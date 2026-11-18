@@ -1,0 +1,9 @@
+error[E0419]: cannot infer type parameter 'T' before this lambda
+ --> $DIR/untyped-lambda-unsolved.nra:3:18
+  |
+3 | let zero = apply(func(x) => x);
+  |                  ^^^^^^^^^^^^ no earlier argument gives the types of this lambda's parameters
+  |
+  = help: write the lambda's parameter types, or the call's type arguments
+
+For more information about this error, try `neura explain E0419`.

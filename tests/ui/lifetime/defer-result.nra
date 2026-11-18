@@ -1,0 +1,11 @@
+// Edge case 11: a deferred call whose result is a Result would lose it.
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class (
+    export let close = func() -> Result<Unit> {
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+let work = func(file: Resource) -> void {
+    defer file.close();
+};

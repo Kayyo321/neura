@@ -1,0 +1,2 @@
+// `record ()` is a call by the lookahead (edge case 3).
+let P = record ();

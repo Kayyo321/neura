@@ -39,7 +39,7 @@ export let Regex = module (
         export let dot_all: bool = false;
 
         /// @brief Compares flags by their three Boolean values.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexFlags)) {
                 return false;
@@ -58,7 +58,7 @@ export let Regex = module (
         #Pure
         export let.override to_string = func -> string =>
             "RegexFlags(ignore_ascii_case=" + ignore_ascii_case.to_string() +
-                ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
+            ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
     );
 
     /// @brief One match: group 0 is the whole match. Immutable.
@@ -95,7 +95,7 @@ export let Regex = module (
         export let text = func -> string => input.slice(start, end);
 
         /// @brief Tests equality of input, capture offsets, and group names.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is RegexMatch)) {
                 return false;
@@ -249,7 +249,7 @@ export let Regex = module (
         };
 
         /// @brief Tests equality of the original pattern and recorded compilation options.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Regex)) {
                 return false;

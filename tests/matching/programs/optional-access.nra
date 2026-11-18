@@ -1,0 +1,74 @@
+// Optional access and coalescing: skipped receivers, arguments and
+// fallbacks print nothing (docs/design/Matching030.md, edge cases 70 to 72,
+// 78 to 82).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Optional;
+
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+    export let rename = func(name: string) -> string {
+        console.print_line("rename " + name);
+        return name;
+    };
+    export let close = func() {
+        console.print_line("closed");
+    };
+);
+
+let next = func(text: string) -> string {
+    console.print_line("next " + text);
+    return text;
+};
+let fallback = func(text: string) -> string {
+    console.print_line("fallback " + text);
+    return text;
+};
+
+let show = func(name: Optional<string>) -> string => match (name) {
+    Optional.None => "None",
+    Optional.Some(text) => "Some(" + text + ")",
+};
+
+let owner_name = func(pet: Pet) -> string => pet?.owner?.name ?? "nobody";
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let none: Pet = nil;
+        let pet = new Pet();
+        let owned = new Pet();
+        owned.owner = new Owner();
+        owned.owner.name = "ada";
+        console.print_line(show(none?.rename(next("a"))));
+        console.print_line(show(pet?.rename(next("b"))));
+        console.print_line(match (pet?.owner) {
+            Optional.None => "None",
+            Optional.Some(owner) => owner == nil ? "Some(nil)" : "Some(owner)",
+        });
+        console.print_line(show(none?.owner?.name) + " " + show(pet?.owner?.name) + " " + show(owned?.owner?.name));
+        console.print_line(owner_name(none) + " " + owner_name(pet) + " " + owner_name(owned));
+        pet?.close();
+        none?.close();
+        let missing = Optional<string>.None;
+        let present = Optional<string>.Some("here");
+        console.print_line(missing ?? fallback("one"));
+        console.print_line(present ?? fallback("two"));
+        let empty = Optional<Owner>.Some(nil);
+        let other = new Owner();
+        console.print_line((empty ?? other) == nil ? "nil" : "owner");
+        let amount = Optional<int64>.None;
+        let total: int64 = amount ?? 0;
+        console.println("{}", total + 1);
+        let a: Owner = nil;
+        let b: Owner = nil;
+        console.print_line((a ?? b ?? owned.owner).name);
+        console.print_line((owned.owner ?? (new Owner())).name);
+        let ages = pet?.age ?? -1;
+        console.println("{} {}", ages, none?.age ?? -1);
+        return program.ExitCode.Ok;
+    };
+);

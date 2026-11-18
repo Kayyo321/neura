@@ -180,6 +180,36 @@ class EditorRegressionTests(unittest.TestCase):
         self.assertTrue({'x', 'y'} <= self.labels('let work = func(point: class (export let x: int; '
                                                 'export let y: int;)) { point.<cursor> };'))
 
+    def test_optional_access_and_match_is_arms_while_incomplete(self):
+        # docs/design/Matching030.md: members after `?.`, and types where a
+        # `match.is` arm's pattern begins, in a buffer that does not parse.
+        pet = 'let Pet = class (export let age: int = 0; export let name: string = "";);\n'
+        self.assertTrue({'age', 'name'} <= self.labels(pet + 'let read = func(pet: Pet) { let a = pet?.<cursor> };'))
+        self.assertTrue({'age', 'name'} <= self.labels(pet + 'let read = func(pet: Pet) { pet ?. <cursor> };'))
+        self.assertIn('Pet', self.labels(pet + 'let read = func(value: class) { match.is (value) { item: <cursor>'))
+
+    def test_pattern_bindings_hover_with_their_type_and_rename_within_their_arm(self):
+        source = ('let Tree = enum (Leaf(int), Node(Tree, Tree));\n'
+                  'let Shape = class ( export let sides: int = 0; );\n'
+                  'let left = func(tree: Tree) -> int => match (tree) {\n'
+                  '    Tree.Node(Tree.Leaf(value), _) if value > 0 => value,\n'
+                  '    Tree.Leaf(value) => value,\n'
+                  '    _ => 0,\n'
+                  '};\n'
+                  'let kind = func(v: class) -> int => match.is (v) {\n'
+                  '    shape: Shape => shape.sides,\n'
+                  '    _ => 0,\n'
+                  '};\n')
+        path = self.root / 'patterns.nra'
+        self.client.open(path, source)
+        hover = lambda line, column: self.client.request('textDocument/hover', params(path, line, column))
+        self.assertIn('value: int32', hover(3, 24)['contents']['value'])
+        self.assertIn('shape: Shape', hover(8, 20)['contents']['value'])
+        rename = self.client.request('textDocument/rename', {**params(path, 3, 24), 'newName': 'leaf'})
+        edits = rename['documentChanges'][0]['edits']
+        # The binding, its guard and its result; the next arm's binding is another name.
+        self.assertEqual(sorted(edit['range']['start']['line'] for edit in edits), [3, 3, 3])
+
     def test_interface_statics_are_only_available_on_declaring_interface(self):
         declaration = ('let I = interface (static let utility = func -> int => 1; let required = func -> int;);\n'
                        'let C = class implements I (export let.override required = func -> int => 1;);\n')

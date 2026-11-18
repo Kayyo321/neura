@@ -1,0 +1,9 @@
+error[E0233]: malformed optional access: '?.' is not an assignment target
+  --> $DIR/optional-assignment.nra:13:8
+   |
+13 |     pet?.owner = other;
+   |        ^^ an optional access gives a value, not a place
+   |
+   = help: test the receiver for nil and assign through '.'
+
+For more information about this error, try `neura explain E0233`.

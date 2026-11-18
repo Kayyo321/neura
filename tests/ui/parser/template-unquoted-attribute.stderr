@@ -1,0 +1,7 @@
+error[E0245]: malformed attribute
+ --> $DIR/template-unquoted-attribute.nra:1:28
+  |
+1 | let view = html() { <input type=text> };
+  |                            ^^^^^^ quote the value or enclose an expression in braces
+
+For more information about this error, try `neura explain E0245`.

@@ -1,0 +1,7 @@
+error[E1002]: unknown attribute, property or event
+ --> $DIR/dynamic-svg-child.nra:1:29
+  |
+1 | let view = html() { <svg><g>{"text"}</g></svg> };
+  |                             ^^^^^^^^ SVG content is static
+
+For more information about this error, try `neura explain E1002`.

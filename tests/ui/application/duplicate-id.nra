@@ -1,0 +1,1 @@
+let view = html() { <p id="total"></p><p id="total"></p> };

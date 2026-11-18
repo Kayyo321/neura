@@ -1,0 +1,252 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+let aes = import:Std.Crypto.Internal.Aes;
+let big = import:Std.Math.BigInteger;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let hex = import:Std.Encoding.Hex;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief FF1 format-preserving encryption of NIST SP 800-38G (Rev. 1) over AES (Stdlib.md section 21.7).
+///
+/// FF1 encrypts a string of numerals in radix 2 to 65536 into another string of the same length and radix,
+/// so a 16-digit card number stays 16 digits. A message must have at least `min_length` numerals, the smallest
+/// length with radix^length >= 1,000,000 (the Rev. 1 domain-size requirement). The tweak may be any length
+/// and should differ by context (for example the table and column). FF1 is deterministic: equal plaintexts
+/// under one key and tweak give equal ciphertexts. Numeral strings are converted with Std.Math.BigInteger.
+/// @see [Std.Crypto.Symmetric.Ff1](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-Ff1)
+#Since("0.3.0")
+export let Ff1 = module (
+    /// @brief The alphabet of the text forms: the first `radix` characters, for radix 2 to 36.
+    let Alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+    /// @brief FF1 under an AES key (16, 24 or 32 bytes) for one radix.
+    #[Final, Since("0.3.0")]
+    export let Ff1 = class implements CryptographicPrimitive<Ff1> (
+        let cipher: aes.Cipher;
+        /// @brief The radix, from 2 to 65536.
+        export last radix: int;
+        /// @brief The shortest accepted numeral string.
+        export last min_length: int;
+
+        /// @brief Keys FF1 for the radix. A radix outside 2 to 65536, or a key of another length, traps.
+        export let init = func(key: uint8[list], numeral_radix: int) {
+            crypto_policy.require(Algorithm.Ff1);
+            if (numeral_radix < 2 || numeral_radix > 65536) {
+                trap_with_message("invalid argument: FF1 radix must be from 2 to 65536");
+            }
+            radix = numeral_radix;
+            let length = 1;
+            let size: int64 = numeral_radix as int64;
+            while (size < 1000000) {
+                size *= numeral_radix as int64;
+                length++;
+            }
+            min_length = length < 2 ? 2 : length;
+            cipher = new(key);
+        };
+
+        /// @brief `Algorithm.Ff1`.
+        export let algorithm = func -> Algorithm => Algorithm.Ff1;
+
+        /// @brief FF1.Encrypt of the numerals (each below the radix) under the tweak. A numeral out of range or a
+        /// string shorter than `min_length` traps.
+        #NoDiscard
+        export let encrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list] => run(numerals, tweak, true);
+
+        /// @brief FF1.Decrypt, the inverse of `encrypt`.
+        #NoDiscard
+        export let decrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list] => run(numerals, tweak, false);
+
+        /// @brief `encrypt` over text in the alphabet 0-9a-z cut to the radix (radix 36 at most). A character
+        /// outside it fails with an Encoding error at its offset; uppercase letters are accepted and the result
+        /// is lowercase.
+        #NoDiscard
+        export let encrypt_text = func(text: string, tweak: uint8[list]) -> Result<string> => run_text(text, tweak, true);
+
+        /// @brief `decrypt` over text, the inverse of `encrypt_text`.
+        #NoDiscard
+        export let decrypt_text = func(text: string, tweak: uint8[list]) -> Result<string> => run_text(text, tweak, false);
+
+        let run_text = func(text: string, tweak: uint8[list], forward: bool) -> Result<string> {
+            if (radix > 36) {
+                trap_with_message("invalid argument: FF1 text forms need a radix of at most 36");
+            }
+            let numerals: int[list] = new;
+            for (let i = 0; i < text.byte_length; i++) {
+                let c = text.byte_at(i) as int;
+                if (c >= 65 && c <= 90) {
+                    c += 32;
+                }
+                let value = -1;
+                if (c >= 48 && c <= 57) {
+                    value = c - 48;
+                } else if (c >= 97 && c <= 122) {
+                    value = c - 87;
+                }
+                if (value < 0 || value >= radix) {
+                    return Result<string>.Err(Error.Encoding { offset: i, message: "character outside the FF1 alphabet" });
+                }
+                numerals.append(value);
+            }
+            if (numerals.length < min_length) {
+                return Result<string>.Err(Error.Encoding {
+                    offset: text.byte_length, message: "text shorter than the FF1 minimum of " + min_length.to_string()
+                });
+            }
+            let out = "";
+            for (let n in run(numerals, tweak, forward)) {
+                out += Alphabet.slice(n, n + 1);
+            }
+            return Result<string>.Ok(out);
+        };
+
+        /// @brief Algorithms 7 and 8 of SP 800-38G.
+        let run = func(numerals: int[list], tweak: uint8[list], forward: bool) -> int[list] {
+            last n = numerals.length;
+            if (n < min_length) {
+                trap_with_message("invalid argument: FF1 input shorter than " + min_length.to_string() + " numerals");
+            }
+            for (let x in numerals) {
+                if (x < 0 || x >= radix) {
+                    trap_with_message("invalid argument: FF1 numeral out of range");
+                }
+            }
+            last u = n / 2;
+            last v = n - u;
+            let a: int[list] = new;
+            let b: int[list] = new;
+            for (let i = 0; i < n; i++) {
+                if (i < u) {
+                    a.append(numerals[i]);
+                } else {
+                    b.append(numerals[i]);
+                }
+            }
+            last radix_big = big.of_int64(radix as int64);
+            last modulus_u = radix_big.pow(u);
+            last modulus_v = radix_big.pow(v);
+            last byte_count = (modulus_v.subtract(big.of_int64(1)).bit_length() + 7) / 8;
+            last d = 4 * ((byte_count + 3) / 4) + 4;
+            let p: uint8[list] = new([1, 2, 1]);
+            p.append(((radix >> 16) & 255) as uint8);
+            p.append(((radix >> 8) & 255) as uint8);
+            p.append((radix & 255) as uint8);
+            p.append(10);
+            p.append((u % 256) as uint8);
+            words.append32_be(p, n as uint32);
+            words.append32_be(p, tweak.length as uint32);
+            last zeros = ((-(tweak.length + byte_count + 1)) % 16 + 16) % 16;
+            for (let step = 0; step < 10; step++) {
+                last i = forward ? step : 9 - step;
+                // Encryption feeds B into the round function; decryption feeds A.
+                last fed = forward ? b : a;
+                let q = words.copy(tweak);
+                for (let k = 0; k < zeros; k++) {
+                    q.append(0);
+                }
+                q.append(i as uint8);
+                words.append_all(q, bytes_of(number(fed), byte_count));
+                last y = round_value(p, q, d);
+                last m = i % 2 == 0 ? u : v;
+                last modulus = m == u ? modulus_u : modulus_v;
+                if (forward) {
+                    last c = number(a).add(y).floor_mod(modulus);
+                    a = b;
+                    b = numerals_of(c, m);
+                } else {
+                    last c = number(b).subtract(y).floor_mod(modulus);
+                    b = a;
+                    a = numerals_of(c, m);
+                }
+            }
+            let out = a;
+            for (let x in b) {
+                out.append(x);
+            }
+            return out;
+        };
+
+        /// @brief y = NUM(S): S is the first d bytes of R || CIPH(R xor [1]^16) || CIPH(R xor [2]^16) ...,
+        /// with R = PRF(P || Q), the CBC-MAC of AES.
+        let round_value = func(p: uint8[list], q: uint8[list], d: int) -> big.BigInteger {
+            let r = cipher.encrypt(p, 0);
+            for (let at = 0; at < q.length; at += 16) {
+                r = cipher.encrypt(words.xor(r, words.slice(q, at, at + 16)), 0);
+            }
+            let s = words.copy(r);
+            let j: uint32 = 1;
+            while (s.length < d) {
+                let block = words.zeros(12);
+                words.append32_be(block, j);
+                words.append_all(s, cipher.encrypt(words.xor(r, block), 0));
+                j += 1;
+            }
+            return from_bytes(words.slice(s, 0, d));
+        };
+
+        /// @brief NUM_radix(X).
+        let number = func(digits: int[list]) -> big.BigInteger {
+            last base = big.of_int64(radix as int64);
+            let value = big.of_int64(0);
+            for (let x in digits) {
+                value = value.multiply(base).add(big.of_int64(x as int64));
+            }
+            return value;
+        };
+
+        /// @brief STR_radix^m(x): m numerals, most significant first.
+        let numerals_of = func(x: big.BigInteger, m: int) -> int[list] {
+            last base = big.of_int64(radix as int64);
+            let reversed: int[list] = new;
+            let rest = x;
+            for (let k = 0; k < m; k++) {
+                const [quotient, remainder] = rest.divide_and_remainder(base);
+                reversed.append(small(remainder));
+                rest = quotient;
+            }
+            let out: int[list] = new;
+            for (let k = m - 1; k >= 0; k--) {
+                out.append(reversed[k]);
+            }
+            return out;
+        };
+
+        export let.override to_string = func -> string => "Ff1(radix " + radix.to_string() + ", <redacted>)";
+    );
+
+    let small = func(x: big.BigInteger) -> int => match (x.to_int64()) {
+        Optional.Some(value) => value as int,
+        Optional.None => 0,
+    };
+
+    /// @brief NUM(X) of a byte string, big-endian.
+    let from_bytes = func(bytes: uint8[list]) -> big.BigInteger {
+        let limbs: uint32[list] = new;
+        let end = bytes.length;
+        while (end > 0) {
+            let limb: uint32 = 0;
+            last start = end >= 4 ? end - 4 : 0;
+            for (let i = start; i < end; i++) {
+                limb = (limb << 8) | (bytes[i] as uint32);
+            }
+            limbs.append(limb);
+            end = start;
+        }
+        return new big.BigInteger(1, limbs);
+    };
+
+    /// @brief [x]^s: the value as exactly s big-endian bytes (it is below 256^s).
+    let bytes_of = func(x: big.BigInteger, s: int) -> uint8[list] {
+        let text = x.to_string_radix(16);
+        while (text.byte_length < 2 * s) {
+            text = "0" + text;
+        }
+        return match (hex.decode(text)) {
+            Result.Ok(bytes) => bytes,
+            Result.Err(_) => words.zeros(s),
+        };
+    };
+);

@@ -42,10 +42,11 @@ if(NOT examples)
 endif()
 # A program cannot both spawn a task and use native bindings
 # (docs/lang/Concurrency.md, C15), and the examples include one of each, so
-# the concurrency examples are checked as programs of their own.
+# the concurrency examples, and the web applications whose roots run in a
+# scope, are checked as programs of their own.
 set(concurrency_examples ${examples})
-list(FILTER concurrency_examples INCLUDE REGEX "/examples/concurrency/")
-list(FILTER examples EXCLUDE REGEX "/examples/concurrency/")
+list(FILTER concurrency_examples INCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
+list(FILTER examples EXCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
 if(NOT concurrency_examples)
     message(FATAL_ERROR "No concurrency examples were found")
 endif()
@@ -425,14 +426,16 @@ let Derived = class:Base (
     };
 );
 ]=] "8:5" "override does not match inherited member 'make'")
+# A call writes all of its type arguments or none (docs/design/Calls030.md,
+# Contextual inference); none are inferred, some are an error.
 check_rejection(missing-type-arguments [=[
-let identity = func<T>(value: T) -> T {
-    return value;
+let pair = func<A, B>(a: A, b: B) -> B {
+    return b;
 };
-let use = func() -> int32 {
-    return identity(3);
+let use = func() -> string {
+    return pair<int32>(3, "three");
 };
-]=] "6:12" "expected 1 type argument")
+]=] "6:12" "expected 2 type argument")
 
 # Enums: variants are qualified values of their enum; only equality and
 # conversion to an integer apply.
@@ -602,7 +605,7 @@ let Sized = interface (
     let size = func -> int;
         | get: 0;
 );
-]=] "4:9" "E0519.*an interface cannot declare accessors")
+]=] "4:9" "E0518.*'size' is a function")
 check_rejection(accessor-duplicate [=[
 let Counter = class (
     export let count = 0;
@@ -1242,6 +1245,10 @@ let Main = module:program.Entry (
 run_success(unused build tag-pure-generic-pure.nra -o tag-pure-generic-pure.nvr)
 check_rejection(tag-immutable-let "#Immutable\nlet P = class (\n    export let x: int32 = 0;\n);" "4:16" "error\\[E0918\\]")
 check_rejection(tag-immutable-list "#Immutable\nlet P = class (\n    export const xs: int32[] = [1];\n);" "4:18" "error\\[E0919\\]")
+# Components030 case 26: a FrozenList of StringBuilder (E0580); case 29: a UI
+# state given to a spawned task (E0602).
+check_rejection(frozen-string-builder "let frozen = import:Std.Collections.Frozen;\nlet builder = import:Std.Core.StringBuilder;\nlet parts = frozen.empty<builder.StringBuilder>();" "4:26" "error\\[E0580\\]: type StringBuilder is not deeply immutable")
+check_rejection(spawned-ui-state "let ui = import:Std.Ui;\nlet read = func(state: ui.State<int32>) -> int32 => state.get();\nlet start = func() -> int32 {\n    let state = new ui.State<int32>(1);\n    scope {\n        let task = spawn read(state);\n        return task.join();\n    }\n};" "7:31" "error\\[E0602\\]")
 check_rejection(tag-immutable-base "let B = class (\n    export let x: int32 = 0;\n);\n#Immutable\nlet P = class:B ();" "5:1" "error\\[E0920\\]: #Immutable class 'P' extends 'B'")
 check_rejection(tag-synchronized-interface "let I = interface (\n    #Synchronized\n    let f = func() -> int32;\n);" "3:5" "error\\[E0921\\].*interface method")
 check_rejection(tag-synchronized-static "let C = class (\n    #Synchronized\n    export static let f = func() -> int32 {\n        return 1;\n    };\n);" "3:5" "error\\[E0921\\]: #Synchronized method 'f' is static")

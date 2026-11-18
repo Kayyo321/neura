@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: scrypt parameters
+let program = import:Std.Program;
+let scrypt = import:Std.Crypto.Kdf.Scrypt;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = scrypt.derive(new([1]), new([2]), 12, 1, 1, 16);
+        return program.ExitCode.Ok;
+    };
+);

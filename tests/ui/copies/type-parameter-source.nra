@@ -1,0 +1,2 @@
+// A value of a type parameter is not a record (edge case 50).
+let copy = func<T: class>(t: T) -> T => new with(t) { };

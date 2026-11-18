@@ -1,0 +1,164 @@
+let cidr = import:Std.Net.Core.CidrBlock;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Core.Optional;
+
+/// @brief A map from CIDR blocks to values with longest-prefix match: the routing-table lookup of RFC 4632
+/// section 5.1, for IPv4 and IPv6 blocks in one table.
+///
+/// The table is a binary trie per family: one node per prefix bit, so `insert`, `remove`, `exact` and
+/// `longest_match` take time proportional to the prefix length (at most 32 or 128 steps) whatever the number
+/// of entries. Nodes live in parallel lists indexed by node number; `remove` clears a value but keeps the
+/// nodes, so a table that churns many distinct prefixes keeps their nodes until it is dropped. An IPv6
+/// query's zone is ignored, and an IPv4-mapped IPv6 address is looked up among the IPv6 blocks only.
+/// The table is not synchronized: share it between tasks only behind a lock.
+/// @see [Std.Net.Core.PrefixTrie](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-PrefixTrie)
+#Since("0.3.0")
+export let PrefixTrie = module (
+    /// @brief A mutable map from `CidrBlock` keys to values of type `V`.
+    #[Final, Since("0.3.0")]
+    export let PrefixTrie = class<V> (
+        /// @brief The child for a 0 bit of each node, or -1.
+        last zero: int[list];
+        /// @brief The child for a 1 bit of each node, or -1.
+        last one: int[list];
+        /// @brief The value stored at each node, if any.
+        last values: Optional<V>[list];
+        /// @brief The number of stored values.
+        let count: int = 0;
+
+        /// @brief Creates an empty table: node 0 is the IPv4 root and node 1 the IPv6 root.
+        export let init = func {
+            zero = new;
+            one = new;
+            values = new;
+            zero.append(-1);
+            one.append(-1);
+            values.append(Optional<V>.None);
+            zero.append(-1);
+            one.append(-1);
+            values.append(Optional<V>.None);
+        };
+
+        /// @brief Stores `value` for `block`; returns true when the block was new and false when its value
+        /// was replaced.
+        export let insert = func(block: cidr.CidrBlock, value: V) -> bool {
+            let node = root(block.network);
+            for (let depth = 0; depth < block.prefix_length; depth++) {
+                last bit = bit_at(block.network, depth);
+                let next = bit ? one[node] : zero[node];
+                if (next < 0) {
+                    next = zero.length;
+                    zero.append(-1);
+                    one.append(-1);
+                    values.append(Optional<V>.None);
+                    if (bit) {
+                        one[node] = next;
+                    } else {
+                        zero[node] = next;
+                    }
+                }
+                node = next;
+            }
+            last added = is_none<V>(values[node]);
+            values[node] = Optional<V>.Some(value);
+            if (added) {
+                count++;
+            }
+            return added;
+        };
+
+        /// @brief Removes the value of `block`; returns whether there was one.
+        export let remove = func(block: cidr.CidrBlock) -> bool {
+            last node = find(block);
+            if (node < 0 || is_none<V>(values[node])) {
+                return false;
+            }
+            values[node] = Optional<V>.None;
+            count--;
+            return true;
+        };
+
+        /// @brief The value of the longest stored block that contains `ip`, or None.
+        #NoDiscard
+        export let longest_match = func(ip: ips.IpAddr) -> Optional<V> {
+            last depth = longest_depth(ip);
+            if (depth < 0) {
+                return Optional<V>.None;
+            }
+            return exact(cidr.of(ip, depth));
+        };
+
+        /// @brief The longest stored block that contains `ip`, or None.
+        #NoDiscard
+        export let longest_match_block = func(ip: ips.IpAddr) -> Optional<cidr.CidrBlock> {
+            last depth = longest_depth(ip);
+            if (depth < 0) {
+                return Optional<cidr.CidrBlock>.None;
+            }
+            return Optional<cidr.CidrBlock>.Some(cidr.of(ip, depth));
+        };
+
+        /// @brief The value stored for exactly `block`, or None.
+        #NoDiscard
+        export let exact = func(block: cidr.CidrBlock) -> Optional<V> {
+            last node = find(block);
+            if (node < 0) {
+                return Optional<V>.None;
+            }
+            return values[node];
+        };
+
+        /// @brief The number of stored blocks.
+        export let size = func -> int => count;
+
+        /// @brief `PrefixTrie(size N)`; the entries are not listed.
+        export let.override to_string = func -> string => "PrefixTrie(size " + count.to_string() + ")";
+
+        /// @brief The node of `block`, or -1 when the path is missing.
+        let find = func(block: cidr.CidrBlock) -> int {
+            let node = root(block.network);
+            for (let depth = 0; depth < block.prefix_length && node >= 0; depth++) {
+                node = bit_at(block.network, depth) ? one[node] : zero[node];
+            }
+            return node;
+        };
+
+        /// @brief The prefix length of the deepest stored value on the path of `ip`, or -1.
+        let longest_depth = func(ip: ips.IpAddr) -> int {
+            last limit = width(ip);
+            let node = root(ip);
+            let best = -1;
+            let depth = 0;
+            while (node >= 0) {
+                if (is_some<V>(values[node])) {
+                    best = depth;
+                }
+                if (depth == limit) {
+                    break;
+                }
+                node = bit_at(ip, depth) ? one[node] : zero[node];
+                depth++;
+            }
+            return best;
+        };
+    );
+
+    /// @brief The root node of the address's family.
+    let root = func(ip: ips.IpAddr) -> int => match (ip) {
+        ips.IpAddr.V4(_) => 0,
+        ips.IpAddr.V6(_) => 1,
+    };
+
+    /// @brief Bit `index` of the address, 0 being the most significant.
+    let bit_at = func(ip: ips.IpAddr, index: int) -> bool => match (ip) {
+        ips.IpAddr.V4(a) => ((a.bits >> ((31 - index) as uint32)) & 1) == 1,
+        ips.IpAddr.V6(a) => index < 64 ? ((a.high >> ((63 - index) as uint64)) & 1) == 1
+            : ((a.low >> ((127 - index) as uint64)) & 1) == 1,
+    };
+
+    /// @brief The address width in bits: 32 or 128.
+    let width = func(ip: ips.IpAddr) -> int => match (ip) {
+        ips.IpAddr.V4(_) => 32,
+        ips.IpAddr.V6(_) => 128,
+    };
+);

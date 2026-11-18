@@ -1,0 +1,21 @@
+{"key":{"id":18446744073709551615},"low":-9223372036854775808}
+ok
+ok
+json.codec.duplicate $.key.id
+json.codec.duplicate $.low
+json.codec.missing $.key
+json.codec.type $.low
+json.codec.type $.note
+json.codec.range $.low
+json.codec.range $.low
+json.codec.range $.key.id
+json.codec.not_finite $.real
+json.codec.not_finite $.real
+ok
+json.codec.payload $.payload
+json.codec.payload $.payload
+json.codec.variant $.variant
+json.codec.missing $.variant
+json.codec.duplicate $.variant
+json.codec.duplicate $.payload.key
+ok

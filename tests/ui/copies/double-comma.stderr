@@ -1,0 +1,9 @@
+error[E0202]: expected a field name
+ --> $DIR/double-comma.nra:4:39
+  |
+4 | let copy = new with(user) { name: "G",, };
+  |                                       ^ expected a field name, found ','
+  |
+  = help: a replacement is written 'field: value'
+
+For more information about this error, try `neura explain E0202`.

@@ -1,0 +1,23 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief The contract of a message authentication code (Stdlib.md section 21.5).
+/// @see [Std.Crypto.Mac.Authenticator](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Authenticator)
+#Since("0.3.0")
+export let Authenticator = module (
+    /// @brief A MAC bound to its key at construction. `verify` is the only comparison the library offers: it
+    /// compares in constant time and accepts only a tag of the full length, never a truncated one.
+    #Since("0.3.0")
+    export let Authenticator = interface (
+        /// @brief The algorithm identifier.
+        let algorithm = func -> Algorithm;
+        /// @brief The tag length in bytes.
+        let tag_length = func -> int;
+        /// @brief Adds the bytes to the message. Traps with "invalid state: mac finished" after `finish` or
+        /// `verify`.
+        let update = func(bytes: uint8[list]);
+        /// @brief Ends the computation and returns the tag. A second `finish` or `verify` traps.
+        let finish = func -> uint8[list];
+        /// @brief Ends the computation and reports whether `tag` is the full, correct tag.
+        let verify = func(tag: uint8[list]) -> bool;
+    );
+);

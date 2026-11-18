@@ -36,7 +36,7 @@ export let ByteBuffer = module (
 
         /// @brief Only the current byte sequence participates. Readers hold their own copies and do not affect
         /// the buffer's equality or hash.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is ByteBuffer)) {
                 return false;

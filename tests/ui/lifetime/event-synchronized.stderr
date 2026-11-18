@@ -1,0 +1,12 @@
+error[E0550]: handlers would run while 'Account' is locked
+  --> $DIR/event-synchronized.nra:10:9
+   |
+ 4 | #Synchronized
+   | ------------- this method runs under its instance's guard
+...
+10 |         changed.emit(balance);
+   |         ^^^^^^^^^^^^^^^^^^^^^ the event is emitted here
+   |
+   = help: commit the change, leave the guard, then emit
+
+For more information about this error, try `neura explain E0550`.

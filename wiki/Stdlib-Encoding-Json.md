@@ -43,6 +43,8 @@ The following public declarations are taken from the module source; each links t
   A hash consistent with equals. Null is 1; Boolean(b) is Hash.combine(2, Hash.of_bool(b)); Number is Hash.combine(3, the hash of its canonical text); Text(s) is Hash.combine(4, s.hash_code()); Array starts at 5 and combines each element's hash in order; Object is Hash.combine(Hash.combine(6, member count), S), where S is the wrapping sum of the distinct values among the members' Hash.combine(name hash, value hash). The canonical text of a number is "0" for zero and otherwise an optional "-", the significant digits without leading or trailing zeros, "e", and the decimal exponent that makes them an integer: 120.50 is "1205e-1". Tagged `#ThreadSafe`.
 - **Json** · [`export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L248)
   A StringMap from each member name to its value, in member order. For a repeated name the last value wins and the name keeps its first position, as in parse. Tagged `#ThreadSafe`.
+- **Json** · [`export let Codec = interface<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L1185)
+  Static signatures of a compiler-derived JSON codec for T.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

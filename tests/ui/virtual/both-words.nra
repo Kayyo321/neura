@@ -1,0 +1,5 @@
+// A clause is '.virtual' or '.override', not both (edge case 85).
+let Shape = class (
+    export let label: string = "shape";
+        | get.virtual.override: label;
+);

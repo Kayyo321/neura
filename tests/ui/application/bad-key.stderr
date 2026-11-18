@@ -1,0 +1,7 @@
+error[E1009]: key of the wrong type
+ --> $DIR/bad-key.nra:1:67
+  |
+1 | let view = html(items: float64[]) { @for (let item in items; key: item) { <p>{item}</p> } };
+  |                                                                   ^^^^ a key must be a string or fixed-width integer, got float64
+
+For more information about this error, try `neura explain E1009`.

@@ -1,0 +1,154 @@
+let hex = import:Std.Encoding.Hex;
+let int32s = import:Std.Core.Int32;
+let.promote _ = import:Std.Crypto.ExtendableOutput;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let sp800185 = import:Sp800185Vectors;
+let test = import:Std.Test;
+let tuple_hash = import:Std.Crypto.Hash.TupleHash;
+let turbo = import:TurboShakeVectors;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:HashVectors;
+
+// SHA-3 and SHAKE against hashlib; cSHAKE and TupleHash against the NIST SP 800-185 samples; TurboSHAKE
+// against RFC 9861 (support/, scripts/crypto-vectors/).
+let Sha3Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let digest_of = func(name: string, message: uint8[list]) -> uint8[list] {
+        if (name == "sha3_224") {
+            return sha3.sha3_224(message);
+        }
+        if (name == "sha3_256") {
+            return sha3.sha3_256(message);
+        }
+        if (name == "sha3_384") {
+            return sha3.sha3_384(message);
+        }
+        return sha3.sha3_512(message);
+    };
+
+    export let test_sha3_known_answers = func {
+        last rows = vectors.digests;
+        let checked = 0;
+        for (let i = 0; i < rows.length; i += 3) {
+            last name = rows[i];
+            if (name.byte_length > 5 && name.slice(0, 5) == "sha3_") {
+                test.assert_equal_string(rows[i + 2], hex.encode(digest_of(name, decode(rows[i + 1]))));
+                checked++;
+            }
+        }
+        test.assert_equal_int32(104, checked);
+    };
+
+    export let test_shake_known_answers = func {
+        last rows = vectors.xofs;
+        for (let i = 0; i < rows.length; i += 4) {
+            last message = decode(rows[i + 1]);
+            last length = test.assert_ok(int32s.parse(rows[i + 2]));
+            last expected = rows[i + 3];
+            if (rows[i] == "shake_128") {
+                test.assert_equal_string(expected, hex.encode(sha3.shake128(message, length)));
+            } else {
+                test.assert_equal_string(expected, hex.encode(sha3.shake256(message, length)));
+            }
+        }
+    };
+
+    // Squeezing in pieces continues one output stream; `read` and `reader` give the same bytes.
+    export let test_shake_streams = func {
+        last message: uint8[list] = new([1, 2, 3]);
+        last whole = hex.encode(sha3.shake128(message, 400));
+        let xof = new sha3.Shake128();
+        xof.update(message);
+        let parts = hex.encode(xof.squeeze(1)) + hex.encode(xof.squeeze(166)) + hex.encode(xof.squeeze(2));
+        let reader = xof.reader();
+        parts += hex.encode(test.assert_ok(reader(200))) + hex.encode(test.assert_ok(xof.read(31)));
+        test.assert_equal_string(whole, parts);
+    };
+
+    export let test_cshake_samples = func {
+        last rows = sp800185.cshake;
+        for (let i = 0; i < rows.length; i += 6) {
+            last data = decode(rows[i + 1]);
+            last name = utf8.encode(rows[i + 2]);
+            last custom = utf8.encode(rows[i + 3]);
+            last length = test.assert_ok(int32s.parse(rows[i + 4]));
+            last out = rows[i] == "128" ? sha3.cshake128(data, length, name, custom) : sha3.cshake256(data, length, name, custom);
+            test.assert_equal_string(rows[i + 5], hex.encode(out));
+        }
+        // Empty N and S: cSHAKE is SHAKE.
+        test.assert_equal_string(hex.encode(sha3.shake256(new([7]), 40)), hex.encode(sha3.cshake256(new([7]), 40, new, new)));
+    };
+
+    export let test_tuple_hash_samples = func {
+        last rows = sp800185.tuple_hash;
+        for (let i = 0; i < rows.length; i += 6) {
+            let items: uint8[list][list] = new;
+            for (let part in Splitter.split(rows[i + 5])) {
+                items.append(decode(part));
+            }
+            last custom = utf8.encode(rows[i + 2]);
+            last length = test.assert_ok(int32s.parse(rows[i + 3]));
+            last xof = rows[i + 1] == "true";
+            last out = rows[i] == "128"
+                ? (xof ? tuple_hash.tuple_hash128_xof(items, length, custom) : tuple_hash.tuple_hash128(items, length, custom))
+                : (xof ? tuple_hash.tuple_hash256_xof(items, length, custom) : tuple_hash.tuple_hash256(items, length, custom));
+            test.assert_equal_string(rows[i + 4], hex.encode(out));
+        }
+    };
+
+    export let test_tuple_hash_separates_items = func {
+        let one: uint8[list][list] = new([new([97, 98]), new([99])]);
+        let two: uint8[list][list] = new([new([97]), new([98, 99])]);
+        test.assert(hex.encode(tuple_hash.tuple_hash128(one, 32, new)) != hex.encode(tuple_hash.tuple_hash128(two, 32, new)));
+    };
+
+    export let test_turboshake_rfc9861 = func {
+        last rows = turbo.cases;
+        for (let i = 0; i < rows.length; i += 5) {
+            let message: uint8[list] = new;
+            last described = rows[i + 1];
+            if (described.byte_length > 4 && described.slice(0, 4) == "ptn:") {
+                last n = test.assert_ok(int32s.parse(described.slice(4, described.byte_length)));
+                for (let k = 0; k < n; k++) {
+                    message.append((k % 251) as uint8);
+                }
+            } else {
+                message = decode(described);
+            }
+            last domain = test.assert_ok(int32s.parse(rows[i + 2])) as uint8;
+            last skip = test.assert_ok(int32s.parse(rows[i + 3]));
+            last expected = rows[i + 4];
+            let out: uint8[list] = new;
+            if (rows[i] == "128") {
+                let xof = new sha3.TurboShake128(domain);
+                xof.update(message);
+                let _ = xof.squeeze(skip);
+                out = xof.squeeze(expected.byte_length / 2);
+            } else {
+                let xof = new sha3.TurboShake256(domain);
+                xof.update(message);
+                let _ = xof.squeeze(skip);
+                out = xof.squeeze(expected.byte_length / 2);
+            }
+            test.assert_equal_string(expected, hex.encode(out));
+        }
+    };
+);
+
+// Splits "aa:bb" at ':' (an empty text gives no parts).
+let Splitter = module (
+    export let split = func(text: string) -> string[list] {
+        let parts: string[list] = new;
+        let start = 0;
+        for (let i = 0; i <= text.byte_length; i++) {
+            if (i == text.byte_length || text.byte_at(i) == 58) {
+                if (i > start) {
+                    parts.append(text.slice(start, i));
+                }
+                start = i + 1;
+            }
+        }
+        return parts;
+    };
+);

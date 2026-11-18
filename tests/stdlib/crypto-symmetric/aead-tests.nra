@@ -1,0 +1,167 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretKey;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let aes_block = import:Std.Crypto.Symmetric.AesBlock;
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let aes_gcm_siv = import:Std.Crypto.Symmetric.AesGcmSiv;
+let aes_siv = import:Std.Crypto.Symmetric.AesSiv;
+let chacha20 = import:Std.Crypto.Symmetric.ChaCha20;
+let chacha20_poly1305 = import:Std.Crypto.Symmetric.ChaCha20Poly1305;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let results = import:Std.Core.Result;
+let test = import:Std.Test;
+let vectors = import:SymmetricVectors;
+let xchacha20_poly1305 = import:Std.Crypto.Symmetric.XChaCha20Poly1305;
+
+// AES, the AEADs and the ChaCha20 stream against cryptography 43, RFC 8452 Appendix C, RFC 5297 Appendix A and
+// draft-irtf-cfrg-xchacha-03 (support/symmetric-vectors.nra, scripts/crypto-vectors/gen-symmetric.py).
+let AeadTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    // Seals, opens, and checks that a changed tag, ciphertext, data or nonce is rejected.
+    let check = func<K>(cipher: AeadCipher<K, uint8[list], uint8[list]>, nonce: uint8[list], data: uint8[list],
+            plaintext: uint8[list], expected: string) {
+        last sealed = cipher.seal(nonce, plaintext, data);
+        test.assert_equal_string(expected, hex.encode(sealed));
+        test.assert_equal_string(hex.encode(plaintext), hex.encode(test.assert_ok(cipher.open(nonce, sealed, data))));
+        let altered = decode(expected);
+        altered[altered.length - 1] = altered[altered.length - 1] ^ 1;
+        test.assert(!is_ok(cipher.open(nonce, altered, data)));
+        let flipped = decode(expected);
+        flipped[0] = flipped[0] ^ 128;
+        test.assert(!is_ok(cipher.open(nonce, flipped, data)));
+        let other_data = decode(hex.encode(data));
+        other_data.append(0);
+        test.assert(!is_ok(cipher.open(nonce, sealed, other_data)));
+        if (nonce.length > 0) {
+            let other_nonce = decode(hex.encode(nonce));
+            other_nonce[0] = other_nonce[0] ^ 1;
+            test.assert(!is_ok(cipher.open(other_nonce, sealed, data)));
+        }
+        test.assert(!is_ok(cipher.open(nonce, new([1, 2, 3]), data)));
+    };
+
+    let is_ok = func(result: Result<uint8[list]>) -> bool {
+        if (results.is_ok(result)) {
+            return true;
+        }
+        last failure = test.assert_err(result);
+        test.assert_equal_string("authentication failed", error.message(failure));
+        test.assert_equal_string("crypto.authentication", code_of(failure));
+        return false;
+    };
+
+    let code_of = func(failure: error.Error) -> string => match (failure) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_aes_blocks = func {
+        last rows = vectors.aes_blocks;
+        for (let i = 0; i < rows.length; i += 3) {
+            let block = new aes_block.AesBlock(decode(rows[i]));
+            test.assert_equal_string(rows[i + 2], hex.encode(block.encrypt_block(decode(rows[i + 1]))));
+            test.assert_equal_string(rows[i + 1], hex.encode(block.decrypt_block(decode(rows[i + 2]))));
+        }
+    };
+
+    export let test_aeads = func {
+        last rows = vectors.aeads;
+        let counts: int[list] = new([0, 0, 0, 0]);
+        for (let i = 0; i < rows.length; i += 6) {
+            last name = rows[i];
+            last key = decode(rows[i + 1]);
+            last nonce = decode(rows[i + 2]);
+            last data = decode(rows[i + 3]);
+            last plaintext = decode(rows[i + 4]);
+            if (name == "aes-gcm") {
+                check<SymmetricKey<aes_gcm.AesGcm>>(new aes_gcm.AesGcm(key), nonce, data, plaintext, rows[i + 5]);
+                counts[0] = counts[0] + 1;
+            } else if (name == "aes-gcm-siv") {
+                check<SymmetricKey<aes_gcm_siv.AesGcmSiv>>(new aes_gcm_siv.AesGcmSiv(key), nonce, data, plaintext, rows[i + 5]);
+                counts[1] = counts[1] + 1;
+            } else if (name == "chacha20-poly1305") {
+                check<SymmetricKey<chacha20_poly1305.ChaCha20Poly1305>>(new chacha20_poly1305.ChaCha20Poly1305(key),
+                    nonce, data, plaintext, rows[i + 5]);
+                counts[2] = counts[2] + 1;
+            } else {
+                check<SymmetricKey<xchacha20_poly1305.XChaCha20Poly1305>>(new xchacha20_poly1305.XChaCha20Poly1305(key),
+                    nonce, data, plaintext, rows[i + 5]);
+                counts[3] = counts[3] + 1;
+            }
+        }
+        test.assert_equal_int32(18, counts[0]);
+        test.assert_equal_int32(58, counts[1]);
+        test.assert_equal_int32(6, counts[2]);
+        test.assert_equal_int32(7, counts[3]);
+    };
+
+    export let test_typed_keys = func {
+        last raw = decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let key = new SecretKey<aes_gcm.AesGcm>(raw);
+        let typed = new aes_gcm.AesGcm(key);
+        let plain = new aes_gcm.AesGcm(raw);
+        last nonce = decode("000000000000000000000001");
+        test.assert_equal_string(hex.encode(plain.seal(nonce, new([1]), new)), hex.encode(typed.seal(nonce, new([1]), new)));
+        test.assert_equal_string("AesGcm(<redacted>)", typed.to_string());
+        test.assert(typed.algorithm() == Algorithm.Aes256Gcm);
+    };
+
+    export let test_aes_siv = func {
+        last rows = vectors.aes_siv;
+        for (let i = 0; i < rows.length; i += 5) {
+            let cipher = new aes_siv.AesSiv(decode(rows[i]));
+            let items: uint8[list][list] = new;
+            last text = rows[i + 1];
+            let start = 0;
+            for (let k = 0; k <= text.byte_length; k++) {
+                if (k == text.byte_length || text.byte_at(k) == 58) {
+                    items.append(decode(text.slice(start, k)));
+                    start = k + 1;
+                }
+            }
+            if (rows[i + 2] == "0") {
+                items = new;
+            }
+            last plaintext = decode(rows[i + 3]);
+            last sealed = cipher.seal_items(items, plaintext);
+            test.assert_equal_string(rows[i + 4], hex.encode(sealed));
+            test.assert_equal_string(rows[i + 3], hex.encode(test.assert_ok(cipher.open_items(items, sealed))));
+            sealed[sealed.length - 1] = sealed[sealed.length - 1] ^ 1;
+            let _ = test.assert_err(cipher.open_items(items, sealed));
+        }
+    };
+
+    export let test_aes_siv_as_aead = func {
+        let cipher = new aes_siv.AesSiv(decode("fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"));
+        // Deterministic: RFC 5297 A.1 is seal with no nonce and the AD as the associated data.
+        check<SymmetricKey<aes_siv.AesSiv>>(cipher, new, decode("101112131415161718191a1b1c1d1e1f2021222324252627"),
+            decode("112233445566778899aabbccddee"),
+            "85632d07c6e8f37f950acd320a2ecc9340c02b9690c4dc04daef7f6afe5c");
+        last a = cipher.seal(new([1, 2]), new([5]), new);
+        last b = cipher.seal(new([1, 3]), new([5]), new);
+        test.assert(hex.encode(a) != hex.encode(b));
+    };
+
+    export let test_chacha20_streams = func {
+        last rows = vectors.streams;
+        for (let i = 0; i < rows.length; i += 6) {
+            last key = decode(rows[i + 1]);
+            last nonce = decode(rows[i + 2]);
+            last counter = test.assert_ok(int64s.parse(rows[i + 3])) as uint32;
+            last plaintext = decode(rows[i + 4]);
+            if (rows[i] == "chacha20") {
+                test.assert_equal_string(rows[i + 5], hex.encode(chacha20.xor(key, nonce, counter, plaintext)));
+                test.assert_equal_string(rows[i + 4], hex.encode(chacha20.xor(key, nonce, counter, decode(rows[i + 5]))));
+            } else {
+                test.assert_equal_string(rows[i + 5], hex.encode(chacha20.xchacha20_xor(key, nonce, counter, plaintext)));
+            }
+        }
+        last h = vectors.hchacha20;
+        test.assert_equal_string(h[2], hex.encode(chacha20.hchacha20(decode(h[0]), decode(h[1]))));
+    };
+);

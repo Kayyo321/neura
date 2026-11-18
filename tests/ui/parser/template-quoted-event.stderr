@@ -1,0 +1,7 @@
+error[E0250]: malformed binding directive
+ --> $DIR/template-quoted-event.nra:1:29
+  |
+1 | let view = html() { <button on:click="save()">Save</button> };
+  |                             ^^^^^^^^ a directive takes a whole expression such as 'on:click={handler}'
+
+For more information about this error, try `neura explain E0250`.

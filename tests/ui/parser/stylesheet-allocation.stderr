@@ -1,0 +1,7 @@
+error[E0255]: html or css form not allowed here
+ --> $DIR/stylesheet-allocation.nra:1:13
+  |
+1 | let style = new css { };
+  |             ^^^^^^^^^^^ a stylesheet must be the whole initializer of a module-level 'const'
+
+For more information about this error, try `neura explain E0255`.

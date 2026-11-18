@@ -1,0 +1,13 @@
+// status: 134
+// stderr: invalid argument: dns name
+let names = import:Std.Net.Dns.Name;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last labels: uint8[list][list] = new;
+        labels.append(new);
+        let _ = new names.DnsName(labels);
+        return program.ExitCode.Ok;
+    };
+);

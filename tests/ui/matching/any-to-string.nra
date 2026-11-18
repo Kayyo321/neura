@@ -1,0 +1,4 @@
+// Edge case 51: a value member of an any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let read = func(v: any) -> string => v.to_string();

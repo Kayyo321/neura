@@ -78,7 +78,7 @@ let stop_on_cancellation = func -> void {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("== shedding overload");
         shed_overload();
         console.print_line("== draining on close");

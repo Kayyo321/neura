@@ -1,0 +1,9 @@
+// Edge case 60: a channel of any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let channels = import:Std.Concurrent.Channel;
+let make = func() {
+    scope {
+        let [out, input, closer] = channels.open<any>(4);
+    }
+};

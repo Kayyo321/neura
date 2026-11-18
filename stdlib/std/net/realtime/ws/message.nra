@@ -1,0 +1,132 @@
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief WebSocket data messages, their fragmentation, and their reassembly (RFC 6455 sections 5.4 and 5.6).
+///
+/// A message is text (valid UTF-8) or binary. It travels as one final data frame or as a first frame with
+/// opcode 1 or 2 followed by continuation frames, the last one final; control frames may come between the
+/// fragments. `MessageAssembler` takes the data frames in order and checks that sequence: a continuation
+/// without an open message, or a new text or binary frame while one is open, fails with status 1002; text that
+/// is not UTF-8 fails with status 1007 (checked when the message completes); a message above the size limit
+/// fails with status 1009 as soon as a fragment crosses it.
+/// @see [Std.Net.Realtime.Ws.Message](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Message)
+#Since("0.3.0")
+export let Message = module (
+    /// @brief A whole data message.
+    export let Message = enum (Text(string), Binary(uint8[list]));
+
+    /// @brief The payload bytes of a message: the UTF-8 bytes of text.
+    #NoDiscard
+    export let bytes_of = func(message: Message) -> uint8[list] => match (message) {
+        Message.Text(text) => strings.to_bytes(text),
+        Message.Binary(data) => data,
+    };
+
+    /// @brief The frames of a message with fragments of at most `max_fragment` payload bytes (at least 1). An
+    /// empty message is one empty final frame. A maximum below 1 traps with "invalid argument: max_fragment".
+    #NoDiscard
+    export let fragment = func(message: Message, max_fragment: int) -> frames.Frame[list] {
+        if (max_fragment < 1) {
+            trap_with_message("invalid argument: max_fragment");
+        }
+        last data = bytes_of(message);
+        last first_code = match (message) {
+            Message.Text(_) => frames.Text,
+            Message.Binary(_) => frames.Binary,
+        };
+        last list: frames.Frame[list] = new;
+        let start = 0;
+        do {
+            last end = data.length - start > max_fragment ? start + max_fragment : data.length;
+            last piece: uint8[list] = new;
+            for (let i = start; i < end; i++) {
+                piece.append(data[i]);
+            }
+            last code = start == 0 ? first_code : frames.Continuation;
+            list.append(new frames.Frame(end == data.length, false, false, false, code, piece));
+            start = end;
+        } while (start < data.length);
+        return list;
+    };
+
+    /// @brief Reassembles messages from data frames received in order.
+    #[Final, NotThreadSafe]
+    export let MessageAssembler = class (
+        /// @brief The largest message accepted, in bytes.
+        last max_message_size: int;
+        /// @brief The opcode of the open message, or -1 when none is open.
+        let open_code: int = -1;
+        /// @brief The bytes of the open message.
+        let pending: uint8[list] = new;
+
+        /// @brief An assembler that accepts messages of at most `max_size` bytes. A negative maximum traps
+        /// with "invalid argument: max_message_size".
+        export let init = func(max_size: int) {
+            if (max_size < 0) {
+                trap_with_message("invalid argument: max_message_size");
+            }
+            max_message_size = max_size;
+        };
+
+        /// @brief Whether a fragmented message is open.
+        #NoDiscard
+        export let in_message = func -> bool => open_code >= 0;
+
+        /// @brief Adds a data frame (opcode 0, 1 or 2). Returns the message when the frame completes one, `None`
+        /// when more fragments are needed, or the failure of a broken sequence. A control frame traps with
+        /// "invalid argument: control frame".
+        #NoDiscard
+        export let add = func(frame: frames.Frame) -> Result<Optional<Message>> {
+            if (frame.is_control()) {
+                trap_with_message("invalid argument: control frame");
+            }
+            if (frame.opcode == frames.Continuation) {
+                if (open_code < 0) {
+                    return fail(close_status.ProtocolError, "a continuation frame without an open message");
+                }
+            } else {
+                if (open_code >= 0) {
+                    return fail(close_status.ProtocolError, "a new data frame inside a fragmented message");
+                }
+                open_code = frame.opcode;
+                pending = new;
+            }
+            if (pending.length + frame.payload.length > max_message_size) {
+                return fail(close_status.MessageTooBig, "message exceeds the limit of "
+                    + max_message_size.to_string() + " bytes");
+            }
+            for (let b in frame.payload) {
+                pending.append(b);
+            }
+            if (!frame.fin) {
+                return Result<Optional<Message>>.Ok(Optional<Message>.None);
+            }
+            last code = open_code;
+            last data = pending;
+            open_code = -1;
+            pending = new;
+            if (code == frames.Binary) {
+                return Result<Optional<Message>>.Ok(Optional<Message>.Some(Message.Binary(data)));
+            }
+            if (utf8.validate(data) >= 0) {
+                return fail(close_status.InvalidPayload, "a text message is not valid UTF-8");
+            }
+            return Result<Optional<Message>>.Ok(Optional<Message>.Some(Message.Text(strings.from_bytes_lossy(data))));
+        };
+
+        /// @brief Whether a message is open and how many bytes it holds.
+        export let.override to_string = func -> string =>
+            "MessageAssembler(" + (open_code >= 0 ? "open, " + pending.length.to_string() + " bytes" : "idle") + ")";
+
+        /// @brief Drops the open message and returns the failure.
+        let fail = func(status: int, message: string) -> Result<Optional<Message>> {
+            open_code = -1;
+            pending = new;
+            return Result<Optional<Message>>.Err(close_status.failure(status, message));
+        };
+    );
+);

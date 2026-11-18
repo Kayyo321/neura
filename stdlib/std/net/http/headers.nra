@@ -1,0 +1,343 @@
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let strings = import:Std.Text.Strings;
+
+/// @brief An ordered, case-insensitive, multi-value map of HTTP header fields (RFC 9110 section 5).
+///
+/// Field names compare without regard to ASCII case and keep the spelling they were added with. A name may
+/// carry several values, kept in the order they were added; `joined` combines them with ", " as RFC 9110
+/// section 5.3 allows for list-based fields. Names must be tokens (RFC 9110 section 5.6.2) and values must not
+/// contain CR, LF or NUL; `add` and `set` trap otherwise ("invalid argument: header name" or "invalid argument:
+/// header value"), so a map never holds a field that cannot be written to the wire. Leading and trailing spaces
+/// and tabs of a value are removed (RFC 9110 section 5.5).
+/// @see [Std.Net.Http.Headers](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Headers)
+#Since("0.3.0")
+export let Headers = module (
+    /// @brief Header fields in insertion order, looked up without regard to ASCII case.
+    #[Final, NotThreadSafe]
+    export let Headers = class (
+        /// @brief Field names as added.
+        last names: string[list] = new;
+        /// @brief Lowercase field names, parallel to `names`.
+        last keys: string[list] = new;
+        /// @brief Field values, parallel to `names`.
+        last values: string[list] = new;
+
+        /// @brief An empty map.
+        export let init = func {
+        };
+
+        /// @brief Appends a field; earlier values of the same name stay.
+        export let add = func(name: string, value: string) {
+            check_name(name);
+            last cleaned = trim_value(value);
+            check_value(cleaned);
+            names.append(name);
+            keys.append(strings.to_ascii_lower(name));
+            values.append(cleaned);
+        };
+
+        /// @brief Replaces every value of `name` with `value`, at the position of the first one (or at the end).
+        export let set = func(name: string, value: string) {
+            check_name(name);
+            last cleaned = trim_value(value);
+            check_value(cleaned);
+            last key = strings.to_ascii_lower(name);
+            last first = index_of(key);
+            if (first < 0) {
+                names.append(name);
+                keys.append(key);
+                values.append(cleaned);
+                return;
+            }
+            values[first] = cleaned;
+            names[first] = name;
+            remove_after(key, first + 1);
+        };
+
+        /// @brief Removes every value of `name`; returns how many were removed.
+        export let remove = func(name: string) -> int {
+            last key = strings.to_ascii_lower(name);
+            last before = keys.length;
+            remove_after(key, 0);
+            return before - keys.length;
+        };
+
+        /// @brief The first value of `name`.
+        #NoDiscard
+        export let get = func(name: string) -> Optional<string> {
+            last at = index_of(strings.to_ascii_lower(name));
+            if (at < 0) {
+                return Optional<string>.None;
+            }
+            return Optional<string>.Some(values[at]);
+        };
+
+        /// @brief Every value of `name` in order, as a new list.
+        #NoDiscard
+        export let get_all = func(name: string) -> string[list] {
+            last key = strings.to_ascii_lower(name);
+            last found: string[list] = new;
+            for (let i = 0; i < keys.length; i++) {
+                if (keys[i] == key) {
+                    found.append(values[i]);
+                }
+            }
+            return found;
+        };
+
+        /// @brief Every value of `name` joined with ", " (RFC 9110 section 5.3), or None when absent.
+        #NoDiscard
+        export let joined = func(name: string) -> Optional<string> {
+            last all = get_all(name);
+            if (all.length == 0) {
+                return Optional<string>.None;
+            }
+            return Optional<string>.Some(strings.join(all, ", "));
+        };
+
+        /// @brief The comma-separated elements of every value of `name` (RFC 9110 section 5.6.1), each trimmed,
+        /// empty elements dropped. Quoted strings are not split.
+        #NoDiscard
+        export let list_elements = func(name: string) -> string[list] {
+            last elements: string[list] = new;
+            for (let value in get_all(name)) {
+                for (let part in split_list(value)) {
+                    elements.append(part);
+                }
+            }
+            return elements;
+        };
+
+        /// @brief Whether `name` has a value.
+        export let contains = func(name: string) -> bool => index_of(strings.to_ascii_lower(name)) >= 0;
+
+        /// @brief Whether any element of `name`'s list values equals `token` without regard to ASCII case.
+        export let has_token = func(name: string, token: string) -> bool {
+            for (let element in list_elements(name)) {
+                if (strings.equals_ignore_ascii_case(element, token)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// @brief The number of fields (a name with two values counts twice).
+        export let size = func -> int => names.length;
+
+        /// @brief The name of field `index` as it was added.
+        export let name_at = func(index: int) -> string => names[index];
+
+        /// @brief The value of field `index`.
+        export let value_at = func(index: int) -> string => values[index];
+
+        /// @brief The distinct lowercase names in order of first appearance.
+        #NoDiscard
+        export let lower_names = func -> string[list] {
+            last seen: string[list] = new;
+            for (let key in keys) {
+                let present = false;
+                for (let other in seen) {
+                    if (other == key) {
+                        present = true;
+                        break;
+                    }
+                }
+                if (!present) {
+                    seen.append(key);
+                }
+            }
+            return seen;
+        };
+
+        /// @brief An independent copy.
+        #NoDiscard
+        export let copy = func -> Headers {
+            last other = new Headers();
+            for (let i = 0; i < names.length; i++) {
+                other.add(names[i], values[i]);
+            }
+            return other;
+        };
+
+        /// @brief Adds every field of `other` after this map's fields.
+        export let add_all = func(other: Headers) {
+            for (let i = 0; i < other.size(); i++) {
+                add(other.name_at(i), other.value_at(i));
+            }
+        };
+
+        /// @brief Equal when both hold the same fields in the same order, names compared without case.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Headers)) {
+                return false;
+            }
+            last map = other as Headers;
+            if (map.size() != names.length) {
+                return false;
+            }
+            for (let i = 0; i < names.length; i++) {
+                if (!strings.equals_ignore_ascii_case(map.name_at(i), names[i]) || map.value_at(i) != values[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines each lowercase name and value in order.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let i = 0; i < keys.length; i++) {
+                hash = hashing.combine(hash, strings.hash(keys[i]));
+                hash = hashing.combine(hash, strings.hash(values[i]));
+            }
+            return hash;
+        };
+
+        /// @brief The fields as "Name: value" lines joined by "; ", in braces.
+        export let.override to_string = func -> string {
+            last parts: string[list] = new;
+            for (let i = 0; i < names.length; i++) {
+                parts.append(names[i] + ": " + values[i]);
+            }
+            return "Headers{" + strings.join(parts, "; ") + "}";
+        };
+
+        /// @brief The position of the first field with lowercase name `key`, or -1.
+        let index_of = func(key: string) -> int {
+            for (let i = 0; i < keys.length; i++) {
+                if (keys[i] == key) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        /// @brief Removes the fields named `key` at or after `start`, keeping the order of the rest.
+        let remove_after = func(key: string, start: int) {
+            let i = keys.length - 1;
+            while (i >= start) {
+                if (keys[i] == key) {
+                    names.remove_at(i);
+                    keys.remove_at(i);
+                    values.remove_at(i);
+                }
+                i--;
+            }
+        };
+    );
+
+    /// @brief A map holding the given names and values in order. The lists must have the same length.
+    #NoDiscard
+    export let of = func(field_names: string[list], field_values: string[list]) -> Headers {
+        if (field_names.length != field_values.length) {
+            trap_with_message("invalid argument: header names and values differ in length");
+        }
+        last map = new Headers();
+        for (let i = 0; i < field_names.length; i++) {
+            map.add(field_names[i], field_values[i]);
+        }
+        return map;
+    };
+
+    /// @brief Whether `name` is a non-empty token (RFC 9110 section 5.6.2).
+    #[Pure, ThreadSafe]
+    export let is_token = func(name: string) -> bool {
+        if (name.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < name.byte_length; i++) {
+            if (!is_tchar(name.byte_at(i))) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether byte `b` is a tchar (RFC 9110 section 5.6.2).
+    #[Pure, ThreadSafe]
+    export let is_tchar = func(b: uint8) -> bool {
+        if ((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122)) {
+            return true;
+        }
+        // ! # $ % & ' * + - . ^ _ ` | ~
+        return b == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
+    };
+
+    /// @brief Whether `value` can be a field value: no CR, LF or NUL, and no other control byte except tab
+    /// (RFC 9110 section 5.5).
+    #[Pure, ThreadSafe]
+    export let is_valid_value = func(value: string) -> bool {
+        for (let i = 0; i < value.byte_length; i++) {
+            last b = value.byte_at(i);
+            if ((b < 32 && b != 9) || b == 127) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief `value` without leading and trailing spaces and tabs.
+    #[Pure, ThreadSafe]
+    export let trim_value = func(value: string) -> string {
+        let start = 0;
+        let end = value.byte_length;
+        while (start < end && (value.byte_at(start) == 32 || value.byte_at(start) == 9)) {
+            start++;
+        }
+        while (end > start && (value.byte_at(end - 1) == 32 || value.byte_at(end - 1) == 9)) {
+            end--;
+        }
+        return value.slice(start, end);
+    };
+
+    /// @brief The comma-separated elements of one field value, trimmed, empty ones dropped; commas inside
+    /// quoted strings do not separate.
+    #[Pure, ThreadSafe]
+    export let split_list = func(value: string) -> string[list] {
+        last parts: string[list] = new;
+        let start = 0;
+        let quoted = false;
+        let i = 0;
+        while (i < value.byte_length) {
+            last b = value.byte_at(i);
+            if (quoted) {
+                if (b == 92) {
+                    i++;
+                } else if (b == 34) {
+                    quoted = false;
+                }
+            } else if (b == 34) {
+                quoted = true;
+            } else if (b == 44) {
+                append_trimmed(parts, value.slice(start, i));
+                start = i + 1;
+            }
+            i++;
+        }
+        append_trimmed(parts, value.slice(start, value.byte_length));
+        return parts;
+    };
+
+    /// @brief Appends the trimmed text unless it is empty.
+    let append_trimmed = func(parts: string[list], text: string) {
+        last trimmed = trim_value(text);
+        if (trimmed.byte_length > 0) {
+            parts.append(trimmed);
+        }
+    };
+
+    /// @brief Traps unless `name` is a token.
+    let check_name = func(name: string) {
+        if (!is_token(name)) {
+            trap_with_message("invalid argument: header name");
+        }
+    };
+
+    /// @brief Traps unless `value` is a valid field value.
+    let check_value = func(value: string) {
+        if (!is_valid_value(value)) {
+            trap_with_message("invalid argument: header value");
+        }
+    };
+);

@@ -1,0 +1,9 @@
+error[E0494]: optional access on a receiver that is never absent
+  --> $DIR/optional-on-result.nra:14:15
+   |
+14 |     let age = open(path)?.age;
+   |               ^^^^^^^^^^ Result<Pet> is not a reference or an Optional of one
+   |
+   = help: to read a member of the success value, propagate the error first: '(open(path)?).age'
+
+For more information about this error, try `neura explain E0494`.

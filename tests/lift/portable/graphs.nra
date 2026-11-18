@@ -1,0 +1,54 @@
+// A program whose blocks use every circuit gadget whose neurons were once built in an order the C++ compiler
+// chose (tests/lift/portable.cmake): selections, thresholds, signed multiplication, division and remainder,
+// float comparisons and NaN canonicalization, and loops bounded by a list's length. The checked-in image
+// graphs.nvr was built from it; every compiler must build the same graphs and lift every hinted block of it.
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    // Narrow types keep the multipliers and dividers, and so the checked-in image, small.
+    let mix = func(a: int16, b: int16) -> int16 {
+        let x = a * b - a / (b | 1) + a % (b | 1);
+        return x > 100 ? x - b : x + a;
+    };
+
+    let narrow = func(a: int8, b: int8) -> int8 => a * b + a / (b | 1) - a % (b | 1);
+
+    let unsigned_mix = func(a: uint8, b: uint8) -> uint8 => a * b + a / (b | 1) + a % (b | 1);
+
+    let float_mix = func(x: float32, y: float32) -> float32 {
+        let z = x * y + (x - y);
+        if (z < x || z == y) {
+            return z - x;
+        }
+        return z;
+    };
+
+    let total = func(values: int[list]) -> int {
+        let sum = 0;
+        for (let value in values) {
+            sum = sum + (value > 3 ? value : -value);
+        }
+        return sum;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let acc = 0;
+        let small = 0;
+        let u = 0;
+        let f: float32 = 0.25;
+        let values: int[list] = new;
+        for (let i: int = 0; i < 200; i++) {
+            acc = (acc + mix((i % 100) as int16, (i % 50 - 7) as int16) as int) % 100000;
+            small = small + narrow((i % 10) as int8, (3 - i % 7) as int8) as int;
+            u = u + unsigned_mix((i % 16) as uint8, 5) as int;
+            f = float_mix(f, (i % 5) as float32);
+            values.append(i % 11);
+        }
+        let names: string[list] = new;
+        names.append("left");
+        names.append(args.length > 0 ? args[0] : "right");
+        let check = acc + small + u + total(values) + (f > 0.0 ? 1 : 0) +
+                    (names[0] == names[1] ? 1 : 0);
+        return program.ExitCode.Status(check % 200);
+    };
+);

@@ -1,0 +1,3 @@
+// The list inside the payload is named (edge case 23).
+let.promote _ = import:Std.Core.Optional;
+let P = record (cell: Optional<int[list]>);

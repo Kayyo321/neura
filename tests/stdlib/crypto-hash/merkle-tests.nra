@@ -1,0 +1,103 @@
+let hex = import:Std.Encoding.Hex;
+let int32s = import:Std.Core.Int32;
+let merkle = import:Std.Crypto.Hash.MerkleTree;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let test = import:Std.Test;
+let vectors = import:MerkleVectors;
+
+// Merkle trees against an independent Python reference of RFC 6962, section 2.1 (no standard vectors exist;
+// support/merkle-vectors.nra, scripts/crypto-vectors/gen-merkle.py).
+let MerkleTests = module (
+    let leaf_data = func(i: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let k = 0; k < i; k++) {
+            out.append(((k * 7 + i) % 256) as uint8);
+        }
+        return out;
+    };
+
+    let joined = func(proof: uint8[list][list]) -> string {
+        let text = "";
+        for (let node in proof) {
+            text += hex.encode(node);
+        }
+        return text;
+    };
+
+    let parse = func(text: string) -> int => test.assert_ok(int32s.parse(text));
+
+    let split32 = func(text: string) -> uint8[list][list] {
+        let out: uint8[list][list] = new;
+        for (let i = 0; i < text.byte_length; i += 64) {
+            out.append(test.assert_ok(hex.decode(text.slice(i, i + 64))));
+        }
+        return out;
+    };
+
+    let check = func<H: StreamingDigest<H>>(name: string) {
+        let tree = new merkle.MerkleTree<H>();
+        for (let i = 0; i < 13; i++) {
+            let _ = tree.append(leaf_data(i));
+        }
+        last roots = vectors.roots;
+        for (let i = 0; i < roots.length; i += 3) {
+            if (roots[i] == name) {
+                test.assert_equal_string(roots[i + 2], hex.encode(tree.root_at(parse(roots[i + 1]))));
+            }
+        }
+        last inclusion = vectors.inclusion;
+        for (let i = 0; i < inclusion.length; i += 4) {
+            if (inclusion[i] != name) {
+                continue;
+            }
+            last m = parse(inclusion[i + 1]);
+            last n = parse(inclusion[i + 2]);
+            last proof = tree.inclusion_proof(m, n);
+            test.assert_equal_string(inclusion[i + 3], joined(proof));
+            last root = tree.root_at(n);
+            test.assert(merkle.verify_inclusion<H>(tree.leaf(m), m, n, proof, root));
+            test.assert(!merkle.verify_inclusion<H>(tree.leaf((m + 1) % 13), m, n, proof, root));
+            if (proof.length > 0) {
+                let tampered: uint8[list][list] = new;
+                for (let node in proof) {
+                    tampered.append(test.assert_ok(hex.decode(hex.encode(node))));
+                }
+                tampered[0][0] = tampered[0][0] ^ 1;
+                test.assert(!merkle.verify_inclusion<H>(tree.leaf(m), m, n, tampered, root));
+            }
+        }
+        last consistency = vectors.consistency;
+        for (let i = 0; i < consistency.length; i += 4) {
+            if (consistency[i] != name) {
+                continue;
+            }
+            last m = parse(consistency[i + 1]);
+            last n = parse(consistency[i + 2]);
+            last proof = tree.consistency_proof(m, n);
+            test.assert_equal_string(consistency[i + 3], joined(proof));
+            test.assert(merkle.verify_consistency<H>(m, n, tree.root_at(m), tree.root_at(n), proof));
+            test.assert(!merkle.verify_consistency<H>(m, n, tree.root_at(n), tree.root_at(n), proof));
+            test.assert(!merkle.verify_consistency<H>(m, n, tree.root_at(m), tree.root_at(m), proof));
+        }
+    };
+
+    export let test_sha256_trees = func {
+        check<sha2.Sha256>("sha256");
+    };
+
+    export let test_sha3_256_trees = func {
+        check<sha3.Sha3_256>("sha3_256");
+    };
+
+    export let test_edges = func {
+        let tree = new merkle.MerkleTree<sha2.Sha256>();
+        test.assert_equal_string(hex.encode(sha2.sha256(new)), hex.encode(tree.root()));
+        test.assert_equal_int32(0, tree.append(new([1])));
+        test.assert(merkle.verify_consistency<sha2.Sha256>(0, 1, new, tree.root(), new));
+        test.assert(merkle.verify_consistency<sha2.Sha256>(1, 1, tree.root(), tree.root(), new));
+        test.assert(!merkle.verify_inclusion<sha2.Sha256>(tree.leaf(0), 1, 1, new, tree.root()));
+        test.assert_equal_string("MerkleTree(1 leaves)", tree.to_string());
+    };
+);

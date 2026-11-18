@@ -1,5 +1,6 @@
 #pragma once
 
+#include "addressable.hpp"
 #include "nvr/image.hpp"
 
 #include <algorithm>
@@ -195,7 +196,13 @@ public:
     // std::vector<std::uint64_t>().max_size(), whatever the storage. It
     // depends on the standard library, and a RepeatCollection longer than it
     // traps with its own detail text, so the value is kept as it is.
-    static std::size_t max_elements() { return std::vector<std::uint64_t>().max_size(); }
+    static std::size_t max_elements() {
+#ifdef NEURA_WASM_RUNTIME
+        return (detail::addressable_bytes - sizeof(ArrayEntry)) / sizeof(std::uint64_t);
+#else
+        return std::vector<std::uint64_t>().max_size();
+#endif
+    }
 
     // True when the entry has no field and no element: nothing to trace.
     bool leaf(Ref ref) const { return text_like(ref.entry_->kind) || ref.entry_->count == 0; }
@@ -336,8 +343,16 @@ public:
     // words (an aggregate collection is never narrowed), so no word widens it.
     void append_words(Ref ref, std::span<const std::uint64_t> words) {
         auto& item = list(ref);
+#ifdef NEURA_WASM_RUNTIME
+        // An unaddressable aggregate must fail before appending any words.
+        const auto requested = detail::add_elements(static_cast<std::size_t>(item.array.head.count), words.size(),
+                                                    detail::addressable_bytes / 8);
+        if (requested > item.capacity) grow(item, requested);
+#endif
         for (const auto bits : words) {
+#ifndef NEURA_WASM_RUNTIME
             if (item.array.head.count == item.capacity) grow(item);
+#endif
             store(bits, item.array.data + item.array.head.count * 8, ElementWidth::W8);
             ++item.array.head.count;
         }
@@ -438,8 +453,9 @@ public:
     // `words`: length * words.size() eight-byte words, element-major.
     std::uint64_t create_repeated(EntryKind kind, std::uint32_t type, std::size_t length,
                                   std::span<const std::uint64_t> words) {
+        const auto count = detail::allocation_bytes(length, words.size());
         reserve_handle();
-        auto* item = new_collection(kind, type, ElementWidth::W8, ElementWidth::W8, length * words.size());
+        auto* item = new_collection(kind, type, ElementWidth::W8, ElementWidth::W8, count);
         auto* out = reinterpret_cast<std::uint64_t*>(item->data);
         for (std::size_t i = 0; i < length; ++i) {
             std::memcpy(out + i * words.size(), words.data(), words.size() * 8);
@@ -977,7 +993,7 @@ private:
     static_assert(sizeof(Entry) == 16 && sizeof(ObjectEntry) == 24 && sizeof(ArrayEntry) == 24 &&
                   sizeof(ListEntry) == 40);
 
-    static constexpr std::size_t word_count(std::size_t fields) { return (fields + 63) / 64; }
+    static constexpr std::size_t word_count(std::size_t fields) { return fields / 64 + (fields % 64 != 0); }
 
     // The entry a Ref names, as the header of its kind.
     static ObjectEntry& object(Ref ref) { return *reinterpret_cast<ObjectEntry*>(ref.entry_); }
@@ -1154,10 +1170,11 @@ private:
     // The block of an object, or of an array, text, or bytes entry whose
     // `length` elements are inline at `width`.
     static constexpr std::size_t object_bytes(std::size_t fields) {
-        return sizeof(ObjectEntry) + 8 * (word_count(fields) + fields);
+        const auto words = detail::add_elements(fields, word_count(fields), detail::addressable_bytes / 8);
+        return detail::allocation_bytes(words, 8, sizeof(ObjectEntry));
     }
     static std::size_t inline_bytes(std::size_t length, ElementWidth width) {
-        return sizeof(ArrayEntry) + length * static_cast<std::size_t>(width);
+        return detail::allocation_bytes(length, static_cast<std::size_t>(width), sizeof(ArrayEntry));
     }
 
     // A new object block with no field initialized and every field zero.
@@ -1175,7 +1192,7 @@ private:
                                std::size_t length) {
         if (kind == EntryKind::List) {
             const auto w = static_cast<std::size_t>(storage);
-            const auto bytes = Blocks::usable(length * w);
+            const auto bytes = Blocks::usable(detail::allocation_bytes(length, w));
             auto* data = static_cast<unsigned char*>(blocks_.allocate(bytes));
             void* block = nullptr;
             try {
@@ -1205,7 +1222,7 @@ private:
         const auto length = static_cast<std::size_t>(item.head.count);
         const bool is_list = item.head.kind == EntryKind::List;
         const auto capacity = is_list ? static_cast<std::size_t>(list(ref).capacity) : length;
-        auto* data = static_cast<unsigned char*>(blocks_.allocate(capacity * 8));
+        auto* data = static_cast<unsigned char*>(blocks_.allocate(detail::allocation_bytes(capacity, 8)));
         const auto s = static_cast<std::size_t>(from);
         for (std::size_t i = 0; i < length; ++i) store(load(item.data + i * s, from), data + i * 8, ElementWidth::W8);
         if (is_list) blocks_.deallocate(item.data, capacity * s);
@@ -1217,9 +1234,15 @@ private:
     // Gives a full list room for at least one more element: at least twice
     // the capacity, and at least four elements.
     NEURA_HEAP_OUT_OF_LINE void grow(ListEntry& item) {
+        grow(item, detail::add_elements(static_cast<std::size_t>(item.array.head.count), 1,
+                                       detail::addressable_bytes));
+    }
+
+    NEURA_HEAP_OUT_OF_LINE void grow(ListEntry& item, std::size_t requested) {
         const auto w = static_cast<std::size_t>(item.array.head.storage);
         const auto capacity = static_cast<std::size_t>(item.capacity);
-        const auto bytes = Blocks::usable(std::max<std::size_t>(capacity * 2, 4) * w);
+        const auto grown = detail::grow_capacity(capacity, requested, 4, detail::addressable_bytes / w);
+        const auto bytes = Blocks::usable(detail::allocation_bytes(grown, w));
         auto* data = static_cast<unsigned char*>(blocks_.allocate(bytes));
         const auto length = static_cast<std::size_t>(item.array.head.count);
         if (length != 0) std::memcpy(data, item.array.data, length * w);
@@ -1233,7 +1256,8 @@ private:
     void reserve_handle() {
         const auto page = (blocks_.native.last + 1) >> page_bits;
         if (page >= pages_.size()) {
-            pages_.resize(page + 1);
+            if (page >= pages_.max_size()) throw std::bad_array_new_length();
+            pages_.resize(static_cast<std::size_t>(page) + 1);
             handle_table_ = {pages_.data(), pages_.size()};
         }
         auto& stored = pages_[page];
@@ -1340,11 +1364,14 @@ static_assert(Heap::marked_flag_mask() == 1 && Heap::inline_flag_mask() == 2);
 static_assert(Heap::identity_offset() == 16 && Heap::initialized_offset() == 24 && Heap::first_field_offset(0) == 24 &&
               Heap::first_field_offset(1) == 32 && Heap::first_field_offset(64) == 32 &&
               Heap::first_field_offset(65) == 40);
-static_assert(Heap::handle_page_bits() == 8 && Heap::handle_page_mask() == 255 && Heap::page_entries_offset() == 0 &&
-              Heap::page_live_offset() == 2048);
+static_assert(Heap::handle_page_bits() == 8 && Heap::handle_page_mask() == 255 && Heap::page_entries_offset() == 0);
+static_assert(Heap::page_live_offset() == sizeof(void*) * 256);
+#ifndef NEURA_WASM_RUNTIME
+static_assert(Heap::page_live_offset() == 2048);
 static_assert(offsetof(Heap::HandleTable, pages) == 0 && offsetof(Heap::HandleTable, count) == 8);
 static_assert(offsetof(Heap::NativeAllocator, free) == 0 && offsetof(Heap::NativeAllocator, next) == 8 * 36 &&
               offsetof(Heap::NativeAllocator, end) == 16 * 36 && offsetof(Heap::NativeAllocator, last) == 24 * 36);
+#endif
 static_assert(Heap::length_offset() == 8 && Heap::data_offset() == 16 && Heap::inline_data_offset() == 24 &&
               Heap::list_capacity_offset() == 24 && Heap::list_version_offset() == 32);
 
@@ -1416,7 +1443,7 @@ public:
     // The low byte of every element of array or list `source` of `heap`.
     void append_elements(const Heap& heap, Ref source) {
         const auto count = heap.length(source);
-        bytes_.reserve(bytes_.size() + count);
+        bytes_.reserve(detail::add_elements(bytes_.size(), count, bytes_.max_size()));
         for (std::size_t i = 0; i < count; ++i) {
             bytes_.push_back(static_cast<char>(static_cast<unsigned char>(heap.element(source, i))));
         }

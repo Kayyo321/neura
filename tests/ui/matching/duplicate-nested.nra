@@ -1,0 +1,10 @@
+// Edge case 34: a repeated nested arm is E0491.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let leftmost = func(tree: Tree) -> int => match (tree) {
+    Tree.Node(Tree.Leaf(a), _) => a,
+    Tree.Node(Tree.Leaf(b), _) => b,
+    _ => 0,
+};

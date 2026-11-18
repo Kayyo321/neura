@@ -1,0 +1,51 @@
+// State, a component with a handler, and a root's turns on the model host
+// (docs/apps/Components.md). Prints the renders, the click, and the host log.
+let console = import:Std.Io.Console;
+let model = import:Std.Ui.ModelHost;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+#Immutable
+let Stock = class (
+    export last name: string;
+    export last count: int32;
+
+    export let init = func(name: string, count: int32) => set;
+);
+
+let stock_view = html(name: string, count: int32, on_restock: func(ui.ClickEvent) -> void) {
+    <section class="stock">
+        <h1>{name}</h1>
+        <output>{count}</output>
+        <button type="button" on:click={on_restock}>Restock</button>
+    </section>
+};
+
+let make_stock = func(name: string) -> ui.Component {
+    last state = new ui.State<Stock>(new Stock(name, 0));
+    last restock = new func(event: ui.ClickEvent) {
+        state.update(func(stock: Stock) -> Stock => new Stock(stock.name, stock.count + 12));
+    };
+    return ui.component<Stock>(state, new func(snapshot: Stock) -> ui.View {
+        console.print_line("render " + snapshot.name + " " + snapshot.count.to_string());
+        return stock_view(snapshot.name, snapshot.count, restock);
+    });
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let host = new model.Host();
+        let stock = make_stock("bolt");
+        let root = result.expect<ui.Root>(ui.mount(host, "#app", stock), "mount");
+        host.click(1, stock, new func(event: ui.ClickEvent) {
+            console.print_line("clicked");
+        });
+        host.end_batch();
+        root.run();
+        for (let line: string in host.log) {
+            console.print_line(line);
+        }
+        return program.ExitCode.Ok;
+    };
+);

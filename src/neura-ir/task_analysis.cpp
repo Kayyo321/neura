@@ -84,6 +84,7 @@ void insert_polls(IrProgram& program) {
 }
 
 TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program), dispatch_(program) {
+    if (program.hooks_elaborated) hooks_.emplace(program);
     for (const auto& body : program.bodies) bodies_.emplace(body.owner, &body);
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
@@ -443,6 +444,12 @@ void TaskAnalysis::callees(const IrNode& node, std::vector<std::pair<SymbolId, S
     case IrOp::Call:
         add(node.symbol);
         break;
+    case IrOp::HookRead:
+    case IrOp::HookAdmit:
+        if (hooks_) {
+            for (const auto id : hooks_->targets(node)) add(id);
+        }
+        break;
     case IrOp::VirtualCall: {
         // The union over every implementation the call can reach: every
         // override, and every implementation of an interface method, which
@@ -624,8 +631,12 @@ void TaskAnalysis::check() const {
     // For a function type that is not transferable, the capture that makes it
     // so: under the union rule the reason is a closure somewhere else in the
     // program, which the type alone does not show. Labelled at the capture.
-    const auto capture_note = [&](Diagnostic& error, const IrType& type) {
-        if (type.kind != TypeKind::Object || !valid(type.symbol)) return;
+    // When the captured value is itself a function value, its own capture is
+    // labelled too, so that a closure a library wraps (a command's work) is
+    // traced to the program's capture.
+    std::function<void(Diagnostic&, const IrType&, std::set<SymbolId>&)> capture_chain;
+    capture_chain = [&](Diagnostic& error, const IrType& type, std::set<SymbolId>& seen) {
+        if (type.kind != TypeKind::Object || !valid(type.symbol) || !seen.insert(type.symbol).second) return;
         std::vector<SymbolId> layouts;
         if (signature_layout(type.symbol)) {
             if (const auto found = derived_.find(type.symbol); found != derived_.end()) layouts = found->second;
@@ -638,9 +649,14 @@ void TaskAnalysis::check() const {
                 if (transferable(symbol(field).type)) continue;
                 error.label(symbol(field).span, "a function value of this type captures a value of type " +
                                                     display(symbol(field).type) + " here");
+                capture_chain(error, symbol(field).type, seen);
                 return;
             }
         }
+    };
+    const auto capture_note = [&](Diagnostic& error, const IrType& type) {
+        std::set<SymbolId> seen;
+        capture_chain(error, type, seen);
     };
     // A check that fails inside a library helper is reported where the
     // user's code calls into the library, and labels where the task starts.
@@ -846,6 +862,17 @@ void TaskAnalysis::check_tags() const {
             }
         }
     }
+}
+
+void check_task_safety(const IrProgram& program) {
+    const bool tasks = uses_tasks(program);
+    if (!tasks && std::ranges::none_of(program.symbols, [](const IrSymbol& item) {
+            return has_tag(item, TagId::ThreadSafe);
+        })) return;
+
+    const TaskAnalysis analysis(program);
+    analysis.check_tags();
+    if (tasks) analysis.check();
 }
 
 } // namespace neura

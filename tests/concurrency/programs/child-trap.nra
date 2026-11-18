@@ -13,7 +13,7 @@ let relay = func(by: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         scope {
             let task = spawn relay(0);
             console.print_line("before");

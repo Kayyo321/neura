@@ -1,0 +1,42 @@
+// Static requirements that compile (docs/design/Records030.md, edge cases
+// 95, 97, 99, 104, 106, 113 and 114).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let Monoid = interface<T> (
+    static let zero = func() -> T;
+);
+// Case 97.
+let Money = class implements Additive<Money> (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Money => new Money(0);
+    export static let add = func(left: Money, right: Money) -> Money => new Money(left.cents + right.cents);
+);
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+let total = sum<Money>([new Money(1), new Money(2)]);
+// Case 99: a subclass of an implementing class as the type argument.
+let Gold = class : Money ();
+let start = func<T: Additive<Money>>() -> Money => T.zero();
+let gold = start<Gold>();
+// Case 104: two bounds with one signature are one requirement.
+let both = func<T: [Additive<T>, Monoid<T>]>() -> T => T.zero();
+// Case 106: an ordinary static call.
+let nothing = Money.zero();
+// Case 113: named arguments.
+let swapped = func<T: Additive<T>>(a: T, b: T) -> T => T.add(right: b, left: a);
+// Case 114: a local named like the type parameter wins.
+let Box = class (
+    export let zero = func() -> int => 0;
+);
+let shadowed = func<T: Additive<T>>() -> int {
+    let T = new Box();
+    return T.zero();
+};

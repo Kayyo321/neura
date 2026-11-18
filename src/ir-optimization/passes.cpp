@@ -4,6 +4,7 @@
 #include "analysis_cache.hpp"
 #include "effects.hpp"
 #include "integer_folding.hpp"
+#include "neura-ir/lifetime.hpp"
 #include "neura-ir/purity.hpp"
 
 #include <algorithm>
@@ -46,6 +47,7 @@ std::size_t rewrite_nodes(IrProgram& program, Rewrite rewrite) {
         }
     };
     for (auto& body : program.bodies) {
+        if (uses_lifetime_operations(body.instructions)) continue;
         for (auto& instruction : body.instructions) {
             if (global_initializer(program, instruction)) {
                 auto& value = instruction.operands.front();
@@ -83,6 +85,7 @@ std::size_t rewrite_regions(IrProgram& program, Rewrite rewrite) {
     std::size_t count = 0;
     auto counted = [&](std::vector<IrNode>& region) { count += rewrite(region); };
     for (auto& body : program.bodies) {
+        if (uses_lifetime_operations(body.instructions)) continue;
         statement_regions(body.instructions, counted);
     }
     return count;

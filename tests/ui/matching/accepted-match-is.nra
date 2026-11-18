@@ -1,0 +1,62 @@
+// Edge cases 1, 3, 4, 7, 9, 10, 11, 12, 14 to 17 and 19: match.is forms that are accepted.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let Box = class<T> (
+    export let count: int = 0;
+);
+let Labelled = class (
+    export let label: string = "";
+);
+let App = module (
+    export let Shapes = module (
+        export let Square = class : Shape ( );
+    );
+);
+let classify = func(value: class) -> int => match.is (value) {
+    Circle => 1,
+    square: App.Shapes.Square => 4,
+    shape: Shape => 2,
+    item: Box<int> => item.count,
+    named: Labelled => 5,
+    nil => 6,
+    _ => 7,
+};
+let guarded = func(value: Shape) -> int => match.is (value) {
+    Shape if value.sides > 2 => 1,
+    Circle => 2,
+    named: Named => 3,
+    _ if value == nil => 4,
+    _ => 5,
+};
+let bounded = func<T: Shape>(value: T) -> int => match . is (value) {
+    circle: Circle => circle.radius,
+    _ => 0,
+};
+let shadow = func(v: int64) -> int64 {
+    let total = v;
+    match.is (total) {
+        // A comment between arms.
+        total: int64 if total > 0 => {
+            return total;
+        },
+        _ => {
+            return 0;
+        },
+    }
+};
+let twice = func(value: class) -> int => match.is (value) {
+    item: Circle => item.radius,
+    item: Shape =>
+        item.sides,
+    _ => 0,
+};

@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <utility>
 #include <string_view>
 #include <vector>
 
@@ -20,7 +21,10 @@ inline constexpr SymbolId no_symbol = static_cast<SymbolId>(-1);
 
 enum class TypeKind {
     Void, Bool, String, Integer, Float, Array, List, Object, TypeParameter, Module, Enum, Callable,
-    Tuple
+    Tuple,
+    // NeuraIR 1.12 (docs/design/Matching030.md): one value of a fixed set
+    // of types together with which type it is (any.hpp).
+    Any
 };
 
 struct IrType {
@@ -117,6 +121,8 @@ struct IrSymbol {
     SymbolId singleton_instance = no_symbol;
     // NeuraIR 1.10. Registered attributes in the order they were attached.
     std::vector<IrAttribute> attributes{};
+    // Written field names of a named enum variant, in payload order (NeuraIR 1.13).
+    std::vector<std::string> payload_names{};
 };
 
 // Class-owned namespace for class-level storage and receiver-free functions.
@@ -161,7 +167,37 @@ enum class IrOp {
     // yields the uint64 task identity. SchedulerCall asks the NVM scheduler
     // for the operation its text names; the scheduler defines each
     // operation's arguments and result.
-    TaskScope, Spawn, SchedulerCall
+    TaskScope, Spawn, SchedulerCall,
+    // Class hooks (docs/design/Hooks030.md). Present only after
+    // elaborate_class_hooks and never written to .nir. HookRead is one read
+    // event on its operand's value; HookAdmit is one admission of its
+    // operand to a destination of the node's type, whose previous value is
+    // what its parent writes over, or the field `symbol` names.
+    HookRead, HookAdmit,
+    // NeuraIR 1.12 (docs/design/Matching030.md, any.hpp). AnyPack has one
+    // operand of a type an `any` can hold and yields an `any`. AnyTag
+    // yields the uint32 tag of its `any` operand. AnyUnpack yields the
+    // value of the node's type from its `any` operand, which is the load of
+    // a constant local inside the region that a Branch or SelectValue
+    // selects when that local's AnyTag equals the tag of the node's type; a
+    // reference is unpacked as the root class.
+    AnyPack, AnyTag, AnyUnpack,
+    // NeuraIR nir_records_minor (docs/design/Records030.md, Static interface
+    // requirements). A call of a static requirement through a type: its
+    // symbol is the bodyless static function of an interface, its one type
+    // argument the type the call goes through, a type parameter bounded by
+    // the interface, and its operands the arguments. Specialization replaces
+    // it with a direct call of the implementation; none remains after it.
+    ConformanceCall,
+    // NeuraIR 1.14 (docs/design/Lifetime030.md, lifetime.hpp). Cleanup is a
+    // direct statement of a block: from where it stands to every exit of
+    // that block it is registered, and each exit runs its body, or on a
+    // return its alternative when that is not empty, last registered first,
+    // before the block's task scope is joined. Pending is the value a return
+    // carries, read and assigned only in a Cleanup's alternative. Yield is a
+    // statement of a function that carries generator.resume; its text is
+    // its suspension index, 1 to n.
+    Cleanup, Pending, Yield
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written
@@ -169,6 +205,9 @@ enum class IrOp {
 // function; a bare bound value records the receiver form for diagnostics.
 inline constexpr std::string_view bound_closure = "$bound";
 inline constexpr std::string_view owned_lambda = "$new_func";
+// A bare generator expression (docs/design/Lifetime030.md): a capturing one
+// that escapes needs `new iterator` (E0479). `new iterator` is owned_lambda.
+inline constexpr std::string_view generator_closure = "$iterator";
 inline constexpr std::string_view owned_bound = "$new_bound";
 inline constexpr std::string_view task_closure = "$task_closure";
 inline constexpr std::string_view region_reference = "$region_reference";
@@ -254,6 +293,35 @@ struct IrNativeLibrary {
     bool operator==(const IrNativeLibrary&) const = default;
 };
 
+// Source-only derivation facts used by the compiler's expansion view and by
+// workspace rename. The emitted ordinary functions carry the execution data.
+struct DerivedWireMember {
+    SymbolId symbol = no_symbol;
+    std::string payload_field;
+    std::string path;
+    std::string wire;
+    bool variant{};
+    bool pinned{};
+};
+
+struct DerivedCodec {
+    SymbolId module = no_symbol;
+    Span declaration;
+    std::optional<Span> close_brace;
+    std::string source;
+    std::vector<DerivedWireMember> members;
+    std::vector<std::pair<std::string, std::string>> schema_imports{};
+};
+
+// A file a build writes beside the image (Html030.md, Lowering and
+// artifacts): a stylesheet or an asset, by its path relative to the
+// directory that holds index.html.
+struct IrBundleFile {
+    std::string path;
+    std::string sha256;
+    std::string contents;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -266,6 +334,20 @@ struct IrProgram {
     // Calls inlined by the optimizer; empty before optimization and not part
     // of a .nir file, which holds IR as lowered.
     std::vector<IrInlineSite> inline_sites{};
+    // Source spans that name a declaration without evaluating it: argument
+    // labels and nameof operands (docs/design/Calls030.md). Editor
+    // information from lowering, for navigation and rename; not part of a
+    // .nir file, and later stages leave it as lowering wrote it.
+    std::vector<std::pair<Span, SymbolId>> name_uses{};
+    // Set by elaborate_class_hooks on a program whose events it derived; not
+    // part of a .nir file.
+    bool hooks_elaborated = false;
+    std::vector<DerivedCodec> derived_codecs{};
+    // Stylesheets and assets of the program's stylesheet forms and templates,
+    // each once, and the stylesheets index.html links, in cascade order. Not
+    // part of a .nir file: a build from source writes them.
+    std::vector<IrBundleFile> bundle_files{};
+    std::vector<std::string> stylesheet_links{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

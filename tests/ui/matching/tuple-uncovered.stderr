@@ -1,0 +1,14 @@
+error[E0410]: non-exhaustive match, '[Light.Yellow, Light.Yellow]' is not covered
+ --> $DIR/tuple-uncovered.nra:6:47
+  |
+6 | let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+  |                                               ^^^^^ '[Light.Yellow, Light.Yellow]' is not covered
+  |
+  = note: a guarded arm covers no value; a match without a '_' arm needs an unguarded arm for every value
+  = help: add an arm for '[Light.Yellow, Light.Yellow]', or a '_' arm
+help: insert the '_' arm before the closing brace
+  |
+9 |     _ => <value>,
+  |     +++++++++++++
+
+For more information about this error, try `neura explain E0410`.

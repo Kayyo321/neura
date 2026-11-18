@@ -1,0 +1,22 @@
+P(x: 1, y: 2) P(x: 1, y: 2) P(x: 1, y: 2)
+new P(1, 2) == new P(1, 2): false
+new P(1, 2) === new P(1, 2): true
+p == p: true
+p === named: true
+p === new P(2, 1): false
+new A(1) === new B(1): false
+p.equals(nil): false
+NaN === NaN: true
+0.0 === -0.0: false
+hash(NaN) == hash(NaN): true
+hash(0.0) != hash(-0.0): true
+994
+2015
+hash(P(1, 2)) == 994: true
+Node(value: 1, next: Node(value: 2, next: nil))
+App.User(id: 7, name: Ada, active: true)
+Mixed(pair: [3, three], mode: Slow, node: Node(value: 1, next: Node(value: 2, next: nil)), wide: -9000000000, small: 255, ok: false)
+3124234426
+mixed === copy: true
+mixed === other mode: false
+2 second

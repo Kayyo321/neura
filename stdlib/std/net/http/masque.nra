@@ -1,0 +1,340 @@
+let.promote _ = import:Std.Core.Error;
+let h3 = import:Std.Net.Http.H3;
+let hashing = import:Std.Core.Hash;
+let header_map = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief MASQUE proxying over HTTP: the extended CONNECT requests of CONNECT-UDP (RFC 9298) and CONNECT-IP
+/// (RFC 9484), their default URI templates, and the UDP proxying datagram format. Tunnel I/O is a stub.
+///
+/// A request uses extended CONNECT (RFC 8441 section 4; RFC 9298 section 3.4; RFC 9484 section 4.4): `:method`
+/// CONNECT, `:protocol` `connect-udp` or `connect-ip`, `:scheme` https, the proxy's `:authority`, the `:path` of
+/// the expanded template, and the field `capsule-protocol: ?1`. The default templates are
+/// `/.well-known/masque/udp/{target_host}/{target_port}/` (RFC 9298 section 2) and
+/// `/.well-known/masque/ip/{target}/{ipproto}/` (RFC 9484 section 3). Variables are expanded as RFC 6570 simple
+/// string expansion: unreserved bytes (letters, digits, `-`, `.`, `_`, `~`) stay and every other byte becomes
+/// `%XX` with uppercase hex, so IPv6 colons become `%3A` and a prefix slash `%2F`; the CONNECT-IP wildcard `*`
+/// is written as `*`, as in RFC 9484 Figure 4. Validation (Err, OutOfRange or InvalidCharacter): a target host
+/// must be non-empty printable ASCII without `%`, `[`, `]` or `/` (zone identifiers are not supported); a port
+/// is 1 through 65535; a CONNECT-IP target is `*`, a host, or an address with an optional `/length` of at most
+/// 32 (IPv4, no colon) or 128 (IPv6); ipproto is `*` or 0 through 255. That host bits beyond a prefix length
+/// are zero is not checked. The pseudo-header fields are not `Headers` entries (`:` is not a token character).
+/// @see [Std.Net.Http.Masque](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Masque)
+#Since("0.3.0")
+export let Masque = module (
+    /// @brief The upgrade token of UDP proxying (RFC 9298 section 3).
+    export const ConnectUdp: string = "connect-udp";
+
+    /// @brief The upgrade token of IP proxying (RFC 9484 section 4).
+    export const ConnectIp: string = "connect-ip";
+
+    /// @brief The wildcard value of the CONNECT-IP template variables (RFC 9484 section 4.6).
+    export const Wildcard: string = "*";
+
+    /// @brief The Context ID of UDP payloads (RFC 9298 section 4).
+    export const UdpPayloadContext: uint64 = 0;
+
+    /// @brief An extended CONNECT request: the pseudo-header fields and the regular fields.
+    #[Final, NotThreadSafe]
+    export let ConnectRequest = class (
+        /// @brief `:method`, always CONNECT.
+        export last method: string = "CONNECT";
+        /// @brief `:protocol`, the upgrade token.
+        export last protocol: string;
+        /// @brief `:scheme`.
+        export last scheme: string;
+        /// @brief `:authority`, the proxy's authority.
+        export last authority: string;
+        /// @brief `:path`, the expanded template path.
+        export last path: string;
+        /// @brief The regular header fields (`capsule-protocol: ?1`).
+        export last fields: header_map.Headers;
+
+        /// @brief Stores the pseudo-header values and adds `capsule-protocol: ?1`.
+        export let init = func(token: string, request_scheme: string, proxy_authority: string, request_path: string) {
+            protocol = token;
+            scheme = request_scheme;
+            authority = proxy_authority;
+            path = request_path;
+            fields = new header_map.Headers();
+            fields.add("capsule-protocol", "?1");
+        };
+
+        /// @brief The pseudo-header names in the order of the RFC examples: :method, :protocol, :scheme, :path,
+        /// :authority.
+        #NoDiscard
+        export let pseudo_names = func -> string[list] {
+            last names: string[list] = new;
+            names.append(":method");
+            names.append(":protocol");
+            names.append(":scheme");
+            names.append(":path");
+            names.append(":authority");
+            return names;
+        };
+
+        /// @brief The pseudo-header values, parallel to `pseudo_names`.
+        #NoDiscard
+        export let pseudo_values = func -> string[list] {
+            last values: string[list] = new;
+            values.append(method);
+            values.append(protocol);
+            values.append(scheme);
+            values.append(path);
+            values.append(authority);
+            return values;
+        };
+
+        /// @brief Equal pseudo-header values and fields.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is ConnectRequest)) {
+                return false;
+            }
+            last that = other as ConnectRequest;
+            return to_string() == that.to_string() && fields.equals(that.fields);
+        };
+
+        /// @brief Combines the pseudo-header values and the fields.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(strings.hash(to_string()), fields.hash_code());
+
+        /// @brief The HEADERS lines as in the RFC figures, "name = value" joined by "; ".
+        export let.override to_string = func -> string {
+            last names = pseudo_names();
+            last values = pseudo_values();
+            last lines: string[list] = new;
+            for (let i = 0; i < names.length; i++) {
+                lines.append(names[i] + " = " + values[i]);
+            }
+            for (let i = 0; i < fields.size(); i++) {
+                lines.append(fields.name_at(i) + " = " + fields.value_at(i));
+            }
+            return strings.join(lines, "; ");
+        };
+    );
+
+    /// @brief A proxied UDP or IP flow carried by a request stream.
+    #[Final, NotThreadSafe]
+    export let Tunnel = class (
+        /// @brief The request that opened the tunnel.
+        export last request: ConnectRequest;
+
+        /// @brief Records the request; only `open` creates tunnels.
+        export let init = func(opening: ConnectRequest) {
+            request = opening;
+        };
+
+        /// @brief Sends one HTTP Datagram with the payload (for CONNECT-UDP, use `encode_udp_datagram`).
+        /// @stub needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented
+        export let send_datagram = func(datagram: uint8[list]) -> Result<Unit> => host_send_datagram(datagram);
+
+        /// @brief Receives the next HTTP Datagram payload.
+        /// @stub needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented
+        #NoDiscard
+        export let receive_datagram = func -> Result<uint8[list]> => host_receive_datagram();
+
+        /// @brief Closes the request stream and with it the tunnel.
+        /// @stub needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented
+        export let close = func -> Result<Unit> => host_close_tunnel();
+
+        /// @brief The protocol and path.
+        export let.override to_string = func -> string => "Tunnel{" + request.protocol + " " + request.path + "}";
+    );
+
+    /// @brief The default CONNECT-UDP path for a target (RFC 9298 section 2), for example
+    /// `/.well-known/masque/udp/192.0.2.6/443/`.
+    #NoDiscard
+    export let udp_path = func(target_host: string, target_port: int) -> Result<string> {
+        if (!is_valid_host(target_host)) {
+            return Result<string>.Err(failure(ParseErrorKind.InvalidCharacter, 0, "invalid target_host"));
+        }
+        if (target_port < 1 || target_port > 65535) {
+            return Result<string>.Err(failure(ParseErrorKind.OutOfRange, 0, "target_port outside 1 through 65535"));
+        }
+        return Result<string>.Ok(
+            "/.well-known/masque/udp/" + expand(target_host) + "/" + target_port.to_string() + "/");
+    };
+
+    /// @brief The default CONNECT-IP path (RFC 9484 section 3), for example `/.well-known/masque/ip/*/*/`.
+    /// `target` is `*`, a host, or an address with an optional `/length`; `ipproto` is `*` or 0 through 255.
+    #NoDiscard
+    export let ip_path = func(target: string, ipproto: string) -> Result<string> {
+        if (!is_valid_ip_target(target)) {
+            return Result<string>.Err(failure(ParseErrorKind.InvalidCharacter, 0, "invalid target"));
+        }
+        if (!is_valid_ipproto(ipproto)) {
+            return Result<string>.Err(failure(ParseErrorKind.OutOfRange, 0, "ipproto is not * or 0 through 255"));
+        }
+        return Result<string>.Ok("/.well-known/masque/ip/" + expand(target) + "/" + expand(ipproto) + "/");
+    };
+
+    /// @brief The extended CONNECT request for UDP proxying to `target_host`:`target_port` through the proxy at
+    /// `proxy_authority`, with the default template (RFC 9298 section 3.4). Errors are those of `udp_path`.
+    #NoDiscard
+    export let udp_request = func(proxy_authority: string, target_host: string,
+        target_port: int) -> Result<ConnectRequest> {
+        last path = udp_path(target_host, target_port)?;
+        return Result<ConnectRequest>.Ok(new ConnectRequest(ConnectUdp, "https", proxy_authority, path));
+    };
+
+    /// @brief The extended CONNECT request for IP proxying through the proxy at `proxy_authority`, with the
+    /// default template (RFC 9484 section 4.4). Errors are those of `ip_path`.
+    #NoDiscard
+    export let ip_request = func(proxy_authority: string, target: string, ipproto: string) -> Result<ConnectRequest> {
+        last path = ip_path(target, ipproto)?;
+        return Result<ConnectRequest>.Ok(new ConnectRequest(ConnectIp, "https", proxy_authority, path));
+    };
+
+    /// @brief RFC 6570 simple string expansion of one variable value, with `*` alone kept as the wildcard.
+    #[Pure, ThreadSafe]
+    export let expand = func(value: string) -> string {
+        if (value == Wildcard) {
+            return Wildcard;
+        }
+        last digits = "0123456789ABCDEF";
+        let text = "";
+        let start = 0;
+        for (let i = 0; i < value.byte_length; i++) {
+            last b = value.byte_at(i);
+            if (!is_unreserved(b)) {
+                last high = (b / 16) as int;
+                last low = (b % 16) as int;
+                if (start < i) {
+                    // Bytes start..i-1 are unreserved ASCII, so both ends are character boundaries.
+                    text += value.slice(start, i);
+                }
+                text = text + "%" + digits.slice(high, high + 1) + digits.slice(low, low + 1);
+                start = i + 1;
+            }
+        }
+        if (start < value.byte_length) {
+            text += value.slice(start, value.byte_length);
+        }
+        return text;
+    };
+
+    /// @brief An HTTP Datagram payload carrying a UDP payload: Context ID 0, then the bytes (RFC 9298 section 5).
+    #[NoDiscard]
+    export let encode_udp_datagram = func(payload: uint8[list]) -> uint8[list] {
+        last bytes = h3.encode_varint(UdpPayloadContext);
+        for (let b in payload) {
+            bytes.append(b);
+        }
+        return bytes;
+    };
+
+    /// @brief The UDP payload of an HTTP Datagram payload with Context ID 0 (RFC 9298 section 5). Err
+    /// (UnexpectedEnd) without a complete Context ID; Err (Syntax) for another Context ID, which the receiver
+    /// drops or buffers.
+    #NoDiscard
+    export let decode_udp_datagram = func(datagram: uint8[list]) -> Result<uint8[list]> {
+        last context = h3.decode_varint(datagram, 0)?;
+        if (context.value != UdpPayloadContext) {
+            return Result<uint8[list]>.Err(failure(ParseErrorKind.Syntax, 0, "context ID is not 0"));
+        }
+        last payload: uint8[list] = new;
+        for (let i = context.next; i < datagram.length; i++) {
+            payload.append(datagram[i]);
+        }
+        return Result<uint8[list]>.Ok(payload);
+    };
+
+    /// @brief Sends `request` on an HTTP/3 connection to the proxy and, on a 2xx response, returns the tunnel
+    /// (RFC 9298 section 3.5, RFC 9484 section 4.5).
+    /// @stub needs TLS/QUIC transport and HTTP/3 datagrams; connection management is not implemented
+    #NoDiscard
+    export let open = func(request: ConnectRequest) -> Result<Tunnel> => host_open(request);
+
+    /// @brief Host binding for `open`: an HTTP/3 request stream with datagrams enabled.
+    let host_open = func(request: ConnectRequest) -> Result<Tunnel> {
+        trap_with_message("unsupported: Std.Net.Http.Masque.open is not implemented in Neura 0.3.0 (needs TLS/QUIC transport and HTTP/3 datagrams; connection management is not implemented)");
+    };
+
+    /// @brief Host binding for `Tunnel.send_datagram`: a QUIC DATAGRAM frame on the request stream.
+    let host_send_datagram = func(datagram: uint8[list]) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.Masque.Tunnel.send_datagram is not implemented in Neura 0.3.0 (needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented)");
+    };
+
+    /// @brief Host binding for `Tunnel.receive_datagram`: the next QUIC DATAGRAM frame of the request stream.
+    let host_receive_datagram = func -> Result<uint8[list]> {
+        trap_with_message("unsupported: Std.Net.Http.Masque.Tunnel.receive_datagram is not implemented in Neura 0.3.0 (needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented)");
+    };
+
+    /// @brief Host binding for `Tunnel.close`: closes the request stream.
+    let host_close_tunnel = func -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.Masque.Tunnel.close is not implemented in Neura 0.3.0 (needs HTTP/3 datagrams over QUIC; tunnel I/O is not implemented)");
+    };
+
+    /// @brief Whether `b` is unreserved (RFC 3986 section 2.3).
+    #[Pure, ThreadSafe]
+    let is_unreserved = func(b: uint8) -> bool =>
+        (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 45 or 46 or 95 or 126;
+
+    /// @brief A non-empty printable-ASCII host without `%`, `[`, `]`, `/` or `*`.
+    #[Pure, ThreadSafe]
+    let is_valid_host = func(host: string) -> bool {
+        if (host.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < host.byte_length; i++) {
+            last b = host.byte_at(i);
+            if (b <= 32 || b >= 127 || b == 37 or 91 or 93 or 47 or 42) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief `*`, a host, or an address with `/length` (at most 32 without a colon, 128 with one).
+    #[Pure, ThreadSafe]
+    let is_valid_ip_target = func(target: string) -> bool {
+        if (target == Wildcard) {
+            return true;
+        }
+        last slash = strings.index_of(target, "/");
+        if (slash < 0) {
+            return is_valid_host(target);
+        }
+        last address = target.slice(0, slash);
+        if (!is_valid_host(address)) {
+            return false;
+        }
+        last length = small_number(target.slice(slash + 1, target.byte_length), 3);
+        last limit = strings.contains(address, ":") ? 128 : 32;
+        return length >= 0 && length <= limit;
+    };
+
+    /// @brief `*` or a decimal 0 through 255 of one to three digits.
+    #[Pure, ThreadSafe]
+    let is_valid_ipproto = func(text: string) -> bool {
+        if (text == Wildcard) {
+            return true;
+        }
+        last value = small_number(text, 3);
+        return value >= 0 && value <= 255;
+    };
+
+    /// @brief The value of one to `max_digits` decimal digits, or -1.
+    #[Pure, ThreadSafe]
+    let small_number = func(text: string, max_digits: int) -> int {
+        if (text.byte_length == 0 || text.byte_length > max_digits) {
+            return -1;
+        }
+        let value = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return -1;
+            }
+            value = value * 10 + ((b - 48) as int);
+        }
+        return value;
+    };
+
+    /// @brief A Parse error.
+    #[Pure, ThreadSafe]
+    let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
+);

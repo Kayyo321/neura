@@ -1,0 +1,4 @@
+// A replacement names a field of the record itself (edge case 49).
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let copy = new with(user) { owner.name: "x" };

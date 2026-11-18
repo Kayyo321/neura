@@ -1,0 +1,91 @@
+// Property dispatch that tier 3 inlines (docs/design/Records030.md, Lowering
+// and artifacts): a hot loop that reads an interface property through a
+// generated field adapter and through a getter and setter clause, one that reads and
+// writes a virtual accessor through its slot and an override, and a nil
+// receiver whose trap inside the loop must match tier 0. The first argument
+// picks the case, the second the size. tests/backend/tier3_inline_tests.cpp
+// runs it at every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Tier3Properties = module:program.Entry (
+    let Sized = interface (
+        let size: int64;
+            | get;
+            | set;
+    );
+
+    let Box = class implements Sized (
+        export let size: int64 = 0;
+    );
+
+    let Offset = class implements Sized (
+        export let size: int64 = 0;
+            | get: size + 1000;
+            | set: size = value;
+    );
+
+    let Shape = class (
+        export let weight: int64 = 1;
+            | get.virtual: weight;
+            | set.virtual: weight = value;
+    );
+
+    let Heavy = class : Shape (
+        export let.override weight: int64;
+            | get.override: weight + 100;
+    );
+
+    let measure = func(items: Sized[list], rounds: int32) -> int64 {
+        let total: int64 = 0;
+        for (let round = 0; round < rounds; round++) {
+            for (let i = 0; i < items.length; i++) {
+                items[i].size += 1;
+                total += items[i].size;
+            }
+        }
+        return total;
+    };
+
+    let weigh = func(shapes: Shape[list], rounds: int32) -> int64 {
+        let total: int64 = 0;
+        for (let round = 0; round < rounds; round++) {
+            for (let i = 0; i < shapes.length; i++) {
+                shapes[i].weight = round as int64;
+                total += shapes[i].weight;
+            }
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        const size = result.value_or<int32>(int32s.parse(args[1]), 10);
+        if (args[0] == "adapter" || args[0] == "all") {
+            let items: Sized[list] = new;
+            items.append(new Box());
+            items.append(new Box());
+            console.print_line("adapter " + measure(items, size).to_string());
+        }
+        if (args[0] == "mixed" || args[0] == "all") {
+            let items: Sized[list] = new;
+            items.append(new Box());
+            items.append(new Offset());
+            console.print_line("mixed " + measure(items, size).to_string());
+        }
+        if (args[0] == "virtual" || args[0] == "all") {
+            let shapes: Shape[list] = new;
+            shapes.append(new Shape());
+            shapes.append(new Heavy());
+            console.print_line("virtual " + weigh(shapes, size).to_string());
+        }
+        if (args[0] == "nil") {
+            let items: Sized[list] = new;
+            items.append(new Box());
+            items.append(nil);
+            console.print_line("nil " + measure(items, size).to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

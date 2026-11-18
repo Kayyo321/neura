@@ -1,0 +1,234 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let optional = import:Std.Core.Optional;
+let percent = import:Std.Net.Core.PercentEncoding;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief Uniform Resource Names (RFC 8141): parsing of `urn:<NID>:<NSS>` with the optional r-component
+/// (`?+`), q-component (`?=`) and f-component (`#`), and URN-equivalence (RFC 8141 section 3).
+///
+/// The parser checks the RFC 8141 section 2 ABNF: the NID is 2 to 32 letters, digits and hyphens that starts
+/// and ends with a letter or digit; the NSS is one or more pchar or `/` and does not start with `/`; an r- or
+/// q-component is one or more pchar, `/` or `?` and does not start with `/` or `?`; the r-component ends at
+/// `?=`; any other `?` outside those components is an error. The registration rules on new NIDs (sections 5.1
+/// and 5.2, such as the reserved `urn-` and two-letter prefixes) are not parse rules and are not applied.
+/// @see [Std.Net.Core.Urn](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Urn)
+#Since("0.3.0")
+export let Urn = module (
+    /// @brief Restricts construction to parse.
+    let Seal = enum (Token);
+
+    /// @brief A parsed URN. Equality is URN-equivalence: the lowercased NID and the NSS with uppercase
+    /// percent-encoding hex digits are compared, and the r-, q- and f-components are ignored.
+    #[Final, Immutable, ThreadSafe, Since("0.3.0")]
+    export let Urn = class (
+        /// @brief The text as parsed.
+        last text: string;
+        /// @brief The scheme as written (`urn` in any case).
+        export last scheme: string;
+        /// @brief The namespace identifier as written.
+        export last nid: string;
+        /// @brief The namespace-specific string as written (percent-encoded).
+        export last nss: string;
+        /// @brief The r-component after `?+`, as written.
+        export last r_component: optional.Optional<string>;
+        /// @brief The q-component after `?=`, as written.
+        export last q_component: optional.Optional<string>;
+        /// @brief The f-component after `#`, as written.
+        export last f_component: optional.Optional<string>;
+
+        /// @brief Builds a URN from parsed parts; only this module can name the seal.
+        export let init = func(seal: Seal, source: string, scheme_text: string, nid_text: string,
+            nss_text: string, r: optional.Optional<string>, q: optional.Optional<string>,
+            f: optional.Optional<string>) {
+            text = source;
+            scheme = scheme_text;
+            nid = nid_text;
+            nss = nss_text;
+            r_component = r;
+            q_component = q;
+            f_component = f;
+        };
+
+        /// @brief `urn:` + the lowercased NID + `:` + the NSS with percent-encoding hex in uppercase: the text
+        /// URN-equivalence compares (RFC 8141 section 3.1). Percent-encoded bytes are not decoded.
+        #Pure
+        export let equivalence_key = func -> string =>
+            "urn:" + strings.to_ascii_lower(nid) + ":" + uppercase_triplets(nss);
+
+        /// @brief The assigned name `urn:<NID>:<NSS>` as written, without the optional components.
+        #Pure
+        export let assigned_name = func -> string => scheme + ":" + nid + ":" + nss;
+
+        /// @brief The NSS with percent-encoding decoded. Errors as in PercentEncoding.decode.
+        #NoDiscard
+        export let decoded_nss = func -> Result<string> => percent.decode(nss);
+
+        /// @brief URN-equivalence (RFC 8141 section 3).
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Urn)) {
+                return false;
+            }
+            return equivalence_key() == (other as Urn).equivalence_key();
+        };
+
+        /// @brief The hash of the equivalence key, consistent with equals.
+        #Pure
+        export let.override hash_code = func -> uint32 => hashing.combine(17, equivalence_key().hash_code());
+
+        /// @brief The text as parsed.
+        #Pure
+        export let.override to_string = func -> string => text;
+    );
+
+    /// @brief Parses a URN.
+    ///
+    /// Errors (Parse, offset in bytes): Empty for empty text; Syntax when the text does not start with `urn:`
+    /// in any case, the NID is malformed or not followed by `:`, the NSS is empty or starts with `/`, an r- or
+    /// q-component is empty or starts with `/` or `?`, or a `?` is not followed by `+` or `=` in its place;
+    /// InvalidCharacter at a byte that the component does not allow, including a `%` without two hex digits.
+    #[NoDiscard, Pure, ThreadSafe, Since("0.3.0")]
+    export let parse = func(text: string) -> Result<Urn> {
+        last length = text.byte_length;
+        if (length == 0) {
+            return failed(ParseErrorKind.Empty, 0, "empty URN");
+        }
+        if (length < 4 || !strings.equals_ignore_ascii_case(text.slice(0, 4), "urn:")) {
+            return failed(ParseErrorKind.Syntax, 0, "a URN starts with \"urn:\"");
+        }
+        // NID: (alphanum) 0*30(ldh) (alphanum), then ':'.
+        let i = 4;
+        while (i < length && is_ldh(text.byte_at(i))) {
+            i++;
+        }
+        last nid_length = i - 4;
+        if (nid_length < 2 || nid_length > 32 || text.byte_at(4) == 45 || text.byte_at(i - 1) == 45) {
+            return failed(ParseErrorKind.Syntax, 4,
+                "the NID is 2 to 32 letters, digits and hyphens, not starting or ending with '-'");
+        }
+        if (i >= length || text.byte_at(i) != 58) {
+            return failed(ParseErrorKind.Syntax, i, "expected ':' after the NID");
+        }
+        last nid = text.slice(4, i);
+        // NSS: pchar *(pchar / "/"), up to '?' or '#'.
+        last nss_start = i + 1;
+        last nss_end = find_any(text, nss_start, 63, 35);
+        last nss = text.slice(nss_start, nss_end);
+        check_component(nss, nss_start, percent.EncodeSet.Path, "NSS")?;
+        let position = nss_end;
+        let r = optional.Optional<string>.None;
+        let q = optional.Optional<string>.None;
+        let f = optional.Optional<string>.None;
+        if (position < length && text.byte_at(position) == 63) {
+            if (position + 1 >= length || !(text.byte_at(position + 1) == 43 or 61)) {
+                return failed(ParseErrorKind.Syntax, position, "'?' must start '?+' or '?='");
+            }
+            if (text.byte_at(position + 1) == 43) {
+                last start = position + 2;
+                last end = find_q_or_fragment(text, start);
+                last component = text.slice(start, end);
+                check_component(component, start, percent.EncodeSet.Query, "r-component")?;
+                r = optional.Optional<string>.Some(component);
+                position = end;
+            }
+        }
+        if (position < length && text.byte_at(position) == 63) {
+            if (position + 1 >= length || text.byte_at(position + 1) != 61) {
+                return failed(ParseErrorKind.Syntax, position, "'?' after the r-component must start '?='");
+            }
+            last start = position + 2;
+            last end = find_any(text, start, 35, 35);
+            last component = text.slice(start, end);
+            check_component(component, start, percent.EncodeSet.Query, "q-component")?;
+            q = optional.Optional<string>.Some(component);
+            position = end;
+        }
+        if (position < length) {
+            // Only '#' can be here: every '?' path above ends at '#' or the end.
+            last start = position + 1;
+            last component = text.slice(start, length);
+            last bad = percent.first_invalid(component, percent.EncodeSet.Fragment);
+            if (bad >= 0) {
+                return failed(ParseErrorKind.InvalidCharacter, start + bad, "character not allowed in the f-component");
+            }
+            f = optional.Optional<string>.Some(component);
+        }
+        return Result<Urn>.Ok(new Urn(Seal.Token, text, text.slice(0, 3), nid, nss, r, q, f));
+    };
+
+    // Internal helpers.
+
+    /// @brief A letter, digit or hyphen.
+    let is_ldh = func(b: uint8) -> bool =>
+        (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45;
+
+    /// @brief The first index from `start` of byte `a` or `b`, or the length.
+    let find_any = func(text: string, start: int, a: uint8, b: uint8) -> int {
+        let i = start;
+        while (i < text.byte_length && text.byte_at(i) != a && text.byte_at(i) != b) {
+            i++;
+        }
+        return i;
+    };
+
+    /// @brief The index of the `?=` or `#` that ends an r-component, or the length.
+    let find_q_or_fragment = func(text: string, start: int) -> int {
+        last length = text.byte_length;
+        let i = start;
+        while (i < length) {
+            last b = text.byte_at(i);
+            if (b == 35 || (b == 63 && i + 1 < length && text.byte_at(i + 1) == 61)) {
+                return i;
+            }
+            i++;
+        }
+        return length;
+    };
+
+    /// @brief Checks a component that is one or more characters of the set and does not start with `/` or
+    /// `?`.
+    let check_component = func(component: string, start: int, set: percent.EncodeSet, name: string) -> Result<int> {
+        if (component.byte_length == 0) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.Syntax, offset: start, message: "empty " + name
+            });
+        }
+        last first = component.byte_at(0);
+        if (first == 47 or 63) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.Syntax, offset: start, message: name + " starts with '/' or '?'"
+            });
+        }
+        last bad = percent.first_invalid(component, set);
+        if (bad >= 0) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.InvalidCharacter, offset: start + bad,
+                message: "character not allowed in the " + name
+            });
+        }
+        return Result<int>.Ok(0);
+    };
+
+    /// @brief The text with the hex digits of each well-formed `%XX` triplet in uppercase.
+    let uppercase_triplets = func(text: string) -> string {
+        last length = text.byte_length;
+        let result = "";
+        let copied = 0;
+        let i = 0;
+        while (i < length) {
+            if (percent.is_triplet(text, i)) {
+                result += text.slice(copied, i) + strings.to_ascii_upper(text.slice(i, i + 3));
+                i += 3;
+                copied = i;
+            } else {
+                i++;
+            }
+        }
+        return result + text.slice(copied, length);
+    };
+
+    /// @brief A parse failure.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<Urn> =>
+        Result<Urn>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+);

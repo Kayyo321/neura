@@ -286,7 +286,7 @@ let twice = func(x: int) -> int => x + x;
 let echo = func(text: string) -> string => text + "!";
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let bytes: uint8[list] = new([1, 2, 3]);
         let flags: bool[] = [true, false];
         let reals: float64[list] = new([1.5]);
@@ -296,7 +296,7 @@ export let Main = module : program.Entry (
         let doubled = parallel.map<int, int>([1, 2, 3], twice, parallel.limits(100000, 100000));
         let echoed = parallel.map<string, string>(words, echo, parallel.limits(100000, 100000));
         console.print_line(digest.length.to_string() + " " + doubled[2].to_string() + " " + echoed[1] + " " +
-                           arguments[0] + " " + flags.length.to_string() + " " + reals.length.to_string() + " " +
+                           args[0] + " " + flags.length.to_string() + " " + reals.length.to_string() + " " +
                            numbers.length.to_string());
         return program.ExitCode.Ok;
     };

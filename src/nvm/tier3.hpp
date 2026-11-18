@@ -590,12 +590,12 @@ struct Helpers {
 // FrameStack::push and pop_back do, and calls a helper otherwise.
 struct FrameRecord {
     void* headers = nullptr;
-    std::uint64_t size = 0;
-    std::uint64_t capacity = 0;
+    std::size_t size = 0;
+    std::size_t capacity = 0;
     std::uint64_t* slots = nullptr;
     std::uint8_t* initialized = nullptr;
-    std::uint64_t slot_size = 0;
-    std::uint64_t slot_capacity = 0;
+    std::size_t slot_size = 0;
+    std::size_t slot_capacity = 0;
 };
 
 // The offsets native code uses in a FrameRecord and in a frame header
@@ -619,6 +619,7 @@ inline constexpr std::int32_t called_from = 32;
 } // namespace frame_offsets
 
 static_assert(std::is_standard_layout_v<FrameRecord>);
+#ifndef NEURA_WASM_RUNTIME
 static_assert(offsetof(FrameRecord, headers) == frame_offsets::headers &&
               offsetof(FrameRecord, size) == frame_offsets::size &&
               offsetof(FrameRecord, capacity) == frame_offsets::capacity &&
@@ -626,6 +627,7 @@ static_assert(offsetof(FrameRecord, headers) == frame_offsets::headers &&
               offsetof(FrameRecord, initialized) == frame_offsets::initialized &&
               offsetof(FrameRecord, slot_size) == frame_offsets::slot_size &&
               offsetof(FrameRecord, slot_capacity) == frame_offsets::slot_capacity);
+#endif
 
 // How a helper of native code went (Context::status).
 enum class NativeStatus : std::uint32_t {
@@ -823,6 +825,7 @@ inline constexpr std::int32_t result_words = 208;
 } // namespace offsets
 
 static_assert(std::is_standard_layout_v<Context>);
+#ifndef NEURA_WASM_RUNTIME
 static_assert(offsetof(Context, C) == offsets::C && offsetof(Context, K) == offsets::K &&
               offsetof(Context, room) == offsets::room && offsetof(Context, slots) == offsets::slots &&
               offsetof(Context, flags) == offsets::flags && offsetof(Context, block) == offsets::block &&
@@ -846,6 +849,7 @@ static_assert(offsetof(Context, callee_cells) == offsets::callee_cells &&
 static_assert(offsetof(Context, frames) == offsets::frames && offsetof(Context, max_frames) == offsets::max_frames &&
               offsetof(Context, inline_calls) == offsets::inline_calls &&
               offsetof(Context, inline_returns) == offsets::inline_returns);
+#endif
 
 // The fields of a CalleeCell.
 namespace cell_offsets {

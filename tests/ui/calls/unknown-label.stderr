@@ -1,0 +1,14 @@
+error[E0482]: no parameter named 'retrys'
+ --> $DIR/unknown-label.nra:3:32
+  |
+2 | let schedule = func(job: string, retries: int) -> string => job;
+  |     -------- 'schedule' is declared here
+3 | let first = schedule("backup", retrys: 3);
+  |                                ^^^^^^ 'schedule' has no parameter of this name
+  |
+help: there is a parameter with a similar name: 'retries'
+  |
+3 | let first = schedule("backup", retries: 3);
+  |                                ~~~~~~~
+
+For more information about this error, try `neura explain E0482`.

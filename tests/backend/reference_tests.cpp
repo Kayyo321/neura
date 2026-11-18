@@ -14,12 +14,14 @@
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "nvm/host.hpp"
 #include "nvr/format.hpp"
 
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -151,7 +153,19 @@ NEURA_TEST(reference, library_tests_match_the_evaluator) {
                 continue;
             }
             image.entry = static_cast<std::uint32_t>(i);
-            const auto actual = run_captured(image);
+            // The NVM run binds the console alone. An image that imports another
+            // host service, such as Std.App's server services, cannot bind there,
+            // so its tests are not compared.
+            std::optional<Captured> run;
+            try {
+                run.emplace(run_captured(image));
+            } catch (const nvm::BindError& error) {
+                const std::string reason = "the image imports a host service other than the console";
+                ++not_compared[reason];
+                first_of.emplace(reason, name + ": " + error.what());
+                continue;
+            }
+            const auto& actual = *run;
             ++compared;
             const bool returned = expected.status == Status::Returned;
             if (returned != actual.result.completed) {

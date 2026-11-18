@@ -1,0 +1,87 @@
+// The portfolio of examples/apps/portfolio.nra in a browser page, for tests/apps/web/app-check.py: the same
+// router, pages and contact form, mounted with Std.Web.mount. The page's journey (portfolio-test.mjs) opens a
+// deep link, follows a link, sends the empty form, fills it in and sends it again. Each message sent is printed.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let controls = import:Std.Ui.Controls;
+let forms = import:Std.Ui.Forms;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let routing = import:Std.Ui.Routing;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+let shell_view = html(home: ui.Url, go_home: func(ui.ClickEvent) -> void, contact: ui.Url,
+                      go_contact: func(ui.ClickEvent) -> void, page: ui.View) {
+    <header>
+        <nav>
+            <a href={home} on:click.prevent_default={go_home}>Home</a>
+            <a href={contact} on:click.prevent_default={go_contact}>Contact</a>
+        </nav>
+    </header>
+    <main>{page}</main>
+};
+
+let text_view = html(title: string, body: string) {
+    <article><h1>{title}</h1><p>{body}</p></article>
+};
+
+let contact_view = html(name: ui.View, email: ui.View, message: ui.View, send: ui.View, sent: int32) {
+    <h1>Contact</h1>
+    {name}{email}{message}{send}
+    @if (sent > 0) {
+        <p role="status">Thank you, your message is on its way.</p>
+    }
+};
+
+let page = func(title: string, body: string) -> ui.Component =>
+    ui.component<string>(new ui.State<string>(body), new func(text: string) -> ui.View => text_view(title, text));
+
+let contact_page = func(form: forms.Form, name: forms.Field<string>, email: forms.Field<string>,
+                        message: forms.Field<string>, send: func() -> void) -> ui.Component {
+    last name_input = controls.text_input<string>(name, "text");
+    last email_input = controls.text_input<string>(email, "email");
+    last message_input = controls.text_area<string>(message);
+    return controls.form(form, send, new func(state: forms.FormState) -> ui.View =>
+        contact_view(ui.slot(name_input), ui.slot(email_input), ui.slot(message_input),
+                     controls.submit_button("Send"), state.submitted));
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let name = new forms.Field<string>("name", "Name", "", forms.required_text("Please enter your name"));
+        let email = new forms.Field<string>("email", "E-mail", "", forms.email("Please enter an e-mail address"));
+        let message = new forms.Field<string>("message", "Message", "", forms.required_text("Please write a message"));
+        let form = new forms.Form();
+        form.add(name);
+        form.add(email);
+        form.add(message);
+        let send = new func() {
+            console.print_line("sent " + name.draft() + " <" + email.draft() + ">: " + message.draft());
+        };
+        let router = new routing.Router();
+        router.add("/", new func(params: routing.Params) -> ui.Component => page("Hello", "I build things."));
+        router.add("/projects/{slug}", new func(params: routing.Params) -> ui.Component =>
+            page("Project", "This is " + params.get("slug") + "."));
+        router.add("/contact", new func(params: routing.Params) -> ui.Component =>
+            contact_page(form, name, email, message, send));
+        router.otherwise(new func(path: string) -> ui.Component => page("Not found", "Nothing lives at " + path + "."));
+        let site = ui.component<bool>(new ui.State<bool>(true), new func(unused: bool) -> ui.View =>
+            shell_view(router.link("/"), router.on_link("/"), router.link("/contact"), router.on_link("/contact"),
+                       ui.slot(router.component())));
+        let status = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", site, tasks)) {
+                result.Result.Ok(root) => {
+                    console.print_line("at " + router.location.get().to_string());
+                    root.run();
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    status = program.ExitCode.Failure;
+                },
+            }
+        }
+        return status;
+    };
+);

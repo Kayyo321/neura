@@ -1,0 +1,27 @@
+let.promote _ = import:Std.Net.FramedTransport;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A framed transport carrying many independent logical streams over one connection
+/// (docs/design/Net030.md).
+///
+/// `Std.Net.Quic.QuicConnection` is the planned implementation. The inherited `receive` and `send` act on the
+/// connection's default stream (for QUIC, unreliable datagrams); the stream members act on one stream.
+/// @see [Std.Net.MultiplexedTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-MultiplexedTransport)
+#Since("0.3.0")
+export let MultiplexedTransport = module (
+    /// @brief Independent streams identified by `StreamId`, each exchanging frames of type `Frame`.
+    export let MultiplexedTransport = interface<StreamId, Frame>:FramedTransport<Frame> (
+        /// @brief Opens a new locally initiated stream, bidirectional or send-only.
+        let open_stream = func(bidirectional: bool) -> Result<StreamId>;
+        /// @brief Waits for the next stream the peer opens.
+        let accept_stream = func -> Result<StreamId>;
+        /// @brief Sends one frame on the stream.
+        let send_on = func(stream: StreamId, frame: Frame) -> Result<Unit>;
+        /// @brief The next frame of the stream, or `None` once the peer has finished the stream.
+        let receive_on = func(stream: StreamId) -> Result<Optional<Frame>>;
+        /// @brief Finishes the local side of the stream.
+        let finish_stream = func(stream: StreamId) -> Result<Unit>;
+    );
+);

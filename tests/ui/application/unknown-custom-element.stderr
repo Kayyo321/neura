@@ -1,0 +1,7 @@
+error[E1001]: unknown element
+ --> $DIR/unknown-custom-element.nra:1:22
+  |
+1 | let view = html() { <my-widget></my-widget> };
+  |                      ^^^^^^^^^ this element is unavailable in templates
+
+For more information about this error, try `neura explain E1001`.

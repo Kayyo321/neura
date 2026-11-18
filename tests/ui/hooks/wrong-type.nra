@@ -1,0 +1,4 @@
+// E0542: a clause yields a reference of its class.
+let Session = class (
+    | get: 1;
+);

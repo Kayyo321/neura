@@ -30,7 +30,7 @@ The following public declarations are taken from the module source; each links t
 - **Fs.FileMetadata** · [`export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L33)
   Stores the entry's kind, size, and modification time.
 - **Fs.FileMetadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L41)
-  Tests equality of the kind, size, and modification time. Tagged `#Pure`.
+  Tests equality of the kind, size, and modification time. Reading the argument can run its class hook.
 - **Fs.FileMetadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L52)
   Combines the hashes of the kind, size, and modification time. Tagged `#Pure`.
 - **Fs.FileMetadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/fs.nra#L58)

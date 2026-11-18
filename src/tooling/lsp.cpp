@@ -1,8 +1,10 @@
+#include "neura-ir/attributes.hpp"
 #include "lsp.hpp"
 #include "analysis.hpp"
 #include "cli/module_path.hpp"
 #include "cli/source_loader.hpp"
 #include "formatter.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/tags.hpp"
 #include "neura/version.hpp"
 #include "protocol.hpp"
@@ -130,7 +132,52 @@ class Server {
 
   private:
     AnalysisSession session_;
+    // Class hooks (docs/design/Hooks030.md): a class's hover lists its
+    // effective clauses and where each comes from.
+    std::string hook_summary(const EditorSymbol &symbol) const {
+        if (!session_.program || symbol.compiler_id == no_symbol ||
+            symbol.compiler_id >= session_.program->symbols.size())
+            return {};
+        const auto &program = *session_.program;
+        if (program.symbols[symbol.compiler_id].kind != SymbolKind::Class)
+            return {};
+        std::string result;
+        for (const auto kind : {HookKind::Get, HookKind::Set}) {
+            const auto function = effective_hook(program, symbol.compiler_id, kind);
+            if (function == no_symbol)
+                continue;
+            const auto owner = hook_owner(program.symbols[function]);
+            result += std::string(result.empty() ? "\n\nClass hooks: " : "; ") + "`" + hook_word(kind) + "` " +
+                      (owner == symbol.compiler_id ? "declared here"
+                                                   : "inherited from `" + program.symbols[owner].name + "`");
+        }
+        return result.empty() ? result : result + ".";
+    }
+    // The clause that `.override` at `offset` replaces, for navigation.
+    std::optional<Span> overridden_hook(const EditorDocument &doc, std::size_t offset) const {
+        if (!session_.program)
+            return std::nullopt;
+        const auto &program = *session_.program;
+        for (const auto &symbol : session_.symbols) {
+            if (!symbol.declaration || symbol.file != doc.path || symbol.compiler_id == no_symbol ||
+                symbol.compiler_id >= program.symbols.size())
+                continue;
+            for (const auto &clause : symbol.declaration->hooks) {
+                if (!clause.override_word || offset < clause.override_word->offset ||
+                    offset > clause.override_word->offset + clause.override_word->length)
+                    continue;
+                const auto base = program.symbols[symbol.compiler_id].base;
+                const auto inherited =
+                    effective_hook(program, base, clause.setter ? HookKind::Set : HookKind::Get);
+                if (inherited == no_symbol)
+                    return std::nullopt;
+                return program.symbols[inherited].span;
+            }
+        }
+        return std::nullopt;
+    }
     bool initialized_{}, shutdown_{};
+    bool change_annotations_{};
     bool code_lens_enabled_{true};
     InlayOptions inlay_options_;
     std::set<std::string> cancelled_;
@@ -196,6 +243,7 @@ class Server {
         if (initialized_)
             throw RequestError(-32600, "Server already initialized");
         initialized_ = true;
+        change_annotations_ = params["capabilities"]["workspace"]["workspaceEdit"]["changeAnnotationSupport"].is_object();
         auto root_uri = params["rootUri"].string();
         if (root_uri.empty() && !params["workspaceFolders"].items().empty())
             root_uri = params["workspaceFolders"][std::size_t{0}]["uri"].string();
@@ -291,7 +339,9 @@ class Server {
             return false;
         }
     }
-    std::vector<Span> all_references(const EditorSymbol &selected, bool declarations) {
+    std::vector<Span> all_references(const EditorSymbol &selected, bool declarations,
+                                     std::vector<DiagnosticEdit>* schema_edits = nullptr,
+                                     const std::string& new_name = {}) {
         const auto key_file = selected.file;
         const auto key_offset = selected.selection.offset;
         std::vector<Span> spans;
@@ -300,7 +350,8 @@ class Server {
         session_.index_workspace();
         std::vector<std::string> roots;
         for (const auto &[path, doc] : session_.documents)
-            if (!doc.library && doc.source.find(selected.name) != std::string::npos)
+            if (!doc.library && (doc.source.find(selected.name) != std::string::npos ||
+                                 (schema_edits && doc.source.find("derive") != std::string::npos)))
                 roots.push_back(doc.uri);
         for (const auto &uri : roots) {
             session_.analyze(uri);
@@ -322,6 +373,48 @@ class Server {
                     return id;
                 };
                 const auto target = session_.symbols[*found].compiler_id;
+                if (schema_edits) {
+                    // A record component and its generated constructor parameter
+                    // share a source span. Both identify the same wire field.
+                    auto wire_target = target;
+                    const auto& symbols = session_.program->symbols;
+                    if (symbols[target].kind == SymbolKind::Parameter && symbols[target].owner != no_symbol) {
+                        const auto& ctor = symbols[symbols[target].owner];
+                        if (ctor.name == "init" && ctor.owner != no_symbol &&
+                            find_attribute(symbols[ctor.owner], AttributeId::ClassRecord)) {
+                            for (SymbolId field = 0; field < symbols.size(); ++field)
+                                if (symbols[field].owner == ctor.owner && symbols[field].kind == SymbolKind::Field &&
+                                    symbols[field].name == symbols[target].name) wire_target = field;
+                        }
+                    }
+                    for (const auto& codec : session_.program->derived_codecs) {
+                        for (const auto& member : codec.members) {
+                            if (member.symbol != wire_target || !member.payload_field.empty() || member.pinned) continue;
+                            auto insertion = codec.close_brace.value_or(codec.declaration);
+                            if (!codec.close_brace) insertion.offset += insertion.length - 1;
+                            insertion.length = 0;
+                            const auto separator = member.path.rfind('.');
+                            const auto owner = member.path.substr(0, separator + 1);
+                            const auto pin = std::string(member.variant ? "variant " : "field ") + owner + new_name +
+                                             ": \"" + member.wire + "\";";
+                            const auto text = codec.close_brace ? " " + pin + " " : " { " + pin + " }";
+                            const auto add_edit = [&](const Span& at, const std::string& replacement) {
+                                const auto duplicate = std::ranges::any_of(*schema_edits, [&](const auto& prior) {
+                                    return prior.span.file == at.file && prior.span.offset == at.offset &&
+                                           prior.replacement == replacement;
+                                });
+                                if (!duplicate) schema_edits->push_back({at, replacement});
+                            };
+                            add_edit(insertion, text);
+                            for (const auto& [alias, source] : codec.schema_imports) {
+                                if (!member.path.starts_with(alias + ".")) continue;
+                                auto at = codec.declaration;
+                                at.length = 0;
+                                add_edit(at, "let " + alias + " = import:" + source + ";\n");
+                            }
+                        }
+                    }
+                }
                 if (session_.program->symbols[target].kind == SymbolKind::Function) {
                     const auto root = root_of(target);
                     for (std::size_t i = 0; i < session_.symbols.size(); ++i) {
@@ -360,20 +453,24 @@ class Server {
             throw RequestError(-32602, "The new name must be a Neura identifier");
         if (!session_.program || selected.compiler_id == no_symbol)
             throw RequestError(-32803, "Resolve source errors before renaming this symbol");
-        auto references = all_references(selected, true);
-        std::vector<DiagnosticEdit> edits;
+        std::vector<DiagnosticEdit> schema_edits;
+        auto references = all_references(selected, true, &schema_edits, name);
+        auto edits = schema_edits;
+        for (const auto& span : references) edits.push_back({span, name});
+        std::sort(edits.begin(), edits.end(), [](const auto& a, const auto& b) {
+            return std::tie(a.span.file, a.span.offset) > std::tie(b.span.file, b.span.offset);
+        });
         std::map<std::string, std::string, std::less<>> overlays;
         for (const auto &[path, item] : session_.documents)
             if (item.open)
                 overlays[path] = item.source;
-        for (auto it = references.rbegin(); it != references.rend(); ++it) {
-            const auto at = session_.documents.find(it->file);
+        for (const auto& edit : edits) {
+            const auto at = session_.documents.find(edit.span.file);
             if (at == session_.documents.end() || at->second.library)
                 throw RequestError(-32803, "Rename would modify a library declaration");
-            if (!overlays.contains(it->file))
-                overlays[it->file] = at->second.source;
-            overlays[it->file].replace(it->offset, it->length, name);
-            edits.push_back({*it, name});
+            if (!overlays.contains(edit.span.file))
+                overlays[edit.span.file] = at->second.source;
+            overlays[edit.span.file].replace(edit.span.offset, edit.span.length, edit.replacement);
         }
         // A missed reference or capture must never produce an apparently
         // successful rename. Validate every affected input before returning.
@@ -398,8 +495,8 @@ class Server {
         DiagnosticSink warnings;
         const DiagnosticSinkScope warning_scope(warnings);
         std::set<std::string> inputs;
-        for (const auto &span : references)
-            inputs.insert(span.file);
+        for (const auto &edit : edits)
+            inputs.insert(edit.span.file);
         for (const auto &input : inputs) {
             try {
                 const auto source = moved && input == moved->first ? moved->second : input;
@@ -409,6 +506,13 @@ class Server {
             }
         }
         auto result = session_.workspace_edit(edits);
+        if (change_annotations_ && !schema_edits.empty()) {
+            result["changeAnnotations"]["neura.preserveSchema"] =
+                Json{{"label", "Preserve JSON wire name"}, {"needsConfirmation", false}};
+            for (auto& change : result["documentChanges"].items())
+                for (auto& edit : change["edits"].items())
+                    if (edit["newText"].string() != name) edit["annotationId"] = "neura.preserveSchema";
+        }
         if (moved)
             result["documentChanges"].push_back(
                 Json{{"kind", "rename"},
@@ -641,15 +745,40 @@ class Server {
                 return Json{};
             }
             std::string markdown = "```neura\n" + symbol->detail + "\n```";
+            if (session_.program) {
+                for (const auto& codec : session_.program->derived_codecs) {
+                    if (symbol->compiler_id != codec.module) continue;
+                    markdown = "```neura\n" + format_source(codec.source, codec.declaration.file) + "```";
+                    break;
+                }
+            }
+            if (symbol->declaration && symbol->declaration->record) {
+                // The members lowering generates for a record.
+                std::string parameters;
+                const auto declared = session_.documents.find(symbol->file);
+                for (const auto &member : symbol->declaration->members)
+                    if (member.kind == Declaration::Kind::Function && member.name == "init" &&
+                        declared != session_.documents.end())
+                        for (const auto &parameter : member.parameters)
+                            parameters += (parameters.empty() ? "" : ", ") + parameter.name + ": " +
+                                          declared->second.source.substr(parameter.type.span.offset,
+                                                                         parameter.type.span.length);
+                markdown.insert(markdown.size() - 3, "// generated\nexport let init = func(" + parameters +
+                                ") => set;\nexport let equals = func(other: class) -> bool;\n"
+                                "export let hash_code = func() -> uint32;\nexport let to_string = func() -> string;\n");
+            }
             if (!symbol->documentation.empty())
                 markdown += "\n\n" + symbol->documentation;
             if (symbol->declaration && !symbol->declaration->accessors.empty())
                 markdown += "\n\nAccessor-backed property. Reads and writes through external "
                             "receivers use its declared getter and setter; storage inside "
                             "the declaring class follows Neura's receiver rules.";
+            markdown += hook_summary(*symbol);
             return Json{{"contents", Json{{"kind", "markdown"}, {"value", markdown}}}};
         }
         if (method == "textDocument/definition" || method == "textDocument/declaration") {
+            if (const auto inherited = overridden_hook(*doc, offset))
+                return session_.location(*inherited);
             const auto *symbol = session_.symbol_at(*doc, offset);
             return symbol ? session_.location(symbol->selection) : Json{};
         }

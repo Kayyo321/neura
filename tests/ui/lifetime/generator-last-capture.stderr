@@ -1,0 +1,14 @@
+error[E0443]: closure captures 'x' before it is assigned
+ --> $DIR/generator-last-capture.nra:5:15
+  |
+3 |     last x: int;
+  |          - declared here without a value
+4 |     let g = iterator() -> int {
+  |             -------- the closure is created here, before 'x' is assigned
+5 |         yield x;
+  |               ^ 'x' is captured here
+  |
+  = note: a closure copies the values it captures when it is created
+  = help: assign 'x' before creating the closure
+
+For more information about this error, try `neura explain E0443`.

@@ -1,0 +1,11 @@
+error[E0491]: unreachable match arm
+ --> $DIR/any-repeated-type.nra:6:5
+  |
+5 |     int => 1,
+  |     --- this earlier arm covers every value it matches
+6 |     x: int32 => 2,
+  |     ^^^^^^^^ no value reaches this arm
+  |
+  = help: remove the arm, or move it before the arms that cover it
+
+For more information about this error, try `neura explain E0491`.

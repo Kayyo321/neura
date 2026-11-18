@@ -257,6 +257,7 @@ std::span<const GraphShape> AutoDevice::shapes() const {
 
 std::span<const GraphShape> AutoDevice::graph_shapes() const { return shapes(); }
 std::string_view AutoDevice::failure_reason() const { return failed_ ? std::string_view(reason_) : std::string_view{}; }
+bool AutoDevice::declines_every_job() const { return state_ == State::Rejected; }
 
 GraphDeviceStatistics AutoDevice::statistics() const {
     auto totals = inner_ ? inner_->statistics() : last_inner_statistics_;

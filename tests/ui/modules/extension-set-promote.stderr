@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-set-promote.nra:2:13
+  |
+2 | let.promote.extensions words = import:App.Words;
+  |             ^^^^^^^^^^ an extension set is not promoted; call its functions as members or through its alias
+
+For more information about this error, try `neura explain E0228`.

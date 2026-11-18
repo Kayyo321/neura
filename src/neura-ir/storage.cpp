@@ -317,6 +317,8 @@ private:
         case IrOp::EnumProject:
         case IrOp::Convert:
         case IrOp::ClassCast:
+        case IrOp::AnyPack:
+        case IrOp::AnyUnpack:
             if (!node.operands.empty()) out = origins(node.operands.front(), scope);
             break;
         case IrOp::Tuple:
@@ -691,7 +693,9 @@ private:
         const bool explicit_owner = explicitly_owned_closure(closure);
         if (!task && !explicit_owner && !escaping_.contains(&closure)) return;
         if (!task && !explicit_owner && !closure.operands.empty()) {
-            report(closure.text == bound_closure ? EscapeKind::BoundNeedsOwnership : EscapeKind::ClosureNeedsOwnership,
+            report(closure.text == bound_closure       ? EscapeKind::BoundNeedsOwnership
+                   : closure.text == generator_closure ? EscapeKind::GeneratorNeedsOwnership
+                                                       : EscapeKind::ClosureNeedsOwnership,
                    closure, closure, owned(closure, scope));
         }
         for (const auto& value : closure.operands) {
@@ -1128,6 +1132,7 @@ std::string_view describe_escape_kind(EscapeKind kind) {
     case EscapeKind::ArrayRetainedByCall: return "array passed to a call that may retain it";
     case EscapeKind::ClosureNeedsOwnership: return "escaping closure requires new func";
     case EscapeKind::BoundNeedsOwnership: return "escaping bound method requires new bound";
+    case EscapeKind::GeneratorNeedsOwnership: return "escaping capturing generator requires new iterator";
     }
     return "";
 }
@@ -1194,6 +1199,21 @@ void check_storage(const IrProgram& program, StorageStage stage) {
                 }
                 throw diagnostic;
             }
+        case EscapeKind::GeneratorNeedsOwnership: {
+            // docs/design/Lifetime030.md, Generators: the generator's state
+            // keeps its captures, so one that escapes owns them.
+            if (std::ranges::any_of(escapes, [&](const auto& other) {
+                return other.operation.file == escape.operation.file && other.operation.offset == escape.operation.offset &&
+                       (other.kind == EscapeKind::ArrayCapturedByClosure || other.kind == EscapeKind::ReferenceCapturedByClosure);
+            })) continue;
+            auto start = escape.operation;
+            start.length = 0;
+            auto diagnostic = with_rebuild_hint(
+                Diagnostic(escape.operation, "a generator that captures outer bindings escapes here").with_code("E0479"));
+            diagnostic.label("its state keeps the captures after the call that creates it");
+            diagnostic.suggest("construct an owned generator", start, "new ", Applicability::MachineApplicable);
+            throw diagnostic.help("write 'new iterator(...) -> T { ... }', or capture nothing");
+        }
         default: {
             auto diagnostic = with_rebuild_hint(Diagnostic(escape.operation, message).with_code("E0451"));
             if (!escape.storage.file.empty()) diagnostic.label(escape.storage, "array storage originates here");

@@ -1,0 +1,11 @@
+parsed four
+inner cleanup for four
+outer cleanup for four
+ok 8
+inner cleanup for bad
+outer cleanup for bad
+error parse error at 0: bad number
+the channel is closed next
+child received 6
+after the join
+drained 6

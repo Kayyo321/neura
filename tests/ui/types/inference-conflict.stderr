@@ -1,0 +1,10 @@
+error[E0480]: type parameter 'T' is Cat from this argument and Dog from that one
+ --> $DIR/inference-conflict.nra:6:28
+  |
+6 |     let either = same(dog, cat);
+  |                            ^^^ gives Cat
+  |                       --- gives Dog
+  |
+  = help: write the type arguments; no common type is computed
+
+For more information about this error, try `neura explain E0480`.

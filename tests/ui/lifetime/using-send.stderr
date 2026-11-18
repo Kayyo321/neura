@@ -1,0 +1,11 @@
+error[E0475]: 'log' is closed at the end of its 'using' block and cannot be sent on a channel
+  --> $DIR/using-send.nra:14:21
+   |
+13 |     using (log = new Log()) {
+   |     ----- 'log' is bound here, and closed when this block is left
+14 |         sender.send(log);
+   |                     ^^^
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

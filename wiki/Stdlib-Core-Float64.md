@@ -77,6 +77,14 @@ The following public declarations are taken from the module source; each links t
   `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the decimal exponent; correctly rounded, ties to even. Tagged `#Pure`, `#ThreadSafe`.
 - **Float64** · [`export let parse = func(text: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L194)
   The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes an infinity and too small a signed zero. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **Float64** · [`export let zero = func() -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L206)
+  The additive identity, 0.0 (Std.Core.Arithmetic.Additive). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **Float64** · [`export let add = func(left: float64, right: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L210)
+  The sum `left + right`, rounded as the type's arithmetic specifies. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **Float64** · [`export let one = func() -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L214)
+  The multiplicative identity, 1.0 (Std.Core.Arithmetic.Multiplicative). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **Float64** · [`export let multiply = func(left: float64, right: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L218)
+  The product `left * right`, rounded as the type's arithmetic specifies. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

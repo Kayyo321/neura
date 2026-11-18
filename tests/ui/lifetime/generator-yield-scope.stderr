@@ -1,0 +1,12 @@
+error[E0476]: a generator cannot suspend while a task scope is pending
+ --> $DIR/generator-yield-scope.nra:6:9
+  |
+4 |     scope {
+  |     -------... this scope would have to wait for its tasks across the 'yield'
+5 |         spawn work();
+6 |         yield 1;
+  |         ^^^^^
+  |
+  = help: end the block before the 'yield', or move the work into a function
+
+For more information about this error, try `neura explain E0476`.

@@ -1,0 +1,10 @@
+error[E0578]: conformance declared by a module
+ --> $DIR/user-module.nra:4:22
+  |
+4 | let Numbers = module implements Additive<int> (
+  |                      ^^^^^^^^^^ only a primitive's companion in the standard library declares 'implements'
+  |
+  = note: a class conforms to an interface by listing it after 'implements'; a primitive conforms only through its companion
+  = help: declare a class that implements the interface
+
+For more information about this error, try `neura explain E0578`.

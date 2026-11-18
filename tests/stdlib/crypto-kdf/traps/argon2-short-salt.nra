@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: Argon2 salt must be at least 8 bytes
+let argon2 = import:Std.Crypto.Kdf.Argon2;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = argon2.argon2id(new([1]), new([1, 2, 3]), new argon2.Argon2Params(8, 1, 1, 32));
+        return program.ExitCode.Ok;
+    };
+);

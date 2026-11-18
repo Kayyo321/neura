@@ -1,0 +1,43 @@
+// Named arguments that are accepted (docs/design/Calls030.md, edge cases
+// 1, 8, 9, 10, 12, 17, 32 and 36).
+let three = func(a: int, b: int, c: int) -> int => a + b + c;
+let pick = func(flag: bool, r: int[list]) -> int => r.length;
+let one = func(value: int) -> int => value;
+let tally = func(count: int) -> int => count;
+
+let Point = class (
+    export let x: int;
+    export let y: int;
+    export let init = func(x: int, y: int) {
+        instance.x = x;
+        instance.y = y;
+    };
+);
+
+let Point3 = class : Point (
+    export let init = func(z: int) {
+        super.init(y: z, x: 1);
+    };
+);
+
+let Label = class (
+    export let.as int = func -> int => 1;
+);
+
+let mixed = func(a: int, b: string) -> int => a
+    or func(b: string, c: bool) -> int => 0;
+
+let use = func(count: int, ok: bool, label: Label) {
+    let order = three(1, c: 3, b: 2);
+    let spaced = three(a : 1, b:2,
+        // a comment between the label and the value
+        c:
+        3);
+    let conditional = one(value: ok ? 1 : 2);
+    let stepped = pick(flag: true, r: new(0 .. 10 : 2));
+    let positional = one(ok ? count : 2);
+    let same = tally(count: count);
+    let point = new Point(y: 2, x: 1);
+    let chosen = mixed(b: "x", a: 1);
+    let cast = one(value: label);
+};

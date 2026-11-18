@@ -1,0 +1,19 @@
+// status: 136
+// stderr: arithmetic failure
+// A trap in a handler ends the run; later handlers are not called
+// (docs/design/Lifetime030.md, Events).
+let console = import:Std.Io.Console;
+let events = import:Std.Events.Event;
+let program = import:Std.Program;
+
+let HandlerTrap = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last event = new events.Event<int>();
+        let first = event.subscribe(func(value: int) { console.print_line("first " + value.to_string()); });
+        let second = event.subscribe(func(value: int) { console.print_line((10 / value).to_string()); });
+        let third = event.subscribe(func(value: int) { console.print_line("third"); });
+        event.emit(0);
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

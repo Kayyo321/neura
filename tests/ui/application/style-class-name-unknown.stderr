@@ -1,0 +1,9 @@
+error[E1012]: not a class of the CSS module
+ --> $DIR/style-class-name-unknown.nra:3:29
+  |
+3 | let name = Local.class_name("rwo");
+  |                             ^^^^^ the module declares no class 'rwo'
+  |
+  = help: did you mean 'row'?
+
+For more information about this error, try `neura explain E1012`.

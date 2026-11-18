@@ -1,8 +1,10 @@
 #include "tier1.hpp"
+#include "environment.hpp"
 
+#ifndef NEURA_WASM_RUNTIME
 #include "tier3.hpp"
-
 #include "jit/tier3_native.hpp"
+#endif
 
 #include "lift/lift.hpp"
 
@@ -11,6 +13,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 namespace neura::nvm {
 namespace {
@@ -32,8 +35,10 @@ std::string reason_class(const std::string& rejection) {
 
 } // namespace
 
+#ifndef NEURA_WASM_RUNTIME
 std::uint8_t tier_ceiling() {
     static const std::uint8_t ceiling = [] {
+        require_bound_environment("NEURA_TIER");
         const char* text = std::getenv("NEURA_TIER");
         if (text && std::strcmp(text, "0") == 0) return std::uint8_t{0};
         if (text && std::strcmp(text, "1") == 0) return std::uint8_t{1};
@@ -47,6 +52,7 @@ namespace {
 // NEURA_TIER_CHECK: 1 or 2, or 0 for any other value.
 int tier_check_mode() {
     static const int mode = [] {
+        require_bound_environment("NEURA_TIER_CHECK");
         const char* text = std::getenv("NEURA_TIER_CHECK");
         if (text && std::strcmp(text, "1") == 0) return 1;
         if (text && std::strcmp(text, "2") == 0) return 2;
@@ -63,11 +69,18 @@ bool tier_shadow_enabled() { return tier_check_mode() == 2; }
 
 bool tier_shadow_heap_always() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER_CHECK_HEAP");
         const char* text = std::getenv("NEURA_TIER_CHECK_HEAP");
         return text && std::strcmp(text, "1") == 0;
     }();
     return enabled;
 }
+#else
+std::uint8_t tier_ceiling() { return 2; }
+bool tier_check_enabled() { return false; }
+bool tier_shadow_enabled() { return false; }
+bool tier_shadow_heap_always() { return false; }
+#endif
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
@@ -220,8 +233,10 @@ std::string TierTimes::describe(Clock::time_point end) const {
            ", host " + milliseconds(of(Category::Host)) + ", other " + milliseconds(other) + "\n";
 }
 
+#ifndef NEURA_WASM_RUNTIME
 bool tier_eager() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER_EAGER");
         const char* text = std::getenv("NEURA_TIER_EAGER");
         return text && std::strcmp(text, "1") == 0;
     }();
@@ -230,6 +245,7 @@ bool tier_eager() {
 
 bool tier_programs_enabled() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER_PROGRAMS");
         const char* text = std::getenv("NEURA_TIER_PROGRAMS");
         return text && std::strcmp(text, "1") == 0;
     }();
@@ -238,6 +254,7 @@ bool tier_programs_enabled() {
 
 TierOptions::Tier3 tier3_environment() {
     static const TierOptions::Tier3 mode = [] {
+        require_bound_environment("NEURA_TIER3");
         const char* text = std::getenv("NEURA_TIER3");
         // Unset is the default, native tier 3 where native code is available
         // (tier3_environment_implicit); anything unrecognized is off.
@@ -250,12 +267,13 @@ TierOptions::Tier3 tier3_environment() {
 }
 
 bool tier3_environment_implicit() {
-    static const bool implicit = std::getenv("NEURA_TIER3") == nullptr;
+    static const bool implicit = (require_bound_environment("NEURA_TIER3"), std::getenv("NEURA_TIER3") == nullptr);
     return implicit;
 }
 
 std::uint32_t tier3_after() {
     static const std::uint32_t value = [] {
+        require_bound_environment("NEURA_TIER3_AFTER");
         const char* text = std::getenv("NEURA_TIER3_AFTER");
         if (!text || *text == '\0') return std::uint32_t{0};
         std::uint64_t number = 0;
@@ -267,9 +285,18 @@ std::uint32_t tier3_after() {
     }();
     return value;
 }
+#endif
 
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
+#ifdef NEURA_WASM_RUNTIME
+    if (options_.tier3 != TierOptions::Tier3::Environment && options_.tier3 != TierOptions::Tier3::Off) {
+        throw std::invalid_argument("the browser runtime has no tier 3");
+    }
+    options_.tier3 = TierOptions::Tier3::Off;
+    if (options_.programs == TierOptions::Programs::Environment) options_.programs = TierOptions::Programs::On;
+    programs_apart_from_tier3_ = programs();
+#else
     if (options_.tier3 == TierOptions::Tier3::Environment) {
         options_.tier3 = tier3_environment();
         tier3_implicit_ = tier3_environment_implicit();
@@ -312,6 +339,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         options_.region_after = 1;
         options_.native_after = tier3_after() != 0 ? tier3_after() : 1;
     }
+#endif
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
     for (const auto& function : image.functions) {
@@ -322,12 +350,15 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     regions_ = std::vector<RegionEntry>(total);
     programs_ = std::vector<RegionEntry>(image.functions.size());
+    settled_proofs_ = std::vector<std::uint64_t>(image.functions.size());
+#ifndef NEURA_WASM_RUNTIME
     // A function has at most five programs over its life: the first and four
     // refreshes (TierCache::program).
     native_capacity_ = 5 * image.functions.size() + 8;
     native_arrivals_ = std::make_unique<std::atomic<std::uint64_t>[]>(native_capacity_);
     native_programs_ = std::make_unique<std::atomic<const tier3::Program*>[]>(native_capacity_ * tier3::variant_count);
     dispatch_records_ = std::make_unique<std::atomic<tier3::DispatchRecord*>[]>(native_capacity_);
+#endif
     region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();
@@ -361,6 +392,46 @@ TierCache::Resolution TierCache::lookup(std::uint32_t function, std::uint32_t bl
 }
 
 TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
+    if (!options_.defer_proofs) return resolve_now(function, block, runs);
+    const std::lock_guard lock(mutex_);
+    auto& found = entry(function, block);
+    if (found.state == Entry::State::Settled) return {found.lowered.get(), true};
+    if (runs < found.next_attempt) return {nullptr, false, found.next_attempt};
+    if (!found.queued && found.state != Entry::State::Lifting) {
+        proof_queue_.push_back({function, block, runs});
+        found.queued = true;
+    }
+    // The next visit can see the result published by the idle callback.
+    return {nullptr, false, runs};
+}
+
+bool TierCache::proofs_pending() const {
+    const std::lock_guard lock(mutex_);
+    return !proof_queue_.empty();
+}
+
+std::optional<std::chrono::steady_clock::duration> TierCache::prove_one_idle() {
+    QueuedProof proof;
+    {
+        const std::lock_guard lock(mutex_);
+        if (proof_queue_.empty()) return std::nullopt;
+        proof = proof_queue_.front();
+        proof_queue_.pop_front();
+        entry(proof.function, proof.block).queued = false;
+        last_idle_proof_ = {proof.function, proof.block};
+    }
+    const auto runs = counts_[first_entry_[proof.function] + proof.block].load(std::memory_order_relaxed);
+    const auto start = std::chrono::steady_clock::now();
+    const auto settled = resolve_now(proof.function, proof.block, std::max(runs, proof.runs)).settled;
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    if (settled) {
+        const std::lock_guard lock(mutex_);
+        ++settled_proofs_[proof.function];
+    }
+    return elapsed;
+}
+
+TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
     const auto& decoded = image_.functions.at(function).blocks.at(block);
     const auto& graph = image_.graphs.at(decoded.graph);
     const auto budget = std::chrono::steady_clock::duration(options_.search_budget);
@@ -416,9 +487,13 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         // search finishes can differ between runs. That changes only which
         // blocks run lifted, never what a run does.
         const auto allowed = std::chrono::nanoseconds(runs * edges * options_.search_picoseconds / 1000);
-        deadline = std::chrono::steady_clock::now() +
-                   std::min(budget - search_spent_,
-                            std::chrono::duration_cast<std::chrono::steady_clock::duration>(allowed));
+        auto limit = std::min(budget - search_spent_,
+                              std::chrono::duration_cast<std::chrono::steady_clock::duration>(allowed));
+        if (options_.attempt_search.count() > 0) {
+            limit = std::min(limit, std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                        options_.attempt_search));
+        }
+        deadline = std::chrono::steady_clock::now() + limit;
     }
 
     // The overflow analysis may use a fixed minimum of work, and beyond it
@@ -427,8 +502,11 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
     // block has run often enough for the lifted form to repay the proof, and
     // a run that ends sooner never pays for it. The proof found does not
     // depend on the work allowed, only whether one is found.
-    const auto work = std::max<std::uint64_t>(options_.minimum_proof_work,
-                                              runs * edges / std::max<std::uint64_t>(options_.steps_per_work, 1));
+    auto work = std::max<std::uint64_t>(options_.minimum_proof_work,
+                                        runs * edges / std::max<std::uint64_t>(options_.steps_per_work, 1));
+    // An attempt bounded below its allowance cannot be given more later.
+    const bool bounded = options_.attempt_work != 0 && work >= options_.attempt_work;
+    if (bounded) work = options_.attempt_work;
 
     // Prove the hint or the retried form, or search. Both run outside the
     // lock; other threads meanwhile run the block on tier 0.
@@ -454,6 +532,20 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         return resolution;
     };
     auto& found = entry(function, block);
+    // A bounded attempt that ran out of work is resumed by the next one
+    // where it stopped (GraphProofs keeps the partial analysis), so it is
+    // tried again at the block's next visit while each attempt settles more
+    // of the graph. One that settled nothing more is final.
+    bool resume = false;
+    if (bounded && result.exhausted && result.rejection == lift::exhausted_work) {
+        if (result.progress > found.bounded_progress) {
+            found.bounded_progress = result.progress;
+            resume = true;
+        } else {
+            result.exhausted = false;
+            result.rejection = "the proof needs more work than one bounded attempt allows";
+        }
+    }
     const bool by_hint = retry ? found.from_hint : hint != nullptr;
     if (result.block) {
         found.state = Entry::State::Settled;
@@ -480,7 +572,7 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         // the proof does not pay for attempts that cannot finish.
         const auto share = std::max(result.progress, 1.0 / 256);
         const auto factor = std::clamp<std::uint64_t>(static_cast<std::uint64_t>(std::ceil(2.0 / share)), 8, 512);
-        found.next_attempt = std::max<std::uint64_t>(runs * factor, 256);
+        found.next_attempt = resume ? runs + 1 : std::max<std::uint64_t>(runs * factor, 256);
         return spent({nullptr, false, found.next_attempt});
     }
     // A failure is final for its source: a failed hint is not tried again

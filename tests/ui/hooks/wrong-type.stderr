@@ -1,0 +1,9 @@
+error[E0542]: a 'get' hook of 'Session' yields a 'Session', found 'int32'
+ --> $DIR/wrong-type.nra:3:12
+  |
+3 |     | get: 1;
+  |            ^ a hook's result is a 'Session' or nil
+  |
+  = help: return 'instance', 'value', 'nil' or another 'Session'
+
+For more information about this error, try `neura explain E0542`.

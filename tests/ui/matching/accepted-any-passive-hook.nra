@@ -1,0 +1,13 @@
+// A passive type test never reads the reference out of the snapshot.
+let count = 0;
+let Session = class (
+    | get: { count += 1; return instance; };
+);
+#Pure
+let test = func(x: any) -> bool => x is Session;
+#Pure
+let choose = func(x: any) -> bool => match.is (x) {
+    Session => true,
+    nil => false,
+    _ => false,
+};

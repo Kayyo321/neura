@@ -1,4 +1,5 @@
-// Accessors on an interface member (E0519).
+// An accessor clause on an interface method (E0518); a property requirement is
+// a binding (docs/design/Records030.md).
 let Sized = interface (
     let size = func -> int;
         | get: 0;

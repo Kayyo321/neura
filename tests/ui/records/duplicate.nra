@@ -1,0 +1,2 @@
+// Two components with one name (edge case 17).
+let P = record (x: int, x: int);

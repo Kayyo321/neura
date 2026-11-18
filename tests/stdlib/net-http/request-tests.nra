@@ -1,0 +1,192 @@
+let errors = import:Std.Core.Error;
+let http = import:Std.Net.Http;
+let json = import:Std.Encoding.Json;
+let messages = import:Std.Net.Http.Message;
+let methods = import:Std.Net.Http.Method;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Std.Net.Http requests and responses with in-memory bodies, and the message conversions.
+let RequestTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => strings.to_bytes(text);
+
+    export let test_target_parts = func {
+        last request = http.request("GET", "/parts/7?full=1&x=a+b");
+        test.assert_equal_string("GET", request.method);
+        test.assert_equal_string("/parts/7", request.path);
+        test.assert_equal_string("full=1&x=a+b", request.query);
+        test.assert_equal_string("http", request.scheme);
+        test.assert_equal_string("", request.client);
+        test.assert_equal_string("", request.request_id);
+        last absolute = http.request("GET", "http://example.com:8080/a/b?q");
+        test.assert_equal_string("/a/b", absolute.path);
+        test.assert_equal_string("q", absolute.query);
+        test.assert_equal_string("/", http.request("GET", "http://example.com").path);
+        test.assert_equal_string("", http.request("GET", "/x").query);
+    };
+
+    export let test_query_params = func {
+        last params = http.request("GET", "/s?q=caf%C3%A9+au+lait&tag=a&tag=b&empty=&flag&bad=%ZZ").query_params();
+        test.assert_equal_string("café au lait", test.assert_some<string>(params.get("q")));
+        test.assert_equal<int>(2, params.get_all("tag").length);
+        test.assert_equal_string("b", params.get_all("tag")[1]);
+        test.assert_equal_string("", test.assert_some<string>(params.get("empty")));
+        test.assert_equal_string("", test.assert_some<string>(params.get("flag")));
+        test.assert_equal_string("%ZZ", test.assert_some<string>(params.get("bad")));
+        test.assert_none<string>(params.get("missing"));
+        test.assert_err<string>(params.value("missing"));
+        test.assert_equal_string("Params{a=1}", http.parse_query("a=1").to_string());
+    };
+
+    export let test_headers_are_a_copy = func {
+        last fields = new http.Headers();
+        fields.add("Host", "Example.COM:443");
+        fields.add("Accept", "a");
+        last request = http.request_with("GET", "/", fields, new uint8[list]());
+        fields.add("X-Later", "1");
+        test.assert_none<string>(request.header("X-Later"));
+        last copy = request.headers;
+        copy.add("X-Changed", "1");
+        test.assert_none<string>(request.header("X-Changed"));
+        test.assert_equal_string("a", test.assert_some<string>(request.header("accept")));
+        test.assert_equal_string("example.com", request.host());
+    };
+
+    export let test_body_whole_and_again = func {
+        last request = http.request_with("POST", "/p", new http.Headers(), bytes_of("hello"));
+        test.assert_equal_string("hello", test.assert_ok<string>(request.body_text()));
+        test.assert_equal<int>(5, test.assert_ok<uint8[list]>(request.body()).length);
+        // After body(), open_body() reads the kept bytes.
+        last reader = test.assert_ok<http.BodyReader>(request.open_body());
+        test.assert_equal<int>(2, test.assert_ok<uint8[list]>(reader.read(2)).length);
+        test.assert_equal<int>(3, test.assert_ok<uint8[list]>(reader.read(10)).length);
+        test.assert_equal<int>(0, test.assert_ok<uint8[list]>(reader.read(10)).length);
+        test.assert_ok<unit.Unit>(reader.close());
+        test.assert_err<uint8[list]>(reader.read(1));
+        test.assert_ok<unit.Unit>(reader.close());
+    };
+
+    export let test_open_body_streams_once = func {
+        last request = http.request_with("POST", "/p", new http.Headers(), bytes_of("abcdef"));
+        last reader = test.assert_ok<http.BodyReader>(request.open_body());
+        test.assert_equal<int>(4, test.assert_ok<uint8[list]>(reader.read(4)).length);
+        test.assert_equal<int64>(4, reader.bytes_read());
+        test.assert_err<http.BodyReader>(request.open_body());
+        test.assert_err<uint8[list]>(request.body());
+        test.assert_ok<unit.Unit>(reader.close());
+    };
+
+    export let test_body_limit = func {
+        last fields = new http.Headers();
+        last at_limit = new http.Request("POST", "/p", fields, new http.MemoryBody(bytes_of("12345")), 5, "", "http", "r1");
+        test.assert_equal<int>(5, test.assert_ok<uint8[list]>(at_limit.body()).length);
+        last over = new http.Request("POST", "/p", fields, new http.MemoryBody(bytes_of("123456")), 5, "", "http", "r2");
+        last problem = test.assert_err<uint8[list]>(over.body());
+        test.assert(strings.contains(errors.message(problem), "exceeds 5 bytes"));
+        last streamed = new http.Request("POST", "/p", fields, new http.MemoryBody(bytes_of("123456")), 5, "", "http", "r3");
+        last reader = test.assert_ok<http.BodyReader>(streamed.open_body());
+        test.assert_ok<uint8[list]>(reader.read(5));
+        test.assert_err<uint8[list]>(reader.read(5));
+    };
+
+    export let test_with_principal_shares_body = func {
+        last request = http.request_with("POST", "/p", new http.Headers(), bytes_of("data"));
+        test.assert_none<http.Principal>(request.principal());
+        test.assert_ok<uint8[list]>(request.body());
+        last who = new http.Principal("u1", "bearer", new(["read"]));
+        last signed = request.with_principal(who);
+        test.assert_equal_string("data", test.assert_ok<string>(signed.body_text()));
+        test.assert(test.assert_some<http.Principal>(signed.principal()).equals(who));
+        test.assert(who.has_scope("read"));
+        test.assert(!who.has_scope("write"));
+        test.assert_none<http.Principal>(request.principal());
+        test.assert_equal_string("Principal(bearer:u1)", who.to_string());
+        test.assert(who.hash_code() == new http.Principal("u1", "bearer", new(["read"])).hash_code());
+        test.assert(!who.equals(new http.Principal("u1", "bearer")));
+        // The copy shares the body state both ways.
+        last fresh = http.request_with("POST", "/p", new http.Headers(), bytes_of("late"));
+        last copy = fresh.with_principal(who);
+        test.assert_equal_string("late", test.assert_ok<string>(copy.body_text()));
+        test.assert_equal_string("late", test.assert_ok<string>(fresh.body_text()));
+    };
+
+    // A codec-shaped encode function: Std.Encoding.Json.Codec<T>.encode for a two-field part.
+    let Part = class (
+        export last id: int;
+        export last name: string;
+        export let init = func(number: int, label: string) {
+            id = number;
+            name = label;
+        };
+        export let.override to_string = func -> string => "Part";
+    );
+
+    let encode_part = func(part: Part) -> result.Result<string> {
+        last members: [string, json.JsonValue][list] = new;
+        members.append(["id", json.number_of_int64(part.id as int64)]);
+        members.append(["name", json.JsonValue.Text(part.name)]);
+        return result.Result<string>.Ok(json.write(json.JsonValue.Object(members)));
+    };
+
+    let refuse = func(part: Part) -> result.Result<string> => result.Result<string>.Err(errors.custom("codec", "no"));
+
+    export let test_response_constructors = func {
+        last answer = test.assert_ok<http.Response>(http.json<Part>(200, new Part(7, "bolt"), encode_part));
+        test.assert_equal<int>(200, answer.status);
+        test.assert_equal_string("application/json", test.assert_some<string>(answer.headers.get("content-type")));
+        test.assert_equal_string("{\"id\":7,\"name\":\"bolt\"}", answer.body_text());
+        test.assert_err<http.Response>(http.json<Part>(200, new Part(1, "x"), refuse));
+        last envelope = http.envelope(404, "not_found", "quote \" here", "r-1");
+        test.assert_equal_string("{\"error\":{\"code\":\"not_found\",\"message\":\"quote \\\" here\",\"request_id\":\"r-1\"}}",
+            envelope.body_text());
+        test.assert_equal_string("Response(204, 0 bytes)", http.empty(204).to_string());
+        last raw = http.binary(200, "application/octet-stream", new([1, 2, 3]));
+        test.assert_equal<int>(3, raw.body().length);
+    };
+
+    export let test_streamed_response = func {
+        last answer = http.stream(200, new http.Headers(), new func(sink: http.BodySink) -> result.Result<unit.Unit> {
+            sink.write(strings.to_bytes("ab"))?;
+            sink.write(strings.to_bytes("cd"))?;
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        });
+        test.assert(answer.is_streamed());
+        last sink = new http.MemorySink();
+        test.assert_ok<unit.Unit>(answer.write_to(sink));
+        test.assert(sink.is_closed());
+        test.assert_equal_string("abcd", strings.from_bytes_lossy(sink.bytes()));
+        test.assert_err<unit.Unit>(sink.write(new([1])));
+        // A HEAD answer does not run the stream and sets no length.
+        last head = answer.without_body();
+        test.assert(!head.is_streamed());
+        test.assert_none<string>(head.headers.get("Content-Length"));
+        last message = test.assert_ok<messages.HttpResponse<uint8[list]>>(http.response_to_message(answer));
+        test.assert_equal<int>(4, message.body.length);
+    };
+
+    export let test_message_conversions = func {
+        last fields = new http.Headers();
+        fields.add("X-A", "1");
+        last request = http.request_with("PATCH", "/p?q=1", fields, bytes_of("xy"));
+        last message = test.assert_ok<messages.HttpRequest<uint8[list]>>(http.to_message(request));
+        test.assert_equal_string("PATCH", methods.name(message.method));
+        test.assert_equal_string("/p?q=1", message.target);
+        test.assert_equal_string("HTTP/1.1", messages.version_text(message.version));
+        test.assert_equal<int>(2, message.body.length);
+        last back = http.from_message(message);
+        test.assert_equal_string("/p", back.path);
+        test.assert_equal_string("1", test.assert_some<string>(back.header("x-a")));
+        test.assert_equal_string("xy", test.assert_ok<string>(back.body_text()));
+        last custom = http.to_message(http.request("PURGE", "/c"));
+        test.assert_equal_string("PURGE", methods.name(test.assert_ok<messages.HttpRequest<uint8[list]>>(custom).method));
+        last reply = new messages.HttpResponse<uint8[list]>(201, new http.Headers(), bytes_of("ok"), messages.Version.Http2);
+        test.assert_equal_string("Created", reply.reason());
+        test.assert_equal<int>(201, http.response_from_message(reply).status);
+        test.assert_equal_string("HttpResponse(201 HTTP/2)", reply.to_string());
+        test.assert_equal_string("h2", test.assert_some<messages.Version>(messages.of_alpn("h2")) == messages.Version.Http2 ? "h2" : "?");
+        test.assert_none<messages.Version>(messages.of_alpn("spdy/3"));
+    };
+);

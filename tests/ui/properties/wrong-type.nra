@@ -1,0 +1,8 @@
+// A property is satisfied by exactly its type (edge case 68).
+let Sized = interface (
+    let size: int64;
+        | get;
+);
+let Small = class implements Sized (
+    export let size: int = 0;
+);

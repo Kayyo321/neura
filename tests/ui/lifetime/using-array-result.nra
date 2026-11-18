@@ -1,0 +1,48 @@
+// A `using` in a function whose `Result` carries an array: a return passes
+// its value to the close, which may replace it, and an array cannot be
+// returned from the call that combines them (docs/design/Lifetime030.md,
+// Exit order). E0473.
+let console = import:Std.Io.Console;
+let closeable = import:Std.Io.Closeable;
+let program = import:Std.Program;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Resource = class implements closeable.Closeable (
+    export let fails: bool = false;
+    export let init = func(failing: bool) {
+        fails = failing;
+    };
+
+    export let close = func -> Result<Unit> {
+        console.print_line("close");
+        if (fails) {
+            return Result<Unit>.Err(error.custom("close", "close failed"));
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let numbers = func(failing: bool) -> Result<int[]> {
+    using (resource = new Resource(failing)) {
+        let values = [4, 7, 11];
+        return Result<int[]>.Ok(values);
+    }
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let failing in [false, true]) {
+            match (numbers(failing)) {
+                Result.Ok(values) => {
+                    console.print_line("ok " + values[0].to_string() + " " + values[2].to_string());
+                },
+                Result.Err(failure) => {
+                    console.print_line("err " + error.message(failure));
+                },
+            }
+        }
+        return program.ExitCode.Ok;
+    };
+);

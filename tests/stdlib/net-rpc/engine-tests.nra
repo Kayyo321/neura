@@ -1,0 +1,391 @@
+let calls = import:Std.Net.Rpc.Call;
+let codecs = import:Std.Net.Rpc.Codec;
+let deadlines = import:Std.Net.Rpc.Deadline;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let fixed_clock = import:Std.Time.FixedClock;
+let framing = import:Std.Net.Rpc.Framing;
+let grpc = import:Std.Net.Rpc.Grpc;
+let health = import:Std.Net.Rpc.Health;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let json = import:Std.Encoding.Json;
+let meta = import:Std.Net.Rpc.Metadata;
+let optional = import:Std.Core.Optional;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let reflection = import:Std.Net.Rpc.Reflection;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let statuses = import:Std.Net.Rpc.Status;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let web = import:Std.Net.Rpc.GrpcWeb;
+
+// Codecs, the in-memory gRPC engine (server + channel), deadline propagation, health and reflection.
+let EngineTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let code_of = func(e: errors.Error) -> int => statuses.number(statuses.of_error(e).code);
+
+    let no_timeout = func -> optional.Optional<duration.Duration> => optional.Optional<duration.Duration>.None;
+
+    let echo_path = func -> calls.MethodPath => new calls.MethodPath("test.v1.Echo", "Say");
+
+    // Upper-cases ASCII text; fails with INVALID_ARGUMENT on empty input.
+    let shout = func(message: uint8[list]) -> result.Result<uint8[list]> {
+        if (message.length == 0) {
+            return result.Result<uint8[list]>.Err(statuses.error(statuses.Code.InvalidArgument, "empty"));
+        }
+        last text = test.assert_ok<string>(strings.from_bytes(message));
+        return result.Result<uint8[list]>.Ok(strings.to_bytes(strings.to_ascii_upper(text)));
+    };
+
+    // Sends each request twice and adds a trailer.
+    let twice = func(stream: grpc.ServerStream) -> result.Result<unit.Unit> {
+        let more = true;
+        while (more) {
+            match (stream.receive()) {
+                optional.Optional.Some(message) => {
+                    stream.send(message);
+                    stream.send(message);
+                },
+                optional.Optional.None => {
+                    more = false;
+                },
+            }
+        }
+        stream.trailers.add_raw("x-count", stream.sent.length.to_string());
+        return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+    };
+
+    let make_server = func -> grpc.GrpcServer {
+        last server = new grpc.GrpcServer(1000);
+        server.add_unary(echo_path(), grpc.unary_handler(shout));
+        server.add_streaming(new calls.MethodPath("test.v1.Echo", "Twice"), new grpc.FunctionStreamHandler(twice));
+        return server;
+    };
+
+    let channel_to = func(server: grpc.GrpcServer) -> grpc.GrpcChannel =>
+        new grpc.GrpcChannel("example.test", "http", "proto", server.as_transport(), 1000);
+
+    export let test_method_path = func {
+        last p = test.assert_ok<calls.MethodPath>(calls.parse_path("/grpc.health.v1.Health/Check"));
+        test.assert_equal_string("grpc.health.v1.Health", p.service);
+        test.assert_equal_string("Check", p.method);
+        test.assert_equal_string("/grpc.health.v1.Health/Check", p.to_string());
+        for (let bad in ["", "/", "//", "/a/", "a/b", "/a", "/a/b/c", "//b"]) {
+            test.assert_err<calls.MethodPath>(calls.parse_path(bad));
+        }
+    };
+
+    export let test_codecs = func {
+        last raw = new codecs.RawCodec("proto");
+        test.assert_equal_string("application/grpc+proto", codecs.content_type<uint8[list]>(raw));
+        test.assert_equal_string("0102", hex.encode(test.assert_ok<uint8[list]>(raw.decode(raw.encode(bytes_of("0102"))))));
+        last js = new codecs.JsonCodec();
+        last value = test.assert_ok<json.JsonValue>(json.parse("{\"a\":[1,true,null]}"));
+        test.assert_equal_string("{\"a\":[1,true,null]}", test.assert_ok<string>(strings.from_bytes(js.encode(value))));
+        test.assert(json.equals(value, test.assert_ok<json.JsonValue>(js.decode(js.encode(value)))));
+        test.assert_err<json.JsonValue>(js.decode(bytes_of("ff")));
+        test.assert_err<json.JsonValue>(js.decode(strings.to_bytes("{")));
+        // A mapped codec of int64 through a JSON number.
+        last ints = new codecs.MappedJsonCodec<int64>(json.number_of_int64, new func(v: json.JsonValue) -> result.Result<int64> {
+            return match (v) {
+                json.JsonValue.Number(text) => result.Result<int64>.Ok(optional.expect<int64>(json.number_to_int64(text), "int")),
+                _ => result.Result<int64>.Err(errors.custom("test.type", "not a number")),
+            };
+        });
+        test.assert_equal_string("json", ints.subtype());
+        test.assert_equal_int64(-42, test.assert_ok<int64>(ints.decode(ints.encode(-42))));
+        test.assert_err<int64>(ints.decode(strings.to_bytes("\"x\"")));
+        // A protobuf codec of a string in field 1.
+        last names = new codecs.ProtoCodec<string>(new func(v: string, w: proto.ProtoWriter) {
+            w.write_string(1, v);
+        }, new func(r: proto.ProtoReader) -> result.Result<string> {
+            last key = r.read_key()?;
+            return r.read_string();
+        });
+        test.assert_equal_string("0a03737663", hex.encode(names.encode("svc")));
+        test.assert_equal_string("svc", test.assert_ok<string>(names.decode(names.encode("svc"))));
+        test.assert_equal_string("flatbuffers", new codecs.FlatBuffersCodec<string>("t.T").subtype());
+        test.assert_equal_string("capnp", new codecs.CapnProtoCodec<string>("t.T").subtype());
+    };
+
+    export let test_request_wire_form = func {
+        last md = meta.empty();
+        test.assert_ok<unit.Unit>(md.add("authorization", "Bearer x"));
+        last request = calls.unary_request(echo_path(), bytes_of("0102"), md,
+            optional.Optional<duration.Duration>.Some(duration.of_seconds(1)));
+        last wire = calls.encode_request(request, "example.test", "https", "proto");
+        // PROTOCOL-HTTP2.md: pseudo-headers first, then grpc-timeout, content-type, te, custom metadata.
+        last expected = [":method", ":scheme", ":path", ":authority", "grpc-timeout", "content-type", "te",
+            "authorization"];
+        test.assert_equal<int>(8, wire.headers.length);
+        for (let i = 0; i < 8; i++) {
+            test.assert_equal_string(expected[i], wire.headers[i][0]);
+        }
+        test.assert_equal_string("/test.v1.Echo/Say", wire.headers[2][1]);
+        test.assert_equal_string("1000000u", wire.headers[4][1]);
+        test.assert_equal_string("application/grpc+proto", wire.headers[5][1]);
+        test.assert_equal_string("trailers", wire.headers[6][1]);
+        test.assert_equal_string("00000000020102", hex.encode(wire.body));
+        last decoded = test.assert_ok<calls.RpcRequest>(calls.decode_request(wire, 100));
+        test.assert(decoded.path.equals(echo_path()));
+        test.assert_equal_int64(1000000000, optional.expect<duration.Duration>(decoded.timeout, "timeout").to_nanos());
+        test.assert_equal_string("Bearer x", test.assert_some<string>(decoded.metadata.get("authorization")));
+        test.assert_equal<int>(1, decoded.metadata.size());
+    };
+
+    export let test_unary_call_in_memory = func {
+        last channel = channel_to(make_server());
+        last reply = test.assert_ok<uint8[list]>(channel.unary(echo_path(), strings.to_bytes("hi"), meta.empty(),
+            no_timeout()));
+        test.assert_equal_string("HI", test.assert_ok<string>(strings.from_bytes(reply)));
+        // Handler error: INVALID_ARGUMENT travels Trailers-Only and comes back as the same status.
+        last failure = test.assert_err<uint8[list]>(channel.unary(echo_path(), new, meta.empty(), no_timeout()));
+        test.assert_equal<int>(3, code_of(failure));
+        test.assert_equal_string("empty", statuses.of_error(failure).message);
+        // Unknown method: UNIMPLEMENTED.
+        test.assert_equal<int>(12, code_of(test.assert_err<uint8[list]>(channel.unary(
+            new calls.MethodPath("test.v1.Echo", "Nope"), new, meta.empty(), no_timeout()))));
+        // Typed call through codecs.
+        last raw = new codecs.RawCodec("proto");
+        last typed = test.assert_ok<uint8[list]>(grpc.call_unary<uint8[list], uint8[list]>(channel, echo_path(),
+            strings.to_bytes("ok"), raw, raw, meta.empty(), no_timeout()));
+        test.assert_equal_string("OK", test.assert_ok<string>(strings.from_bytes(typed)));
+    };
+
+    export let test_server_wire_rules = func {
+        last server = make_server();
+        last plain: [string, string][list] = new;
+        plain.append([":path", "/test.v1.Echo/Say"]);
+        plain.append(["content-type", "text/plain"]);
+        test.assert_equal<int>(415, server.handle(new calls.WireRequest(plain, new)).http_status);
+        // Two messages to a unary method: UNIMPLEMENTED, Trailers-Only.
+        last request = new calls.RpcRequest(echo_path(), meta.empty(), new, no_timeout());
+        request.messages.append(strings.to_bytes("a"));
+        request.messages.append(strings.to_bytes("b"));
+        last answer = server.handle(calls.encode_request(request, "h", "http", "proto"));
+        test.assert_equal<int>(200, answer.http_status);
+        test.assert_equal<int>(0, answer.trailers.length);
+        test.assert_equal_string("12", test.assert_some<string>(answer.header("grpc-status")));
+        // An unsupported grpc-encoding: UNIMPLEMENTED.
+        last wire = calls.encode_request(calls.unary_request(echo_path(), strings.to_bytes("a"), meta.empty(),
+            no_timeout()), "h", "http", "proto");
+        wire.headers.append(["grpc-encoding", "gzip"]);
+        test.assert_equal_string("12", test.assert_some<string>(server.handle(wire).header("grpc-status")));
+        // A client reading a non-gRPC 503 synthesizes UNAVAILABLE.
+        last proxy_error = test.assert_ok<calls.RpcResponse>(calls.decode_response(
+            new calls.WireResponse(503, new, new, new), 100));
+        test.assert_equal<int>(14, statuses.number(proxy_error.status.code));
+        // A grpc-message with a raw non-ASCII byte is kept, not dropped.
+        last raw_trailers: [string, string][list] = new;
+        raw_trailers.append(["grpc-status", "13"]);
+        raw_trailers.append(["grpc-message", "café"]);
+        last grpc_headers: [string, string][list] = new;
+        grpc_headers.append(["content-type", "application/grpc"]);
+        last kept = test.assert_ok<calls.RpcResponse>(calls.decode_response(new calls.WireResponse(200,
+            grpc_headers, new, raw_trailers), 100));
+        test.assert_equal<int>(13, statuses.number(kept.status.code));
+        test.assert_equal_string("café", kept.status.message);
+        // A transport failure that is not a status becomes UNAVAILABLE.
+        last broken = new grpc.GrpcChannel("h", "http", "proto", services.of<calls.WireRequest, calls.WireResponse>(
+            new func(w: calls.WireRequest) -> result.Result<calls.WireResponse> {
+            return result.Result<calls.WireResponse>.Err(errors.custom("test.io", "connection reset"));
+        }), 100);
+        test.assert_equal<int>(14, code_of(test.assert_err<uint8[list]>(broken.unary(echo_path(), new, meta.empty(),
+            no_timeout()))));
+        // OK response: status in trailers, message in body.
+        last ok_answer = server.handle(calls.encode_request(calls.unary_request(echo_path(), strings.to_bytes("a"),
+            meta.empty(), no_timeout()), "h", "http", "proto"));
+        test.assert_equal_string("0000000001" + "41", hex.encode(ok_answer.body));
+        test.assert_equal_string("grpc-status", ok_answer.trailers[0][0]);
+        test.assert_equal_string("0", ok_answer.trailers[0][1]);
+    };
+
+    export let test_streaming_in_memory = func {
+        last channel = channel_to(make_server());
+        last path = new calls.MethodPath("test.v1.Echo", "Twice");
+        last stream = channel.open(path, meta.empty());
+        stream.send(strings.to_bytes("a"));
+        stream.send(strings.to_bytes("b"));
+        test.assert_none<uint8[list]>(stream.receive());
+        test.assert_ok<unit.Unit>(stream.close_send());
+        let order = "";
+        let more = true;
+        while (more) {
+            match (stream.receive()) {
+                optional.Optional.Some(m) => {
+                    order += test.assert_ok<string>(strings.from_bytes(m));
+                },
+                optional.Optional.None => {
+                    more = false;
+                },
+            }
+        }
+        test.assert_equal_string("aabb", order);
+        test.assert(test.assert_some<statuses.RpcStatus>(stream.status()).is_ok());
+        // The streaming helper and the trailer metadata.
+        last messages: uint8[list][list] = new;
+        messages.append(strings.to_bytes("z"));
+        last response = test.assert_ok<calls.RpcResponse>(channel.call(new calls.RpcRequest(path, meta.empty(),
+            messages, no_timeout())));
+        test.assert_equal<int>(2, response.messages.length);
+        test.assert_equal_string("2", test.assert_some<string>(response.trailers.get("x-count")));
+        test.assert_equal<int>(2, test.assert_ok<uint8[list][list]>(channel.stream(path, messages, meta.empty(),
+            no_timeout())).length);
+    };
+
+    export let test_grpc_web = func {
+        last server = make_server();
+        last request = calls.encode_request(calls.unary_request(echo_path(), strings.to_bytes("hi"), meta.empty(),
+            no_timeout()), "h", "http", "proto");
+        last headers: [string, string][list] = new;
+        headers.append([":path", "/test.v1.Echo/Say"]);
+        headers.append(["content-type", "application/grpc-web+proto"]);
+        last answer = server.handle_web(new calls.WireRequest(headers, request.body));
+        test.assert_equal_string("application/grpc-web+proto", test.assert_some<string>(answer.header("content-type")));
+        last body = test.assert_ok<web.WebBody>(web.decode_body(answer.body, 100));
+        test.assert_equal_string("4849", hex.encode(body.messages[0].payload));
+        test.assert_equal_string("0", test.assert_some<string>(body.trailers.get("grpc-status")));
+        // Text variant: base64 in, base64 out.
+        last text_headers: [string, string][list] = new;
+        text_headers.append([":path", "/test.v1.Echo/Say"]);
+        text_headers.append(["content-type", "application/grpc-web-text"]);
+        last text_answer = server.handle_web(new calls.WireRequest(text_headers,
+            strings.to_bytes(web.encode_text(request.body))));
+        last decoded = test.assert_ok<uint8[list]>(web.decode_text(test.assert_ok<string>(
+            strings.from_bytes(text_answer.body))));
+        test.assert_equal<int>(1, test.assert_ok<web.WebBody>(web.decode_body(decoded, 100)).messages.length);
+    };
+
+    export let test_deadline_filter = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        last deadline = test.assert_ok<deadlines.Deadline>(deadlines.after(clock, duration.of_millis(500)));
+        // A downstream service that records the timeout it was given and takes 100 ms.
+        last seen: string[list] = new;
+        last downstream = services.of<calls.RpcRequest, calls.RpcResponse>(new func(r: calls.RpcRequest)
+            -> result.Result<calls.RpcResponse> {
+            seen.append(match (r.timeout) {
+                optional.Optional.Some(t) => t.to_millis().to_string(),
+                optional.Optional.None => "none",
+            });
+            clock.advance(duration.of_millis(100));
+            return result.Result<calls.RpcResponse>.Ok(calls.unary_response(new));
+        });
+        last guarded = filters.bind<calls.RpcRequest, calls.RpcResponse, calls.RpcRequest, calls.RpcResponse>(
+            new deadlines.DeadlineFilter(clock, deadline), downstream);
+        last request = calls.unary_request(echo_path(), new, meta.empty(), no_timeout());
+        test.assert_ok<calls.RpcResponse>(guarded.call(request));
+        clock.advance(duration.of_millis(100));
+        // A shorter own timeout wins.
+        test.assert_ok<calls.RpcResponse>(guarded.call(request.with_timeout(
+            optional.Optional<duration.Duration>.Some(duration.of_millis(50)))));
+        test.assert_equal<int>(2, seen.length);
+        test.assert_equal_string("500", seen[0]);
+        test.assert_equal_string("50", seen[1]);
+        // 300 ms used; 200 ms left; a call that runs 100 ms more still fits, then the budget is gone.
+        test.assert_ok<calls.RpcResponse>(guarded.call(request));
+        clock.advance(duration.of_millis(100));
+        last expired = test.assert_err<calls.RpcResponse>(guarded.call(request));
+        test.assert_equal<int>(4, code_of(expired));
+        test.assert_equal<int>(3, seen.length);
+        // A call that overruns the deadline: DEADLINE_EXCEEDED after it returns.
+        last late = test.assert_ok<deadlines.Deadline>(deadlines.after(clock, duration.of_millis(50)));
+        last overrun = filters.bind<calls.RpcRequest, calls.RpcResponse, calls.RpcRequest, calls.RpcResponse>(
+            new deadlines.DeadlineFilter(clock, late), downstream);
+        test.assert_equal<int>(4, code_of(test.assert_err<calls.RpcResponse>(overrun.call(request))));
+        // A server reads the deadline of an incoming request.
+        last incoming = request.with_timeout(optional.Optional<duration.Duration>.Some(duration.of_seconds(2)));
+        last server_deadline = test.assert_some<deadlines.Deadline>(test.assert_ok<optional.Optional<deadlines.Deadline>>(
+            deadlines.of_request(clock, incoming)));
+        test.assert_equal_int64(2000, test.assert_ok<duration.Duration>(server_deadline.remaining(clock)).to_millis());
+    };
+
+    export let test_deadline_over_channel = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(0, 0));
+        last channel = channel_to(make_server());
+        last deadline = test.assert_ok<deadlines.Deadline>(deadlines.after(clock, duration.of_seconds(1)));
+        last guarded = filters.bind<calls.RpcRequest, calls.RpcResponse, calls.RpcRequest, calls.RpcResponse>(
+            new deadlines.DeadlineFilter(clock, deadline), channel);
+        last request = calls.unary_request(echo_path(), strings.to_bytes("x"), meta.empty(), no_timeout());
+        test.assert_equal<int>(1, test.assert_ok<calls.RpcResponse>(guarded.call(request)).messages.length);
+        clock.advance(duration.of_seconds(1));
+        test.assert_equal<int>(4, code_of(test.assert_err<calls.RpcResponse>(guarded.call(request))));
+    };
+
+    // grpc/grpc doc/health-checking.md; vectors: python3 v(1<<3|2)+v(3)+b'svc' 0a03737663, v(1<<3|0)+v(1) 0801
+    export let test_health_messages = func {
+        test.assert_equal_string("0a03737663", hex.encode(health.encode_request("svc")));
+        test.assert_equal_string("", hex.encode(health.encode_request("")));
+        test.assert_equal_string("0801", hex.encode(health.encode_response(health.ServingStatus.Serving)));
+        test.assert_equal_string("svc", test.assert_ok<string>(health.decode_request(bytes_of("0a03737663"))));
+        test.assert_equal<int>(2, health.number(test.assert_ok<health.ServingStatus>(health.decode_response(
+            bytes_of("0802")))));
+        test.assert_equal<int>(0, health.number(test.assert_ok<health.ServingStatus>(health.decode_response(new))));
+        test.assert_err<string>(health.decode_request(bytes_of("0a05")));
+    };
+
+    export let test_health_service = func {
+        last hs = new health.HealthService();
+        last log: string[list] = new;
+        last id = hs.watch("db", new func(s: health.ServingStatus) {
+            log.append(s.to_string());
+        });
+        hs.set_status("db", health.ServingStatus.Serving);
+        hs.set_status("db", health.ServingStatus.Serving);
+        hs.set_status("db", health.ServingStatus.NotServing);
+        test.assert_equal<int>(2, health.number(test.assert_ok<health.ServingStatus>(hs.check("db"))));
+        hs.clear_status("db");
+        test.assert_equal<int>(5, code_of(test.assert_err<health.ServingStatus>(hs.check("db"))));
+        test.assert(hs.cancel_watch(id));
+        hs.set_status("db", health.ServingStatus.Serving);
+        test.assert_equal<int>(4, log.length);
+        test.assert_equal_string("ServiceUnknown", log[0]);
+        test.assert_equal_string("Serving", log[1]);
+        test.assert_equal_string("NotServing", log[2]);
+        test.assert_equal_string("ServiceUnknown", log[3]);
+        hs.shutdown();
+        test.assert_equal<int>(2, health.number(test.assert_ok<health.ServingStatus>(hs.check(""))));
+    };
+
+    export let test_health_check_end_to_end = func {
+        last hs = new health.HealthService();
+        hs.set_status("test.v1.Echo", health.ServingStatus.Serving);
+        last server = make_server();
+        health.register(hs, server);
+        last channel = channel_to(server);
+        test.assert_equal<int>(1, health.number(test.assert_ok<health.ServingStatus>(
+            health.check_remote(channel, "test.v1.Echo", no_timeout()))));
+        test.assert_equal<int>(1, health.number(test.assert_ok<health.ServingStatus>(
+            health.check_remote(channel, "", no_timeout()))));
+        test.assert_equal<int>(5, code_of(test.assert_err<health.ServingStatus>(
+            health.check_remote(channel, "other", no_timeout()))));
+    };
+
+    export let test_reflection = func {
+        last registry = new reflection.ReflectionRegistry();
+        last methods: reflection.MethodDescriptor[list] = new;
+        methods.append(new reflection.MethodDescriptor("Check", "grpc.health.v1.HealthCheckRequest",
+            "grpc.health.v1.HealthCheckResponse", false, false));
+        methods.append(new reflection.MethodDescriptor("Watch", "grpc.health.v1.HealthCheckRequest",
+            "grpc.health.v1.HealthCheckResponse", false, true));
+        registry.add_service("grpc.health.v1.Health", methods);
+        registry.add_service("test.v1.Echo", new);
+        last names = registry.list_services();
+        test.assert_equal<int>(2, names.length);
+        test.assert_equal_string("grpc.health.v1.Health", names[0]);
+        test.assert_equal_string("Watch(grpc.health.v1.HealthCheckRequest) returns (stream grpc.health.v1.HealthCheckResponse)",
+            registry.methods_of("grpc.health.v1.Health")[1].to_string());
+        test.assert_equal<int>(2, registry.method_paths().length);
+        // python3 -I -c: ld(f,b) = bytes([f<<3|2,len(b)])+b; ld(6, b"".join(ld(1, ld(1, n)) for n in names))
+        last encoded = reflection.encode_list_services_response(names);
+        test.assert_equal_string("3229" + "0a17" + "0a15" + hex.encode(strings.to_bytes("grpc.health.v1.Health"))
+            + "0a0e" + "0a0c" + hex.encode(strings.to_bytes("test.v1.Echo")), hex.encode(encoded));
+        last decoded = test.assert_ok<string[list]>(reflection.decode_list_services_response(encoded));
+        test.assert_equal<int>(2, decoded.length);
+        test.assert_equal_string("test.v1.Echo", decoded[1]);
+    };
+);

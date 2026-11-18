@@ -1,0 +1,9 @@
+// `using` at file level has no block of a function to leave.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+using (source = new Resource()) {
+}

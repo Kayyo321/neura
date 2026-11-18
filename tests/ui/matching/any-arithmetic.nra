@@ -1,0 +1,4 @@
+// Edge case 51: arithmetic on any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let add = func(v: any) => v + 1;

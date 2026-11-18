@@ -35,18 +35,18 @@ let make_stock = func(name: string) -> ui.Component {
 
 | Rule | Status |
 | --- | --- |
-| `ui.State<T>` holds one value of a deeply immutable `T`: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class (a record of immutable fields is one), or a `FrozenList` of them. Any other `T` is `E0580` at the type argument. | proposed |
-| `get()` returns the current value. `set(value)` and `update(change: func(T) -> T)` replace it; `update` calls `change` once, synchronously, and does not retain it. | proposed |
-| Each accepted `set` or `update` notifies every subscriber once, in subscription order, with the new value, even when the new value is the old one. A state built with `equal: func(T, T) -> bool` skips the notification when `equal(old, new)` is true; there is no default equality. | proposed |
-| An update made by a subscriber during a notification is queued and applied when the round ends. More than 100 rounds in one turn is the trap `state update loop`. | proposed |
-| `subscribe(new func(T))` returns a `ui.Subscription` whose `close()` is idempotent. A class's `get` and `set` clauses and hooks are never observed: only `ui.State` is. | proposed |
-| A state, a subscription, a component, a root and a view belong to one task (`E0602` when given to another). | proposed |
-| `ui.component(state:, styles:, render:)` returns a `ui.Component`. `render` is retained and render-compatible (`E1010`): it receives a snapshot and returns a view. `styles` keeps the stylesheet reachable; it registers nothing at run time. | proposed |
-| A component is embedded in another's view with `{ ui.slot(child) }`. The child renders by itself when its state changes; the parent's render is not run again for it. Children and named slots are ordinary `ui.View` parameters of a factory. | proposed |
-| `web.mount(selector, component, tasks)` and `desktop.mount(window, component, tasks)` return `Result<ui.Root>`. `tasks` is the handle of the enclosing `scope`, so every task the root starts is lexically inside it. A second root on one element, or more than `U-9` roots, is `Err`. | proposed |
-| `root.run()` is the event loop. One *turn* is: take the next event; call its handler; apply queued updates and notify; render each component whose state changed, once, parents before children; commit. It returns when the root is closed or its scope is cancelled. | proposed |
-| An `Invalid` or `Err` commit is delivered to the root's `on_render_failure` callback (default: log it and keep the previous view) and the loop continues, except that a faulted root stops taking events until `reset`. | proposed |
-| Unmounting a component removes its listeners, closes its subscriptions, cancels its commands and raises its generation. | proposed |
+| `ui.State<T>` holds one value of a deeply immutable `T`: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class (a record of immutable fields is one), or a `FrozenList` of them. Any other `T` is `E0580` at the type argument. | implemented (docs/apps/Components.md); a record is not, records are not on this branch |
+| `get()` returns the current value. `set(value)` and `update(change: func(T) -> T)` replace it; `update` calls `change` once, synchronously, and does not retain it. | implemented |
+| Each accepted `set` or `update` notifies every subscriber once, in subscription order, with the new value, even when the new value is the old one. A state built with `equal: func(T, T) -> bool` skips the notification when `equal(old, new)` is true; there is no default equality. | implemented; the `equal:` form is `ui.with_equality<T>(initial, same)`, since named arguments are not on this branch |
+| An update made by a subscriber during a notification is queued and applied when the round ends. More than 100 rounds in one turn is the trap `state update loop`. | implemented: the value changes at once and the notification is queued; rounds are counted per outermost notification |
+| `subscribe(new func(T))` returns a `ui.Subscription` whose `close()` is idempotent. A class's `get` and `set` clauses and hooks are never observed: only `ui.State` is. | implemented |
+| A state, a subscription, a component, a root and a view belong to one task (`E0602` when given to another). | implemented through `#NotThreadSafe` |
+| `ui.component(state:, styles:, render:)` returns a `ui.Component`. `render` is retained and render-compatible (`E1010`): it receives a snapshot and returns a view. `styles` keeps the stylesheet reachable; it registers nothing at run time. | partly implemented: `ui.component<T>(state, render)`; no `styles` (no `ui.Stylesheet` yet) and no `E1010` (Html030 step 6) |
+| A component is embedded in another's view with `{ ui.slot(child) }`. The child renders by itself when its state changes; the parent's render is not run again for it. Children and named slots are ordinary `ui.View` parameters of a factory. | implemented, with [subtree commits](#subtree-commits): the commit of a child that rendered alone changes only the child's nodes |
+| `web.mount(selector, component, tasks)` and `desktop.mount(window, component, tasks)` return `Result<ui.Root>`. `tasks` is the handle of the enclosing `scope`, so every task the root starts is lexically inside it. A second root on one element, or more than `U-9` roots, is `Err`. | `ui.mount(host, target, component)` and `Std.Web.mount` over the browser's `neura.ui.*` services are implemented; `desktop.mount` is not declared (no window type). A `Scope` cannot own tasks a library starts (a `spawn` is lexical and a `Scope` cannot be stored), so the root's tasks are owned by the scope of `Std.Ui.Commands.run(root)` instead; `tasks` gives nothing a library can use (A3 round 2, decision 13) |
+| `root.run()` is the event loop. One *turn* is: take the next event; call its handler; apply queued updates and notify; render each component whose state changed, once, parents before children; commit. It returns when the root is closed or its scope is cancelled. | implemented; `run` also returns when the host has no more events |
+| An `Invalid` or `Err` commit is delivered to the root's `on_render_failure` callback (default: log it and keep the previous view) and the loop continues, except that a faulted root stops taking events until `reset`. | implemented; a faulted root stops its loop, and `reset` restarts it |
+| Unmounting a component removes its listeners, closes its subscriptions, cancels its commands and raises its generation. | implemented |
 
 ## Events
 
@@ -68,9 +68,9 @@ The adapter copies the fields below when the event arrives and queues an immutab
 
 | Rule | Status |
 | --- | --- |
-| `stop_propagation` is valid on every event of the table except `focus`, `blur`, `scroll`, `toggle` and `close`. Both modifiers are applied by the adapter when the event arrives, before any Neura code runs. | proposed |
-| Events are delivered in arrival order. A coalesced event replaces the queued one of the same listener and keeps its place. | proposed |
-| When `U-7` events are queued, the root is *overloaded*: an arriving event that cannot be coalesced is not queued, its modifiers still apply, and it is counted. The adapter sets `data-neura-overloaded` on the root's element. Before the next event it accepts, it delivers `RootEvent.InputOverflow(dropped: uint32)` to `on_overflow`, followed by one `input` record for each controlled element whose value changed meanwhile, so no text edit is lost without the application being told. | proposed |
+| `stop_propagation` is valid on every event of the table except `focus`, `blur`, `scroll`, `toggle` and `close`. Both modifiers are applied by the adapter when the event arrives, before any Neura code runs. | implemented by A1 at template check; the adapter is not |
+| Events are delivered in arrival order. A coalesced event replaces the queued one of the same listener and keeps its place. | implemented in `ui.Root.post` |
+| When `U-7` events are queued, the root is *overloaded*: an arriving event that cannot be coalesced is not queued, its modifiers still apply, and it is counted. The adapter sets `data-neura-overloaded` on the root's element. Before the next event it accepts, it delivers `RootEvent.InputOverflow(dropped: uint32)` to `on_overflow`, followed by one `input` record for each controlled element whose value changed meanwhile, so no text edit is lost without the application being told. | implemented in the root, the model host and the browser adapter; checked in headless Chromium and Firefox (`tests/apps/web/events-test.mjs`: 1,100 clicks while the image is busy drop 75 and set and clear `data-neura-overloaded`) |
 | The order of events and the values of their fields are recorded in the trace, and a replay delivers them without a browser. Replay reproduces the Neura execution, not the screen. | proposed |
 | An action that the browser allows only during a user gesture (a file picker, a clipboard write, a download) is a `web.GestureAction` prepared in advance (`web.copy_action(text)`, `web.download_action(name, bytes)`, `web.pick_file_action(accept)`) and bound with `on:click={ web.with_gesture(action, then) }`. The adapter performs it inside the browser event and queues a `web.GestureResult` to `then`. No asynchronous completion is promised a gesture. | proposed |
 
@@ -78,22 +78,22 @@ The adapter copies the fields below when the event arrives and queues an immutab
 
 | Rule | Status |
 | --- | --- |
-| A handler should finish within a turn. Work that waits belongs to a `ui.Command<I, O>`, built from `work: func(I, cancellation.Token) -> O` with `I` and `O` transferable and immutable (`E0602`, `E0580`). | proposed |
-| `command.run(input)` starts `work` as a task in the root's scope, at most `U-10` at once; over the limit it returns `Rejected` and starts nothing. `command.state` is a `ui.State<ui.CommandState<O>>`: `Idle`, `Running`, `Succeeded(O)`, `Failed(error.PortableError)` or `Cancelled`. | proposed |
-| Each `run` and each unmount raises the command's generation. A completion that carries an older generation is discarded: it updates nothing. | proposed |
-| `command.cancel()` and unmount request cancellation; the task ends at its next cancellation point and is joined by the enclosing scope. Nothing is detached, and no `Scope` is stored in a field. | proposed |
-| A `Result<T>` is not sent between tasks, because `Error.Custom` can hold any object. A command's failure is a `PortableError`. | proposed |
-| There is no `async` or `await`. A provider call parks its task, as host I/O does today ([Concurrency](../lang/Concurrency.md#104-host-io)). | proposed |
+| A handler should finish within a turn. Work that waits belongs to a `ui.Command<I, O>`, built from `work: func(I, cancellation.Token) -> O` with `I` and `O` transferable and immutable (`E0602`, `E0580`). | implemented as `Std.Ui.Commands.Command<I, O>` with `work: func(I) -> Result<O>` and no token (decisions 11, 12); `O` must be transferable and `ui.State` requires the state deeply immutable |
+| `command.run(input)` starts `work` as a task in the root's scope, at most `U-10` at once; over the limit it returns `Rejected` and starts nothing. `command.state` is a `ui.State<ui.CommandState<O>>`: `Idle`, `Running`, `Succeeded(O)`, `Failed(error.PortableError)` or `Cancelled`. | implemented, with `commands.CommandState`; the scope is that of `commands.run(root)`, and an unbound or unmounted command is also `Rejected` |
+| Each `run` and each unmount raises the command's generation. A completion that carries an older generation is discarded: it updates nothing. | implemented; a `cancel` of a running command raises it too |
+| `command.cancel()` and unmount request cancellation; the task ends at its next cancellation point and is joined by the enclosing scope. Nothing is detached, and no `Scope` is stored in a field. | implemented: each run works in a scope of its own inside the task `commands.run` starts |
+| A `Result<T>` is not sent between tasks, because `Error.Custom` can hold any object. A command's failure is a `PortableError`. | implemented |
+| There is no `async` or `await`. A provider call parks its task, as host I/O does today ([Concurrency](../lang/Concurrency.md#104-host-io)). | implemented |
 
 ## Forms, routing and controls
 
 | Rule | Status |
 | --- | --- |
-| The library ships, as components over real elements: text input, checkbox, select, button, form with validation, list, table and dialog. Each uses the platform's element, so focus, keyboard and accessibility come from the browser. | proposed |
-| `ui.Field<T>` pairs a draft `string` with `parse: func(string) -> Result<T>`; `ui.Form` collects fields, reports the first invalid one, and moves focus to it on submit. Validation shared with a server is an ordinary function of a shared package; it never replaces the server's own. | proposed |
-| `ui.Router` maps path patterns (`/parts/{id}`, segments only, no wildcards) to components. `ui.route(path)` returns a `ui.Url` for `href`. A click on such a link is handled by the adapter without a page load. | proposed |
-| A web target chooses `routing = "hash"` (the default: works on any static host) or `"history"` (the host must serve `index.html` for unknown paths; the build writes a `404.html` copy and says so). | proposed |
-| Loading, empty and failed states are explicit values of the application's state; the library provides no implicit suspense. | proposed |
+| The library ships, as components over real elements: text input, checkbox, select, button, form with validation, list, table and dialog. Each uses the platform's element, so focus, keyboard and accessibility come from the browser. | implemented in `Std.Ui.Controls` (and a text area), tested on the model host; focus, selection and composition journeys in headless browsers need the browser host |
+| `ui.Field<T>` pairs a draft `string` with `parse: func(string) -> Result<T>`; `ui.Form` collects fields, reports the first invalid one, and moves focus to it on submit. Validation shared with a server is an ordinary function of a shared package; it never replaces the server's own. | implemented as `Std.Ui.Forms.Field<T>` and `Form`, with the focus moved through `ui.FocusHost` after the turn's commit |
+| `ui.Router` maps path patterns (`/parts/{id}`, segments only, no wildcards) to components. `ui.route(path)` returns a `ui.Url` for `href`. A click on such a link is handled by the adapter without a page load. | implemented as `Std.Ui.Routing.Router`, with `router.link(path)` for `href` and `router.on_link(path)` for `on:click.prevent_default` (decision 15); the adapter's own interception of plain links is the browser host's |
+| A web target chooses `routing = "hash"` (the default: works on any static host) or `"history"` (the host must serve `index.html` for unknown paths; the build writes a `404.html` copy and says so). | partly implemented: the router asks its `ui.HistoryHost` for the link form; the target setting and `404.html` belong to the web build |
+| Loading, empty and failed states are explicit values of the application's state; the library provides no implicit suspense. | implemented: a command's state is one |
 
 ## FrozenList
 
@@ -101,14 +101,14 @@ The adapter copies the fields below when the event arrives and queues an immutab
 
 | Rule | Status |
 | --- | --- |
-| `T` is deeply immutable, as defined for `ui.State` (`E0580`). | proposed |
-| `frozen.copy_of(source)` takes an array or a list and copies its elements into new private storage. `frozen.empty<T>()` and `frozen.of(items: ...T)` complete the constructors. Nothing freezes a list in place. | proposed |
-| `length`, `get(index)` (an index out of range traps, as for a list), `first_or_none()`, `last_or_none()`, `contains`, `index_of`, for-each, `slice`, `to_list()` (a fresh copy). | proposed |
-| `appended(value)`, `replaced(index, value)`, `removed(index)` and `concat(other)` return a new list. The first implementation copies; structural sharing may replace it only with alias and accounting tests. | proposed |
-| `equals` and `hash_code` compare elements by value and exist only where `T` has value equality and hashing; `==` stays identity. | proposed |
-| A `FrozenList<T>` is an `#Immutable` class, so tasks may share it and it may be a message, when `T` is transferable. | proposed |
-| The class is written in Neura. Its storage is a private `last` field of list type carrying the tag `#Frozen`, which only `Std.Collections.Frozen` may use. The compiler checks that the field is assigned once, from a list the constructor created, and that no method stores into it, passes it to a retaining parameter, or returns it (`E0581`); with that, the `#Immutable` check accepts the field. | proposed |
-| The existing `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning: read-only views. They are not deeply immutable and are not accepted where this note requires it. | proposed |
+| `T` is deeply immutable, as defined for `ui.State` (`E0580`). | implemented: `#Frozen` on the class; a type parameter passed on carries the requirement to the outermost written argument |
+| `frozen.copy_of(source)` takes an array or a list and copies its elements into new private storage. `frozen.empty<T>()` and `frozen.of(items: ...T)` complete the constructors. Nothing freezes a list in place. | implemented, with `copy_of_list` for a list: a generic function cannot be overloaded, and an array does not convert to a list |
+| `length`, `get(index)` (an index out of range traps, as for a list), `first_or_none()`, `last_or_none()`, `contains`, `index_of`, for-each, `slice`, `to_list()` (a fresh copy). | implemented |
+| `appended(value)`, `replaced(index, value)`, `removed(index)` and `concat(other)` return a new list. The first implementation copies; structural sharing may replace it only with alias and accounting tests. | implemented (copying) |
+| `equals` and `hash_code` compare elements by value and exist only where `T` has value equality and hashing; `==` stays identity. | implemented with `===` and the list hash for every `T`: Neura cannot declare a method only for some type arguments |
+| A `FrozenList<T>` is an `#Immutable` class, so tasks may share it and it may be a message, when `T` is transferable. | not implemented: NVR 1.5 admits no list in a transferable layout (`TRNS`), so sending one is `E0602`; needs a format decision |
+| The class is written in Neura. Its storage is a private `last` field of list type carrying the tag `#Frozen`, which only `Std.Collections.Frozen` may use. The compiler checks that the field is assigned once, from a list the constructor created, and that no method stores into it, passes it to a retaining parameter, or returns it (`E0581`); with that, the `#Immutable` check accepts the field. | implemented as an allow-list: after the one constructor assignment, only index reads and length; `Std.Ui` may also write the tag |
+| The existing `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning: read-only views. They are not deeply immutable and are not accepted where this note requires it. | implemented |
 | Derived JSON codecs accept `FrozenList<T>` as an ordered array when `T` has a codec, bounded by `C-3` and `C-4`. A nested `FrozenList` is allowed within those bounds. An `Optional` element is rejected (`E0584`) until a tagged absence encoding exists. | proposed |
 
 ## Contracts
@@ -304,3 +304,86 @@ A program that passed an `ImmutableList` to another task or stored one as shared
 9. 64-bit integers are JSON numbers, with no string form.
 10. One contract version is served at a time; any breaking change needs a new `version`.
 11. `routing = "hash"` is the default for web targets.
+
+## A3 implementation record
+
+*Implemented* 2026-11-17 by autonomous agents, awaiting owner confirmation: steps 2 and 3, and the root half of step 4. Records, `new with`, named arguments, untyped lambda parameters and inference of type arguments are not on this branch, so the library is written with `#Immutable` classes, positional arguments and explicit type arguments, and the examples above stay fragments.
+
+| Edge case | Evidence |
+| --- | --- |
+| 1, 2, 3, 4, 5, 6, 7 | `tests/stdlib/ui-state` (`test_state_values`, `test_notifications`, `test_equality_suppresses`, `test_update_in_subscriber_is_queued`), `tests/ui/components/accepted.nra` |
+| 8, 9, 10, 11, 12, 48 | `tests/stdlib/ui-state` (`test_turn_renders_once`, `test_child_renders_alone`, `test_unmount_discards_events`, `test_coalescing`, `test_overflow`) on the model host |
+| 16, 17, 18, 43 | `tests/stdlib/frozen` (with a model-based test against a list), `tests/stdlib/frozen/traps/get-out-of-range.nra` |
+| 25, 26, 28, 29, 31 | `tests/ui/components`, `tests/ui/frozen`, and for 26 and 29 the `frozen-string-builder` and `spawned-ui-state` rejections of `tests/frontend.cmake`; the storage half of 31 in `tests/apps/frozen/storage.py` |
+| 44 | `tests/stdlib/ui-state/traps/update-loop.nra` |
+| 13, 14, 15 | `tests/stdlib/ui-commands` (`test_run_twice_discards_first`, `test_unmount_and_remount_discard`, `test_cancel_when_idle`, and the slow command across unmount and remount) |
+| 30 | `command_work_captures_a_state` in `tests/concurrency/frontend.cmake`, with the label at the program's capture |
+| 19 to 24, 27, 32 to 42, 45 to 47 | Not implemented: codecs, contracts, `neura.http.fetch`, `E1010`, and the transfer of a `FrozenList` |
+
+### Decisions taken without the owner
+
+1. `#Frozen` also marks a class: every type argument it is given must be deeply immutable. `FrozenList` and `ui.State` carry it, so `Std.Ui` may write the tag too. A type parameter given as such an argument inherits the requirement, so the check reaches the outermost written argument; requirements do not cross a prebuilt `.nir` boundary.
+2. The frozen-storage check is an allow-list: after the one constructor assignment, from a fresh list or a local that was only filled, a `#Frozen` field may only be indexed for reading, measured, hashed or printed.
+3. `frozen.copy_of` takes an array and `frozen.copy_of_list` a list, because a generic function cannot be overloaded. `equals`, `hash_code`, `contains` and `index_of` exist for every `T` and compare with `===`.
+4. A `FrozenList` is not transferable in 0.3.0. NVR 1.5 admits no list in a transferable layout, and widening that is a format decision this lane did not take.
+5. `set` during a notification replaces the value at once and queues only the notification, so `get` always returns the latest value. Rounds are counted per outermost notification, which bounds every turn. A subscriber added during a round is first notified in the next.
+6. `equal:` is `ui.with_equality<T>(initial, same)`; `ui.component` takes `(state, render)` without `styles` until a stylesheet value exists.
+7. Mounting is `ui.mount(host, target, component)` over the `ui.Host` interface (`open`, `commit`, `wait`, `resynchronize`, `reset`, `close`); a commit carries the turn's renders as component and view pairs. `Std.Web.mount` keeps its final signature as a stub, and `desktop.mount` waits for the desktop window type.
+8. A change made between turns renders in the next turn. A faulted root ends `run`; `reset` asks the host to empty the root, renders every component again and lets `run` continue.
+9. An event is stale when its component has unmounted or its generation has changed; removing one listener of a still-mounted component is the host's part. The overflow notice is queued as a marker before the next accepted event, and the host resynchronizes controlled values when the marker's turn runs; the input events it posts then are delivered before the events that arrived after the overflow.
+10. *Replaced in round 2 by decision 14.* When a commit is refused (`Invalid`), components mounted or unmounted by that turn's renders stay so; only the host keeps its previous view. A component embedded by two parents traps with `a component is mounted twice`.
+
+### Round 2
+
+*Implemented* 2026-11-17 by autonomous agents, awaiting owner confirmation: step 5 (commands), the rollback of refused commits, and the parts of step 6 that run on the model host (controls, forms, the router and the host services they use). Steps 7 to 9 need records, derived codecs and `neura contracts`, which are not on this branch; the "Not done" list below says what each needs.
+
+11. Commands live in `Std.Ui.Commands` (`commands.Command<I, O>`, `commands.CommandState<O>`, `commands.RunOutcome`, `commands.run(root)`), not in `Std.Ui`. The compiler applies the rule that tasks and native calls cannot share an image (Concurrency C15) to every function a program links, so a `spawn` inside `Std.Ui` would forbid `Std.Ui` to every program with a C import. A generic class cannot be re-exported under another module's name, so `ui.Command` is not an alias either.
+12. `work` is `func(I) -> Result<O>`, with no `cancellation.Token`: no token type exists, and cancellation is the scope's signal, which a run's own scope gives the work through `Cancellation.requested()` and parked operations. An `Err` becomes `Failed` with `error.to_portable`, because a `Result` cannot cross a channel.
+13. The root's tasks are owned by the scope of `commands.run(root)`, the root's event loop with commands. A `spawn` must be lexically inside a scope of the same function body and a `Scope` cannot be stored, so neither `command.run` nor a host can start a task in the caller's scope; `Std.Web.mount`'s `tasks` parameter cannot own the root's tasks as the row says. The loop starts the queued runs, takes events and completions as turns, and on return stops every run and leaves the scope, which joins them. A run started outside the loop is queued until it runs; `root.run()` traps when one is queued.
+14. A refused (`Invalid`) or failed (`Err`) commit rolls back the turn: children a render embedded are unmounted again, children it dropped are unmounted only when the host commits and otherwise stay mounted, and every component that rendered gets back its previous view and children. The rendered components stay clean, so a component whose render the host always refuses does not block the root's other commits; it renders again when its state next notifies. A child that moves from one parent to a later-rendered parent in one turn is moved, not remounted.
+15. The router is `Std.Ui.Routing.Router`. Links come from `router.link(path)`, because the routing mode belongs to the host (`ui.HistoryHost.link`), not to a free function; without a history host the hash form is used. The first match in specificity order wins (a literal segment over a parameter at the first difference), and two routes of one shape trap when added. A query is kept, a fragment is dropped, a trailing slash is ignored, and parameter values are percent-decoded.
+16. History, focus and the combined wait are optional interfaces (`ui.HistoryHost`, `ui.FocusHost`, `ui.TaskHost`) next to `ui.Host`, so a host that does not provide one still compiles. A navigation the host reports is a root event: it coalesces with a queued navigation and is never dropped by `U-7`. A focus request is carried out after the turn's commit.
+17. `Std.Ui.Forms` and `Std.Ui.Controls` are modules of their own, for the same reason as decision 11 for generic classes. A table row is `controls.TableRow`. Cells are keyed by column position because a template `@for` needs a key and a row's texts may repeat.
+18. The E0602 label for a function value follows a captured function value to its own capture, so a library that wraps the program's closure (a command's run) reports the program's capture.
+
+Not done in round 2, and what each part needs:
+
+| Part | Needs |
+| --- | --- |
+| Step 7: derived JSON codecs for `FrozenList<T>`, bounds `C-3` and `C-4`, `E0584` for an `Optional` element, cases 21 to 23 | Records and derived codecs (the records lane): a `FrozenList` codec is an extension of the derived codec, so it can only follow it |
+| Step 8: `contracts.toml`, `E0582`, `E0583`, `E0584`, `E1040` to `E1043`, `E1045`, `neura contracts` and its generated files, cases 20, 24, 32 to 42 | Records, enums with record payloads and derived codecs for the wire schema; a manifest reader and a `neura contracts` command in the driver; the desktop target's `bridge.operations` for `E1045`. Nothing marks an interface as a contract without the manifest, so the eligibility codes cannot be added on their own |
+| Step 9: `neura.http.fetch` and the generated client, cases 45 to 47 | The native host service and the browser adapter's `fetch` (A2, A4), and the generated client of step 8 |
+| Transfer of a `FrozenList` (case 19) | A format decision on lists in transferable layouts (NVR 1.5 `TRNS`) |
+| `E1010` (case 27) | The render-effect check of [HTML factories](Html030.md) (A1) |
+| Controls in a real browser: focus, selection and composition journeys in headless Chromium and Firefox | The browser host (`Std.Web.mount` over A2's `neura.ui.*` services), which is the apps integration's |
+| `ui.TaskHost` and `ui.HistoryHost` for the browser | The browser host: `wait_with` can race `neura.ui.event.next` and `neura.history.next`, both cancellable, against the completions channel in a scope of its own |
+| Budgets B-W5 and B-W7 | A browser run of the 1,000-row list; the model-host figures of B-W8 are not evidence for them |
+| Known defect: two `#Immutable` classes of one name in different modules, each a `FrozenList` element in one program (a program's `Choice` or `TableRow` next to `Std.Ui.Controls`), fail `neura build` with an NVR loader error (`type N is not assignable to type M`) | A fix in IRtoNeuronConversion; `emit-ir` keeps the two specializations apart. Until then, rename the program's class. The repro is kept with the round-2 evidence |
+
+## Subtree commits
+
+*Proposed* 2026-11-17, implemented by autonomous agents in the apps integration, awaiting owner confirmation. A3's roots render only the components whose state changed, but A1's reconciler took one whole view per commit and refused a view that was already mounted, so a child that rendered alone could not be committed without its parent. This section fixes how a turn's renders become one commit.
+
+| Rule | Status |
+| --- | --- |
+| A turn's commit carries its renders and the root's top component (`ui.Commit.top`). A host that reconciles builds the root's tree from `top`: each component contributes its current view, and a `ui.slot(child)` in it is replaced by the child's tree. | implemented (`Reconciler.prepare_turn`) |
+| A component that rendered for the commit is *fresh*: its view must be new, as before (`ViewReused` for a mounted view). A component that did not render is *retained*: its mounted view is expanded again and is not refused. A view used twice in one tree, or held by another root, is refused in both. | implemented |
+| A retained component's nodes match their mounted nodes by key and origin, so they produce no operation unless they moved. The commit of a child that rendered alone holds only the operations of the child's nodes. | implemented; checked on the model host and in headless Chromium and Firefox |
+| A retained node writes no property. A fresh node writes its bound properties as before, and the browser adapter skips equal values. A value the user is editing in one component is not overwritten by the commit of another. | implemented |
+| A listener belongs to the component whose view holds it. The host posts a browser event to the root with that component as the target, so an event for a component that unmounted or remounted since is discarded by the root's generation check. | implemented (`Reconciler.target_of`) |
+| After a refused commit the mounted tree stays, and the root rolls back the turn (round 2, decision 14): every component that rendered gets back the view the host holds, so the next commit is built from mounted views and the components that render again. | implemented |
+| The commit encoding is unchanged: subtree commits are ordinary version 1 batches ([Providers](../runtime/Providers.md#commit-encoding)). | implemented |
+
+| A retained component none of whose descendants rendered is not expanded again: its mounted nodes join the new tree as they are, with their views claimed for the commit, and matching, placement, changes and removals skip their subtrees (`Reconcile.Memo`, apps integration round 2). Siblings whose keys are the old ones in the same order are matched by position. A reused node matches only itself; when one would match elsewhere (its parent changed template at the same key path) the turn is planned again without reuse, from the same node identifiers, so the operations are those of expanding every view. | implemented; operations identical on `app-ui-reconcile`, `app-ui-retained`, the browser journeys, and before/after logs of keyed reorders, drops, re-adds and a template switch around a retained component |
+
+Cost: a commit expands the components that rendered and their ancestors, and reuses the rest. On the model host with `reconcile_commits()` (steps per update, 1,000 rows, before and after): a counter beside a retained 1,000-row list 5.32M and 0.09M; one of 1,000 row components 5.12M and 2.80M (the page around the rows still expands its `@for` and checks its keys); one row of a `controls.list` that renders 5.26M and 4.65M (the in-order match); mounting the 1,000 row components 17.4M and 10.2M (a rendered component is found by a stamp instead of a search of the turn's renders).
+
+### Decisions taken without the owner
+
+1. The component boundary is the view that `ui.slot` makes, recognized by the reconciler; no new view kind and no encoding change.
+2. Re-expanding retained views, rather than reconciling each component's subtree against an anchor in its parent, keeps one algorithm for every commit and makes keyed moves across component boundaries impossible to get wrong. Round 2 keeps that algorithm and skips only what it would recompute unchanged: the nodes of a component none of whose descendants rendered. A retained view is not expanded again until its component renders, so a change to a mutable list that the view captured (an `@for` source or key list) shows only then; before the skip, such a change could appear in the commit of another component.
+3. A retained node writes no property, so a commit never moves the value of an element whose component did not render. A fresh node keeps A1's rule and writes every bound property.
+4. `ui.Host` gains `stats(root) -> ui.HostStats`: nodes, listeners, templates and queued events, the counts of `neura.ui.stats`. The model host reports its reconciled tree's counts, or zeros when it does not reconcile.
+5. A host that queues events itself, as the browser does, reports an overflow with `Root.post_overflow(dropped)`; the inputs the browser kept follow it in the same batch, so the web host's `resynchronize` does nothing.
+6. `Std.Web.Host` is a `ui.HistoryHost`, a `ui.TaskHost` and a `ui.FocusHost` (apps integration round 2). Its links come from the page (`neura.history.link`), so one image runs under hash or history routing; each wait races `neura.ui.event.next`, `neura.history.next` (while a router listens) and the command completions channel in a scope of its own, cancels the losers, and the adapter returns what a cancelled wait took to its queue; `neura.ui.focus` serves focus requests. A router that mounts after links were rendered in the hash form under history routing makes the root render every component again before the turn commits (`Root.render_all_again`), so the page never shows hash links.
+

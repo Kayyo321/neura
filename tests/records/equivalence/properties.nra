@@ -1,0 +1,94 @@
+// Interface properties (docs/design/Records030.md, edge cases 65, 67, 72, 73,
+// 74, 75 and 76): dispatch to fields, adapters and accessors; the order of a
+// compound assignment through an interface; a getter's side effect on each
+// read; and a nil receiver.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Counter = interface (
+    let count: int;
+        | get;
+        | set;
+);
+let Holder = interface<T> (
+    let item: T;
+        | get;
+);
+
+let Plain = class implements Named, Counter (
+    export let name: string = "plain";
+    export let count: int = 0;
+);
+let Traced = class implements Named, Counter (
+    export let name: string = "";
+        | get: {
+            console.print_line("get name");
+            return "traced";
+        };
+    export let count: int = 0;
+        | get: {
+            console.print_line("get count");
+            return count;
+        };
+        | set: {
+            console.print_line("set count " + value.to_string());
+            count = value;
+        };
+);
+let Box = class implements Holder<string> (
+    export let item: string = "boxed";
+);
+
+let receiver = func(counter: Counter) -> Counter {
+    console.print_line("receiver");
+    return counter;
+};
+let operand = func(value: int) -> int {
+    console.print_line("operand");
+    return value;
+};
+let label = func<T: Named>(value: T) -> string => value.name;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let named: Named[] = [new Plain(), new Traced()];
+        for (let item in named) {
+            console.print_line(item.name);
+        }
+        // Case 73: a getter with a side effect runs on each read.
+        let traced = new Traced();
+        let twice: Named = traced;
+        console.print_line(twice.name + " " + twice.name);
+        // Case 72: receiver once, getter, operand, add, setter.
+        receiver(traced).count += operand(5);
+        receiver(new Plain()).count += operand(1);
+        let counter: Counter = new Plain();
+        counter.count = 2;
+        counter.count *= 21;
+        counter.count--;
+        console.print_line(counter.count.to_string());
+        // Case 74 and 76.
+        console.print_line(label(new Plain()) + " " + label<Traced>(traced));
+        let holder: Holder<string> = new Box();
+        console.print_line(holder.item);
+        // A hot loop of interface reads.
+        let total = 0;
+        let sum: Counter = new Plain();
+        sum.count = 3;
+        for (let i = 0; i < 2000; i++) {
+            total += sum.count;
+        }
+        console.print_line(total.to_string());
+        // A checked-arithmetic trap comes before the setter.
+        let big: Counter = traced;
+        traced.count = 2147483647;
+        console.print_line("before the overflow");
+        big.count += operand(1);
+        console.print_line("never printed");
+        return program.ExitCode.Ok;
+    };
+);

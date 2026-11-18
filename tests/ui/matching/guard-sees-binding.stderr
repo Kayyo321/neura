@@ -1,0 +1,12 @@
+error[E0304]: unknown name 'n'
+ --> $DIR/guard-sees-binding.nra:8:45
+  |
+8 |     Shape.Box { size: [w, h], label: _ } if n > 0 => w,
+  |                                             ^ not found in this scope
+  |
+help: there is a binding with a similar name: 'h'
+  |
+8 |     Shape.Box { size: [w, h], label: _ } if h > 0 => w,
+  |                                             ~
+
+For more information about this error, try `neura explain E0304`.

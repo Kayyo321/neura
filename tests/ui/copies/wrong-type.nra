@@ -1,0 +1,4 @@
+// A replacement has the field's type (edge case 48).
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let copy = new with(user) { id: "seven" };

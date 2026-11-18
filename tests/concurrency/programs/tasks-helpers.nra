@@ -55,7 +55,7 @@ let show_one = func(outcome: result.Result<int>) -> string => match (outcome) {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("== all");
         let squares: (func() -> int)[list] = new([square(2), square(3), square(4)]);
         let values = tasks.all<int>(squares);

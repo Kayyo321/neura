@@ -1,0 +1,231 @@
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief QUIC stream identifiers (RFC 9000 section 2.1) and their allocation.
+///
+/// A stream ID is a 62-bit integer. Bit 0x01 names the initiator (0 client, 1 server) and bit 0x02 the
+/// direction (0 bidirectional, 1 unidirectional), so the two low bits give the four stream types of Table 1;
+/// the n-th stream of a type (from 0) has the ID `4 * n + type`. `StreamIdAllocator` hands out an endpoint's own
+/// IDs in increasing order within the peer's stream limits (MAX_STREAMS, section 4.6), and `PeerStreams` applies
+/// the rule that a peer's stream used out of order also opens every lower-numbered stream of its type. Their
+/// failures are Custom errors with the codes `quic.stream_limit` (the endpoint would exceed a limit; the
+/// transport error for a peer is STREAM_LIMIT_ERROR) and `quic.stream_state` (a peer used an ID of a type it
+/// cannot open). An ID outside 0 through 2^62 - 1 traps with "invalid argument: stream ID".
+/// @see [Std.Net.Quic.StreamId](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-StreamId)
+#Since("0.3.0")
+export let StreamId = module (
+    /// @brief The largest stream ID, 2^62 - 1.
+    export const MaxStreamId: int64 = 4611686018427387903;
+    /// @brief The largest number of streams of one type, 2^60 (section 4.6).
+    export const MaxStreamCount: int64 = 1152921504606846976;
+
+    /// @brief The four stream types of RFC 9000 Table 1, in the order of their low bits 0x00 through 0x03.
+    export let StreamType = enum (
+        ClientBidirectional, ServerBidirectional, ClientUnidirectional,
+        ServerUnidirectional
+    );
+
+    /// @brief The type of a stream ID.
+    #Pure
+    export let type_of = func(id: int64) -> StreamType {
+        check(id);
+        last bits = id % 4;
+        return bits == 0 ? StreamType.ClientBidirectional : bits == 1 ? StreamType.ServerBidirectional
+            : bits == 2 ? StreamType.ClientUnidirectional : StreamType.ServerUnidirectional;
+    };
+
+    /// @brief The two low bits of a type (0 through 3).
+    #Pure
+    export let type_bits = func(kind: StreamType) -> int64 => kind == StreamType.ClientBidirectional ? 0
+        : kind == StreamType.ServerBidirectional ? 1 : kind == StreamType.ClientUnidirectional ? 2 : 3;
+
+    /// @brief The type of streams that `client` (true) or the server opens in the given direction.
+    #Pure
+    export let type_for = func(client: bool, bidirectional: bool) -> StreamType => client
+        ? (bidirectional ? StreamType.ClientBidirectional : StreamType.ClientUnidirectional)
+        : (bidirectional ? StreamType.ServerBidirectional : StreamType.ServerUnidirectional);
+
+    /// @brief True when the client opened the stream (bit 0x01 clear).
+    #Pure
+    export let is_client_initiated = func(id: int64) -> bool {
+        check(id);
+        return id % 2 == 0;
+    };
+
+    /// @brief True for a bidirectional stream (bit 0x02 clear).
+    #Pure
+    export let is_bidirectional = func(id: int64) -> bool {
+        check(id);
+        return (id / 2) % 2 == 0;
+    };
+
+    /// @brief The position of the stream among the streams of its type, from 0.
+    #Pure
+    export let index_of = func(id: int64) -> int64 {
+        check(id);
+        return id / 4;
+    };
+
+    /// @brief The ID of the `index`-th stream of `kind` (from 0). An index from which no valid ID follows traps
+    /// with "invalid argument: stream index".
+    #Pure
+    export let nth = func(kind: StreamType, index: int64) -> int64 {
+        if (index < 0 || index >= MaxStreamCount) {
+            trap_with_message("invalid argument: stream index");
+        }
+        return index * 4 + type_bits(kind);
+    };
+
+    /// @brief True when the client (`local_client`) or the server may send on stream `id`: on every
+    /// bidirectional stream and on its own unidirectional streams.
+    #Pure
+    export let may_send = func(id: int64, local_client: bool) -> bool =>
+        is_bidirectional(id) || is_client_initiated(id) == local_client;
+
+    /// @brief True when the client (`local_client`) or the server may receive on stream `id`: on every
+    /// bidirectional stream and on the peer's unidirectional streams.
+    #Pure
+    export let may_receive = func(id: int64, local_client: bool) -> bool =>
+        is_bidirectional(id) || is_client_initiated(id) != local_client;
+
+    /// @brief Allocates the IDs of the streams one endpoint opens, within the peer's stream limits.
+    #[Final, NotThreadSafe]
+    export let StreamIdAllocator = class (
+        /// @brief True for the client side.
+        export last client: bool;
+        /// @brief Bidirectional streams opened so far.
+        let bidirectional_opened: int64 = 0;
+        /// @brief Unidirectional streams opened so far.
+        let unidirectional_opened: int64 = 0;
+        /// @brief The peer's limit on bidirectional streams.
+        let bidirectional_limit: int64;
+        /// @brief The peer's limit on unidirectional streams.
+        let unidirectional_limit: int64;
+
+        /// @brief An allocator for the client or the server with the peer's initial limits
+        /// (`initial_max_streams_bidi` and `initial_max_streams_uni`). A limit outside 0 through 2^60 traps with
+        /// "invalid argument: stream limit".
+        export let init = func(is_client: bool, max_bidirectional: int64, max_unidirectional: int64) {
+            check_limit(max_bidirectional);
+            check_limit(max_unidirectional);
+            client = is_client;
+            bidirectional_limit = max_bidirectional;
+            unidirectional_limit = max_unidirectional;
+        };
+
+        /// @brief The next stream ID of the direction, or a `quic.stream_limit` error when the peer's limit is
+        /// reached (the endpoint would then send STREAMS_BLOCKED).
+        #NoDiscard
+        export let open = func(bidirectional: bool) -> Result<int64> {
+            last opened = bidirectional ? bidirectional_opened : unidirectional_opened;
+            last limit = bidirectional ? bidirectional_limit : unidirectional_limit;
+            if (opened >= limit) {
+                return Result<int64>.Err(errors.custom("quic.stream_limit", "the peer allows "
+                    + limit.to_string() + (bidirectional ? " bidirectional" : " unidirectional") + " streams"));
+            }
+            if (bidirectional) {
+                bidirectional_opened++;
+            } else {
+                unidirectional_opened++;
+            }
+            return Result<int64>.Ok(nth(type_for(client, bidirectional), opened));
+        };
+
+        /// @brief Applies a MAX_STREAMS frame from the peer; a smaller value than the current limit is ignored
+        /// (section 19.11). A value above 2^60 traps with "invalid argument: stream limit".
+        export let raise_limit = func(bidirectional: bool, max_streams: int64) {
+            check_limit(max_streams);
+            if (bidirectional && max_streams > bidirectional_limit) {
+                bidirectional_limit = max_streams;
+            }
+            if (!bidirectional && max_streams > unidirectional_limit) {
+                unidirectional_limit = max_streams;
+            }
+        };
+
+        /// @brief The number of streams opened in the direction.
+        #Pure
+        export let opened = func(bidirectional: bool) -> int64 =>
+            bidirectional ? bidirectional_opened : unidirectional_opened;
+
+        /// @brief Text such as "StreamIdAllocator(client, 3/100 bidirectional, 0/3 unidirectional)".
+        export let.override to_string = func -> string => "StreamIdAllocator(" + (client ? "client" : "server") + ", "
+            + bidirectional_opened.to_string() + "/" + bidirectional_limit.to_string() + " bidirectional, "
+            + unidirectional_opened.to_string() + "/" + unidirectional_limit.to_string() + " unidirectional)";
+    );
+
+    /// @brief Tracks the streams a peer opens, applying the implicit opening of lower-numbered streams.
+    #[Final, NotThreadSafe]
+    export let PeerStreams = class (
+        /// @brief True when the local endpoint is the client (so the peer is the server).
+        export last local_client: bool;
+        /// @brief The peer's bidirectional streams opened so far.
+        let bidirectional_count: int64 = 0;
+        /// @brief The peer's unidirectional streams opened so far.
+        let unidirectional_count: int64 = 0;
+        /// @brief The local limit on the peer's bidirectional streams.
+        last bidirectional_limit: int64;
+        /// @brief The local limit on the peer's unidirectional streams.
+        last unidirectional_limit: int64;
+
+        /// @brief A tracker with the limits this endpoint advertised. A limit outside 0 through 2^60 traps.
+        export let init = func(is_client: bool, max_bidirectional: int64, max_unidirectional: int64) {
+            check_limit(max_bidirectional);
+            check_limit(max_unidirectional);
+            local_client = is_client;
+            bidirectional_limit = max_bidirectional;
+            unidirectional_limit = max_unidirectional;
+        };
+
+        /// @brief Records a frame on stream `id` from the peer and returns the IDs it newly opens, in increasing
+        /// order (empty when the stream was already open). Err `quic.stream_state` when `id` is of a type the
+        /// local endpoint opens, and `quic.stream_limit` when it exceeds the advertised limit.
+        #NoDiscard
+        export let receive = func(id: int64) -> Result<int64[list]> {
+            if (is_client_initiated(id) == local_client) {
+                return Result<int64[list]>.Err(errors.custom("quic.stream_state",
+                    "stream " + id.to_string() + " is opened by this endpoint, not the peer"));
+            }
+            last bidirectional = is_bidirectional(id);
+            last index = index_of(id);
+            last limit = bidirectional ? bidirectional_limit : unidirectional_limit;
+            if (index >= limit) {
+                return Result<int64[list]>.Err(errors.custom("quic.stream_limit",
+                    "stream " + id.to_string() + " exceeds the limit of " + limit.to_string() + " streams"));
+            }
+            let opened: int64[list] = new;
+            last count = bidirectional ? bidirectional_count : unidirectional_count;
+            let next = count;
+            while (next <= index) {
+                opened.append(nth(type_of(id), next));
+                next++;
+            }
+            if (next > count) {
+                if (bidirectional) {
+                    bidirectional_count = next;
+                } else {
+                    unidirectional_count = next;
+                }
+            }
+            return Result<int64[list]>.Ok(opened);
+        };
+
+        /// @brief Text such as "PeerStreams(2 bidirectional, 0 unidirectional)".
+        export let.override to_string = func -> string => "PeerStreams(" + bidirectional_count.to_string()
+            + " bidirectional, " + unidirectional_count.to_string() + " unidirectional)";
+    );
+
+    /// @brief Traps unless `id` is a valid stream ID.
+    let check = func(id: int64) {
+        if (id < 0 || id > MaxStreamId) {
+            trap_with_message("invalid argument: stream ID");
+        }
+    };
+
+    /// @brief Traps unless `limit` is a valid stream count.
+    let check_limit = func(limit: int64) {
+        if (limit < 0 || limit > MaxStreamCount) {
+            trap_with_message("invalid argument: stream limit");
+        }
+    };
+);

@@ -1,0 +1,5 @@
+// A named first argument makes a record, and its type is a value
+// (edge case 13).
+let record = func(count: int) -> int => count;
+let limit = 3;
+let x = record(count: limit);

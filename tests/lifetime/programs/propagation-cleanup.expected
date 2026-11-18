@@ -1,0 +1,15 @@
+open outer
+open inner
+inner defer
+close outer
+outer defer
+error
+open outer
+open inner
+body
+open missing
+close inner
+inner defer
+close outer
+outer defer
+error

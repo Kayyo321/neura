@@ -1,0 +1,9 @@
+// An override's clauses are '.override' (edge case 83).
+let Shape = class (
+    export let label: string = "shape";
+        | get.virtual: label;
+);
+let Circle = class : Shape (
+    export let.override label: string;
+        | get: "circle";
+);

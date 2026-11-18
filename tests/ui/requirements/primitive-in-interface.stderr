@@ -1,0 +1,8 @@
+error[E0403]: expected Additive<int32>, got int32
+ --> $DIR/primitive-in-interface.nra:3:28
+  |
+3 | let value: Additive<int> = 3;
+  |                            ^ expected Additive<int32>, found int32
+  |            ------------- expected because of this type
+
+For more information about this error, try `neura explain E0403`.

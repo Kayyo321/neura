@@ -1,0 +1,9 @@
+error[E0232]: '?' is followed by '.'
+ --> $DIR/propagate-dot.nra:7:41
+  |
+7 | let read = func(pet: Pet) -> int => pet ? .age;
+  |                                         ^ a postfix '?' cannot take a member
+  |
+  = help: to read a member of the success value, write '(r?).name'; for optional access, write 'r?.name'
+
+For more information about this error, try `neura explain E0232`.

@@ -1,0 +1,16 @@
+// Edge case 88: optional access on a Result.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let open = func(path: string) -> Result<Pet> => Result<Pet>.Ok(new Pet());
+let read = func(path: string) -> Result<int> {
+    let age = open(path)?.age;
+    return Result<int>.Ok(0);
+};

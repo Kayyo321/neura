@@ -49,6 +49,8 @@ std::string type_source(const TypeSyntax& type, const std::map<std::string, std:
             result += type_source(type.arguments[i], substitutions);
         }
         result += ") -> " + (type.arguments.empty() ? std::string("void") : type_source(type.arguments.back(), substitutions));
+    } else if (type.name == "[generator]") {
+        result = "Sequence<" + (type.arguments.empty() ? std::string() : type_source(type.arguments.front(), substitutions)) + ">";
     } else if (type.name == "[tuple]") {
         result = "[";
         for (std::size_t i = 0; i < type.arguments.size(); ++i) {

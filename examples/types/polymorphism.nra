@@ -36,7 +36,7 @@ let Polymorphism = module (
     };
 
     // A bound permits render() while preserving the caller's concrete type.
-    export let render_twice = func<T:Renderable>(item: T) -> string {
+    export let render_twice = func<T: Renderable>(item: T) -> string {
         return item.render() + " / " + item.render();
     };
 
@@ -75,19 +75,19 @@ let Polymorphism = module (
         last alert: Alert = new;
         alert.value = "Attention";
 
-        last first: string = display(text);       // "[Hello]"
-        last second: string = display(alert);     // "[Alert: Attention]"
+        last first: string = display(text); // "[Hello]"
+        last second: string = display(alert); // "[Alert: Attention]"
         last same: Alert = identity<Alert>(alert);
         last repeated: string = render_twice<Alert>(same);
         // repeated is "Alert: Attention / Alert: Attention"
 
-        last box: Box<Text> = new;                // target-typed new: Box<Text>
+        last box: Box<Text> = new; // target-typed new: Box<Text>
         box.value = text;
         last unboxed: Text = box.get();
-        last third: string = display(unboxed);     // "[Hello]"
+        last third: string = display(unboxed); // "[Hello]"
 
         last named: NamedText = new("Note", "Saved");
-        last fourth: string = display(named);      // "[Note: Saved]"
+        last fourth: string = display(named); // "[Note: Saved]"
         destroy named; // Runs NamedText cleanup, then base cleanup.
     };
 );

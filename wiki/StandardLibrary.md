@@ -33,18 +33,21 @@ Ada
 
 | Area | Modules |
 | --- | --- |
-| `Std.Core` | `Failure`, `Unit`, `Cell`, `Ordering`, `Comparable`, `Comparators`, `Hash`, `Error`, `Optional`, `Result`, `IntRange`, `Version`, `String`, `StringBuilder`, `Variadic`, `Int8` … `Int64`, `UInt8` … `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, `Bool` |
+| `Std.Core` | `Failure`, `Unit`, `Cell`, `Ordering`, `Comparable`, `Comparators`, `Arithmetic`, `Hash`, `Error`, `Optional`, `Result`, `IntRange`, `Version`, `String`, `StringBuilder`, `Character`, `UnicodeScript`, `UnicodeBlock`, `Variadic`, `Int8` … `Int64`, `UInt8` … `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, `Bool` |
 | `Std.Text` | `Strings`, `Scalars`, `Regex`, `Charsets` |
 | `Std.Collections` | The interfaces `Iterator`, `Iterable`, `Collection`, `MutableCollection`, `List`, `MutableList`, `Set`, `MutableSet`, `SortedSet`, `Queue`, `Deque`, `Map`, `MutableMap`, `SortedMap`; `ArrayList`, `ArrayDeque`, `LinkedList`, `PriorityQueue`, `BitSet`, `OrdinalMap`, `HashMap`, `HashSet`, `IntMap`, `StringMap`, `TreeMap`, `TreeSet`, `ImmutableList`, `ImmutableSet`, `ImmutableMap`, `Sequence`, `Sorting`, `Lists`, `Sets`, `Maps` |
 | `Std.Math` | `Math` (an fdlibm 5.3 port), `BigInteger`, `BigDecimal` |
 | `Std.Time` | `Duration`, `Instant`, `Clock`, `SystemClock`, `FixedClock`, `Stopwatch`, `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset`, `DayOfWeek` |
 | `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` ([below](#stdconcurrent)) |
+| `Std.Events` | `Event`, `EventView`, `Subscription`: task-local events delivered synchronously in registration order ([Stdlib](Stdlib-Design#20-stdevents)) |
 | `Std.Random` | `Random` (xoshiro256**), `Uuid` |
 | `Std.Encoding` | `Utf8`, `Hex`, `Base64`, `Csv`, `Json` |
 | `Std.Digest` | `Crc32`, `Sha256` |
+| `Std.Crypto` | Contracts (`SecretMemory`, `StreamingDigest`, `AeadCipher`, ...); `Core` (`SecretBytes`, `ConstantTime`, `CryptoPolicy`); `Random` (`Entropy`, `ChaCha20Drbg`); `Hash` (`Sha2`, `Sha3`, `TupleHash`, `Blake3`, `MerkleTree`); `Mac` (`Hmac`, `Kmac`, `Poly1305`, `AesCmac`); `Kdf` (`Hkdf`, `Pbkdf2`, `Scrypt`, `Argon2`, `Balloon`, `Phc`, `PasswordHash`); `Symmetric` (`AesGcm`, `AesGcmSiv`, `AesSiv`, `ChaCha20Poly1305`, `XChaCha20Poly1305`, `OnlineCipher`, `Ff1`) ([Stdlib, section 21](Stdlib-Design#21-stdcrypto)) |
 | `Std.Io` | `Console`, `Closeable`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer` |
 | `Std.Fs` | `Path`, `File`, `Fs` |
-| `Std.Net` | `TcpStream`, `TcpListener` |
+| `Std.Desktop` | `Desktop`: `Registry`, `Dispatcher`, `Context`, `Window`, `Call`, `Event`, `run_application` (0.3.0) |
+| `Std.Net` | `TcpStream`, `TcpListener`; in 0.3.0 the contracts (`Endpoint`, `Listener`, `Connector`, `Transport`, `Service`, `Filter`) and the packages `Core`, `Socket`, `Dns`, `Tls`, `Quic`, `Http`, `Rpc`, `Realtime`, `Resilience` and `Mesh`, some of whose host calls are stubs ([Stdlib](Stdlib-Design#114-stdnet)) |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |
 | `Std.Test` | The assertions of [Testing](Testing) |
@@ -81,7 +84,7 @@ Text positions and range lengths count UTF-8 bytes except in the explicit UTF-16
 | `value_of<T>(value)`, `transform<T>(s, operation)` | Format a value that supports `to_string` or apply a callback of type `func(string) -> T`. |
 | `translate_escapes(s)` | Translate escaped quotes, backslash, space, and the `b`, `f`, `n`, `r`, and `t` escapes. Also accepts octal escapes through `377` and removes backslash followed by CR, LF, or CRLF. Unknown or incomplete escapes trap. |
 
-The whitespace set follows Java's `Character.isWhitespace` for strip and indentation. It includes U+0009–000D, U+001C–0020, U+1680, U+2000–2006, U+2008–200A, U+2028, U+2029, U+205F, and U+3000. The original `Std.Text.Strings.trim` and `Std.Text.Strings.lines` retain their own behavior. [Java SE 25 Character](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/Character.html#isWhitespace(int))
+The whitespace set follows Java's `Character.isWhitespace` for strip and indentation, and is the set of [`Character.is_whitespace`](Stdlib-Design#85-character). It includes U+0009–000D, U+001C–0020, U+1680, U+2000–2006, U+2008–200A, U+2028, U+2029, U+205F, and U+3000. The original `Std.Text.Strings.trim` and `Std.Text.Strings.lines` retain their own behavior. [Java SE 25 Character](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/Character.html#isWhitespace(int))
 
 Neura strings always contain valid UTF-8. Hashes, ordinary comparisons, and byte indexes use that representation. The explicit UTF-16 adapters work in code units. Regular-expression and formatting operations use Neura's syntax. `split` and `replace` from `Std.Text.Strings` use literal matching. JVM object interning and constant descriptors have no direct equivalent. [Java SE 26 String](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/String.html)
 
@@ -119,6 +122,8 @@ let decoded = string.decode_bytes(bytes, "UTF-16LE");
 ```
 
 ## Console formatting
+
+An [interpolated string](CoreLanguage#interpolated-strings), `$"{name}: {count:>4}"`, uses the same grammar with its holes in place of arguments, and the compiler checks its specifications. A pattern computed at run time stays with `Console.format` and `vformat`.
 
 `Console.format(pattern, args...)` and the static `Console.Formatter.format` return a UTF-8 string. `print` and `println` format to stdout, and `eprint` and `eprintln` format to stderr. The two newline forms append one LF. The module functions have `try_` counterparts that return a `Result` containing the string or `Unit`. For an existing `Std.Core.Variadic.Argument[]`, use `vformat` or `try_vformat`. Use `write`, `print_line`, or `error_line` for already-formatted text that may contain literal braces.
 
@@ -184,11 +189,13 @@ A call that `spawn` starts must be [task-safe](Concurrency#52-task-safe-calls): 
 | `Std.Core`, `Std.Text`, `Std.Math`, `Std.Random`, `Std.Log`, `Std.Program`, `Std.Test` | Every function | None |
 | `Std.Collections` | Every function. The collections keep no module state, text conversion included. A generic member is checked with the callbacks and element types of each specialization, so a comparator or a hasher that is not task-safe makes the calls that use it unsafe. | None |
 | `Std.Concurrent` | Every function | None |
+| `Std.Events` | Every function. The classes keep no module state; their instances are not transferable, so they stay in the task that made them. | None |
 | `Std.Fs`, `Std.Net` | Every function. They issue host requests, which a task may do. | None |
 | `Std.Io` | Console output and formatting, `Closeable`, `ByteBuffer`, `BufferedWriter`, `Utf8Writer` | `Console.read_line` and the byte source that `Console.input()` returns: the read-ahead buffer belongs to the root task. In a program that calls `Console.input()`, also the read functions of `BufferedReader` (`read`, `read_exact`, `read_all`) and `Utf8Reader` (`read_scalar`, `read_line`, `read_to_end`), whatever source they were built from, because that source is a function value of the same type. A program that never calls `Console.input()` may use them in a task |
 | `Std.Time` | Every function, `SystemClock`, `FixedClock`, and `Stopwatch` included. The value classes are `#Immutable`, so a task may be given their instances and may read `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc` | None |
 | `Std.Encoding` | Every function. `Utf8.validate`, `Hex`, and `Base64` run built-in kernels, which keep no module state | None |
 | `Std.Digest` | Every function. Both digests run built-in kernels, which keep no module state, so a task or a parallel item can compute either one | None |
+| `Std.Crypto` | Every function. The policy is an `AtomicInt64` and the constant tables are built per object, so a task can create and use any primitive (`tests/stdlib/crypto-contracts/tasks-tests.nra`). The classes hold mutable state and belong to the task that made them | None |
 | `Std.DynamicForeign` | | Every function: it cannot be linked into a program with tasks |
 
 The table is the report for a program that links every module of the library except `Std.DynamicForeign`. The `concurrency-frontend` test pins a smaller set: with `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json` linked, only the console's input functions may be listed. The rows for `Std.Encoding`, `Std.Digest`, the two readers of `Std.Io`, and the two `Std.Time` classes come from the report alone. A function that calls a function value is judged by every function value of that type the program can create, so a program that makes an unsafe function value of a type the library calls, such as a logger's sink or a comparator, adds the library functions that call it to the list.
@@ -202,7 +209,7 @@ The properties in this table that hold for every program are stated in the sourc
 
 Everything that reaches outside the program goes through a named, versioned host service ([NVM](NVM#host-services)). `neura run` and `neura test` grant every host service by default: files, the network, environment variables, clocks, entropy, and native code work with no option. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all` turn groups off ([Tooling](Tooling#build-and-run-executables)). A call to a denied service returns an `Io` error of kind `CapabilityDenied`. `neura run --record` and `--replay` capture and replay every host interaction, which makes programs that use time, entropy, files, or sockets reproducible.
 
-A host resource (`File`, `TcpStream`, `TcpListener`) is closed explicitly with `close()`. When a run ends, the runner closes whatever the program left open; reclaiming an unreachable resource object does not close it. Two scoped helpers close for the program: `File.with_open<T>(path, mode, body)` and `TcpStream.with_connection<T>(host, port, body)` open the resource, run `body` with it, and close it exactly once when the body returns a value, returns an error, or returns because its scope was cancelled. If the open fails, the body is not called. If the close fails after a body `Ok`, the helper returns the close error; after a body `Err`, a `Context` error whose cause is the body's error. `Std.Io.Closeable.release<T>(resource, outcome)` applies the same rule to any `Closeable`. A trap in the body still ends the run without cleanup ([Stdlib](Stdlib-Design#55-resources)).
+A host resource (`File`, `TcpStream`, `TcpListener`) is closed explicitly with `close()`. When a run ends, the runner closes whatever the program left open; reclaiming an unreachable resource object does not close it. Two scoped helpers close for the program: `File.with_open<T>(path, mode, body)` and `TcpStream.with_connection<T>(host, port, body)` open the resource, run `body` with it, and close it exactly once when the body returns a value, returns an error, or returns because its scope was cancelled. If the open fails, the body is not called. If the close fails after a body `Ok`, the helper returns the close error; after a body `Err`, a `Context` error whose cause is the body's error. `Std.Io.Closeable.release<T>(resource, outcome)` applies the same rule to any `Closeable`, and a [`using`](CoreLanguage#using) block applies it to the resource it binds. A trap in the body still ends the run without cleanup ([Stdlib](Stdlib-Design#55-resources)).
 
 In a program with tasks, the calls that wait on the outside world overlap: a task parked in `TcpStream.read`, `write`, or `connect`, `TcpListener.accept`, `Console.read_line`, or `SystemClock.sleep` lets the other tasks run. Cancelling its scope ends the wait with an `Io` error of kind `Cancelled`, unless the operation had already finished; a cancelled write reports the bytes it had written. File operations and console output complete before another task runs ([Concurrency](Concurrency#104-host-io)).
 

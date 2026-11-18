@@ -1,0 +1,25 @@
+// A named constructor admits arguments in written order before init.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let log: string = "";
+let record = func(line: string) {
+    if (log != "") { log += "\n"; }
+    log += line;
+};
+
+let Session = class (
+    | set: { record("admit"); return value; };
+    export let init = func(label: string) { record("evaluate " + label); };
+);
+let Pair = class (
+    export let init = func(left: Session, right: Session) {
+        record("init pair");
+    };
+);
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let pair = new Pair(right: new Session("right"), left: new Session("left"));
+        console.print_line(log);
+        return program.ExitCode.Ok;
+    };
+);

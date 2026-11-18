@@ -1,0 +1,7 @@
+// An override keeps the base method's defaults (edge case 33).
+let Shape = class (
+    export let area = func(scale: int = 1) -> int => scale;
+);
+let Square = class : Shape (
+    export let.override area = func(scale: int = 2) -> int => scale * 4;
+);

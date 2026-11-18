@@ -1,0 +1,11 @@
+// Edge case 79: a generator's sequence cannot be given to a task.
+let sequences = import:Std.Collections.Sequence;
+let numbers = iterator() -> int {
+    yield 1;
+};
+let consume = func(items: sequences.Sequence<int>) -> void {};
+let work = func() -> void {
+    scope {
+        spawn consume(numbers());
+    }
+};

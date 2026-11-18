@@ -1,0 +1,19 @@
+// After the body ends, has_next is false and next is the `no such element`
+// trap (docs/design/Lifetime030.md, edge case 66).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let GeneratorExhausted = module:program.Entry (
+    let one = iterator() -> int {
+        yield 7;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let items = one().iterator();
+        console.print_line(items.next().to_string());
+        console.print_line(items.has_next().to_string());
+        console.print_line(items.has_next().to_string());
+        console.print_line(items.next().to_string());
+        return program.ExitCode.Ok;
+    };
+);

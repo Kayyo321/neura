@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: seed must be at least 32 bytes
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new drbg.ChaCha20Drbg(new([1, 2, 3]));
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,7 @@
+error[E0241]: unterminated template or stylesheet
+ --> $DIR/unterminated-template.nra:1:20
+  |
+1 | let ready = html() {
+  |                    ^ this body has no closing '}'
+
+For more information about this error, try `neura explain E0241`.

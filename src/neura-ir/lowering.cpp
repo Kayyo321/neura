@@ -1,33 +1,51 @@
 #include "aggregate.hpp"
+#include "any.hpp"
 #include "attributes.hpp"
+#include "class_hooks.hpp"
+#include "conformance.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
+#include "derive_json.hpp"
 #include "float.hpp"
+#include "hook_arguments.hpp"
 #include "host_binding.hpp"
+#include "initialization_order.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
 #include "integer.hpp"
 #include "ir.hpp"
+#include "lifetime.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
+#include "frozen.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 #include "reference_initialization.hpp"
 #include "reference_storage.hpp"
+#include "scoped_resources.hpp"
+#include "event_guard.hpp"
 #include "static_initialization.hpp"
 #include "tags.hpp"
+#include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
+#include "tooling/json.hpp"
+#include "util/sha256.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
 
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
+#include <functional>
 #include <cstdint>
+#include <deque>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -54,6 +72,8 @@ std::optional<IrType> primitive(std::string_view name) {
     if (name == "void") return void_type;
     if (name == "bool") return bool_type;
     if (name == "string") return string_type;
+    // docs/design/Matching030.md: `any` is a type name wherever a type is read.
+    if (name == "any") return any_type;
     // `int` and `byte` are aliases of int32 and uint8 (Types.md). Lowering
     // spells every integer type by its sized name, so the aliases are
     // interchangeable with it everywhere.
@@ -181,6 +201,11 @@ struct Context {
     // found at or above it was declared inside that scope. Without a task
     // scope every local of the function body qualifies; parameters never do.
     std::size_t task_scope_base = 0;
+    // Inside a startup block (Modules.md, Startup blocks).
+    bool startup_block = false;
+    // A field or global initializer resolves names in its enclosing scope,
+    // but owns the closures it creates.
+    SymbolId initializer = no_symbol;
 };
 
 struct ClosureEnvironment {
@@ -192,6 +217,11 @@ struct ClosureEnvironment {
 
 SymbolId lexical_owner(const Context& context) {
     return context.closure ? lexical_owner(context.closure->enclosing) : context.owner;
+}
+
+SymbolId closure_owner(const Context& context) {
+    if (context.closure) return context.closure->layout;
+    return context.initializer == no_symbol ? context.owner : context.initializer;
 }
 
 class Lowering {
@@ -230,10 +260,13 @@ private:
     };
 
     IrProgram program_;
+    // Every type argument written in this compilation, for E0580 (frozen.hpp).
+    std::vector<WrittenTypeArgument> written_type_arguments_;
     std::vector<Entry> entries_;
     std::vector<SymbolId> file_ids_;
     Names linked_files_;
     Names library_files_;
+    std::map<SymbolId, std::string> artifact_origins_;
     std::map<std::string, SymbolId, std::less<>> reference_layouts_;
     std::set<const Statement*> reference_field_bindings_;
     // The single assignments of deferred `last` bindings (definite_assignment.hpp).
@@ -241,6 +274,23 @@ private:
     std::map<std::pair<std::string, std::string>, SymbolId> linked_modules_;
     std::map<const Statement*, GlobalDestructure> destructures_;
     std::set<std::pair<SymbolId, SymbolId>> wrapper_imports_;
+    std::map<SymbolId, std::vector<IrNode>> template_constants_;
+    // Stylesheet forms (Html030.md, Stylesheets): the scoped names of each
+    // css.module constant, and every stylesheet constant with the bundle
+    // path of its file, to order the links once lowering is done.
+    struct StyleModuleNames {
+        std::map<std::string, std::string, std::less<>> classes;
+        std::map<std::string, std::string, std::less<>> keyframes;
+    };
+    std::map<SymbolId, StyleModuleNames> style_modules_;
+    std::map<const Expr*, SymbolId> stylesheet_constants_;
+    struct StylesheetLink {
+        SymbolId constant;
+        std::size_t offset;
+        std::string path;
+    };
+    std::vector<StylesheetLink> stylesheet_links_;
+    std::deque<Declaration> named_html_;
     const std::vector<ParsedFile>* files_ = nullptr;
     SymbolId root_class_ = no_symbol;
     // Trusted library functions bound to a scheduler operation, by name.
@@ -280,10 +330,13 @@ private:
     std::map<const Declaration*, SymbolId> occurrence_classes_;
     std::set<const Declaration*> binding_bodies_;
     std::vector<SymbolId> pending_anonymous_;
+    std::map<SymbolId, std::size_t> anonymous_ordinals_;
+    std::map<SymbolId, std::string> anonymous_owners_;
+    std::map<SymbolId, std::size_t> closure_ordinals_;
     void mark_binding_annotation(const TypeSyntax& syntax);
     IrType anonymous_class(const TypeSyntax& syntax, const Context& context);
     std::string structural_key(SymbolId cls) const;
-    std::string canonical_type(const IrType& type) const;
+    std::string canonical_type(const IrType& type, bool lexical = false) const;
     bool structural_class(const IrType& type) const;
     IrNode construct(const Expr& expr, Context& context, const IrType* expected);
     IrNode construct_structural(const Expr& expr, Context& context, const IrType& object,
@@ -341,11 +394,19 @@ private:
     bool can_bind_reference(const IrNode& place, const IrType& type) const;
     IrNode bind_reference(IrNode place, const IrType& type);
     IrType callable_type(std::vector<IrType> signature, const Span& span);
-    SymbolId closure_layout(const Span& span, SymbolId scope);
+    std::string closure_owner_name(SymbolId owner) const;
+    SymbolId closure_layout(const Span& span, const Context& context);
     SymbolId closure_method(SymbolId layout, const IrType& type, const Span& span,
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
-    IrNode lambda(const Declaration& declaration, Context& context);
+    IrNode lambda(const Declaration& declaration, Context& context, const IrType* expected = nullptr);
+    class UiLowering;
+    IrNode html_factory(const Expr& expr, Context& context);
+    IrNode stylesheet(const Expr& expr, Context& context);
+    std::optional<IrNode> style_module_name(const Expr& expr, Context& context);
+    void order_stylesheets();
+    std::vector<IrNode> html_body(SymbolId id, const Expr& expression, Context& context);
+    IrType html_view_type(const Span& span, const Context& context);
     IrNode bind_function(IrNode callee, Context& context, bool owned = false);
     std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
@@ -372,7 +433,7 @@ private:
     IrNode select(const Expr& expr, Context& context, bool for_call = false);
     IrNode wrapped_member(const Expr& expr, const IrType& type, Context& context,
                           std::optional<IrNode> receiver = std::nullopt);
-    IrNode call(const Expr& expr, Context& context);
+    IrNode call(const Expr& expr, Context& context, const IrType* expected = nullptr);
     std::optional<IrNode> primitive_call(const Expr& expr, Context& context);
     IrNode enum_construct(const IrNode& variant, const Expr& expr, Context& context);
     Substitution enum_arguments(const IrType& type) const;
@@ -410,6 +471,97 @@ private:
     void resolve_destructure(const Statement& stmt, SymbolId file);
     IrNode lower_match(const Statement& stmt, Context& context, bool produces_value,
                        const IrType* expected = nullptr, bool call_argument = false);
+    // Guards, nested and tuple patterns, and match.is
+    // (docs/design/Matching030.md). The implementation is in
+    // lowering_matching.inc.
+    struct PatternStep;
+    struct CoverPattern;
+    std::map<SymbolId, std::vector<SymbolId>> variants_;
+    const std::vector<SymbolId>& enum_variants(SymbolId enumeration);
+    SymbolId arm_variant(const std::string& name, const Span& span, const Context& context, const IrType& type);
+    std::vector<IrType> constructor_arguments(const IrType& type, SymbolId constructor) const;
+    bool useful(const std::vector<std::vector<CoverPattern>>& matrix, const std::vector<CoverPattern>& row,
+                const std::vector<IrType>& types, std::vector<CoverPattern>& witness);
+    std::string cover_text(const CoverPattern& pattern, const IrType& type) const;
+    CoverPattern lower_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
+                               std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    CoverPattern element_pattern(const PatternSyntax& pattern, IrNode projection, std::vector<PatternStep>& steps,
+                                 std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    struct IsCover {
+        enum class Kind { Wildcard, Nil, Type };
+        Kind kind = Kind::Wildcard;
+        IrType type{};
+    };
+    void is_subject(const IrNode& subject) const;
+    bool scalar_subject(const IrType& type) const;
+    IsCover is_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
+                       std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    bool is_covered(const IsCover& earlier, const IsCover& later, const IrType& subject) const;
+    IsCover any_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
+                        std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    void is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered,
+                       bool produces_value) const;
+    void wildcard_fix(Diagnostic& error, const Statement& stmt, bool produces_value) const;
+    // Optional access, coalescing and propagation (lowering_optional.inc).
+    SymbolId library_enum(std::string_view path, std::string_view module, std::string_view name, const Span& span,
+                          const Context& context);
+    SymbolId library_variant(SymbolId enumeration, std::string_view name, const Span& span) const;
+    bool library_enum_type(const IrType& type, std::string_view path, std::string_view module) const;
+    IrType generic_enum(SymbolId enumeration, const IrType& argument) const;
+    IrNode variant_value(SymbolId variant, const IrType& type, std::optional<IrNode> payload, const Span& span);
+    IrNode tag_is(const IrNode& value, SymbolId variant, const Span& span);
+    SymbolId hidden_local(const std::string& name, const IrType& type, const Span& span, const Context& context);
+    IrNode optional_receiver(const Expr& access, Context& context);
+    IrNode optional_access(const Expr& access, const Expr* call, Context& context);
+    IrNode member_of_optional(const Expr& member, Context& context, bool for_call);
+    IrNode coalesce(const Expr& expr, Context& context);
+    IrNode propagate(const Expr& expr, Context& context);
+    // The type any and the scope-bound conversion rule (lowering_any.inc).
+    void reject_erasure(const IrType& actual, const IrType& target, const Span& span) const;
+    void reserve_any(const std::string& name, const Span& span, std::string_view what) const;
+    IrNode pack_any(IrNode inner, const Span& span);
+    IrNode pack_expression(const Expr& expr, Context& context, bool call_argument);
+    IrNode any_tag_of(SymbolId local, const Span& span);
+    IrNode any_tag_is(SymbolId local, std::uint32_t tag, const Span& span);
+    IrNode any_unpack(SymbolId local, const IrType& type, const Span& span);
+    IrNode any_type_test(IrNode source, const IrType& target, const Span& span, const Context& context);
+    Diagnostic any_operation(const Span& span, const std::string& what) const;
+    Diagnostic any_boundary(const Span& span, const std::string& what) const;
+    std::string shown(const IrType& type) const;
+    bool lowers_to_any(const Expr& expr, Context& context);
+    // defer, using and generators (lowering_lifetime.inc).
+    void lower_defer(std::vector<IrNode>& instructions, const Statement& stmt, Context& context);
+    void require_function_block(const Span& keyword, std::string_view word, const Context& context);
+    void hoist_operands(IrNode& call, std::vector<IrNode>& saved, std::size_t number, const Context& context);
+    IrNode lower_using(const Statement& stmt, Context& context);
+    std::size_t lifetime_statements_ = 0;
+    // A generator's state class and the `$resume` method that runs its body.
+    struct GeneratorState {
+        SymbolId cls = no_symbol;
+        SymbolId index = no_symbol;
+        SymbolId buffer = no_symbol;
+        SymbolId buffered = no_symbol;
+        SymbolId finished = no_symbol;
+        SymbolId running = no_symbol;
+        std::size_t yields = 0;
+        // The locals that stand for the parameters, and each moved local's
+        // field.
+        std::vector<SymbolId> parameters;
+        std::map<SymbolId, SymbolId> moved;
+    };
+    std::map<SymbolId, GeneratorState> generator_states_;
+    std::size_t generator_count_ = 0;
+    IrType generator_sequence(const IrType& element, const Span& span, const Context& context);
+    IrNode generator_lambda(const Declaration& declaration, Context& context);
+    std::vector<IrNode> generator_factory(const Declaration& declaration, Context& context, SymbolId factory);
+    IrNode lower_yield(const Statement& stmt, Context& context);
+    IrNode generator_return(const Statement& stmt);
+    void lower_generator_body(SymbolId resume, std::vector<IrNode>& instructions);
+    // The `$resume` methods of generators, whose bodies hold no `using`.
+    std::set<SymbolId> generator_bodies_;
+    IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
+    IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
+                         bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
     IrNode do_loop(const Statement& stmt, Context& context);
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
@@ -446,6 +598,182 @@ private:
     IrNode read_place(IrNode place, Context& context);
     IrNode store_place(IrNode place, IrNode value, const Span& span);
     [[noreturn]] void accessor_reference(const IrNode& place, const IrType& type) const;
+
+    // Calls: named arguments and constant defaults (docs/design/Calls030.md).
+    // The implementation is in lowering_calls.inc.
+    struct ArgumentMap {
+        // For each parameter after the leading ones, the operand that gives
+        // its value, or none when its default does.
+        std::vector<std::optional<std::size_t>> source;
+        // For each written argument, the parameter it fills.
+        std::vector<std::size_t> parameter;
+        // Whether the written order differs from the parameter order.
+        bool reordered = false;
+    };
+    // The hidden locals of the last reordered call, which finish_call places
+    // before it.
+    std::vector<IrNode> named_prelude_;
+    static Span argument_span(const Expr& expr, std::size_t index);
+    void check_label_order(const Expr& expr, std::size_t first, SymbolId target) const;
+    void reject_labels(const Expr& expr, std::size_t first, std::string_view reason, bool order = true) const;
+    std::optional<ArgumentMap> map_arguments(SymbolId target, const Expr& expr, std::size_t first,
+                                             std::size_t leading, bool diagnose);
+    bool named_call(SymbolId target, const Expr& expr) const;
+    void named_arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
+                         const Substitution& replacements, Context& context, std::size_t leading);
+    void assemble_arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
+                            const ArgumentMap& map, std::vector<IrNode> admitted,
+                            const Substitution& replacements, Context& context, std::size_t leading);
+    IrNode finish_call(IrNode call);
+    std::vector<IrNode> named_call_prelude(IrNode& invocation);
+    void check_parameter_names(SymbolId method, SymbolId base);
+    Diagnostic ambiguous_overload(const Expr& expr, std::size_t first, SymbolId group, SymbolId one, SymbolId other,
+                                  const std::map<SymbolId, ArgumentMap>& maps) const;
+    bool has_default(SymbolId parameter) const;
+    IrNode default_value(SymbolId parameter, const IrType& type, const Span& span);
+    void record_defaults(SymbolId function, const Declaration& decl, Context& context);
+    // Contextual inference of type arguments.
+    struct Inference {
+        struct Solution {
+            IrType type;
+            Span source;
+            bool from_literal = false;
+        };
+        std::map<SymbolId, std::optional<Solution>> solutions;
+    };
+    // Arguments that inference lowered, by call and operand index, until the
+    // call assembles them.
+    std::map<const Expr*, std::vector<std::optional<IrNode>>> inferred_;
+    bool mentions(const IrType& type, const std::vector<SymbolId>& generics) const;
+    void unify(const IrType& parameter, const IrType& argument, const std::vector<SymbolId>& generics,
+               Inference& inference, const Span& source);
+    Substitution call_type_arguments(SymbolId target, const Expr& expr, const Substitution& replacements,
+                                     Context& context, const IrType* expected);
+    Substitution infer_type_arguments(SymbolId target, const Expr& expr, std::size_t first,
+                                      const Substitution& replacements, Context& context, const IrType* expected);
+    IrNode argument_value(const Expr& expr, std::size_t index, const IrType& expected, Context& context);
+    // Lambdas with untyped parameters.
+    IrNode untyped_lambda(const Declaration& declaration, Context& context, const IrType* expected,
+                          bool infer_result);
+    static bool untyped_lambda_expr(const Expr& expr);
+    std::string function_text(const IrType& type) const;
+    // Interpolated strings.
+    IrNode interpolation(const Expr& expr, Context& context);
+    // nameof.
+    IrNode name_of(const Expr& expr, Context& context);
+    SymbolId name_of_target(const Expr& path, Context& context);
+    // Extension sets.
+    std::map<std::string, std::vector<SymbolId>, std::less<>> extension_index_;
+    std::size_t extensions_indexed_ = 0;
+    void check_extension(SymbolId function, const Declaration& decl);
+    const std::vector<SymbolId>& extension_functions(std::string_view name);
+    SymbolId extension_group(SymbolId function) const;
+    std::vector<std::pair<SymbolId, SymbolId>> enabled_extension_sets(const Context& context);
+    bool finds_member(const IrNode& receiver, std::string_view name, const Context& context, const Span& span) const;
+    bool accepts_receiver(SymbolId function, const IrType& type);
+    std::optional<IrNode> extension_member(const Expr& expr, const IrNode& receiver, Context& context, bool for_call);
+    IrNode extension_call(const Expr& expr, IrNode callee, Context& context, const IrType* expected);
+    static bool lambda_fits(const Expr& expr, const IrType& expected);
+    // Startup blocks (Modules.md, Startup blocks); lowering_startup.inc.
+    IrNode startup_block(const Statement& stmt, const Context& context);
+    static Diagnostic return_in_startup_block(const Statement& stmt);
+    // Class hooks (docs/design/Hooks030.md); lowering_hooks.inc.
+    std::map<SymbolId, const HookClause*> hook_clauses_;
+    void declare_hooks(const Declaration& decl, SymbolId cls);
+    SymbolId synchronized_method(SymbolId cls) const;
+    void lower_hooks(SymbolId cls);
+    static std::string describe_found(const std::string& message);
+    void check_hooked_storage(SymbolId first);
+
+    // Records (docs/design/Records030.md). The implementation is in
+    // lowering_records.inc.
+    std::deque<Declaration> generated_declarations_;
+    // The value members lowering generated for each record.
+    std::map<SymbolId, std::vector<Declaration*>> record_members_;
+    bool record_class(SymbolId cls) const;
+    void check_record_syntax(const Declaration& decl) const;
+    void declare_record(SymbolId id, const Declaration& decl);
+    std::vector<SymbolId> derivations_;
+    std::map<SymbolId, std::vector<SymbolId>> derived_members_;
+    void expand_derivation(SymbolId id);
+    using CodecImports = std::map<SymbolId, std::pair<std::string, std::string>>;
+    std::string codec_source_name(SymbolId id, const Context& ctx, const Declaration& decl, CodecImports& imports);
+    std::size_t codec_shape(const IrType& type, const Span& at, const std::string& path,
+                            std::vector<IrType>& active, std::vector<CodecShape>& shapes);
+    void codec_mappings(std::vector<CodecShape>& shapes, const DeriveSyntax& syntax, const Context& ctx);
+
+    void lower_record_members(SymbolId id);
+    std::vector<TagSyntax> record_tags(const Declaration& decl) const;
+    std::optional<std::string> record_ineligible(const IrType& type, IrType& inner, std::vector<IrType> path = {}) const;
+    void check_record(SymbolId id);
+    void reject_record_destroy(const IrNode& object) const;
+    static void record_call_help(const Expr& initializer, Diagnostic& error);
+    IrNode copy(const Expr& expr, Context& context);
+
+    // Interface properties (docs/design/Records030.md). The implementation is
+    // in lowering_properties.inc.
+    static bool property_requirement_syntax(const Declaration& decl);
+    bool property_requirement(SymbolId field) const;
+    void check_property_requirement(const Declaration& decl) const;
+    void reject_clauseless_property(const Declaration& member) const;
+    void declare_requirement_accessors(const Declaration& decl, SymbolId field);
+    void type_requirement_accessors(SymbolId field);
+    SymbolId hidden_method(SymbolId cls, const std::string& name) const;
+    void check_property_requirements(SymbolId id);
+    // Virtual accessors and accessor overrides.
+    struct AccessorOverride {
+        const Declaration* decl;
+        SymbolId get;
+        SymbolId set;
+    };
+    struct OverrideClause {
+        SymbolId field;
+        SymbolId get;
+        SymbolId set;
+    };
+    std::map<SymbolId, std::vector<AccessorOverride>> accessor_overrides_;
+    std::optional<OverrideClause> override_clause_;
+    static bool accessor_override_syntax(const Declaration& decl);
+    std::size_t class_depth(SymbolId cls) const;
+    void check_dispatch_words(const Declaration& decl) const;
+    SymbolId declare_accessor_override(const Declaration& decl, SymbolId owner);
+    SymbolId own_hidden_method(SymbolId cls, const std::string& name) const;
+    SymbolId nearest_accessor(SymbolId start, const std::string& name, bool setter) const;
+    bool overridable_accessor(SymbolId function) const;
+    SymbolId static_accessor(SymbolId function);
+    void lower_clause_body(SymbolId function, const AccessorClause& clause, SymbolId field, const IrType& field_type);
+    struct PendingTwin {
+        SymbolId twin;
+        const AccessorClause* clause;
+        SymbolId field;
+        IrType field_type;
+        std::optional<OverrideClause> context;
+    };
+    std::vector<PendingTwin> pending_twins_;
+    std::map<SymbolId, OverrideClause> override_contexts_;
+    void lower_accessor_overrides(SymbolId id);
+    IrNode override_access(IrNode field, const Expr& expr);
+    SymbolId ensure_twin(SymbolId function);
+    void lower_pending_twins();
+
+    // Static interface requirements (docs/design/Records030.md). The
+    // implementation is in lowering_static.inc.
+    // The interface whose static requirement's signature is being resolved,
+    // whose type parameters it may use.
+    SymbolId requirement_scope_ = no_symbol;
+    bool static_requirement(SymbolId function) const;
+    void check_static_requirement_syntax(const Declaration& decl) const;
+    void check_static_requirements(SymbolId id);
+    std::vector<IrType> parameter_bounds(SymbolId parameter) const;
+    std::optional<std::pair<SymbolId, Substitution>> bound_requirement(SymbolId parameter, const std::string& name,
+                                                                       const Span& at);
+    std::optional<IrNode> conformance_call(const Expr& expr, Context& context);
+    [[noreturn]] void requirement_misuse(const Span& at, const std::string& name, bool value) const;
+    // Primitive conformance through companions.
+    std::set<SymbolId> conformance_checked_;
+    std::optional<IrType> companion_primitive(SymbolId module) const;
+    void check_module_conformance(SymbolId id);
+    bool satisfies_by_conformance(const IrType& actual, const IrType& bound, const Span& span, const Context& context);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -601,12 +929,12 @@ Diagnostic Lowering::non_exhaustive(const Statement& stmt, const std::vector<Sym
     std::string arms;
     for (const auto variant : missing) {
         std::string pattern = qualifier + symbol(variant).name;
-        const auto* declaration = variant < entries_.size() ? entries_[variant].declaration : nullptr;
-        if (declaration && !declaration->parameters.empty()) {
+        const auto& item = symbol(variant);
+        if (!item.payload_types.empty()) {
             std::string fields;
-            for (const auto& field : declaration->parameters)
-                fields += (fields.empty() ? "" : ", ") + (declaration->named_payload ? field.name : std::string("_"));
-            pattern += declaration->named_payload ? " { " + fields + " }" : "(" + fields + ")";
+            for (std::size_t i = 0; i < item.payload_types.size(); ++i)
+                fields += (i == 0 ? "" : ", ") + (item.payload_names.empty() ? std::string("_") : item.payload_names[i]);
+            pattern += item.payload_names.empty() ? "(" + fields + ")" : " { " + fields + " }";
         }
         arms += arm_indent + pattern + (produces_value ? " => <value>,\n" : " => {},\n");
     }
@@ -641,7 +969,35 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
     return id;
 }
 
+Declaration named_factory(const Declaration& binding, const Expr& expression, bool primary) {
+    Declaration factory{};
+    factory.kind = DeclKind::Function;
+    factory.name = binding.name;
+    factory.name_span = primary ? binding.name_span : std::optional<Span>{expression.span};
+    factory.span = primary ? binding.span : expression.span;
+    factory.type = TypeSyntax{expression.span, "[html View]", {}, {}};
+    factory.parameters = expression.html_factory->parameters;
+    factory.initializer = expression;
+    factory.constant = binding.constant;
+    factory.exported = binding.exported;
+    factory.override_member = binding.override_member;
+    factory.static_member = binding.static_member;
+    factory.has_body = true;
+    if (primary) {
+        factory.tags = binding.tags;
+        for (const auto& alternative : expression.html_factory->overloads)
+            factory.overloads.push_back(named_factory(binding, alternative, false));
+    }
+    return factory;
+}
+
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
+    if (accessor_override_syntax(decl) && symbol(owner).kind == SymbolKind::Class)
+        return declare_accessor_override(decl, owner);
+    if (decl.static_member && decl.kind == DeclKind::Function && !decl.has_body &&
+        symbol(owner).kind == SymbolKind::Interface)
+        check_static_requirement_syntax(decl);
+    if (decl.record) check_record_syntax(decl);
     if (!decl.accessors.empty()) check_accessor_member(decl, owner);
     if (decl.name == "_" && kind != SymbolKind::Variant) {
         if (decl.kind != DeclKind::Binding || decl.exported || decl.override_member ||
@@ -651,6 +1007,11 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
                 .with_code("E0310");
         return no_symbol;
     }
+    if (decl.kind == DeclKind::Binding && !decl.last && !decl.type && decl.accessors.empty() &&
+        decl.initializer && decl.initializer->html_factory && !decl.initializer->html_factory->retained) {
+        named_html_.push_back(named_factory(decl, *decl.initializer, true));
+        return declare(named_html_.back(), owner, kind);
+    }
     switch (decl.kind) {
     case DeclKind::Module: kind = SymbolKind::Module; break;
     case DeclKind::Class: kind = SymbolKind::Class; break;
@@ -659,6 +1020,9 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     case DeclKind::Enum: kind = SymbolKind::Enum; break;
     case DeclKind::Binding: break;
     }
+    if (decl.kind == DeclKind::Class || decl.kind == DeclKind::Interface || decl.kind == DeclKind::Enum ||
+        decl.kind == DeclKind::Module || (decl.initializer && decl.initializer->kind == ExprKind::Import))
+        reserve_any(decl.name, decl.name_span.value_or(decl.span), "type, module or alias");
     if (decl.cast_target) {
         if (symbol(owner).kind != SymbolKind::Class || decl.static_member || decl.override_member ||
             !decl.has_body || !decl.generics.empty() || !decl.parameters.empty()) {
@@ -732,13 +1096,23 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(id).singleton_instance = instance;
         symbol(instance).constant = true;
     }
-    if (!decl.accessors.empty()) declare_accessors(decl, id);
-    attach_tags(program_, id, tag_target(program_, id), decl.tags, decl.name_span.value_or(decl.span),
-                entries_[id].overloads);
+    if (!decl.accessors.empty()) {
+        if (symbol(owner).kind == SymbolKind::Interface) declare_requirement_accessors(decl, id);
+        else declare_accessors(decl, id);
+    }
+    if (!decl.hooks.empty() && kind == SymbolKind::Class) declare_hooks(decl, id);
+    attach_tags(program_, id, tag_target(program_, id), decl.record ? record_tags(decl) : decl.tags,
+                decl.name_span.value_or(decl.span), entries_[id].overloads);
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
-    for (const auto& child : decl.members) declare(child, id, member_kind);
+    for (const auto& child : decl.members) {
+        // A property requirement is a field of its interface, without storage.
+        const bool property = kind == SymbolKind::Interface && !child.static_member && property_requirement_syntax(child);
+        declare(child, id, property ? SymbolKind::Field : member_kind);
+    }
+    if (decl.record) declare_record(id, decl);
+    if (decl.derive) derivations_.push_back(id);
     return id;
 }
 
@@ -921,7 +1295,8 @@ SymbolId Lowering::find(std::string_view name, const Context& context, const Spa
     for (auto scope = context.owner; scope != no_symbol; scope = symbol(scope).owner) {
         static_context |= is_static_scope(symbol(scope));
         if (auto id = member(scope, name, false); id != no_symbol) {
-            if (static_context && symbol(id).kind == SymbolKind::TypeParameter && class_or_interface(symbol(scope).kind))
+            if (static_context && symbol(id).kind == SymbolKind::TypeParameter && class_or_interface(symbol(scope).kind) &&
+                scope != requirement_scope_)
                 throw Diagnostic(span, "static member cannot use an enclosing class type parameter").with_code("E0501");
             return id;
         }
@@ -1030,6 +1405,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         if (scope_bound(actual))
             throw Diagnostic(args[i].span, "a value of type " + describe(actual) +
                                            " cannot leave its scope: it cannot be a type argument").with_code("E0605");
+        written_type_arguments_.push_back({params[i], actual, args[i].span});
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -1037,7 +1413,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         const auto check = [&](const IrType& declared) {
             const auto bound = substitute(declared, result);
             const auto& actual = result.at(params[i]);
-            if (!assignable(actual, bound)) {
+            if (!assignable(actual, bound) && !satisfies_by_conformance(actual, bound, args[i].span, context)) {
                 throw Diagnostic(args[i].span, "type argument " + describe(actual) + " does not satisfy the bound " +
                                                describe(bound) + " of type parameter '" + parameter.name + "'")
                     .with_code("E0418");
@@ -1050,6 +1426,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
 }
 
 IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
+    if (syntax.name == "[html View]") return html_view_type(syntax.span, context);
     IrType result;
     if (syntax.name == "[tuple]") {
         result = {TypeKind::Tuple, {}, no_symbol, {}};
@@ -1059,6 +1436,9 @@ IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
                 throw Diagnostic(part.span, "a tuple element cannot have type void").with_code("E0416");
             result.arguments.push_back(std::move(element));
         }
+    } else if (syntax.name == "[generator]") {
+        // A generator's result (docs/design/Lifetime030.md): Sequence<T>.
+        result = generator_sequence(type(syntax.arguments.front(), context), syntax.span, context);
     } else if (syntax.name == "[function]") {
         std::vector<IrType> signature;
         for (const auto& part : syntax.arguments) signature.push_back(type(part, context));
@@ -1239,9 +1619,55 @@ IrType Lowering::callable_type(std::vector<IrType> signature, const Span& span) 
     return {TypeKind::Callable, "func", no_symbol, std::move(signature)};
 }
 
-SymbolId Lowering::closure_layout(const Span& span, SymbolId scope) {
+std::string closure_name_component(std::string_view name, bool library_path = false) {
+    constexpr std::string_view hex = "0123456789ABCDEF";
+    std::string escaped;
+    for (const unsigned char byte : name) {
+        if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
+            byte == '_' || byte == '-' || byte == '.' || (library_path && byte == '/')) {
+            escaped += static_cast<char>(byte);
+        } else {
+            escaped += '%';
+            escaped += hex[byte >> 4];
+            escaped += hex[byte & 15];
+        }
+    }
+    return escaped;
+}
+
+std::string Lowering::closure_owner_name(SymbolId owner) const {
+    const auto& item = symbol(owner);
+    if (item.kind == SymbolKind::File) {
+        if (!item.library_path.empty()) return closure_name_component(item.library_path, true);
+        const auto name = std::string_view(item.name);
+        const auto separator = name.find_last_of("/\\");
+        return closure_name_component(separator == std::string_view::npos ? name : name.substr(separator + 1));
+    }
+    if (item.kind == SymbolKind::Class && item.name.starts_with(stable_closure_prefix))
+        return item.name.substr(stable_closure_prefix.size());
+    if (const auto found = anonymous_owners_.find(owner); found != anonymous_owners_.end())
+        return found->second;
+
+    auto name = closure_name_component(item.name);
+    if (item.overload_group != no_symbol) {
+        const auto& branches = entries_[item.overload_group].overloads;
+        const auto index = std::ranges::find(branches, owner) - branches.begin();
+        name = closure_name_component(symbol(item.overload_group).name) + "#" + std::to_string(index + 1);
+    } else if (item.user_cast) {
+        name = "$as#" + closure_name_component(canonical_type(item.type, true));
+    }
+    if (item.owner == no_symbol) return name;
+    const auto separator = symbol(item.owner).kind == SymbolKind::File ? "::" : "/";
+    return closure_owner_name(item.owner) + separator + name;
+}
+
+SymbolId Lowering::closure_layout(const Span& span, const Context& context) {
+    const auto owner = closure_owner(context);
+    const auto ordinal = ++closure_ordinals_[owner];
+    const auto scope = lexical_owner(context);
     const auto file = owner_kind(scope, SymbolKind::File);
-    const auto layout = add(SymbolKind::Class, "$closure" + std::to_string(program_.symbols.size()), span, file);
+    const auto layout = add(SymbolKind::Class, std::string(stable_closure_prefix) + closure_owner_name(owner) +
+                                               "$" + std::to_string(ordinal), span, file);
     symbol(layout).type = {TypeKind::Object, symbol(layout).name, layout, {}};
     // A closure body may use any type parameter in lexical scope, including
     // one that appears only in a local annotation or another generic call.
@@ -1362,11 +1788,15 @@ IrType Lowering::parameter_type(const Parameter& parameter, const Context& conte
     return collection_type(TypeKind::Array, element);
 }
 
-IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
+IrNode Lowering::lambda(const Declaration& declaration, Context& context, const IrType* expected) {
+    if (declaration.untyped_parameters) return untyped_lambda(declaration, context, expected, false);
     const auto& span = declaration.span;
     std::vector<IrType> signature;
     std::vector<std::string> names;
     for (const auto& parameter : declaration.parameters) {
+        if (parameter.default_value)
+            throw Diagnostic(*parameter.default_span, "a parameter of a lambda takes no default").with_code("E0226")
+                .label("a lambda is called through a function value, which carries no defaults");
         if (parameter.variadic)
             throw Diagnostic(parameter.span, "a variadic parameter requires a named function").with_code("E0207");
         signature.push_back(parameter_type(parameter, context));
@@ -1375,7 +1805,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     }
     signature.push_back(type(*declaration.type, context));
     const auto callable = callable_type(std::move(signature), span);
-    ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(span, context), context, {}, {}};
     const auto method = closure_method(environment.layout, callable, span, names);
     if (declaration.type && symbol(method).type.kind != TypeKind::Void) result_spans_.emplace(method, declaration.type->span);
     Context inner{method, method, context.receiver, 0, {entries_[method].names}, &environment};
@@ -1412,7 +1842,7 @@ IrNode Lowering::bind_function(IrNode callee, Context& context, bool owned) {
     }
     signature.push_back(substitute(symbol(target).type, replacements));
     const auto callable = callable_type(std::move(signature), span);
-    ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(span, context), context, {}, {}};
     const auto method = closure_method(environment.layout, callable, span, names);
     auto invocation = node(IrOp::Call, span, symbol(method).type);
     invocation.symbol = target;
@@ -1452,6 +1882,7 @@ std::optional<IrNode> Lowering::static_qualifier(IrNode& callee) {
 
 void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& context) {
     for (const auto& parameter : decl.generics) {
+        reserve_any(parameter.name, parameter.span, "type parameter");
         auto generic = add(SymbolKind::TypeParameter, parameter.name, parameter.span, id);
         if (!entries_[id].names.emplace(parameter.name, generic).second)
             throw Diagnostic(parameter.span, "duplicate type parameter '" + parameter.name + "'").with_code("E0303");
@@ -1481,6 +1912,9 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
 
 void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     auto ctx = context(symbol(id).owner);
+    ctx.initializer = id;
+    if (decl.initializer && decl.initializer->kind == ExprKind::Stylesheet)
+        stylesheet_constants_[&*decl.initializer] = id;
     if (decl.initializer && decl.initializer->kind == ExprKind::Import) {
         if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation").with_code("E0704");
         auto target = resolve_import(*decl.initializer);
@@ -1496,7 +1930,14 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
             symbol(id).type = std::move(builtin);
             return;
         }
-        auto initializer = expression(init, ctx);
+        auto initializer = [&] {
+            try {
+                return expression(init, ctx);
+            } catch (Diagnostic& error) {
+                record_call_help(init, error);
+                throw;
+            }
+        }();
         if (initializer.op == IrOp::Reference && initializer.symbol != no_symbol) {
             auto kind = symbol(initializer.symbol).kind;
             if (kind == SymbolKind::Alias || class_or_interface(kind) || kind == SymbolKind::Enum) {
@@ -1578,6 +2019,17 @@ void Lowering::resolve(SymbolId id) {
     entries_[id].resolution = Resolution::Resolving;
     const TagScope tag_scope(id);
     const auto& decl = *entries_[id].declaration;
+    // A static requirement's signature may use its interface's type
+    // parameters (lowering_static.inc).
+    struct RequirementScope {
+        SymbolId& scope;
+        SymbolId saved;
+        ~RequirementScope() { scope = saved; }
+    } requirement_scope{requirement_scope_, requirement_scope_};
+    if (decl.kind == DeclKind::Function && decl.static_member && !decl.has_body && symbol(id).owner != no_symbol &&
+        is_static_scope(symbol(symbol(id).owner)) &&
+        symbol(symbol(symbol(id).owner).owner).kind == SymbolKind::Interface)
+        requirement_scope_ = symbol(symbol(id).owner).owner;
     auto ctx = context(id);
     if (class_or_interface(symbol(id).kind) || decl.kind == DeclKind::Module) {
         auto kind = decl.kind == DeclKind::Module ? TypeKind::Module : TypeKind::Object;
@@ -1609,7 +2061,8 @@ void Lowering::resolve(SymbolId id) {
         } else if (decl.base) {
             throw Diagnostic(decl.base->span, "a module cannot inherit from class").with_code("E0503");
         }
-        for (const auto& syntax : decl.interfaces) {
+        // A module's list is a companion's conformance (lowering_static.inc).
+        for (const auto& syntax : decl.kind == DeclKind::Module ? std::vector<TypeSyntax>{} : decl.interfaces) {
             auto interface = type(syntax, ctx);
             if (interface.kind != TypeKind::Object || symbol(interface.symbol).kind != SymbolKind::Interface) {
                 throw Diagnostic(syntax.span, "an interface is required here").with_code("E0421");
@@ -1652,6 +2105,7 @@ void Lowering::resolve(SymbolId id) {
                                                  " cannot leave its scope: it cannot be an enum payload")
                         .with_code("E0605");
                 symbol(variant).payload_types.push_back(std::move(payload));
+                if (member.named_payload) symbol(variant).payload_names.push_back(field.name);
             }
         }
     } else if (decl.kind == DeclKind::Function) {
@@ -1684,11 +2138,13 @@ void Lowering::resolve(SymbolId id) {
                     ? VariadicKind::Untyped : VariadicKind::Typed;
             }
         }
+        record_defaults(id, decl, ctx);
+        check_extension(id, decl);
         if (!decl.has_body && symbol(symbol(id).owner).kind != SymbolKind::Module &&
             !class_or_interface(symbol(symbol(id).owner).kind))
             throw Diagnostic(decl.span, "only class, interface or module members may omit a function body")
                 .with_code("E0434");
-        if (!decl.has_body && decl.static_member)
+        if (!decl.has_body && decl.static_member && !static_requirement(id))
             throw Diagnostic(decl.span, "a static function requires a body").with_code("E0501");
         if (decl.host_binding) {
             const auto file = source_file(program_, id);
@@ -1842,6 +2298,8 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
                 if (requirement != no_symbol && !static_member(requirement)) {
                     if (!symbol(id).exported) throw Diagnostic(decl.span, "an override must be exported")
                         .with_code("E0502");
+                    resolve(requirement);
+                    check_parameter_names(id, requirement);
                     symbol(id).overrides = requirement;
                     return;
                 }
@@ -1882,6 +2340,7 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
     });
     if (!match) throw Diagnostic(decl.span, "override does not match inherited member '" + decl.name + "'")
         .with_code("E0502");
+    check_parameter_names(id, inherited);
     symbol(id).overrides = inherited;
 }
 
@@ -1938,6 +2397,7 @@ void Lowering::check_interfaces(SymbolId id) {
                 throw Diagnostic(candidate.span, "member '" + name + "' does not match the interface requirement")
                     .with_code("E0504");
             }
+            for (const auto& method : methods) check_parameter_names(implementation, method.method);
             continue;
         }
         std::size_t defaults = 0;
@@ -2059,19 +2519,48 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         const auto builtin = primitive(operand.text);
         if (builtin && primitive_wrapper(*builtin) && find(operand.text, context, operand.span) == no_symbol)
             return wrapped_member(expr, *builtin, context);
+        // `T.name` without a call (lowering_static.inc).
+        if (const auto parameter = find(operand.text, context, operand.span);
+            parameter != no_symbol && symbol(parameter).kind == SymbolKind::TypeParameter) {
+            if (bound_requirement(parameter, expr.text, expr.span)) requirement_misuse(expr.span, expr.text, true);
+            throw Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " + operand.text)
+                .with_code("E0305")
+                .label("no bound of '" + operand.text + "' requires a static function '" + expr.text + "'");
+        }
+    }
+    // `Interface<...>.name` for a static requirement (lowering_static.inc).
+    if (operand.kind == ExprKind::TypeApplication && !operand.operands.empty() &&
+        operand.operands.front().kind == ExprKind::Name) {
+        const auto named = find(operand.operands.front().text, context, operand.span);
+        if (named != no_symbol && symbol(named).kind == SymbolKind::Interface &&
+            static_requirement(own_member(named, expr.text)))
+            requirement_misuse(expr.span, expr.text, false);
     }
     auto receiver = expression(operand, context);
+    if (auto extension = extension_member(expr, receiver, context, for_call)) return std::move(*extension);
     auto nominal = receiver_type(receiver.type);
     if (nominal.kind != TypeKind::Object &&
         (receiver.op != IrOp::Reference ||
          (receiver.symbol != no_symbol && symbol(receiver.symbol).kind == SymbolKind::Variant)) &&
-        intrinsic_value_member(expr.text) && supports_value_members(program_, nominal)) {
-        // Ensure the root method contracts are available when a generic
-        // instantiation or a composite operation encounters a class value.
-        root_class();
-        auto result = node(IrOp::Reference, expr.span, {TypeKind::Callable, expr.text, no_symbol, {}});
-        result.operands.push_back(std::move(receiver));
-        return result;
+        intrinsic_value_member(expr.text)) {
+        if (!supports_value_members(program_, nominal)) {
+            if (nominal.kind == TypeKind::Enum)
+                throw Diagnostic(expr.span, "a payload of " + describe(nominal) + " does not support '" + expr.text + "'")
+                    .with_code("E0305");
+        } else {
+            if (receiver.op == IrOp::Reference && nominal.kind == TypeKind::Enum &&
+                has_enum_payload(program_, nominal.symbol)) {
+                if (!symbol(receiver.symbol).payload_types.empty())
+                    throw Diagnostic(operand.span, "enum variant requires a payload").with_code("E0427");
+                receiver.op = IrOp::EnumConstruct;
+            }
+            // Ensure the root method contracts are available when a generic
+            // instantiation or a composite operation encounters a class value.
+            root_class();
+            auto result = node(IrOp::Reference, expr.span, {TypeKind::Callable, expr.text, no_symbol, {}});
+            result.operands.push_back(std::move(receiver));
+            return result;
+        }
     }
     if (nominal.kind == TypeKind::String && expr.text == "byte_length") {
         auto result = node(IrOp::TextLength, expr.span, int32_type);
@@ -2127,6 +2616,13 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         ? member(nominal.symbol, expr.text, exported) : no_symbol;
     if (target == no_symbol && nominal.kind == TypeKind::Object)
         target = value_member(receiver.type, expr.text, exported);
+    // A static requirement is not called through its interface or a value.
+    if (static_requirement(target)) requirement_misuse(expr.span, expr.text, false);
+    if (target == no_symbol && nominal.kind == TypeKind::Object) {
+        for (const auto& view : nominal_views(program_, receiver.type))
+            if (symbol(view.symbol).kind == SymbolKind::Interface && static_requirement(own_member(view.symbol, expr.text)))
+                requirement_misuse(expr.span, expr.text, false);
+    }
     if (target == no_symbol) {
         auto error = Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
                                            describe(nominal)).with_code("E0305")
@@ -2180,6 +2676,7 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
 
 void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
                          const Substitution& replacements, Context& context, std::size_t leading) {
+    if (named_call(target, expr)) return named_arguments(call, expr, first, target, replacements, context, leading);
     auto params = target == no_symbol ? std::vector<SymbolId>{} : symbol(target).parameters;
     const auto variadic = target == no_symbol ? VariadicKind::None : symbol(target).variadic;
     const bool rest = variadic != VariadicKind::None;
@@ -2193,6 +2690,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
         if (target != no_symbol && !symbol(target).span.file.empty())
             error.label(name_span(target), "'" + symbol(target).name + "' takes " +
                                                std::string(rest ? "at least " : "") + plural(fixed, "parameter"));
+        if (count < fixed) error.note("parameter '" + symbol(params[count + leading]).name + "' is not given a value");
         throw error;
     }
     for (std::size_t i = 0; i < fixed; ++i) {
@@ -2204,7 +2702,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
             expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here",
                 function && index < function->parameters.size() ? &function->parameters[index].type : nullptr};
         }
-        call.operands.push_back(value(expr.operands[i + first], context, &expected, true));
+        call.operands.push_back(argument_value(expr, i + first, expected, context));
     }
     if (!rest) return;
     auto pack = node(IrOp::Collection, expr.span, substitute(symbol(params.back()).type, replacements));
@@ -2212,7 +2710,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
     for (std::size_t i = fixed; i < count; ++i) {
         const auto& input = expr.operands[i + first];
         pack.operands.push_back(variadic == VariadicKind::Untyped
-            ? pack_argument(input, element, context) : value(input, context, &element, true));
+            ? pack_argument(input, element, context) : argument_value(expr, i + first, element, context));
     }
     call.operands.push_back(std::move(pack));
 }
@@ -2252,6 +2750,9 @@ IrNode Lowering::cast_call(SymbolId target, IrNode source, const IrType& type, c
 IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context& context) {
     auto input = value(expr, context);
     if (input.type == argument) return input;
+    if (input.type.kind == TypeKind::Any)
+        throw any_operation(expr.span, "formatting")
+            .note("an untyped variadic parameter formats its arguments; an any is not formatted");
     auto variant_name = "Text";
     const IrType* numeric_type = nullptr;
     if (auto integer = specified_integer_format(input.type)) {
@@ -2265,6 +2766,7 @@ IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context
     } else if (input.type.kind == TypeKind::Bool) {
         variant_name = "Boolean";
     } else if (class_reference(input.type)) {
+        reject_erasure(input.type, symbol(root_class()).type, expr.span);
         variant_name = "Object";
     } else if (input.type != string_type) {
         if (!supports_value_members(program_, input.type))
@@ -2296,10 +2798,14 @@ Substitution Lowering::enum_arguments(const IrType& type) const {
 
 IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context& context) {
     const auto variant = target.symbol;
-    const auto* payload = entries_[variant].declaration;
+    const auto names = symbol(variant).payload_names;
     const bool named = expr.kind == ExprKind::NamedVariant;
+    reject_labels(expr, 1, "an enum constructor; a named payload is written 'Variant { name: value }'");
     const auto fields = symbol(variant).payload_types;
-    if (!payload || fields.empty() || !expr.type_arguments.empty() || named != payload->named_payload)
+    if (named && names.empty() && !entries_[variant].declaration)
+        throw Diagnostic(expr.span, "imported variant has no named payload fields").with_code("E0427")
+            .help("if this variant declares named fields, rebuild its .nir with NeuraIR 1.13");
+    if (fields.empty() || !expr.type_arguments.empty() || named != !names.empty())
         throw Diagnostic(expr.span, "use the variant's declared payload constructor").with_code("E0427");
     if (fields.size() != expr.operands.size() - 1)
         throw Diagnostic(expr.span, "expected " + std::to_string(fields.size()) + " enum payload field(s)")
@@ -2312,10 +2818,10 @@ IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context&
         auto index = i;
         if (named) {
             const auto& name = expr.field_names[i];
-            const auto field = std::ranges::find(payload->parameters, name, &Parameter::name);
-            if (field == payload->parameters.end() || !seen.insert(name).second)
+            const auto field = std::ranges::find(names, name);
+            if (field == names.end() || !seen.insert(name).second)
                 throw Diagnostic(expr.span, "unknown or repeated enum payload field '" + name + "'").with_code("E0427");
-            index = static_cast<std::size_t>(field - payload->parameters.begin());
+            index = static_cast<std::size_t>(field - names.begin());
             if (i != 0) result.text += ',';
             result.text += std::to_string(index);
         }
@@ -2347,6 +2853,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     const bool from_utf8 = target->kind == TypeKind::String && callee.text == "from_utf8";
     const auto bits_type = callee.text == "from_bits" ? float_bits_type(*target) : std::nullopt;
     if (!from_utf8 && !bits_type) return std::nullopt;
+    reject_labels(expr, 1, "a call of an intrinsic member");
     if (!expr.type_arguments.empty() || expr.operands.size() != 2)
         throw Diagnostic(expr.span, "expected one argument and no type arguments").with_code("E0407");
     const auto& input = expr.operands[1];
@@ -2364,9 +2871,12 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     return result;
 }
 
-IrNode Lowering::call(const Expr& expr, Context& context) {
-    if (auto result = primitive_call(expr, context)) return std::move(*result);
+IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected) {
     const auto& callee_expr = expr.operands.front();
+    if (callee_expr.kind == ExprKind::OptionalMember) return optional_access(callee_expr, &expr, context);
+    if (auto result = primitive_call(expr, context)) return std::move(*result);
+    if (auto result = style_module_name(expr, context)) return std::move(*result);
+    if (auto result = conformance_call(expr, context)) return std::move(*result);
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
     // say what the form requires (Concurrency.md section 4.4).
     if (callee_expr.kind == ExprKind::Name && callee_expr.text == "spawn" && expr.open &&
@@ -2374,12 +2884,17 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         throw Diagnostic(*expr.open, "a spawn operand begins with a name; bind the callee to a name first")
             .with_code("E0603");
     auto callee = callee_expr.kind == ExprKind::Member
-        ? select(callee_expr, context, true) : expression(callee_expr, context);
+        ? (callee_expr.operands.front().kind == ExprKind::OptionalMember ? member_of_optional(callee_expr, context, true)
+                                                                         : select(callee_expr, context, true))
+        : expression(callee_expr, context);
     if (callee.op == IrOp::Reference && callee.symbol != no_symbol &&
         symbol(callee.symbol).kind == SymbolKind::Variant) {
         return enum_construct(callee, expr, context);
     }
+    if (callee.type.kind == TypeKind::Callable && callee.type.name == "[extension]")
+        return extension_call(expr, std::move(callee), context, expected);
     if (is_function_value(callee.type)) {
+        reject_labels(expr, 1, "a call of a function value");
         if (!expr.type_arguments.empty()) throw Diagnostic(expr.span, "function values take no type arguments")
             .with_code("E0417");
         const auto signature = callee.type.arguments;
@@ -2410,9 +2925,10 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         result.op = IrOp::BaseInitialize;
         result.operands = std::move(callee.operands);
         result.symbol = select_overload(target, expr, 1, {}, context, result);
-        return result;
+        return finish_call(std::move(result));
     }
     if (target == no_symbol) {
+        reject_labels(expr, 1, "a call of an intrinsic member");
         if (const auto operation = intrinsic_value_member(callee.type.name)) {
             const bool equality = *operation == IrOp::ValueEquals;
             if (!expr.type_arguments.empty() || expr.operands.size() != (equality ? 2U : 1U))
@@ -2470,8 +2986,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     resolve(target);
     if (const auto bound = scheduler_bindings_.find(target); bound != scheduler_bindings_.end()) {
         // A copy: type() can add symbols.
-        const auto generics = symbol(target).generics;
-        auto replacements = type_arguments(generics, expr.type_arguments, expr.span, context);
+        auto replacements = call_type_arguments(target, expr, {}, context, expected);
         arguments(result, expr, 1, target, replacements, context);
         result.op = IrOp::SchedulerCall;
         result.symbol = no_symbol;
@@ -2481,13 +2996,13 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         if (scheduler_operation(bound->second)->typed) {
             result.type_arguments.push_back(replacements.at(symbol(target).generics.front()));
         }
-        return result;
+        return finish_call(std::move(result));
     }
     auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
         : receiver_arguments(callee.operands.front().type, symbol(target).owner);
     auto generics = symbol(target).generics;
-    auto instantiated = type_arguments(generics, expr.type_arguments, expr.span, context);
+    auto instantiated = call_type_arguments(target, expr, replacements, context, expected);
     for (auto generic : generics) result.type_arguments.push_back(instantiated.at(generic));
     replacements.merge(std::move(instantiated));
     if (symbol(target).external) {
@@ -2509,6 +3024,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     result.symbol = select_overload(target, expr, 1, replacements, context, result,
                                     wrapped_receiver ? &*wrapped_receiver : nullptr);
     result.type = substitute(symbol(result.symbol).type, replacements);
+    result = finish_call(std::move(result));
     return qualifier ? discard_before(std::move(*qualifier), std::move(result)) : std::move(result);
 }
 
@@ -2542,7 +3058,7 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
     }
     auto result = node(IrOp::Allocate, expr.span, object);
     result.symbol = select_overload(target, expr, 0, receiver_arguments(object), context, result);
-    return result;
+    return finish_call(std::move(result));
 }
 
 IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative) {
@@ -2627,11 +3143,19 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         throw Diagnostic(expr.span, "overloaded functions take no type arguments").with_code("E0417");
     auto branches = entries_[group].overloads;
     branches.insert(branches.begin(), group);
+    check_label_order(expr, first, no_symbol);
     std::vector<SymbolId> candidates;
+    // Each alternative maps the arguments to its parameters by position and
+    // label (Calls030.md, Overloads); without labels or defaults it applies
+    // when the counts are equal.
+    std::map<SymbolId, ArgumentMap> maps;
     for (const auto branch : branches) {
         resolve(branch);
-        if (symbol(branch).parameters.size() == count + leading && usable_receiver(branch))
+        if (!usable_receiver(branch)) continue;
+        if (auto map = map_arguments(branch, expr, first, leading, false)) {
+            maps.emplace(branch, std::move(*map));
             candidates.push_back(branch);
+        }
     }
     if (candidates.size() == 1) {
         arguments(call, expr, first, candidates.front(), replacements, context, leading);
@@ -2661,7 +3185,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     const auto target_typed = [](const Expr& input) { return input.kind == ExprKind::New && !input.type; };
     const auto contextual = [&](const Expr& input) {
         return numeric_literal(input) || input.kind == ExprKind::Nil ||
-            (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input);
+            (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input) ||
+            untyped_lambda_expr(input);
     };
     std::vector<std::optional<IrNode>> inputs;
     std::vector<std::optional<IrType>> defaults;
@@ -2669,9 +3194,14 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         const auto& input = expr.operands[i];
         inputs.emplace_back();
         defaults.emplace_back();
-        if (!contextual(input)) {
+        if (const auto lowered = inferred_.find(&expr);
+            lowered != inferred_.end() && i < lowered->second.size() && lowered->second[i]) {
+            // Lowered before the call, such as the receiver of an extension call.
+            inputs.back() = std::move(*lowered->second[i]);
+            lowered->second[i].reset();
+        } else if (!contextual(input)) {
             inputs.back() = value(input, context);
-        } else if (input.kind != ExprKind::Nil && !target_typed(input)) {
+        } else if (input.kind != ExprKind::Nil && !target_typed(input) && !untyped_lambda_expr(input)) {
             // Lowered again below with the chosen parameter type.
             SpeculativeDiagnostics speculative;
             try {
@@ -2681,7 +3211,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
             }
         }
     }
-    enum class Rank { Exact, Assignable, ReferenceBinding, Contextual, Cast };
+    // Packing into `any` ranks below every other match (docs/design/Matching030.md).
+    enum class Rank { Exact, Assignable, ReferenceBinding, Contextual, Cast, Packed };
     struct Match {
         SymbolId branch;
         std::vector<Rank> ranks;
@@ -2694,7 +3225,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         Match match{branch, {}, {}, {}};
         for (std::size_t i = 0; i < count; ++i) {
             const auto& input = expr.operands[i + first];
-            auto expected = substitute(symbol(symbol(branch).parameters[i + leading]).type, replacements);
+            auto expected = substitute(symbol(symbol(branch).parameters[maps.at(branch).parameter[i] + leading]).type,
+                                       replacements);
             auto conversion = no_symbol;
             Rank rank;
             if (inputs[i]) {
@@ -2710,9 +3242,17 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                     rank = Rank::Assignable;
                 } else if ((conversion = cast_method(argument.type, expected, context, false)) != no_symbol) {
                     rank = Rank::Cast;
+                } else if (expected.kind == TypeKind::Any &&
+                           (any_holdable(argument.type) || argument.type.kind == TypeKind::TypeParameter)) {
+                    rank = Rank::Packed;
                 } else {
                     break;
                 }
+            } else if (untyped_lambda_expr(input)) {
+                // Its body is not used to choose (Calls030.md): it fits a
+                // function type with as many parameters.
+                if (!lambda_fits(input, expected)) break;
+                rank = Rank::Contextual;
             } else if (target_typed(input)) {
                 const auto& object = expected;
                 if (object.kind == TypeKind::List) {
@@ -2754,7 +3294,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                     if (rejected.code() == "E0450" && !missing_new) missing_new = rejected;
                     break;
                 }
-                rank = defaults[i] == expected ? Rank::Exact : Rank::Contextual;
+                rank = expected.kind == TypeKind::Any ? Rank::Packed
+                     : defaults[i] == expected ? Rank::Exact : Rank::Contextual;
             }
             match.ranks.push_back(rank);
             match.types.push_back(std::move(expected));
@@ -2780,14 +3321,16 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     for (const auto& match : matches) {
         if (std::ranges::any_of(matches, [&](const Match& other) { return better(other, match); }))
             continue;
-        if (selected) throw Diagnostic(expr.span, "ambiguous overload of '" + symbol(group).name + "'")
-            .with_code("E0409");
+        if (selected) throw ambiguous_overload(expr, first, group, selected->branch, match.branch, maps);
         selected = &match;
     }
     if (!selected) {
         if (matches.empty() && missing_new) throw *missing_new;
         throw no_match();
     }
+    if (!expr.labels.empty() && symbol(selected->branch).variadic != VariadicKind::None)
+        reject_labels(expr, first, "a call of a function with a variadic parameter");
+    std::vector<IrNode> admitted;
     for (std::size_t i = 0; i < count; ++i) {
         const auto& input = expr.operands[i + first];
         auto argument = inputs[i] ? std::move(*inputs[i]) : value(input, context, &selected->types[i]);
@@ -2795,8 +3338,12 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
             argument = bind_reference(std::move(argument), selected->types[i]);
         else if (selected->casts[i] != no_symbol)
             argument = cast_call(selected->casts[i], std::move(argument), selected->types[i], input.span);
-        call.operands.push_back(std::move(argument));
+        else if (selected->types[i].kind == TypeKind::Any)
+            argument = pack_any(std::move(argument), input.span);
+        admitted.push_back(std::move(argument));
     }
+    assemble_arguments(call, expr, first, selected->branch, maps.at(selected->branch), std::move(admitted),
+                       replacements, context, leading);
     return selected->branch;
 }
 
@@ -3058,14 +3605,25 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
 }
 
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
-    auto result = expression_node(expr, context, expected, call_argument);
+    const bool guarded = expr.kind == ExprKind::Binary || expr.kind == ExprKind::Unary ||
+                         expr.kind == ExprKind::PrefixUpdate || expr.kind == ExprKind::PostfixUpdate ||
+                         expr.kind == ExprKind::ComparisonChain || expr.kind == ExprKind::Member ||
+                         expr.kind == ExprKind::Index || expr.kind == ExprKind::Call;
+    auto result = guarded ? any_guard(expr, context, [&] { return expression_node(expr, context, expected, call_argument); })
+                          : expression_node(expr, context, expected, call_argument);
     if (is_primitive_reference(result.type) && (!expected || result.type != *expected))
         return read_reference(std::move(result));
     return result;
 }
 
+#include "lowering_ui.inc"
+
 IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     switch (expr.kind) {
+    case ExprKind::HtmlFactory:
+        return html_factory(expr, context);
+    case ExprKind::Stylesheet:
+        return stylesheet(expr, context);
     case ExprKind::TypeApplication: {
         auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
@@ -3078,10 +3636,19 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return target;
     }
     case ExprKind::Lambda: {
-        auto result = lambda(*expr.lambda, context);
+        auto result = lambda(*expr.lambda, context, expected);
         if (expr.text == "new") result.text = owned_lambda;
         return result;
     }
+    case ExprKind::Generator: {
+        auto result = generator_lambda(*expr.lambda, context);
+        result.text = expr.text == "new" ? owned_lambda : generator_closure;
+        return result;
+    }
+    case ExprKind::Interpolation:
+        return interpolation(expr, context);
+    case ExprKind::NameOf:
+        return name_of(expr, context);
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {
@@ -3099,6 +3666,9 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             auto error = Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304")
                 .label("not found in this scope");
             suggest_name(error, expr.span, expr.text, visible_names(context), "a binding");
+            if (expr.text == "defer")
+                error.help("to defer a call, write 'defer f();' without parentheses around the call; "
+                           "a callee in parentheses is bound to a name first");
             throw error;
         }
         if (symbol(id).kind == SymbolKind::Function &&
@@ -3163,9 +3733,16 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::ComparisonChain:
         return comparison_chain(expr, context);
     case ExprKind::Member:
+        if (expr.operands.front().kind == ExprKind::OptionalMember) return member_of_optional(expr, context, false);
         return select(expr, context);
+    case ExprKind::OptionalMember:
+        return optional_access(expr, nullptr, context);
+    case ExprKind::Coalesce:
+        return coalesce(expr, context);
+    case ExprKind::Propagate:
+        return propagate(expr, context);
     case ExprKind::Call:
-        return call(expr, context);
+        return call(expr, context, expected);
     case ExprKind::Index: {
         auto receiver = value(expr.operands[0], context);
         if (receiver.type.kind == TypeKind::Tuple) {
@@ -3223,6 +3800,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             return result;
         }
         return construct(expr, context, expected);
+    case ExprKind::Copy:
+        return copy(expr, context);
     case ExprKind::NamedVariant: {
         const auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
@@ -3239,12 +3818,25 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         if (is_primitive_reference(target))
             throw Diagnostic(expr.type->span, "a primitive reference must be bound to storage").with_code("E0428");
         auto source = value(expr.operands.front(), context);
+        if (target.kind == TypeKind::Any) {
+            if (expr.kind == ExprKind::TypeTest)
+                throw Diagnostic(expr.span, "is requires a type that a value can have, not any").with_code("E0490")
+                    .label("every value converts to any; test for the type it holds");
+            return pack_any(std::move(source), expr.span);
+        }
+        if (source.type.kind == TypeKind::Any) {
+            if (expr.kind == ExprKind::TypeTest) return any_type_test(std::move(source), target, expr.span, context);
+            throw Diagnostic(expr.span, "operation is not defined for any").with_code("E0493")
+                .label("'as' is not defined for any")
+                .help("match the value instead: a 'match.is' arm 'name: " + describe(target) + "'");
+        }
         if (expr.kind == ExprKind::Cast) {
             if (const auto method = cast_method(source.type, target, context); method != no_symbol)
                 return cast_call(method, std::move(source), target, expr.span);
         }
         if (class_reference(source.type) && class_reference(target)) {
             const auto test = expr.kind == ExprKind::TypeTest;
+            if (!test) reject_erasure(source.type, target, expr.span);
             auto result = node(test ? IrOp::ClassIs : IrOp::ClassCast, expr.span, test ? bool_type : target);
             if (test) result.type_arguments.push_back(target);
             result.operands.push_back(std::move(source));
@@ -3273,6 +3865,11 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
 
 IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     const auto origin = std::exchange(expected_origin_, std::nullopt);
+    // A value is packed where an `any` is expected; a conditional or a match
+    // packs each of its results (docs/design/Matching030.md).
+    if (expected && expected->kind == TypeKind::Any && expr.kind != ExprKind::Conditional &&
+        expr.kind != ExprKind::Match)
+        return pack_expression(expr, context, call_argument);
     if (expr.kind == ExprKind::New && origin) new_origin_.emplace(&expr, *origin);
     auto result = expression(expr, context, expected, call_argument);
     if (expected && is_primitive_reference(*expected))
@@ -3294,6 +3891,7 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
          (result.symbol == no_symbol || symbol(result.symbol).kind != SymbolKind::Variant))) {
         throw Diagnostic(expr.span, "expected a value").with_code("E0422");
     }
+    if (expected) reject_erasure(result.type, *expected, expr.span);
     if (expected && call_argument && !assignable(result.type, *expected)) {
         if (const auto method = cast_method(result.type, *expected, context); method != no_symbol)
             return cast_call(method, std::move(result), *expected, expr.span);
@@ -3771,11 +4369,15 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         auto inner = std::move(invocation.body.back());
         invocation = std::move(inner);
     }
+    // The parent evaluates the arguments of a reordered named call in
+    // written order before it starts the task (Calls030.md).
+    auto prelude = named_call_prelude(invocation);
     if (invocation.op != IrOp::Call && invocation.op != IrOp::VirtualCall && invocation.op != IrOp::CallClosure)
         throw Diagnostic(operand.span, "spawn requires a call of a function, a method, or a function value")
             .with_code("E0603");
+    if (invocation.type.kind == TypeKind::Any) throw any_boundary(operand.span, "the result of a spawned call");
 
-    ClosureEnvironment environment{closure_layout(expr.span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(expr.span, context), context, {}, {}};
     for (std::size_t i = 0; i < invocation.operands.size(); ++i) {
         auto& input = invocation.operands[i];
         if (i == 0 && invocation.op == IrOp::VirtualCall && input.type.kind == TypeKind::Module) {
@@ -3836,6 +4438,12 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         // result until the scope closes.
         auto dropped = node(IrOp::Discard, expr.span);
         dropped.operands.push_back(std::move(started));
+        if (!prelude.empty()) {
+            auto block = node(IrOp::Block, expr.span);
+            block.body = std::move(prelude);
+            block.body.push_back(std::move(dropped));
+            dropped = std::move(block);
+        }
         if (!qualifier) return dropped;
         auto both = node(IrOp::Block, expr.span);
         auto first = node(IrOp::Discard, qualifier->span);
@@ -3848,6 +4456,10 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     auto task = node(IrOp::Allocate, expr.span, apply_arguments(symbol(task_class).type, arguments));
     task.symbol = task_init;
     task.operands.push_back(std::move(started));
+    if (!prelude.empty()) {
+        named_prelude_ = std::move(prelude);
+        task = finish_call(std::move(task));
+    }
     return qualifier ? discard_before(std::move(*qualifier), std::move(task)) : std::move(task);
 }
 
@@ -3985,6 +4597,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return store_place(std::move(destination), std::move(source), stmt.span);
     }
     case StmtKind::Block: {
+        if (stmt.startup && !context.startup_block)
+            throw Diagnostic(stmt.keyword, "a startup block is written at file or module level").with_code("E0218");
         auto result = node(IrOp::Block, stmt.span);
         result.body = body(stmt.body, context);
         return result;
@@ -4000,6 +4614,13 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return lower_match(stmt, context, false);
     case StmtKind::Destructure:
         throw Diagnostic(stmt.span, "destructuring requires a statement list").with_code("E0899");
+    case StmtKind::Defer:
+        require_function_block(stmt.keyword, "defer", context);
+        throw Diagnostic(stmt.span, "'defer' requires a statement list").with_code("E0899");
+    case StmtKind::Using:
+        return lower_using(stmt, context);
+    case StmtKind::Yield:
+        return lower_yield(stmt, context);
     case StmtKind::While: {
         auto result = node(IrOp::Loop, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
@@ -4015,9 +4636,11 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::ForEach:
         return for_each(stmt, context);
     case StmtKind::Return: {
+        if (context.function == no_symbol && context.startup_block) throw return_in_startup_block(stmt);
         if (context.function == no_symbol) {
             throw Diagnostic(stmt.span, "return is only allowed inside a function").with_code("E0431");
         }
+        if (generator_bodies_.contains(context.function)) return generator_return(stmt);
         const auto expected = symbol(context.function).type;
         const auto result_span = result_spans_.find(context.function);
         auto result = node(IrOp::Return, stmt.span);
@@ -4066,6 +4689,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         if (object.type.kind != TypeKind::Object) {
             throw Diagnostic(object.span, "destroy requires an object").with_code("E0514");
         }
+        reject_record_destroy(object);
         if (entries_[object.type.symbol].singleton_instance != no_symbol)
             throw Diagnostic(object.span, "a singleton cannot be destroyed").with_code("E0511");
         auto result = node(IrOp::Destroy, stmt.span);
@@ -4337,6 +4961,8 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
     if (stmt.kind == StmtKind::Destructure) {
         destructure(instructions, stmt, context);
+    } else if (stmt.kind == StmtKind::Defer) {
+        lower_defer(instructions, stmt, context);
     } else {
         instructions.push_back(statement(stmt, context));
     }
@@ -4393,6 +5019,8 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
         if (id != no_symbol) entries_[id].resolution = Resolution::Resolving;
     }
     auto scope = context(file);
+    if (const auto first = std::ranges::find_if(group.bindings, [](SymbolId id) { return id != no_symbol; });
+        first != group.bindings.end()) scope.initializer = *first;
     destructure(group.instructions, stmt, scope, &group.bindings);
     for (const auto id : group.bindings) {
         if (id != no_symbol) entries_[id].resolution = Resolution::Resolved;
@@ -4402,8 +5030,12 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
 
 IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produces_value,
                              const IrType* expected, bool call_argument) {
+    if (stmt.match_is || std::ranges::any_of(stmt.arms, &MatchArm::general))
+        return general_match(stmt, context, produces_value, expected, call_argument);
     auto subject = value(stmt.expressions.front(), context);
     const auto enum_type = subject.type;
+    if (enum_type.kind == TypeKind::Tuple)
+        return general_match(stmt, context, produces_value, expected, call_argument, std::move(subject));
     if (enum_type.kind != TypeKind::Enum)
         throw Diagnostic(subject.span, "match requires an enum value").with_code("E0411");
     auto owner = context.owner;
@@ -4433,7 +5065,7 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
         if (wildcard)
             throw Diagnostic(arm.span, "a wildcard match arm must be last").with_code("E0412");
         wildcard = arm.variant == "_";
-        const auto variant = wildcard ? no_symbol : qualified(arm.variant, arm.span, context);
+        const auto variant = wildcard ? no_symbol : arm_variant(arm.variant, arm.span, context, enum_type);
         if (!wildcard && (symbol(variant).kind != SymbolKind::Variant || symbol(variant).owner != enum_type.symbol))
             throw Diagnostic(arm.span, "match arm must name a variant of " + describe(enum_type)).with_code("E0412");
         if (const auto separator = arm.variant.rfind('.'); !wildcard && separator != std::string::npos) {
@@ -4446,8 +5078,8 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
             throw Diagnostic(arm.span, "duplicate match arm for '" + arm.variant + "'").with_code("E0412");
         auto fields = wildcard ? std::vector<IrType>{} : symbol(variant).payload_types;
         for (auto& field : fields) field = substitute(std::move(field), replacements);
-        const auto* declaration = wildcard ? nullptr : entries_[variant].declaration;
-        if (arm.bindings.size() != fields.size() || arm.named != (declaration && declaration->named_payload))
+        const auto names = wildcard ? std::vector<std::string>{} : symbol(variant).payload_names;
+        if (arm.bindings.size() != fields.size() || arm.named != !names.empty())
             throw Diagnostic(arm.span, "match pattern must bind each payload field, using _ to ignore a field")
                 .with_code("E0412");
 
@@ -4458,11 +5090,11 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
             auto field = i;
             if (arm.named) {
                 const auto& name = arm.fields[i];
-                const auto found = std::ranges::find(declaration->parameters, name, &Parameter::name);
-                if (found == declaration->parameters.end() || !seen_fields.insert(name).second)
+                const auto found = std::ranges::find(names, name);
+                if (found == names.end() || !seen_fields.insert(name).second)
                     throw Diagnostic(arm.span, "unknown or repeated enum payload field '" + name + "'")
                         .with_code("E0427");
-                field = static_cast<std::size_t>(found - declaration->parameters.begin());
+                field = static_cast<std::size_t>(found - names.begin());
             }
             const auto& binding = arm.bindings[i];
             if (binding.text == "_") continue;
@@ -4667,13 +5299,21 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
         check_definite_assignment(declaration, id);
-        auto instructions = body(declaration.body, ctx);
+        auto instructions = declaration.generator ? generator_factory(declaration, ctx, id)
+            : declaration.initializer && declaration.initializer->html_factory
+            ? html_body(id, *declaration.initializer, ctx) : body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
             throw missing_return(declaration.span, id, declaration);
         program_.bodies.push_back({id, std::move(instructions)});
         const auto branches = entries_[id].overloads;
         for (const auto branch : branches) lower_declaration(branch);
     } else if (declaration.kind == DeclKind::Module || class_or_interface(symbol(id).kind)) {
+        if (declaration.record) check_record(id);
+        if (declaration.derive)
+            for (const auto child : derived_members_.at(id)) lower_declaration(child);
+        // A companion's conformance is checked when a bound needs it
+        // (satisfies_by_conformance); any other module's is rejected here.
+        if (declaration.kind == DeclKind::Module && !companion_primitive(id)) check_module_conformance(id);
         if (symbol(id).kind == SymbolKind::Class) {
             const auto fields = reference_fields(declaration);
             if (!fields.empty()) {
@@ -4704,14 +5344,19 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (symbol(id).kind == SymbolKind::Interface) {
             for (const auto& member : declaration.members) {
-                if (member.static_member) continue;
+                if (member.static_member || property_requirement_syntax(member)) continue;
+                if (member.kind == DeclKind::Binding && !member.cast_target) reject_clauseless_property(member);
                 if (member.kind != DeclKind::Function || !member.generics.empty() ||
                     member.name == "init" || member.name == "deinit") {
                     throw Diagnostic(member.span, "interfaces may declare only non-generic methods").with_code("E0504");
                 }
             }
         }
-        if (class_or_interface(symbol(id).kind)) check_interfaces(id);
+        if (class_or_interface(symbol(id).kind)) {
+            check_interfaces(id);
+            check_property_requirements(id);
+            check_static_requirements(id);
+        }
         const auto casts = entries_[id].casts;
         std::vector<IrType> cast_types;
         for (const auto cast : casts) {
@@ -4725,7 +5370,8 @@ void Lowering::lower_declaration(SymbolId id) {
         std::vector<IrNode> initializers;
         std::vector<IrNode> static_initializers;
         for (const auto& member : declaration.members) {
-            if (member.cast_target) continue;
+            if (member.cast_target || (symbol(id).kind == SymbolKind::Class && accessor_override_syntax(member)))
+                continue;
             if (member.name == "_") {
                 if (member.initializer->kind != ExprKind::Import) {
                     auto ctx = context(id);
@@ -4745,6 +5391,13 @@ void Lowering::lower_declaration(SymbolId id) {
                 region.push_back(std::move(instruction));
             }
         }
+        if (symbol(id).kind == SymbolKind::Class) lower_hooks(id);
+        for (const auto& block : declaration.startup_blocks) {
+            auto ctx = context(id);
+            initializers.push_back(startup_block(block, ctx));
+        }
+        lower_record_members(id);
+        lower_accessor_overrides(id);
         if (!initializers.empty()) program_.bodies.push_back({id, std::move(initializers)});
         if (!static_initializers.empty())
             program_.bodies.push_back({entries_[id].static_scope, std::move(static_initializers)});
@@ -4772,6 +5425,7 @@ void Lowering::lower_declaration(SymbolId id) {
 void Lowering::seed(LinkedImports linked) {
     program_ = std::move(linked.program);
     linked_modules_ = std::move(linked.modules);
+    artifact_origins_ = std::move(linked.artifact_origins);
     entries_.resize(program_.symbols.size());
 
     // A singleton's class and value share their source name. Older files
@@ -4897,6 +5551,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             if (stmt.kind == StmtKind::Binding) prepare_promotions(*stmt.declaration, file_ids_[i]);
         }
     }
+    for (const auto id : derivations_) expand_derivation(id);
     for (std::size_t i = 0; i < files.size(); ++i) {
         const auto id = file_ids_[i];
         auto ctx = context(id);
@@ -4924,7 +5579,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             } else {
                 const auto accepted = neura::check_definite_assignment({}, std::span(&stmt, 1));
                 deferred_assignments_.insert(accepted.begin(), accepted.end());
-                instructions.push_back(statement(stmt, ctx));
+                instructions.push_back(stmt.startup ? startup_block(stmt, ctx) : statement(stmt, ctx));
             }
         }
         if (!instructions.empty()) program_.bodies.push_back({id, std::move(instructions)});
@@ -4932,6 +5587,18 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // Classes written in type positions, including those their own bodies
     // write.
     for (std::size_t i = 0; i < pending_anonymous_.size(); ++i) lower_declaration(pending_anonymous_[i]);
+    lower_pending_twins();
+    order_stylesheets();
+    for (auto& [file, constants] : template_constants_) {
+        const auto body = std::ranges::find(program_.bodies, file, &IrBody::owner);
+        if (body == program_.bodies.end()) {
+            program_.bodies.push_back({file, std::move(constants)});
+        } else {
+            constants.insert(constants.end(), std::make_move_iterator(body->instructions.begin()),
+                             std::make_move_iterator(body->instructions.end()));
+            body->instructions = std::move(constants);
+        }
+    }
     finish_tags(program_, linked_symbols, warning_mark, [&](SymbolId id) -> std::optional<TagDeclarationSpans> {
         if (id >= entries_.size() || !entries_[id].declaration) return std::nullopt;
         const auto& decl = *entries_[id].declaration;
@@ -4943,12 +5610,17 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     for (const auto& entry : entries_) {
         if (entry.singleton_instance != no_symbol) singletons.insert(entry.singleton_instance);
     }
+    check_hooked_storage(linked_symbols);
     lower_static_initializers(program_, singletons, linked_symbols, linked_bodies);
     // The checked tags (Tags.md): #Synchronized, #Immutable, and monitors on
     // what this compilation declared, then #Pure over the whole program. A
     // function of a prebuilt module is pure only when it is marked #Pure,
     // because its tag is part of its interface.
     declare_checked_tags(program_, linked_symbols, [&](SymbolId id) { return name_span(id); });
+    // Deeply immutable application data (Components030.md): #Frozen storage
+    // and the type arguments of #Frozen classes.
+    check_frozen_storage(program_, linked_symbols, linked_bodies, [&](SymbolId id) { return name_span(id); });
+    check_frozen_arguments(program_, written_type_arguments_);
     std::set<SymbolId> artifact_files;
     for (SymbolId id = 0; id < linked_symbols; ++id) {
         const auto& item = symbol(id);
@@ -4956,11 +5628,29 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             artifact_files.insert(id);
         }
     }
-    check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    const auto prebuilt = [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); };
+    check_pure_tags(program_, prebuilt);
+    // A `using` resource does not escape its block (Lifetime030.md), judged
+    // with the retention summaries of the linked program.
+    check_scoped_resources(program_, prebuilt);
+    // No event is emitted under a monitor guard (Lifetime030.md, Events).
+    check_event_guards(program_);
+    check_render_factories(program_, prebuilt);
     return std::move(program_);
 }
 
 #include "lowering_accessors.inc"
+#include "lowering_records.inc"
+#include "lowering_derive.inc"
+#include "lowering_properties.inc"
+#include "lowering_static.inc"
+#include "lowering_calls.inc"
+#include "lowering_matching.inc"
+#include "lowering_optional.inc"
+#include "lowering_any.inc"
+#include "lowering_startup.inc"
+#include "lowering_hooks.inc"
+#include "lowering_lifetime.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).
@@ -5024,27 +5714,42 @@ bool Lowering::structural_class(const IrType& type) const {
            found->value.items.front().kind == AttributeValueKind::Bool && found->value.items.front().integer != 0;
 }
 
-std::string Lowering::canonical_type(const IrType& type) const {
+std::string Lowering::canonical_type(const IrType& type, bool lexical) const {
     // A type as every compilation spells it: a declared type by the identity
     // of its file and its qualified name, never by a symbol number.
     std::string result = std::to_string(static_cast<int>(type.kind)) + ":";
     if (type.symbol != no_symbol && type.symbol < program_.symbols.size() &&
         (type.kind == TypeKind::Object || type.kind == TypeKind::Enum)) {
-        std::string qualified = symbol(type.symbol).name;
-        auto owner = symbol(type.symbol).owner;
-        for (; owner != no_symbol && symbol(owner).kind != SymbolKind::File; owner = symbol(owner).owner)
-            qualified = symbol(owner).name + "." + qualified;
-        if (owner != no_symbol) {
-            const auto& file = symbol(owner);
-            result += (file.library_path.empty() ? "file " + file.name : "library " + file.library_path) + "::";
+        if (lexical && structural_class(type)) {
+            // The generated file for a structural class can encode absolute
+            // source identities in its hash. Use its fields for closure names.
+            result += "class(";
+            for (const auto& field : program_.symbols) {
+                if (field.owner == type.symbol && field.kind == SymbolKind::Field) {
+                    result += field.constant ? "const " : "let ";
+                    result += field.name + ":" + canonical_type(field.type, true) + ";";
+                }
+            }
+            result += ")";
+        } else if (lexical) {
+            result += closure_owner_name(type.symbol);
+        } else {
+            std::string qualified = symbol(type.symbol).name;
+            auto owner = symbol(type.symbol).owner;
+            for (; owner != no_symbol && symbol(owner).kind != SymbolKind::File; owner = symbol(owner).owner)
+                qualified = symbol(owner).name + "." + qualified;
+            if (owner != no_symbol) {
+                const auto& file = symbol(owner);
+                result += (file.library_path.empty() ? "file " + file.name : "library " + file.library_path) + "::";
+            }
+            result += qualified;
         }
-        result += qualified;
     } else {
         result += type.name;
     }
     if (!type.arguments.empty()) {
         result += "<";
-        for (const auto& argument : type.arguments) result += canonical_type(argument) + ",";
+        for (const auto& argument : type.arguments) result += canonical_type(argument, lexical) + ",";
         result += ">";
     }
     return result;
@@ -5184,6 +5889,9 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
     const auto id = declare(body, owner, SymbolKind::Class);
     entries_[owner].names.erase(name);
     occurrence_classes_.emplace(&body, id);
+    const auto lexical = closure_owner(context);
+    const auto ordinal = ++anonymous_ordinals_[lexical];
+    anonymous_owners_.emplace(id, closure_owner_name(lexical) + "/$class" + std::to_string(ordinal));
     add_attribute(symbol(id), AttributeId::ClassAnonymous, anonymous_class_payload(false, name, body.span));
     for (const auto& member : body.members) {
         if (!member.cast_target) prepare_promotions(member, id);

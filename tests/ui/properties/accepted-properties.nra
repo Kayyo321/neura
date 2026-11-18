@@ -1,0 +1,65 @@
+// Property requirements that compile (docs/design/Records030.md, edge cases
+// 59, 60, 65, 66, 67, 69, 70, 74, 76 and 77).
+// Case 59: get, and get with set in either order.
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Counter = interface (
+    let count: int;
+        | set;
+        | get;
+);
+// Case 60: `export` may be written.
+let Titled = interface (
+    export let title: string;
+        | get;
+        | set;
+);
+// Case 65: a plain field satisfies get and get/set.
+let Plain = class implements Named, Counter (
+    export let name: string = "plain";
+    export let count: int = 0;
+);
+// Case 66: a `last` field satisfies get.
+let Fixed = class implements Named (
+    export last name: string;
+    export let init = func(name: string) => set;
+);
+// Case 67: a field with a getter satisfies get.
+let Computed = class implements Named (
+    let raw: string = "raw";
+    export let name: string = "";
+        | get: raw + "!";
+);
+// Case 69: an inherited field; the adapter is in the subclass.
+let Base = class (
+    export let title: string = "base";
+);
+let Derived = class : Base implements Titled ();
+// Case 70: two interfaces require the same property, one with set.
+let Both = class implements Named, Renamable (
+    export let name: string = "both";
+);
+let Renamable = interface (
+    let name: string;
+        | get;
+        | set;
+);
+// Case 74: through a type parameter.
+let label = func<T: Named>(v: T) -> string => v.name;
+let labels = label(new Plain()) + label(new Fixed("f"));
+// Case 76: a generic interface.
+let Holder = interface<T> (
+    let item: T;
+        | get;
+);
+let Box = class implements Holder<int> (
+    export let item: int = 3;
+);
+let boxed: Holder<int> = new Box();
+let item = boxed.item + 1;
+// Case 77: a record implements a get requirement.
+let User = record implements Named (id: int, name: string);
+let user: Named = new User(1, "u");
+let user_name = user.name;

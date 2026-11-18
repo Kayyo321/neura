@@ -1,0 +1,7 @@
+error[E0412]: duplicate match arm for 'Shape.Line'
+ --> $DIR/duplicate-today.nra:8:5
+  |
+8 |     Shape.Line(m) => m,
+  |     ^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0412`.

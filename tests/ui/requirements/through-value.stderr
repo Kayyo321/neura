@@ -1,0 +1,9 @@
+error[E0576]: invalid call of a static requirement
+ --> $DIR/through-value.nra:6:49
+  |
+6 | let make = func(value: Additive<int>) -> int => value.zero();
+  |                                                 ^^^^^^^^^^ a static requirement is called through a type parameter or an implementing class
+  |
+  = help: call it as 'T.zero(...)' in a function with a type parameter 'T' bounded by the interface, or through the name of a class that implements it
+
+For more information about this error, try `neura explain E0576`.

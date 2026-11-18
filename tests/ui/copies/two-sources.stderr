@@ -1,0 +1,9 @@
+error[E0202]: expected ')' after the record to copy
+ --> $DIR/two-sources.nra:4:25
+  |
+4 | let copy = new with(user, user) { };
+  |                         ^ expected ')', found ','
+  |
+  = help: a copy has one source: 'new with(source) { field: value }'
+
+For more information about this error, try `neura explain E0202`.

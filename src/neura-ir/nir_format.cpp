@@ -1,17 +1,22 @@
 #include "nir_format.hpp"
+#include "lexer/lexer.hpp"
 #include "attributes.hpp"
+#include "hook_arguments.hpp"
 #include "host_binding.hpp"
 #include "integer.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <map>
+#include <set>
 #include <string_view>
 
 namespace neura {
 namespace {
 
 constexpr std::string_view magic = "NEIR";
+constexpr std::string_view payload_names_tag = "PNAM";
 constexpr std::uint32_t absent = 0xffffffffU;
 // Bounds the reader's recursion and that of the passes that later walk the
 // program, with room to spare under sanitizers.
@@ -24,18 +29,33 @@ constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
 constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollection);
 constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
 constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
+constexpr std::uint8_t max_op_1_12 = static_cast<std::uint8_t>(IrOp::AnyUnpack);
+static_assert(static_cast<unsigned>(IrOp::HookRead) == 64 && static_cast<unsigned>(IrOp::HookAdmit) == 65);
+static_assert(static_cast<unsigned>(IrOp::AnyPack) == 66 && static_cast<unsigned>(IrOp::AnyTag) == 67 &&
+              max_op_1_12 == 68);
+constexpr std::uint8_t max_op_records = static_cast<std::uint8_t>(IrOp::ConformanceCall);
+static_assert(max_op_records == 69);
+constexpr std::uint8_t max_op_1_14 = static_cast<std::uint8_t>(IrOp::Yield);
+static_assert(static_cast<unsigned>(IrOp::Cleanup) == 70 && static_cast<unsigned>(IrOp::Pending) == 71 &&
+              max_op_1_14 == 72);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
-constexpr std::uint16_t newest_node_minor = attribute_minor;
+constexpr std::uint16_t newest_node_minor = nir_records_minor;
+
+bool hook_attribute(const IrSymbol& symbol) {
+    return has_attribute(symbol, AttributeId::HookGet) || has_attribute(symbol, AttributeId::HookSet) ||
+           has_attribute(symbol, AttributeId::HookOf);
+}
 
 bool may_poll(IrOp op) {
     return op == IrOp::Loop || op == IrOp::Call || op == IrOp::VirtualCall || op == IrOp::CallClosure;
 }
 
 std::uint16_t type_minor(const IrType& type) {
+    if (type.kind == TypeKind::Any) return nir_any_minor;
     if (type.kind == TypeKind::Object && type.name.starts_with('&')) return 7;
     if (is_function_value(type) || (type.kind == TypeKind::Enum && !type.arguments.empty())) return 3;
     return type.kind == TypeKind::Tuple ? 2 : 0;
@@ -60,6 +80,44 @@ bool scoped_statements(const IrNode& node) {
                     [](const IrNode& prefix) { return prefix.op != IrOp::Initialize; });
 }
 
+// A return anywhere inside a scoped value (NeuraIR 1.12).
+bool contains_return(const IrNode& node) {
+    if (node.op == IrOp::Return) return true;
+    for (const auto* region : {&node.operands, &node.body, &node.alternative})
+        for (const auto& child : *region)
+            if (contains_return(child)) return true;
+    return false;
+}
+
+bool scoped_return(const IrNode& node) {
+    return node.op == IrOp::ScopedValue && contains_return(node);
+}
+
+bool mentions_any(const IrType& type) {
+    return type.kind == TypeKind::Any || std::ranges::any_of(type.arguments, mentions_any);
+}
+
+bool needs_any_minor(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (scoped_return(node) || (node.op >= IrOp::AnyPack && node.op <= IrOp::AnyUnpack) || mentions_any(node.type) ||
+            std::ranges::any_of(node.type_arguments, mentions_any))
+            return true;
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            if (needs_any_minor(*region)) return true;
+    }
+    return false;
+}
+
+// A Cleanup, Pending or Yield anywhere (NeuraIR 1.14).
+bool needs_lifetime_minor(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (static_cast<std::uint8_t>(node.op) > max_op_records) return true;
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            if (needs_lifetime_minor(*region)) return true;
+    }
+    return false;
+}
+
 bool class_qualified_load(const IrNode& node) {
     return node.op == IrOp::Load && !node.operands.empty() &&
         node.operands.front().type.kind != TypeKind::Module;
@@ -69,8 +127,10 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (is_deferred_initialize(node)) return attribute_minor;
-        if (op > max_op_1_7 || node.poll) {
+        if (node.op == IrOp::ConformanceCall) return nir_records_minor;
+        if (is_deferred_initialize(node)) {
+            version = std::max(version, attribute_minor);
+        } else if (op > max_op_1_7 || node.poll) {
             version = std::max(version, task_minor);
         } else if (op > max_op_1_4) {
             version = std::max<std::uint16_t>(version, 7);
@@ -106,6 +166,92 @@ enum LinkFlag : std::uint8_t {
     HasAttributes = 32
 };
 
+// A program may load a standard library with named variants even when no
+// user declaration exposes them and no value member can observe their names.
+// Keep such programs at their earlier format minor.
+bool needs_payload_names(const IrProgram& program) {
+    const auto& symbols = program.symbols;
+    std::vector<std::vector<SymbolId>> children(symbols.size());
+    for (SymbolId id = 0; id < symbols.size(); ++id)
+        if (symbols[id].owner < symbols.size()) children[symbols[id].owner].push_back(id);
+
+    std::set<SymbolId> exposed;
+    const auto exposes = [&](const auto& self, const IrType& type) -> bool {
+        for (const auto& argument : type.arguments)
+            if (self(self, argument)) return true;
+        const auto id = type.symbol;
+        if (id >= symbols.size() || !exposed.insert(id).second) return false;
+        const auto& declaration = symbols[id];
+        if (self(self, declaration.type)) return true;
+        if (declaration.base < symbols.size() && self(self, symbols[declaration.base].type)) return true;
+        for (const auto& view : declaration.interfaces)
+            if (self(self, view)) return true;
+        if (declaration.bound && self(self, *declaration.bound)) return true;
+        for (const auto& bound : declaration.additional_bounds)
+            if (self(self, bound)) return true;
+        for (const auto child : children[id]) {
+            const auto& member = symbols[child];
+            if (member.kind == SymbolKind::Variant) {
+                if (!member.payload_names.empty()) return true;
+                for (const auto& payload : member.payload_types)
+                    if (self(self, payload)) return true;
+            } else if (member.exported || member.kind == SymbolKind::Field) {
+                if (self(self, member.type)) return true;
+                for (const auto parameter : member.parameters)
+                    if (parameter < symbols.size() && self(self, symbols[parameter].type)) return true;
+            }
+        }
+        return false;
+    };
+    // Only declarations reachable from the user's exported interface are
+    // signature roots. Imported trusted modules contribute when exposed.
+    for (SymbolId file = 0; file < symbols.size(); ++file) {
+        if (symbols[file].kind != SymbolKind::File || !symbols[file].library_path.empty()) continue;
+        for (const auto child : children[file]) {
+            const auto& item = symbols[child];
+            // A top-level module can be the root of a file import even
+            // without an export modifier; its members still need export.
+            if (!item.exported && item.kind != SymbolKind::Module) continue;
+            if (exposes(exposes, item.type)) return true;
+            for (const auto parameter : item.parameters)
+                if (parameter < symbols.size() && exposes(exposes, symbols[parameter].type)) return true;
+        }
+    }
+    // A generic function can format its type parameter in a different
+    // module. Follow calls back from each value-text operation to preserve
+    // names of both explicit and inferred concrete instantiations.
+    std::set<SymbolId> printers;
+    std::vector<std::pair<SymbolId, const IrNode*>> calls;
+    const auto visit = [&](const auto& self, SymbolId owner, const IrNode& node) -> bool {
+        if (node.op == IrOp::ValueText && !node.operands.empty()) {
+            printers.insert(owner);
+            if (exposes(exposes, node.operands.front().type)) return true;
+        }
+        if (node.symbol < symbols.size() && symbols[node.symbol].kind == SymbolKind::Function)
+            calls.emplace_back(owner, &node);
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            for (const auto& child : *region)
+                if (self(self, owner, child)) return true;
+        return false;
+    };
+    for (const auto& body : program.bodies)
+        for (const auto& node : body.instructions)
+            if (visit(visit, body.owner, node)) return true;
+    for (std::size_t previous = 0; previous != printers.size();) {
+        previous = printers.size();
+        for (const auto& [caller, call] : calls) {
+            if (!printers.contains(call->symbol)) continue;
+            printers.insert(caller);
+            for (const auto& argument : call->type_arguments)
+                if (exposes(exposes, argument)) return true;
+            if (!call->operands.empty())
+                for (const auto& argument : call->operands.front().type.arguments)
+                    if (exposes(exposes, argument)) return true;
+        }
+    }
+    return false;
+}
+
 class Writer {
 public:
     explicit Writer(const IrProgram& program) {
@@ -129,7 +275,9 @@ public:
         u16(nir_major_version);
         std::uint16_t version = program.static_constants.empty() ? 0 : 6;
         if (program.native_library) version = 8;
+        std::size_t named_variants = 0;
         for (const auto& item : program.symbols) {
+            if (!item.payload_names.empty()) ++named_variants;
             if (item.variadic != VariadicKind::None || item.user_cast ||
                 item.overload_group != no_symbol || item.singleton_instance != no_symbol) {
                 version = std::max<std::uint16_t>(version, 6);
@@ -138,6 +286,7 @@ public:
             if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
             if (host_callback(item)) version = std::max<std::uint16_t>(version, 8);
             if (!item.attributes.empty()) version = std::max(version, attribute_minor);
+            if (hook_attribute(item)) version = std::max(version, nir_hooks_minor);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -153,6 +302,23 @@ public:
             if (version >= newest_node_minor) break;
             version = std::max(version, required_minor(body.instructions));
         }
+        if (std::ranges::any_of(program.bodies, [](const IrBody& body) { return needs_any_minor(body.instructions); }) ||
+            std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+                return mentions_any(item.type) || std::ranges::any_of(item.payload_types, mentions_any) ||
+                       (item.bound && mentions_any(*item.bound));
+            }))
+            version = std::max(version, nir_any_minor);
+        if (named_variants != 0 && version < nir_records_minor) {
+            if (needs_payload_names(program)) version = nir_records_minor;
+            else named_variants = 0;
+        }
+        if (std::ranges::any_of(program.bodies, [](const IrBody& body) { return needs_lifetime_minor(body.instructions); }) ||
+            std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+                return std::ranges::any_of(item.attributes, [](const IrAttribute& attribute) {
+                    return attribute.id == AttributeId::GeneratorResume;
+                });
+            }))
+            version = std::max(version, nir_lifetime_minor);
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -183,6 +349,24 @@ public:
                 for (const auto byte : program.native_library->object) u8(byte);
                 count(program.native_library->symbols.size());
                 for (const auto& symbol : program.native_library->symbols) text(symbol);
+            }
+        }
+        if (named_variants != 0) {
+            for (const char letter : payload_names_tag) u8(letter);
+            count(named_variants);
+            for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+                const auto& item = program.symbols[id];
+                if (item.payload_names.empty()) continue;
+                if (item.kind != SymbolKind::Variant || item.payload_names.size() != item.payload_types.size())
+                    throw NirError("named payload fields require one name per variant payload");
+                reference(id);
+                count(item.payload_names.size());
+                std::set<std::string_view> seen;
+                for (const auto& name : item.payload_names) {
+                    if (!is_identifier(name) || !seen.insert(name).second)
+                        throw NirError("invalid or repeated named payload field");
+                    text(name);
+                }
             }
         }
         return std::move(bytes_);
@@ -341,6 +525,12 @@ private:
     }
 
     void node(const IrNode& value) {
+        // Events are derived on the linked program and never stored.
+        if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
+            throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
+        if (static_cast<std::uint8_t>(value.op) > max_op_1_14)
+            throw NirError("invalid operation tag " + std::to_string(static_cast<unsigned>(value.op)));
+        if (linked_argument_annotation(value)) throw NirError("argument transport is derived after linking");
         // Only bodies carry polls, and a body with one makes the file 1.9.
         u8(static_cast<std::uint8_t>(value.op) | (polls_ && value.poll ? poll_bit : 0));
         type(value.type);
@@ -374,9 +564,12 @@ public:
             fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor_) +
                  " is not supported; this reader accepts 1.0 through 1." + std::to_string(nir_minor_version));
         }
+        // 1.11 and 1.12 belong to milestones merged beside this one and add
+        // no operation here.
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14};
+        static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -415,6 +608,28 @@ public:
             for (std::uint32_t i = 0; i < symbols; ++i) library.symbols.push_back(text());
             if (library.triple.empty() || library.object.empty()) fail("a native library needs a triple and an object");
             program.native_library = std::move(library);
+        }
+        if (remaining() >= payload_names_tag.size() &&
+            std::equal(payload_names_tag.begin(), payload_names_tag.end(), bytes_.begin() + position_)) {
+            if (minor_ < nir_records_minor) fail("named payload fields require NeuraIR format 1.13");
+            position_ += payload_names_tag.size();
+            const auto entries = count(8);
+            if (entries == 0 || entries > symbol_count_) fail("invalid named variant count");
+            for (std::uint32_t i = 0; i < entries; ++i) {
+                auto& item = program.symbols[required_reference()];
+                if (item.kind != SymbolKind::Variant || !item.payload_names.empty())
+                    fail("invalid or repeated named variant");
+                const auto fields = count(4);
+                if (fields == 0 || fields != item.payload_types.size())
+                    fail("named payload fields require one name per variant payload");
+                std::set<std::string> seen;
+                for (std::uint32_t f = 0; f < fields; ++f) {
+                    auto name = text();
+                    if (!is_identifier(name) || !seen.insert(name).second)
+                        fail("invalid or repeated named payload field");
+                    item.payload_names.push_back(std::move(name));
+                }
+            }
         }
         if (position_ != bytes_.size()) {
             fail(std::to_string(bytes_.size() - position_) + " unread bytes at the end of the file");
@@ -523,7 +738,7 @@ private:
     IrType type(std::size_t depth) {
         enter(depth);
         IrType value;
-        const auto max_kind = aggregates_ ? TypeKind::Tuple : TypeKind::Callable;
+        const auto max_kind = minor_ >= nir_any_minor ? TypeKind::Any : aggregates_ ? TypeKind::Tuple : TypeKind::Callable;
         value.kind = static_cast<TypeKind>(tag(static_cast<std::uint8_t>(max_kind), "type kind"));
         value.name = text();
         value.symbol = reference();
@@ -628,9 +843,14 @@ private:
                 }
                 if (const auto problem = attribute_problem(value.kind, value.attributes))
                     fail("symbol '" + value.name + "': " + *problem);
+                if (hook_attribute(value) && minor_ < nir_hooks_minor)
+                    fail("class hooks require NeuraIR format 1." + std::to_string(nir_hooks_minor));
                 if (has_attribute(value, AttributeId::HostEffects) &&
                     (value.has_body || !value.external || !value.host_binding))
                     fail("symbol '" + value.name + "': a host-effects contract belongs to a host binding without a body");
+                if (has_attribute(value, AttributeId::GeneratorResume) && minor_ < nir_lifetime_minor)
+                    fail("symbol '" + value.name + "': generator.resume requires NeuraIR format 1." +
+                         std::to_string(nir_lifetime_minor));
             }
         }
         return value;
@@ -678,7 +898,9 @@ private:
         if (minor_ >= 9) {
             const auto byte = u8();
             const auto operation = static_cast<std::uint8_t>(byte & ~poll_bit);
-            if (operation > max_op_) fail("invalid operation tag " + std::to_string(byte));
+            if (operation > max_op_ || operation == static_cast<unsigned>(IrOp::HookRead) ||
+                operation == static_cast<unsigned>(IrOp::HookAdmit))
+                fail("invalid operation tag " + std::to_string(byte));
             value.op = static_cast<IrOp>(operation);
             value.poll = (byte & poll_bit) != 0;
             if (value.poll && !may_poll(value.op)) fail("a poll marks only a loop or a call");
@@ -689,6 +911,7 @@ private:
         value.span = span();
         value.symbol = reference();
         value.text = text();
+        if (linked_argument_annotation(value)) fail("argument transport is derived after linking");
         if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);
         if (minor_ < attribute_minor && is_deferred_initialize(value))
@@ -699,6 +922,8 @@ private:
         value.alternative = nodes(depth + 1);
         if (minor_ < 4 && scoped_statements(value))
             fail("statements in a scoped value require NeuraIR format 1.4");
+        if (minor_ < nir_any_minor && scoped_return(value))
+            fail("a return inside a scoped value requires NeuraIR format 1." + std::to_string(nir_any_minor));
         if (value.op == IrOp::Loop && !value.alternative.empty() && !latches_) {
             fail("a loop latch requires NeuraIR format 1.1");
         }

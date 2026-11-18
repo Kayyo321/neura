@@ -1,0 +1,43 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief A service over a function value that a task may run, the form of service `HedgingFilter` can race.
+///
+/// A filter receives its next service as a `Service` interface value, an ordinary object that cannot be given to a
+/// spawned task (Concurrency.md section 5.1). `SpawnableService` keeps the function itself, so a filter can spawn
+/// it. The program must keep the function spawnable: a named function, or a closure that captures only
+/// transferable values (numbers, text, `#Immutable` objects, monitors, `Std.Concurrent` handles), whose body
+/// is task-safe (section 5.2), with a transferable request type. Transferability is decided per function type over
+/// the whole program: if any closure of the type `func(Req) -> Result<Resp>` that the program creates captures an
+/// object, array, or list, no function of that type can be spawned, even one that captures nothing. The compiler
+/// reports a violation at the program's call into the filter (E0601, E0602), with a label at the offending capture.
+/// A request type of its own for the hedged call keeps the rule local to that call.
+/// @see [Std.Net.Resilience.SpawnableService](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-SpawnableService)
+#Since("0.3.0")
+export let SpawnableService = module (
+    /// @brief A service that runs a spawnable function.
+    #Final
+    export let SpawnableService = class<Req, Resp> implements Service<Req, Resp> (
+        /// @brief The function each call runs.
+        last body: func(Req) -> Result<Resp>;
+
+        /// @brief Wraps `handler`.
+        export let init = func(handler: func(Req) -> Result<Resp>) {
+            body = handler;
+        };
+
+        /// @brief Runs the function in the calling task.
+        export let call = func(request: Req) -> Result<Resp> => body(request);
+
+        /// @brief The function, for a filter that runs it in a task.
+        export let function = func -> func(Req) -> Result<Resp> => body;
+
+        /// @brief The fixed text "SpawnableService".
+        export let.override to_string = func -> string => "SpawnableService";
+    );
+
+    /// @brief A spawnable service running `handler`.
+    #NoDiscard
+    export let of = func<Req, Resp>(handler: func(Req) -> Result<Resp>) -> SpawnableService<Req, Resp> =>
+        new SpawnableService<Req, Resp>(handler);
+);

@@ -1,0 +1,13 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: NoBlock has no range
+let character = import:Std.Core.Character;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let unicode_block = import:Std.Core.UnicodeBlock;
+
+export let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(unicode_block.first(unicode_block.UnicodeBlock.NoBlock).to_string());
+        return program.ExitCode.Ok;
+    };
+);

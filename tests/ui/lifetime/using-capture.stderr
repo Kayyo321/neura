@@ -1,0 +1,11 @@
+error[E0475]: 'source' is closed at the end of its 'using' block and cannot be captured by a function value that 'subscribe' retains
+  --> $DIR/using-capture.nra:18:29
+   |
+17 |     using (source = open()) {
+   |     ----- 'source' is bound here, and closed when this block is left
+18 |         callbacks.subscribe(func() -> void {
+   |                             ^^^^^^^^^^^^^^^^...
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

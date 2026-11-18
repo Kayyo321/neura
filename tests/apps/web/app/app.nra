@@ -1,0 +1,141 @@
+// The browser journey of tests/apps/web/app-check.py: a page of three child components under one parent, mounted
+// with Std.Web.mount. A counter with a stylesheet, a keyed list that adds, removes and reverses its items, a form
+// input bound both ways, and a button that closes the root. Each render prints a line, so the check can tell
+// which components rendered for each event. The heading's image and the stylesheet's url() are bundled assets.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let frozen = import:Std.Collections.Frozen;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+const AppStyles = css {
+    .app { font-family: sans-serif; }
+    .count { color: rgb(200, 30, 30); font-weight: 700; }
+    .parts li { margin: 2px 0; }
+    .app h1 { background: url("./stripe.svg") repeat-x bottom; }
+};
+
+let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <p class="counter">
+        Count: <span class="count" id="count">{count}</span>
+        <button type="button" id="add" on:click={on_add}>Add one</button>
+    </p>
+};
+
+let parts_view = html(names: frozen.FrozenList<string>, on_add: func(ui.ClickEvent) -> void,
+                      on_remove: func(ui.ClickEvent) -> void, on_reverse: func(ui.ClickEvent) -> void) {
+    <section>
+        <ul class="parts" id="parts">
+            @for (const name in names; key: name) {
+                <li>{name}</li>
+            }
+        </ul>
+        <button type="button" id="part-add" on:click={on_add}>Add part</button>
+        <button type="button" id="part-remove" on:click={on_remove}>Remove first</button>
+        <button type="button" id="part-reverse" on:click={on_reverse}>Reverse</button>
+    </section>
+};
+
+let form_view = html(draft: string, on_input: func(ui.InputEvent) -> void, on_clear: func(ui.ClickEvent) -> void) {
+    <form>
+        <input type="text" id="name" prop:value={draft} on:input={on_input}>
+        <output id="echo">{draft}</output>
+        <button type="button" id="clear" on:click={on_clear}>Clear</button>
+    </form>
+};
+
+let app_view = html(counter: ui.View, parts: ui.View, form: ui.View, on_close: func(ui.ClickEvent) -> void) {
+    <main class="app">
+        <h1 id="title"><img id="badge" src="./badge.svg" alt="" width="16" height="16"> Parts</h1>
+        {counter}
+        {parts}
+        {form}
+        <button type="button" id="close" on:click={on_close}>Close</button>
+    </main>
+};
+
+let make_counter = func -> ui.Component {
+    last count = new ui.State<int32>(0);
+    last add = new func(event: ui.ClickEvent) {
+        count.update(func(value: int32) -> int32 => value + 1);
+    };
+    return ui.component<int32>(count, new func(value: int32) -> ui.View {
+        console.print_line("render counter " + value.to_string());
+        return counter_view(value, add);
+    });
+};
+
+let make_parts = func -> ui.Component {
+    last names = new ui.State<frozen.FrozenList<string>>(frozen.of<string>("bolt", "nut", "gear"));
+    last serial = new ui.State<int32>(3);
+    last add = new func(event: ui.ClickEvent) {
+        serial.update(func(value: int32) -> int32 => value + 1);
+        last name = "part " + serial.get().to_string();
+        names.update(func(list: frozen.FrozenList<string>) -> frozen.FrozenList<string> => list.appended(name));
+    };
+    last remove = new func(event: ui.ClickEvent) {
+        names.update(func(list: frozen.FrozenList<string>) -> frozen.FrozenList<string> => list.removed(0));
+    };
+    last reverse = new func(event: ui.ClickEvent) {
+        names.update(func(list: frozen.FrozenList<string>) -> frozen.FrozenList<string> {
+            last reversed: string[list] = new;
+            for (let i = list.length() - 1; i >= 0; i--) {
+                reversed.append(list.get(i));
+            }
+            return frozen.copy_of_list<string>(reversed);
+        });
+    };
+    return ui.component<frozen.FrozenList<string>>(names, new func(list: frozen.FrozenList<string>) -> ui.View {
+        console.print_line("render parts " + list.to_string());
+        return parts_view(list, add, remove, reverse);
+    });
+};
+
+let make_form = func -> ui.Component {
+    last draft = new ui.State<string>("");
+    last typed = new func(event: ui.InputEvent) {
+        draft.set(event.value);
+    };
+    last clear = new func(event: ui.ClickEvent) {
+        draft.set("");
+    };
+    return ui.component<string>(draft, new func(value: string) -> ui.View {
+        console.print_line("render form '" + value + "'");
+        return form_view(value, typed, clear);
+    });
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last opened: ui.Root[list] = new;
+        last close = new func(event: ui.ClickEvent) {
+            console.print_line("before close: " + opened[0].host_stats().to_string());
+            opened[0].close();
+        };
+        last counter = make_counter();
+        last parts = make_parts();
+        last form = make_form();
+        last page = new ui.State<int32>(0);
+        last app = ui.component<int32>(page, new func(value: int32) -> ui.View {
+            console.print_line("render app");
+            return app_view(ui.slot(counter), ui.slot(parts), ui.slot(form), close);
+        });
+        let status = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", app, tasks)) {
+                result.Result.Ok(root) => {
+                    opened.append(root);
+                    root.run();
+                    console.print_line("closed: " + root.stats().to_string());
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    status = program.ExitCode.Failure;
+                },
+            }
+        }
+        return status;
+    };
+);

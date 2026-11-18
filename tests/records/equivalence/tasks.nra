@@ -1,0 +1,33 @@
+// A record is shared between tasks as an #Immutable object is: passed to
+// `spawn` and sent on a channel, the same object arrives (edge case 36).
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Point = record (x: int, y: int);
+let Path = record (start: Point, end: Point, label: string);
+
+let length = func(path: Path) -> int => path.end.x - path.start.x + path.end.y - path.start.y;
+
+let forward = func(paths: channels.Sender<Path>, path: Path) -> int {
+    paths.send(path);
+    return 1;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let path = new Path(new Point(1, 2), new Point(4, 6), "diagonal");
+        const [sender, receiver, closer] = channels.open<Path>(1);
+        scope {
+            last measured = spawn length(path);
+            last sent = spawn forward(sender, path);
+            last arrived = match (receiver.receive()) {
+                channels.Received.Value(value) => value,
+                _ => nil,
+            };
+            console.print_line(measured.join().to_string() + " " + sent.join().to_string());
+            console.print_line((arrived == path).to_string() + " " + arrived.to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

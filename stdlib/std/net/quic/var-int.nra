@@ -1,0 +1,103 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief QUIC variable-length integers (RFC 9000 section 16): the two most significant bits of the first byte
+/// give the length (1, 2, 4 or 8 bytes) and the remaining 6, 14, 30 or 62 bits hold the value in network byte
+/// order.
+///
+/// `encode` uses the shortest form; `encode_with_length` writes a chosen longer form, which the RFC allows for
+/// every field except a frame type (section 12.4). `decode` accepts any form, as the A.1 algorithm does, and
+/// returns the value and the number of bytes read. Values are `uint64` from 0 through `MaxValue` (2^62 - 1);
+/// a larger value traps with "invalid argument: varint above 2^62-1".
+/// @see [Std.Net.Quic.VarInt](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-VarInt)
+#Since("0.3.0")
+export let VarInt = module (
+    /// @brief The largest encodable value, 2^62 - 1.
+    export const MaxValue: uint64 = 4611686018427387903;
+
+    /// @brief The shortest encoding length of `value`: 1 through 63 take 1 byte, through 16,383 2, through
+    /// 1,073,741,823 4, and the rest 8.
+    #Pure
+    export let encoded_length = func(value: uint64) -> int {
+        check(value);
+        if (value <= 63) {
+            return 1;
+        }
+        if (value <= 16383) {
+            return 2;
+        }
+        if (value <= 1073741823) {
+            return 4;
+        }
+        return 8;
+    };
+
+    /// @brief The shortest encoding of `value`.
+    #NoDiscard
+    export let encode = func(value: uint64) -> uint8[list] => encode_with_length(value, encoded_length(value));
+
+    /// @brief The encoding of `value` in `length` bytes (1, 2, 4 or 8). Another length, or one too short for the
+    /// value, traps with "invalid argument: varint length".
+    #NoDiscard
+    export let encode_with_length = func(value: uint64, length: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        append_with_length(out, value, length);
+        return out;
+    };
+
+    /// @brief Appends the shortest encoding of `value` to `out`.
+    export let append = func(out: uint8[list], value: uint64) {
+        append_with_length(out, value, encoded_length(value));
+    };
+
+    /// @brief Appends the encoding of `value` in `length` bytes to `out` (see `encode_with_length`).
+    export let append_with_length = func(out: uint8[list], value: uint64, length: int) {
+        check(value);
+        if (!(length == 1 or 2 or 4 or 8) || length < encoded_length(value)) {
+            trap_with_message("invalid argument: varint length");
+        }
+        last prefix: uint64 = length == 1 ? 0 : length == 2 ? 1 : length == 4 ? 2 : 3;
+        last tagged = value | (prefix << ((length * 8 - 2) as uint64));
+        let shift = (length - 1) * 8;
+        while (shift >= 0) {
+            out.append(((tagged >> (shift as uint64)) & 255) as uint8);
+            shift -= 8;
+        }
+    };
+
+    /// @brief The value encoded at `offset` and the number of bytes it took (RFC 9000 section A.1). A Parse
+    /// error of kind UnexpectedEnd, at `offset`, when the bytes end inside it; an offset outside the list traps.
+    #NoDiscard
+    export let decode = func(bytes: uint8[list], offset: int) -> Result<[uint64, int]> {
+        if (offset < 0 || offset > bytes.length) {
+            trap_with_message("invalid argument: offset");
+        }
+        if (offset == bytes.length) {
+            return truncated(offset);
+        }
+        last first = bytes[offset] as uint64;
+        last length = 1 << ((first >> 6) as int);
+        if (offset + length > bytes.length) {
+            return truncated(offset);
+        }
+        let value = first & 63;
+        let i = 1;
+        while (i < length) {
+            value = (value << 8) + (bytes[offset + i] as uint64);
+            i++;
+        }
+        return Result<[uint64, int]>.Ok([value, length]);
+    };
+
+    /// @brief Traps unless `value` is at most `MaxValue`.
+    let check = func(value: uint64) {
+        if (value > MaxValue) {
+            trap_with_message("invalid argument: varint above 2^62-1");
+        }
+    };
+
+    /// @brief The error for bytes that end inside a varint.
+    let truncated = func(offset: int) -> Result<[uint64, int]> =>
+        Result<[uint64, int]>.Err(Error.Parse { kind: ParseErrorKind.UnexpectedEnd, offset: offset,
+            message: "the bytes end inside a variable-length integer" });
+);

@@ -1,0 +1,9 @@
+error[E0571]: field 'items' has type 'int32[list]', which a record cannot hold
+ --> $DIR/field-list.nra:2:24
+  |
+2 | let P = record (items: int[list]);
+  |                        ^^^^^^^^^ a collection is mutable
+  |
+  = help: hold a record, a tuple or an enum of eligible types, or declare 'P' as an #Immutable class and not as a record
+
+For more information about this error, try `neura explain E0571`.

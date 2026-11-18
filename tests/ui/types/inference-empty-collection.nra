@@ -1,0 +1,3 @@
+// An empty collection literal gives no type (edge case 45).
+let first = func<T>(items: T[]) -> int => items.length;
+let none = first([]);

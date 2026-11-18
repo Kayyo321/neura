@@ -1,0 +1,78 @@
+// The static contracts of Std.Core.Arithmetic for primitives
+// (docs/design/Records030.md, edge cases 101 and 102): each sized integer and
+// float through Additive and Multiplicative, integers and bool through
+// Ordered, every one through Parseable, a float sum left to right bit for bit
+// and a NaN element giving the canonical NaN, and companion calls of the new
+// functions.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let results = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Arithmetic;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+let product = func<T: Multiplicative<T>>(items: T[]) -> T {
+    let total = T.one();
+    for (let item in items) {
+        total = T.multiply(total, item);
+    }
+    return total;
+};
+let largest = func<T: Ordered<T>>(items: T[]) -> T {
+    let best = items[0];
+    for (let item in items) {
+        if (T.compare(item, best) == Ordering.Greater) {
+            best = item;
+        }
+    }
+    return best;
+};
+let parsed = func<T: Parseable<T>>(text: string) -> bool => results.is_ok<T>(T.parse(text));
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let i8: int8[] = [1, -2, 100];
+        let i16: int16[] = [300, -2, 7];
+        let i32: int32[] = [100000, 2, 3];
+        let i64: int64[] = [9000000000, 1, -1];
+        let u8: uint8[] = [200, 50, 5];
+        let u16: uint16[] = [60000, 5, 1];
+        let u32: uint32[] = [4000000000, 1, 2];
+        let u64: uint64[] = [18000000000000000000, 1, 2];
+        console.print_line(sum(i8).to_string() + " " + sum(i16).to_string() + " " + sum(i32).to_string() + " " +
+                           sum(i64).to_string());
+        console.print_line(sum(u8).to_string() + " " + sum(u16).to_string() + " " + sum(u32).to_string() + " " +
+                           sum(u64).to_string());
+        console.print_line(product(i16).to_string() + " " + product(i32).to_string() + " " +
+                           product<uint8>([3, 5, 7]).to_string() + " " + product<int>([2, 3, 7]).to_string());
+        console.print_line(largest(i8).to_string() + " " + largest(u64).to_string() + " " +
+                           largest([false, true, false]).to_string());
+        let f16: float16[] = [0.5, 0.25, 1.0];
+        let b16: bfloat16[] = [0.5, 0.25, 1.0];
+        let f32: float32[] = [0.1, 0.2, 0.3];
+        let f64: float64[] = [0.1, 0.2, 0.3];
+        console.print_line(sum(f16).to_string() + " " + sum(b16).to_string() + " " + sum(f32).to_string() + " " +
+                           sum(f64).to_string());
+        // Left to right, bit for bit: (0.1 + 0.2) + 0.3 differs from 0.1 + (0.2 + 0.3).
+        console.print_line(sum(f64).to_bits().to_string() + " " + (0.1 + (0.2 + 0.3)).to_bits().to_string());
+        console.print_line(sum(f32).to_bits().to_string() + " " + product(f64).to_string());
+        let zero = 0.0;
+        let nan: float64[] = [1.0, zero / zero, 2.0];
+        console.print_line(sum(nan).to_bits().to_string());
+        let infinite: float64[] = [1.0e308, 1.0e308];
+        console.print_line(sum(infinite).to_string());
+        console.print_line(parsed<int8>("-128").to_string() + " " + parsed<uint64>("18446744073709551615").to_string() +
+                           " " + parsed<int8>("128").to_string() + " " + parsed<float32>("1.5").to_string() + " " +
+                           parsed<bool>("true").to_string());
+        console.print_line(3.add(4).to_string() + " " + (2.5).multiply(2.0).to_string() + " " +
+                           uint16.zero().to_string() + " " + float32.one().to_string());
+        return program.ExitCode.Ok;
+    };
+);

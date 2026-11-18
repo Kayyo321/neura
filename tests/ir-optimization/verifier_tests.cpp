@@ -2,6 +2,7 @@
 // each deliberately malformed program is rejected with a specific issue.
 #include "concurrency_support.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
@@ -134,6 +135,43 @@ NEURA_TEST(verifier, accepts_lowered_and_optimized_programs) {
         issues = verify_ir(program);
         check(issues.empty(), label + " after optimization:" + issues_text(issues));
     }
+}
+
+// docs/design/Records030.md: a conformance call names a static requirement
+// and goes through a type parameter that a bound of its interface
+// constrains; specialization leaves none through a concrete type.
+NEURA_TEST(verifier, rejects_invalid_conformance_calls) {
+    const auto conformance = [](IrProgram& program, std::string_view function) -> IrNode& {
+        return first(body_of(program, function), IrOp::ConformanceCall);
+    };
+    expect_issue(environment, "verifier/requirements.nra", "remains after specialization", [&](IrProgram& program) {
+        auto& call = conformance(program, "Requirements.twice");
+        call.type_arguments.front() = call.operands.front().type;
+        call.type_arguments.front() = IrType{TypeKind::Integer, "int32", no_symbol, {}};
+    });
+    expect_issue(environment, "verifier/requirements.nra", "which is not a static requirement of an interface",
+                 [&](IrProgram& program) {
+        auto& call = conformance(program, "Requirements.start");
+        call.symbol = first(body_of(program, "Requirements.plain"), IrOp::Call).symbol;
+    });
+    expect_issue(environment, "verifier/requirements.nra", "it goes through exactly one", [&](IrProgram& program) {
+        conformance(program, "Requirements.start").type_arguments.clear();
+    });
+    expect_issue(environment, "verifier/requirements.nra", "argument(s) to", [&](IrProgram& program) {
+        conformance(program, "Requirements.twice").operands.pop_back();
+    });
+}
+
+NEURA_TEST(verifier, rejects_invalid_static_implements_attributes) {
+    expect_issue(environment, "verifier/requirements.nra", "static.implements", [&](IrProgram& program) {
+        for (auto& item : program.symbols) {
+            if (item.kind == SymbolKind::Function && item.name == "zero" && item.has_body) {
+                auto* attribute = const_cast<IrAttribute*>(find_attribute(item, AttributeId::StaticImplements));
+                // Name the implementation itself as the requirement.
+                attribute->value.items[0].symbol = static_cast<SymbolId>(&item - program.symbols.data());
+            }
+        }
+    });
 }
 
 NEURA_TEST(verifier, rejects_mismatched_binary_operands) {
@@ -426,6 +464,68 @@ NEURA_TEST(verifier, rejects_a_poll_on_an_operation_that_is_neither_a_loop_nor_a
     }
     check(loop && call, "lowering marks polls on loops and on calls");
     check(verify_ir(program).empty(), "polls on loops and calls verify");
+}
+
+} // namespace neura::testing
+
+namespace neura::testing {
+
+// docs/design/Lifetime030.md, Verifier: where Cleanup, Pending and Yield
+// may stand.
+NEURA_TEST(verifier, rejects_misplaced_cleanups_pending_values_and_yields) {
+    constexpr std::string_view fixture = "lifetime.nra";
+    expect_issue(environment, fixture, "a cleanup appears among the statements of a scoped value", [](IrProgram& program) {
+        auto& body = body_of(program, "Lifetime.saved_argument");
+        auto cleanup = first(body, IrOp::Cleanup);
+        IrNode value{};
+        value.op = IrOp::Integer;
+        value.type = {TypeKind::Integer, "int32", no_symbol, {}};
+        value.span = cleanup.span;
+        value.text = "0";
+        IrNode scoped{};
+        scoped.op = IrOp::ScopedValue;
+        scoped.type = value.type;
+        scoped.span = cleanup.span;
+        scoped.body = {cleanup, value};
+        IrNode discard{};
+        discard.op = IrOp::Discard;
+        discard.span = cleanup.span;
+        discard.operands.push_back(std::move(scoped));
+        body.insert(body.begin(), std::move(discard));
+    });
+    expect_issue(environment, fixture, "pending appears outside a cleanup's return list", [](IrProgram& program) {
+        auto& body = body_of(program, "Lifetime.held_return");
+        const auto& returned = first(body, IrOp::Return).operands.front();
+        IrNode pending{};
+        pending.op = IrOp::Pending;
+        pending.type = returned.type;
+        pending.span = returned.span;
+        IrNode discard{};
+        discard.op = IrOp::Discard;
+        discard.span = returned.span;
+        discard.operands.push_back(std::move(pending));
+        body.insert(body.begin(), std::move(discard));
+    });
+    const auto yield_at = [](IrProgram& program, std::string text, bool resume, bool front) {
+        auto& body = body_of(program, "Lifetime.saved_argument");
+        IrNode yield{};
+        yield.op = IrOp::Yield;
+        yield.span = body.front().span;
+        yield.text = std::move(text);
+        body.insert(front ? body.begin() : body.end() - 1, std::move(yield));
+        if (!resume) return;
+        for (SymbolId id = 0; id < program.symbols.size(); ++id)
+            if (program.symbols[id].name == "saved_argument")
+                set_attribute(program.symbols[id], AttributeId::GeneratorResume, attribute_symbol(id));
+    };
+    expect_issue(environment, fixture, "a yield appears outside a generator's resume function",
+                 [&](IrProgram& program) { yield_at(program, "1", false, true); });
+    expect_issue(environment, fixture, "the suspension indexes of a body are not 1 to 1",
+                 [&](IrProgram& program) { yield_at(program, "2", true, true); });
+    expect_issue(environment, fixture, "a yield appears with a cleanup pending",
+                 [&](IrProgram& program) { yield_at(program, "1", true, false); });
+    expect_issue(environment, fixture, "a yield appears in the scope of the local",
+                 [&](IrProgram& program) { yield_at(program, "1", true, false); });
 }
 
 } // namespace neura::testing

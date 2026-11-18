@@ -1,0 +1,9 @@
+error[E0202]: unexpected ':' in an argument list
+ --> $DIR/generic.nra:2:21
+  |
+2 | let P = record<T> (x: T);
+  |                     ^ 'record<...>' is read as a call, and its arguments are expressions
+  |
+  = help: a record is not generic in this release
+
+For more information about this error, try `neura explain E0202`.

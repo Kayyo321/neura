@@ -1,0 +1,239 @@
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let listeners = import:Std.Net.Listener;
+let connectors = import:Std.Net.Connector;
+let pp = import:Std.Net.Mesh.ProxyProtocol;
+let ppl = import:Std.Net.Mesh.ProxyProtocolListener;
+let result = import:Std.Core.Result;
+let sockets = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let units = import:Std.Core.Unit;
+
+// The PROXY protocol listener and connector over in-memory connections. The version 2 header is the "tcp4" vector
+// of proxy-protocol-tests.nra (generated there with Python struct; command recorded in that file); the version 1
+// line is the example of proxy-protocol.txt section 2.1.
+let ProxyListenerTests = module (
+    let Tcp4 = "0d0a0d0a000d0a515549540a2111000cc0a80001c0a8000bdc0401bb";
+
+    // A connection over a byte list. `chunk` caps each read; a greedy connection ignores the requested count.
+    let MemConn = class (
+        export last name: string;
+        last inbound: uint8[list];
+        let position: int = 0;
+        export last chunk: int;
+        export last greedy: bool;
+        export last failing: bool;
+        export let closed: bool = false;
+        export last written: uint8[list] = new;
+        export let reads: int = 0;
+
+        export let init = func(label: string, bytes: uint8[list], limit: int, ignores_count: bool, fails: bool) {
+            name = label;
+            inbound = bytes;
+            chunk = limit;
+            greedy = ignores_count;
+            failing = fails;
+        };
+
+        export let take = func(n: int) -> uint8[list] {
+            last out: uint8[list] = new;
+            let count = greedy ? inbound.length - position : (n < chunk ? n : chunk);
+            while (count > 0 && position < inbound.length) {
+                out.append(inbound[position]);
+                position++;
+                count--;
+            }
+            reads++;
+            return out;
+        };
+
+        export let rest = func -> string {
+            last out: uint8[list] = new;
+            for (let i = position; i < inbound.length; i++) {
+                out.append(inbound[i]);
+            }
+            return strings.from_bytes_lossy(out);
+        };
+
+        export let.override to_string = func -> string => "MemConn(" + name + ")";
+    );
+
+    let FakeListener = class implements listeners.Listener<string, MemConn> (
+        last pending: MemConn[list] = new;
+        let next_index: int = 0;
+        export let init = func { };
+        export let add = func(conn: MemConn) {
+            pending.append(conn);
+        };
+        export let address = func -> string => "memory:443";
+        export let accept = func -> result.Result<MemConn> {
+            if (next_index >= pending.length) {
+                return result.Result<MemConn>.Err(errors.Error.Io {
+                    kind: errors.IoErrorKind.Closed, message: "no more connections", path: "" });
+            }
+            next_index++;
+            return result.Result<MemConn>.Ok(pending[next_index - 1]);
+        };
+        export let close = func -> result.Result<units.Unit> => result.Result<units.Unit>.Ok(units.Unit.Value);
+        export let.override to_string = func -> string => "FakeListener";
+    );
+
+    let FakeConnector = class implements connectors.Connector<string, MemConn> (
+        export last made: MemConn[list] = new;
+        export let init = func { };
+        export let address = func -> string => "backend:80";
+        export let connect = func -> result.Result<MemConn> {
+            last conn = new MemConn("out", new, 1000, false, false);
+            made.append(conn);
+            return result.Result<MemConn>.Ok(conn);
+        };
+        export let.override to_string = func -> string => "FakeConnector";
+    );
+
+    let read_mem = func(conn: MemConn, n: int) -> result.Result<uint8[list]> {
+        if (conn.failing) {
+            return result.Result<uint8[list]>.Err(errors.Error.Io {
+                kind: errors.IoErrorKind.ConnectionReset, message: "reset", path: "" });
+        }
+        return result.Result<uint8[list]>.Ok(conn.take(n));
+    };
+
+    let write_mem = func(conn: MemConn, bytes: uint8[list]) -> result.Result<units.Unit> {
+        for (let b in bytes) {
+            conn.written.append(b);
+        }
+        return result.Result<units.Unit>.Ok(units.Unit.Value);
+    };
+
+    let close_mem = func(conn: MemConn) -> result.Result<units.Unit> {
+        conn.closed = true;
+        return result.Result<units.Unit>.Ok(units.Unit.Value);
+    };
+
+    let joined = func(first: uint8[list], text: string) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let b in first) {
+            out.append(b);
+        }
+        for (let b in strings.to_bytes(text)) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    let v2_bytes = func -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(Tcp4));
+
+    let wrap = func(fake: FakeListener) -> ppl.ProxyProtocolListener<string, MemConn> =>
+        new ppl.ProxyProtocolListener<string, MemConn>(fake, read_mem, close_mem);
+
+    let code_of = func(e: errors.Error) -> string => match (e) {
+        errors.Error.Custom(detail) => detail.code(),
+        errors.Error.Io { kind, message, path } => "io:" + errors.io_kind_name(kind),
+        errors.Error.Parse { kind, offset, message } => "parse",
+        errors.Error.Encoding { offset, message } => "encoding",
+        errors.Error.Context { message, cause } => "context",
+    };
+
+    export let test_v2_header_with_short_reads = func {
+        last fake = new FakeListener();
+        last conn = new MemConn("a", joined(v2_bytes(), "hello"), 3, false, false);
+        fake.add(conn);
+        last listener = wrap(fake);
+        test.assert_equal_string("memory:443", listener.address());
+        last accepted = test.assert_ok<ppl.ProxiedConnection<MemConn>>(listener.accept());
+        test.assert_equal_string("192.168.0.1:56324", test.assert_some<sockets.SocketAddr>(accepted.source()).to_string());
+        test.assert_equal_string("192.168.0.11:443",
+            test.assert_some<sockets.SocketAddr>(accepted.destination()).to_string());
+        // Nothing past the header was read.
+        test.assert_equal<int>(0, accepted.prefix.length);
+        test.assert_equal_string("hello", accepted.connection.rest());
+        test.assert_equal_bool(false, conn.closed);
+        test.assert_equal_string("ProxiedConnection(ProxyHeader(v2 PROXY STREAM 192.168.0.1:56324 -> "
+            + "192.168.0.11:443, 0 TLVs), 0 prefix bytes)", accepted.to_string());
+    };
+
+    export let test_v1_line_reads_up_to_the_crlf = func {
+        last fake = new FakeListener();
+        last conn = new MemConn("b", strings.to_bytes("PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\nGET / HTTP/1.1\r\n"),
+            1000, false, false);
+        fake.add(conn);
+        last accepted = test.assert_ok<ppl.ProxiedConnection<MemConn>>(wrap(fake).accept());
+        test.assert_equal_string("192.168.0.1:56324", test.assert_some<sockets.SocketAddr>(accepted.source()).to_string());
+        test.assert_equal_string("GET / HTTP/1.1\r\n", conn.rest());
+        test.assert_equal<int>(0, accepted.prefix.length);
+        // 8 bytes, then one byte at a time to the LF: 1 + (47 - 8) reads.
+        test.assert_equal<int>(40, conn.reads);
+    };
+
+    export let test_bytes_past_the_header_become_the_prefix = func {
+        last fake = new FakeListener();
+        fake.add(new MemConn("c", joined(v2_bytes(), "hello"), 1000, true, false));
+        last accepted = test.assert_ok<ppl.ProxiedConnection<MemConn>>(wrap(fake).accept());
+        test.assert_equal_string("hello", strings.from_bytes_lossy(accepted.prefix));
+        test.assert_equal_string("", accepted.connection.rest());
+    };
+
+    export let test_invalid_header_closes_and_the_next_accept_works = func {
+        last fake = new FakeListener();
+        last bad = new MemConn("bad", strings.to_bytes("GET / HTTP/1.1\r\n\r\n"), 1000, false, false);
+        last truncated = new MemConn("short", strings.to_bytes("PROXY TCP4 1.2."), 1000, false, false);
+        last broken = new MemConn("reset", new, 1000, false, true);
+        last good = new MemConn("good", v2_bytes(), 1000, false, false);
+        fake.add(bad);
+        fake.add(truncated);
+        fake.add(broken);
+        fake.add(good);
+        last listener = wrap(fake);
+        test.assert_equal_string(ppl.InvalidCode,
+            code_of(test.assert_err<ppl.ProxiedConnection<MemConn>>(listener.accept())));
+        test.assert_equal_bool(true, bad.closed);
+        test.assert_equal_string(ppl.InvalidCode,
+            code_of(test.assert_err<ppl.ProxiedConnection<MemConn>>(listener.accept())));
+        test.assert_equal_bool(true, truncated.closed);
+        test.assert_equal_string("io:ConnectionReset",
+            code_of(test.assert_err<ppl.ProxiedConnection<MemConn>>(listener.accept())));
+        test.assert_equal_bool(true, broken.closed);
+        last accepted = test.assert_ok<ppl.ProxiedConnection<MemConn>>(listener.accept());
+        test.assert_equal_bool(false, good.closed);
+        test.assert_equal_string("MemConn(good)", accepted.connection.to_string());
+        // The wrapped listener's own failure passes through.
+        test.assert_equal_string("io:Closed", code_of(test.assert_err<ppl.ProxiedConnection<MemConn>>(listener.accept())));
+        test.assert_ok<units.Unit>(listener.close());
+    };
+
+    export let test_local_uses_the_real_peer = func {
+        last fake = new FakeListener();
+        fake.add(new MemConn("health", test.assert_ok<uint8[list]>(pp.encode(pp.local(new), false)), 1000, false, false));
+        last accepted = test.assert_ok<ppl.ProxiedConnection<MemConn>>(wrap(fake).accept());
+        test.assert_equal_bool(true, accepted.header.is_local());
+        test.assert_none<sockets.SocketAddr>(accepted.source());
+        last peer = test.assert_ok<sockets.SocketAddr>(sockets.parse("10.1.1.1:9000"));
+        test.assert_equal_string("10.1.1.1:9000", accepted.client_or(peer).to_string());
+    };
+
+    let failing_header = func(conn: MemConn) -> result.Result<uint8[list]> =>
+        result.Result<uint8[list]>.Err(errors.custom("test.no_header", "no header"));
+
+    export let test_connector_writes_the_header_first = func {
+        last fake = new FakeConnector();
+        last header = pp.tcp(2, test.assert_ok<sockets.SocketAddr>(sockets.parse("192.168.0.1:56324")),
+            test.assert_ok<sockets.SocketAddr>(sockets.parse("192.168.0.11:443")));
+        last connector = new ppl.ProxyProtocolConnector<string, MemConn>(fake,
+            ppl.fixed_header<MemConn>(header, false), write_mem, close_mem);
+        test.assert_equal_string("backend:80", connector.address());
+        last conn = test.assert_ok<MemConn>(connector.connect());
+        test.assert_ok<units.Unit>(write_mem(conn, strings.to_bytes("hello")));
+        test.assert_equal_string(Tcp4 + hex.encode(strings.to_bytes("hello")), hex.encode(conn.written));
+        // The bytes a listener would read back give the same header.
+        test.assert_equal_bool(true, header.equals(test.assert_ok<pp.ProxyHeader>(pp.parse(conn.written))));
+        // A second connection gets its own header.
+        last again = test.assert_ok<MemConn>(connector.connect());
+        test.assert_equal_string(Tcp4, hex.encode(again.written));
+        // A header that cannot be built closes the connection.
+        last refusing = new ppl.ProxyProtocolConnector<string, MemConn>(fake, failing_header, write_mem, close_mem);
+        test.assert_err<MemConn>(refusing.connect());
+        test.assert_equal_bool(true, fake.made[2].closed);
+        test.assert_equal_string("ProxyProtocolConnector", refusing.to_string());
+    };
+);

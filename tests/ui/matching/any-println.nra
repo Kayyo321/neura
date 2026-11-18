@@ -1,0 +1,7 @@
+// Edge case 69: an any for an untyped variadic parameter.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let console = import:Std.Io.Console;
+let show = func(v: any) {
+    console.println("{}", v);
+};

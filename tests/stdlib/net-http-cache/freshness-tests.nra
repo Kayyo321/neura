@@ -1,0 +1,232 @@
+let cache = import:Std.Net.Http.Cache;
+let headers = import:Std.Net.Http.Headers;
+let instant = import:Std.Time.Instant;
+let test = import:Std.Test;
+
+// Std.Net.Http.Cache: the freshness lifetime rules of RFC 9111 section 4.2.1, the heuristic of section 4.2.2
+// and the age terms of section 4.2.3, with the 2^31 saturation of section 1.2.2.
+// R is the response time, 2026-11-17T00:00:00Z; the request time is R-2. Dates and expectations come from
+// (run verbatim):
+// python3 -I -c 'from email.utils import formatdate; import calendar,datetime; R=1794873600; [print(v, formatdate(v, usegmt=True)) for v in (R, R-5, R-50, R+30, R-5+3600, R+7200, R-5-100000)]; print((R-5+3600)-(R-5), (R+7200)-R, R-(R+30)); print(10+2, max(5,12), 12+100); print(max(0,R-(R-50)), max(50,0+2)+100); print(100000*10//100); print(2+97, 2+98); y=calendar.timegm(datetime.datetime(1000,1,1).timetuple()); print(y, R-y, 2**31); print(datetime.date(1000,1,1).strftime("%a"), datetime.date(9999,12,31).strftime("%a"), calendar.timegm(datetime.datetime(9999,12,31).timetuple())-R); print(2-100)'
+// -> 1794873600 Tue, 17 Nov 2026 00:00:00 GMT / 1794873595 Mon, 16 Nov 2026 23:59:55 GMT /
+//    1794873550 Mon, 16 Nov 2026 23:59:10 GMT / 1794873630 Tue, 17 Nov 2026 00:00:30 GMT /
+//    1794877195 Tue, 17 Nov 2026 00:59:55 GMT / 1794880800 Tue, 17 Nov 2026 02:00:00 GMT /
+//    1794773595 Sun, 15 Nov 2026 20:13:15 GMT; 3600 7200 -30 (Expires lifetimes); 12 12 112 (age terms with
+//    Age 10, Date R-5); 50 150 (Date R-50); 10000 (heuristic); 99 100 (ages at R+97, R+98); -30610224000
+//    32405097600 2147483648 (year 1000 Date, beyond 2^31); Wed Fri 251607340800 (weekdays, year 9999 Expires
+//    beyond 2^31); -98 (current_age at R-100).
+let FreshnessTests = module (
+    const Received: int64 = 1794873600;
+
+    let at = func(offset: int64) -> instant.Instant => instant.of_epoch_seconds(Received + offset, 0);
+
+    // A 200 response requested 2 seconds before R and received at R.
+    let stored_with = func(code: int, names: string[list], values: string[list]) -> cache.StoredResponse {
+        last body: uint8[list] = new;
+        body.append(104);
+        return new cache.StoredResponse(code, headers.of(names, values), body, at(-2), at(0));
+    };
+
+    let one = func(name: string, value: string) -> cache.StoredResponse {
+        last names: string[list] = new;
+        last values: string[list] = new;
+        names.append(name);
+        values.append(value);
+        return stored_with(200, names, values);
+    };
+
+    let two = func(code: int, n1: string, v1: string, n2: string, v2: string) -> cache.StoredResponse {
+        last names: string[list] = new;
+        last values: string[list] = new;
+        names.append(n1);
+        values.append(v1);
+        names.append(n2);
+        values.append(v2);
+        return stored_with(code, names, values);
+    };
+
+    let source = func(value: cache.Lifetime) -> string => match (value) {
+        cache.Lifetime.SharedMaxAge(_) => "s-maxage",
+        cache.Lifetime.MaxAge(_) => "max-age",
+        cache.Lifetime.Expires(_) => "expires",
+        cache.Lifetime.Heuristic(_) => "heuristic",
+        cache.Lifetime.Unknown => "unknown",
+    };
+
+    export let test_s_maxage_only_for_shared = func {
+        last stored = one("Cache-Control", "max-age=60, s-maxage=600");
+        test.assert_equal_string("s-maxage", source(cache.lifetime(stored, true, true)));
+        test.assert_equal<int64>(600, cache.freshness_lifetime(stored, true, true));
+        test.assert_equal_string("max-age", source(cache.lifetime(stored, false, true)));
+        test.assert_equal<int64>(60, cache.freshness_lifetime(stored, false, true));
+    };
+
+    export let test_max_age_beats_expires = func {
+        last stored = two(200, "Cache-Control", "max-age=60", "Expires", "Tue, 17 Nov 2026 02:00:00 GMT");
+        test.assert_equal_string("max-age", source(cache.lifetime(stored, false, true)));
+        test.assert_equal<int64>(60, cache.freshness_lifetime(stored, false, true));
+        // An invalid max-age reads as 0 rather than falling through to Expires.
+        last invalid = two(200, "Cache-Control", "max-age=soon", "Expires", "Tue, 17 Nov 2026 02:00:00 GMT");
+        test.assert_equal<int64>(0, cache.freshness_lifetime(invalid, false, true));
+    };
+
+    export let test_expires_minus_date = func {
+        last stored = two(200, "Date", "Mon, 16 Nov 2026 23:59:55 GMT", "Expires", "Tue, 17 Nov 2026 00:59:55 GMT");
+        test.assert_equal_string("expires", source(cache.lifetime(stored, false, true)));
+        test.assert_equal<int64>(3600, cache.freshness_lifetime(stored, false, true));
+        // Without Date, the response time stands in: 02:00:00 minus 00:00:00.
+        test.assert_equal<int64>(7200,
+            cache.freshness_lifetime(one("Expires", "Tue, 17 Nov 2026 02:00:00 GMT"), true, true));
+        // Cache recipients match dates without regard to case (section 4.2).
+        test.assert_equal<int64>(7200,
+            cache.freshness_lifetime(one("Expires", "TUE, 17 NOV 2026 02:00:00 gmt"), false, true));
+        // Expires in the past gives a negative lifetime.
+        test.assert_equal<int64>(-30, cache.freshness_lifetime(
+            two(200,
+                "Date", "Tue, 17 Nov 2026 00:00:30 GMT", "Expires", "Tue, 17 Nov 2026 00:00:00 GMT"), false, true));
+    };
+
+    export let test_invalid_expires_is_expired = func {
+        last zero = one("Expires", "0");
+        test.assert_equal_string("expires", source(cache.lifetime(zero, false, true)));
+        test.assert_equal<int64>(0, cache.freshness_lifetime(zero, false, true));
+        test.assert(!cache.is_fresh(zero, at(0), false, true));
+        // The heuristic does not apply when Expires is present, even an invalid one.
+        last both = two(200, "Expires", "never", "Last-Modified", "Sun, 15 Nov 2026 20:13:15 GMT");
+        test.assert_equal<int64>(0, cache.freshness_lifetime(both, false, true));
+    };
+
+    export let test_far_expires_saturates = func {
+        last stored = one("Expires", "Fri, 31 Dec 9999 00:00:00 GMT");
+        test.assert_equal<int64>(cache.Infinity, cache.freshness_lifetime(stored, false, true));
+        test.assert_equal<int64>(cache.Infinity,
+            cache.freshness_lifetime(one("Cache-Control", "max-age=99999999999999"), false, true));
+    };
+
+    export let test_heuristic_rules = func {
+        last stored = two(200,
+            "Date", "Mon, 16 Nov 2026 23:59:55 GMT", "Last-Modified", "Sun, 15 Nov 2026 20:13:15 GMT");
+        test.assert_equal_string("heuristic", source(cache.lifetime(stored, false, true)));
+        test.assert_equal<int64>(10000, cache.freshness_lifetime(stored, false, true));
+        // Not when heuristics are off.
+        test.assert_equal_string("unknown", source(cache.lifetime(stored, false, false)));
+        test.assert_equal<int64>(0, cache.freshness_lifetime(stored, false, false));
+        // Not for a status that is not heuristically cacheable ...
+        last created = two(201,
+            "Date", "Mon, 16 Nov 2026 23:59:55 GMT", "Last-Modified", "Sun, 15 Nov 2026 20:13:15 GMT");
+        test.assert_equal_string("unknown", source(cache.lifetime(created, false, true)));
+        // ... unless the response is marked public.
+        last names: string[list] = new;
+        last values: string[list] = new;
+        names.append("Date");
+        values.append("Mon, 16 Nov 2026 23:59:55 GMT");
+        names.append("Last-Modified");
+        values.append("Sun, 15 Nov 2026 20:13:15 GMT");
+        names.append("Cache-Control");
+        values.append("public");
+        test.assert_equal<int64>(10000, cache.freshness_lifetime(stored_with(201, names, values), false, true));
+        // Without Last-Modified there is no heuristic lifetime.
+        test.assert_equal_string("unknown",
+            source(cache.lifetime(one("Date", "Mon, 16 Nov 2026 23:59:55 GMT"), false, true)));
+        // A Last-Modified after Date gives 0.
+        test.assert_equal<int64>(0, cache.freshness_lifetime(
+            two(200,
+                "Date", "Mon, 16 Nov 2026 23:59:55 GMT", "Last-Modified", "Tue, 17 Nov 2026 02:00:00 GMT"),
+            false, true));
+    };
+
+    export let test_age_terms_corrected_age_dominates = func {
+        last stored = two(200, "Date", "Mon, 16 Nov 2026 23:59:55 GMT", "Age", "10");
+        last terms = cache.age_terms(stored, at(100));
+        test.assert_equal<int64>(10, terms.age_value);
+        test.assert_equal<int64>(Received - 5, terms.date_value);
+        test.assert_equal<int64>(5, terms.apparent_age);
+        test.assert_equal<int64>(2, terms.response_delay);
+        test.assert_equal<int64>(12, terms.corrected_age_value);
+        test.assert_equal<int64>(12, terms.corrected_initial_age);
+        test.assert_equal<int64>(100, terms.resident_time);
+        test.assert_equal<int64>(112, terms.current_age);
+        test.assert_equal<int64>(112, cache.current_age(stored, at(100)));
+        test.assert(terms.equals(cache.age_terms(stored, at(100))));
+    };
+
+    export let test_age_terms_apparent_age_dominates = func {
+        last terms = cache.age_terms(one("Date", "Mon, 16 Nov 2026 23:59:10 GMT"), at(100));
+        test.assert_equal<int64>(0, terms.age_value);
+        test.assert_equal<int64>(50, terms.apparent_age);
+        test.assert_equal<int64>(2, terms.corrected_age_value);
+        test.assert_equal<int64>(50, terms.corrected_initial_age);
+        test.assert_equal<int64>(150, terms.current_age);
+    };
+
+    export let test_age_terms_missing_or_future_date = func {
+        last missing = cache.age_terms(one("Content-Type", "text/plain"), at(0));
+        test.assert_equal<int64>(Received, missing.date_value);
+        test.assert_equal<int64>(0, missing.apparent_age);
+        test.assert_equal<int64>(2, missing.current_age);
+        // A Date after the response time gives an apparent age of 0, not a negative one.
+        last future = cache.age_terms(one("Date", "Tue, 17 Nov 2026 00:00:30 GMT"), at(0));
+        test.assert_equal<int64>(0, future.apparent_age);
+        // An invalid Date counts as missing.
+        test.assert_equal<int64>(Received, cache.age_terms(one("Date", "yesterday"), at(0)).date_value);
+    };
+
+    export let test_age_field_rules = func {
+        test.assert_equal<int64>(0, cache.age_terms(one("Age", "abc"), at(0)).age_value);
+        test.assert_equal<int64>(0, cache.age_terms(one("Age", "-3"), at(0)).age_value);
+        test.assert_equal<int64>(7, cache.age_terms(one("Age", "7, 9"), at(0)).age_value);
+    };
+
+    export let test_age_saturates = func {
+        last huge = cache.age_terms(one("Age", "99999999999"), at(100));
+        test.assert_equal<int64>(cache.Infinity, huge.age_value);
+        test.assert_equal<int64>(cache.Infinity, huge.corrected_age_value);
+        test.assert_equal<int64>(cache.Infinity, huge.current_age);
+        // Date in the year 1000: 32405097600 seconds before R, beyond 2^31.
+        last ancient = cache.age_terms(one("Date", "Wed, 01 Jan 1000 00:00:00 GMT"), at(0));
+        test.assert_equal<int64>(-30610224000, ancient.date_value);
+        test.assert_equal<int64>(cache.Infinity, ancient.apparent_age);
+        test.assert_equal<int64>(cache.Infinity, ancient.current_age);
+    };
+
+    export let test_is_fresh_is_strict = func {
+        last stored = one("Cache-Control", "max-age=100");
+        // current_age at R+97 is 2 + 97 = 99 < 100; at R+98 it is 100, not fresh.
+        test.assert(cache.is_fresh(stored, at(97), false, true));
+        test.assert(!cache.is_fresh(stored, at(98), false, true));
+        // Sub-second parts are dropped: R+97.9 counts as R+97.
+        test.assert(cache.is_fresh(stored, instant.of_epoch_seconds(Received + 97, 900000000), false, true));
+    };
+
+    export let test_stored_response_value = func {
+        last a = one("ETag", "\"x\"");
+        last b = one("ETag", "\"x\"");
+        test.assert(a.equals(b));
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert(!a.equals(one("ETag", "\"y\"")));
+        test.assert_equal_string(
+            "StoredResponse{status=200, fields=1, body=1 bytes, request_time=2026-11-16T23:59:58Z, "
+                + "response_time=2026-11-17T00:00:00Z}",
+            a.to_string());
+        // The stored response owns copies of the fields and the content.
+        last fields = new headers.Headers();
+        last body: uint8[list] = new;
+        last c = new cache.StoredResponse(200, fields, body, at(0), at(0));
+        fields.add("X", "1");
+        body.append(1);
+        test.assert_equal<int>(0, c.fields.size());
+        test.assert_equal<int>(0, c.body.length);
+    };
+
+    export let test_negative_age_is_never_fresh = func {
+        // A clock that reads before the response time: resident_time -100, current_age 2 - 100 = -98.
+        last stored = one("Cache-Control", "max-age=0");
+        last terms = cache.age_terms(stored, at(-100));
+        test.assert_equal<int64>(-100, terms.resident_time);
+        test.assert_equal<int64>(-98, terms.current_age);
+        // The negative age counts as 0 when freshness is decided, so a lifetime of 0 is not fresh.
+        test.assert(!cache.is_fresh(stored, at(-100), false, true));
+        test.assert(!cache.is_fresh(one("Expires", "0"), at(-100), false, true));
+        test.assert(cache.is_fresh(one("Cache-Control", "max-age=1"), at(-100), false, true));
+    };
+);

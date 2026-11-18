@@ -1,0 +1,256 @@
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let fixed_clock = import:Std.Time.FixedClock;
+let gradients = import:Std.Net.Resilience.GradientLimit;
+let instant = import:Std.Time.Instant;
+let limit_filters = import:Std.Net.Resilience.ConcurrencyLimitFilter;
+let limits = import:Std.Net.Resilience.AdaptiveLimit;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let test = import:Std.Test;
+let vegas = import:Std.Net.Resilience.VegasLimit;
+
+// Adaptive concurrency limits and the concurrency limit filter. Expected estimates come from a Python model of the
+// formulas documented in VegasLimit and GradientLimit:
+//   python3 -I limits.py, with limits.py (it prints each estimate with repr):
+//   # Models of VegasLimit and GradientLimit as documented in Std.Net.Resilience (after Netflix concurrency-limits).
+//   import math
+//   def lg(x): return 1 if x < 10 else max(1, int(math.log10(x)))
+//   class Vegas:
+//       def __init__(s, L, mn, mx, sm, a=0, b=0): s.L, s.mn, s.mx, s.sm, s.a, s.b, s.nl = float(L), mn, mx, sm, a, b, 0
+//       def sample(s, rtt, inflight, drop):
+//           if s.nl == 0 or rtt < s.nl: s.nl = rtt; return
+//           cur = int(s.L); q = math.ceil(s.L * (1.0 - s.nl / rtt)); st = float(lg(cur))
+//           if drop: n = s.L - st
+//           else:
+//               if inflight * 2.0 < s.L: return
+//               a = float(s.a or 3 * lg(cur)); b = float(s.b or 6 * lg(cur))
+//               if q <= st: n = s.L + b
+//               elif q < a: n = s.L + st
+//               elif q > b: n = s.L - st
+//               else: return
+//           n = max(float(s.mn), min(float(s.mx), n)); s.L = (1.0 - s.sm) * s.L + s.sm * n
+//   class Gradient:
+//       def __init__(s, L, mn, mx, sm, tol=2.0, bo=0.9, fl=4): s.L, s.mn, s.mx, s.sm, s.tol, s.bo, s.fl, s.nl = float(L), mn, mx, sm, tol, bo, fl, 0
+//       def q(s): return max(s.fl, int(math.sqrt(float(int(s.L)))))
+//       def sample(s, rtt, inflight, drop):
+//           q = float(s.q())
+//           if s.nl == 0 or rtt < s.nl: s.nl = rtt
+//           g = max(0.5, min(1.0, s.tol * s.nl / rtt))
+//           if drop: n = s.L * s.bo
+//           else:
+//               if inflight < s.L / 2.0: return
+//               n = s.L * g + q
+//           if n < s.L: n = max(float(s.mn), (1.0 - s.sm) * s.L + s.sm * n)
+//           s.L = max(q, min(float(s.mx), n))
+//   ms = 1000000
+//   v = Vegas(20, 1, 1000, 1.0)
+//   for args in [(10*ms, 20, False), (10*ms, 20, False), (12*ms, 26, False), (10500000, 26, False), (20*ms, 27, False), (10*ms, 26, True), (10*ms, 10, False)]:
+//       v.sample(*args); print("vegas", args, repr(v.L))
+//   v2 = Vegas(20, 1, 1000, 0.5); v2.sample(10*ms, 20, False); v2.sample(10*ms, 20, False); print("vegas smooth", repr(v2.L))
+//   v3 = Vegas(150, 1, 1000, 1.0); v3.sample(10*ms, 150, False); v3.sample(10*ms, 150, False); print("vegas 150", repr(v3.L))
+//   g = Gradient(20, 1, 1000, 0.2)
+//   for args in [(10*ms, 20, False), (40*ms, 24, False), (10*ms, 22, True), (30*ms, 21, False), (10*ms, 5, False)]:
+//       g.sample(*args); print("gradient", args, repr(g.L), int(g.L), g.q())
+let ConcurrencyLimitTests = module (
+    let ms = func(n: int64) -> durations.Duration => durations.of_millis(n);
+
+    export let test_vegas_grows_holds_and_shrinks = func {
+        // Defaults: alpha = 3, beta = 6, threshold = 1 while the limit is below 100.
+        last limit = vegas.of(20, 1, 1000, 1.0);
+        limit.on_sample(ms(10), 20, false);
+        // The first sample only sets rtt_noload.
+        test.assert_equal<int>(20, limit.limit());
+        test.assert_equal<int64>(10000000, limit.rtt_no_load().to_nanos());
+        // queue = ceil(20 * 0) = 0 <= 1: grow by beta.
+        limit.on_sample(ms(10), 20, false);
+        test.assert_equal_float64(26.0, limit.estimated());
+        // queue = ceil(26 * (1 - 10/12)) = 5, between alpha and beta: hold.
+        limit.on_sample(ms(12), 26, false);
+        test.assert_equal_float64(26.0, limit.estimated());
+        // queue = ceil(26 * (1 - 10/10.5)) = 2 < alpha: grow by log10.
+        limit.on_sample(durations.of_micros(10500), 26, false);
+        test.assert_equal_float64(27.0, limit.estimated());
+        // queue = ceil(27 * 0.5) = 14 > beta: shrink by log10.
+        limit.on_sample(ms(20), 27, false);
+        test.assert_equal_float64(26.0, limit.estimated());
+        // A drop shrinks by log10.
+        limit.on_sample(ms(10), 26, true);
+        test.assert_equal_float64(25.0, limit.estimated());
+        // 10 in flight is below half the limit: no change.
+        limit.on_sample(ms(10), 10, false);
+        test.assert_equal_float64(25.0, limit.estimated());
+        test.assert_equal_string("VegasLimit(limit 25)", limit.to_string());
+    };
+
+    export let test_vegas_smoothing_clamp_and_log_scale = func {
+        last smooth = vegas.of(20, 1, 1000, 0.5);
+        smooth.on_sample(ms(10), 20, false);
+        smooth.on_sample(ms(10), 20, false);
+        // 0.5 * 20 + 0.5 * 26.
+        test.assert_equal_float64(23.0, smooth.estimated());
+        last capped = vegas.of(20, 1, 22, 1.0);
+        capped.on_sample(ms(10), 20, false);
+        capped.on_sample(ms(10), 20, false);
+        test.assert_equal<int>(22, capped.limit());
+        // At 150, log10 gives 2: beta = 12.
+        last large = vegas.of(150, 1, 1000, 1.0);
+        large.on_sample(ms(10), 150, false);
+        large.on_sample(ms(10), 150, false);
+        test.assert_equal_float64(162.0, large.estimated());
+        // Fixed thresholds: alpha 2, beta 4. queue = ceil(20 * (1 - 10/11)) = 2: hold.
+        last fixed = vegas.with_thresholds(20, 1, 1000, 1.0, 2, 4);
+        fixed.on_sample(ms(10), 20, false);
+        fixed.on_sample(ms(11), 20, false);
+        test.assert_equal_float64(20.0, fixed.estimated());
+        // A floor of min_limit.
+        last floor = vegas.of(2, 2, 10, 1.0);
+        floor.on_sample(ms(10), 2, false);
+        floor.on_sample(ms(10), 2, true);
+        test.assert_equal<int>(2, floor.limit());
+        floor.reset_rtt_noload();
+        test.assert_equal<int64>(0, floor.rtt_no_load().to_nanos());
+    };
+
+    export let test_gradient_vectors = func {
+        last limit = gradients.of(20, 1, 1000, 0.2);
+        // queue 4, gradient min(1, 2 * 10/10) = 1: 20 + 4.
+        limit.on_sample(ms(10), 20, false);
+        test.assert_equal_float64(24.0, limit.estimated());
+        // gradient 0.5: new 16, smoothed 0.8 * 24 + 0.2 * 16.
+        limit.on_sample(ms(40), 24, false);
+        test.assert_float_near(22.400000000000002, limit.estimated(), 0.000000001);
+        test.assert_equal<int>(22, limit.limit());
+        // Drop: 22.4 * 0.9, smoothed.
+        limit.on_sample(ms(10), 22, true);
+        test.assert_float_near(21.952, limit.estimated(), 0.000000001);
+        limit.on_sample(ms(30), 21, false);
+        test.assert_float_near(21.288533333333337, limit.estimated(), 0.000000001);
+        // Below half the limit in flight: unchanged.
+        limit.on_sample(ms(10), 5, false);
+        test.assert_float_near(21.288533333333337, limit.estimated(), 0.000000001);
+        test.assert_equal<int>(4, limit.queue_size());
+        // A probe cuts the limit to max(min_limit, queue).
+        limit.reset_rtt_noload();
+        test.assert_equal<int>(4, limit.limit());
+        test.assert_equal_string("GradientLimit(limit 4)", limit.to_string());
+    };
+
+    export let test_gradient_defaults = func {
+        last limit = gradients.create();
+        test.assert_equal<int>(50, limit.limit());
+        // floor(sqrt(50)) = 7.
+        test.assert_equal<int>(7, limit.queue_size());
+    };
+
+    // A limit that records its samples and holds a fixed limit.
+    let Recording = class implements limits.AdaptiveLimit (
+        last fixed: int;
+        export last rtts: int64[list] = new;
+        export last in_flights: int[list] = new;
+        export last drops: bool[list] = new;
+
+        export let init = func(value: int) {
+            fixed = value;
+        };
+
+        export let limit = func -> int => fixed;
+
+        export let on_sample = func(rtt: durations.Duration, in_flight: int, dropped: bool) {
+            rtts.append(rtt.to_nanos());
+            in_flights.append(in_flight);
+            drops.append(dropped);
+        };
+
+        export let.override to_string = func -> string => "Recording";
+    );
+
+    // A backend that takes `latency` on the fixed clock, fails requests starting with "!", and calls `outer` again
+    // for requests starting with "+" (a nested call in the same task).
+    let Backend = class implements services.Service<string, string> (
+        last clock: fixed_clock.FixedClock;
+        last latency: durations.Duration;
+        export last outer: services.Service<string, string>[list] = new;
+
+        export let init = func(source: fixed_clock.FixedClock, took: durations.Duration) {
+            clock = source;
+            latency = took;
+        };
+
+        export let call = func(request: string) -> result.Result<string> {
+            clock.advance(latency);
+            if (request.byte_length > 0 && request.byte_at(0) == 43) {
+                return outer[0].call(request.slice(1, request.byte_length));
+            }
+            if (request.byte_length > 0 && request.byte_at(0) == 33) {
+                return result.Result<string>.Err(errors.custom("backend.timeout", request));
+            }
+            return result.Result<string>.Ok("ok " + request);
+        };
+
+        export let.override to_string = func -> string => "Backend";
+    );
+
+    let code_of = func(e: errors.Error) -> string => match (e) {
+        errors.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_filter_samples_latency = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last recording = new Recording(10);
+        last limiter = limit_filters.of<string, string>(recording, clock);
+        last backend = new Backend(clock, ms(25));
+        last service = filters.bind<string, string, string, string>(limiter, backend);
+        backend.outer.append(service);
+        test.assert_equal_string("ok a", test.assert_ok<string>(service.call("a")));
+        test.assert_err<string>(service.call("!b"));
+        // A nested call: the outer request has 1 in flight at its start, the inner one 2.
+        test.assert_equal_string("ok c", test.assert_ok<string>(service.call("+c")));
+        test.assert_equal<int>(4, recording.rtts.length);
+        test.assert_equal<int64>(25000000, recording.rtts[0]);
+        test.assert_equal<int64>(25000000, recording.rtts[1]);
+        test.assert(recording.drops[1]);
+        // The inner call reports first (25 ms), then the outer one (50 ms).
+        test.assert_equal<int64>(25000000, recording.rtts[2]);
+        test.assert_equal<int>(2, recording.in_flights[2]);
+        test.assert_equal<int64>(50000000, recording.rtts[3]);
+        test.assert_equal<int>(1, recording.in_flights[3]);
+        test.assert_equal<int>(0, limiter.in_flight());
+    };
+
+    export let test_filter_sheds_at_limit = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        // A Vegas limit pinned at 2 (min = max = 2).
+        last limit = vegas.of(2, 2, 2, 1.0);
+        last limiter = limit_filters.of<string, string>(limit, clock);
+        last backend = new Backend(clock, ms(5));
+        last service = filters.bind<string, string, string, string>(limiter, backend);
+        backend.outer.append(service);
+        // Depth 2 fits.
+        test.assert_equal_string("ok x", test.assert_ok<string>(service.call("+x")));
+        // Depth 3: the third nested call is shed.
+        last e = test.assert_err<string>(service.call("++x"));
+        test.assert_equal_string(limit_filters.ExceededCode, code_of(e));
+        test.assert_equal_string("concurrency limit of 2 reached", errors.message(e));
+        test.assert_equal<int64>(1, limiter.rejected());
+        test.assert_equal<int>(0, limiter.in_flight());
+        test.assert_equal_string("ConcurrencyLimitFilter(VegasLimit(limit 2), 0 in flight)", limiter.to_string());
+    };
+
+    export let test_filter_drives_vegas_down_on_drops = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last limit = vegas.of(20, 1, 1000, 1.0);
+        last limiter = limit_filters.of<string, string>(limit, clock);
+        last service = filters.bind<string, string, string, string>(limiter, new Backend(clock, ms(30)));
+        // The first sample sets rtt_noload = 30 ms; each later timeout is a drop: 20 -> 19 -> 18.
+        test.assert_err<string>(service.call("!1"));
+        test.assert_err<string>(service.call("!2"));
+        test.assert_err<string>(service.call("!3"));
+        test.assert_equal<int>(18, limit.limit());
+        // Successes with 1 in flight are below half the limit and change nothing.
+        test.assert_ok<string>(service.call("ok"));
+        test.assert_equal<int>(18, limit.limit());
+    };
+);

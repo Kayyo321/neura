@@ -1,0 +1,7 @@
+error[E0418]: type argument string does not satisfy the bound Additive<string> of type parameter 'T'
+  --> $DIR/primitive-string.nra:11:18
+   |
+11 | let joined = sum<string>(words);
+   |                  ^^^^^^
+
+For more information about this error, try `neura explain E0418`.

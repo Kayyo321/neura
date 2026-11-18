@@ -1,0 +1,5 @@
+// A clause in a class has a body (edge case 64).
+let Shape = class (
+    export let name: string = "s";
+        | get;
+);

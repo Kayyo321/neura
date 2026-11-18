@@ -1,0 +1,65 @@
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let int32s = import:Std.Core.Int32;
+let test = import:Std.Test;
+let vectors = import:DrbgVectors;
+
+// ChaCha20Drbg against an independent Python reference of its construction (no standard vectors exist;
+// support/drbg-vectors.nra, scripts/crypto-vectors/gen-drbg.py).
+let DrbgTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_reference_sequences = func {
+        last rows = vectors.steps;
+        let current = "";
+        let generator = new drbg.ChaCha20Drbg(decode(rows[0]));
+        let checked = 0;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i] != current) {
+                current = rows[i];
+                generator = new drbg.ChaCha20Drbg(decode(current));
+            }
+            last step = rows[i + 1];
+            if (step.slice(0, 5) == "fill:") {
+                last count = test.assert_ok(int32s.parse(step.slice(5, step.byte_length)));
+                test.assert_equal_string(rows[i + 2], hex.encode(generator.fill(count)));
+                checked++;
+            } else {
+                generator.reseed(decode(rows[i + 2]));
+            }
+        }
+        test.assert_equal_int32(11, checked);
+    };
+
+    export let test_same_seed_same_output = func {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(i as uint8);
+        }
+        let a = new drbg.ChaCha20Drbg(seed);
+        let b = new drbg.ChaCha20Drbg(seed);
+        test.assert_equal_string(hex.encode(a.fill(70)), hex.encode(b.fill(70)));
+        test.assert(a.next_uint64() == b.next_uint64());
+        b.reseed(new([1]));
+        test.assert(a.next_uint32() != b.next_uint32() || a.next_uint32() != b.next_uint32());
+    };
+
+    export let test_next_below = func {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(7);
+        }
+        let generator = new drbg.ChaCha20Drbg(seed);
+        let seen: bool[list] = new([false, false, false, false, false, false]);
+        for (let i = 0; i < 200; i++) {
+            last v = generator.next_below(6);
+            test.assert(v >= 0 && v < 6);
+            seen[v] = true;
+        }
+        for (let s in seen) {
+            test.assert(s);
+        }
+        test.assert_equal_int32(0, generator.next_below(1));
+        test.assert_equal_string("ChaCha20Drbg(<redacted>)", generator.to_string());
+    };
+);

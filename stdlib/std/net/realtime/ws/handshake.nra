@@ -1,0 +1,566 @@
+let base64 = import:Std.Encoding.Base64;
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let sha1_digest = import:Std.Net.Realtime.Ws.Internal.Sha1;
+let strings = import:Std.Text.Strings;
+
+/// @brief The WebSocket opening handshake over HTTP/1.1 (RFC 6455 section 4), on plain header lists.
+///
+/// The module builds and checks both sides of the handshake without an HTTP library: a header is a `Header`
+/// name and value, and a header list is a `Header[list]` whose names compare without ASCII case. Repeated
+/// headers are read as one comma-separated list (RFC 9110 section 5.3). `request_text`, `response_text`,
+/// `parse_request_head` and `parse_response_head` read and write the HTTP/1.1 head that a byte transport
+/// carries. Failures are Custom errors with the code `ws.handshake`.
+/// @see [Std.Net.Realtime.Ws.Handshake](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-Handshake)
+#Since("0.3.0")
+export let Handshake = module (
+    /// @brief The GUID a server appends to the client's key (RFC 6455 section 1.3).
+    export const Guid: string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+    /// @brief The only protocol version RFC 6455 defines (section 4.1).
+    export const Version: string = "13";
+
+    /// @brief The error code of a handshake failure.
+    export const ErrorCode: string = "ws.handshake";
+
+    /// @brief One header field: a name and its value.
+    #[Final, Immutable]
+    export let Header = class (
+        /// @brief The field name as written.
+        export last name: string;
+        /// @brief The field value with surrounding whitespace removed.
+        export last value: string;
+
+        /// @brief Stores the name and value.
+        export let init = func(field: string, text: string) {
+            name = field;
+            value = text;
+        };
+
+        /// @brief Equal when the names match without ASCII case and the values match exactly.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Header)) {
+                return false;
+            }
+            last header = other as Header;
+            return strings.equals_ignore_ascii_case(name, header.name) && value == header.value;
+        };
+
+        /// @brief Combines the lowercase name and the value.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(strings.hash(strings.to_ascii_lower(name)), strings.hash(value));
+
+        /// @brief `name: value`.
+        export let.override to_string = func -> string => $"{name}: {value}";
+    );
+
+    /// @brief The opening request a client sends (RFC 6455 section 4.1).
+    #Final
+    export let ClientRequest = class (
+        /// @brief The Host header value, `host` or `host:port`.
+        export last host: string;
+        /// @brief The request target: the resource name of the WebSocket URI, starting with `/`.
+        export last path: string;
+        /// @brief The base64 nonce sent as Sec-WebSocket-Key.
+        export last key: string;
+        /// @brief The subprotocols offered, most preferred first.
+        export last protocols: string[list];
+        /// @brief The Sec-WebSocket-Extensions offer, or the empty string for none.
+        export last extensions: string;
+
+        /// @brief Stores the fields; use `client_request` to make one with a fresh key.
+        export let init = func(host_value: string, target: string, nonce: string, offered: string[list],
+            extension_offer: string) {
+            host = host_value;
+            path = target;
+            key = nonce;
+            protocols = offered;
+            extensions = extension_offer;
+        };
+
+        /// @brief The request headers in the order they are written.
+        #NoDiscard
+        export let headers = func -> Header[list] {
+            last list: Header[list] = new;
+            list.append(new Header("Host", host));
+            list.append(new Header("Upgrade", "websocket"));
+            list.append(new Header("Connection", "Upgrade"));
+            list.append(new Header("Sec-WebSocket-Key", key));
+            list.append(new Header("Sec-WebSocket-Version", Version));
+            if (protocols.length > 0) {
+                list.append(new Header("Sec-WebSocket-Protocol", strings.join(protocols, ", ")));
+            }
+            if (extensions.byte_length > 0) {
+                list.append(new Header("Sec-WebSocket-Extensions", extensions));
+            }
+            return list;
+        };
+
+        /// @brief The HTTP/1.1 request head, ending with the empty line.
+        #NoDiscard
+        export let to_text = func -> string => request_text("GET", path, headers());
+
+        /// @brief The host, path and offered protocols; the key is shown because it is a public nonce.
+        export let.override to_string = func -> string =>
+            $"ClientRequest(GET {path}, host {host}, protocols [{strings.join(protocols, ", ")}])";
+    );
+
+    /// @brief What a server learned from a valid client request (RFC 6455 section 4.2.1).
+    #Final
+    export let ClientOffer = class (
+        /// @brief The request target.
+        export last path: string;
+        /// @brief The Host header value.
+        export last host: string;
+        /// @brief The Sec-WebSocket-Key value.
+        export last key: string;
+        /// @brief The Origin header value, or the empty string when absent.
+        export last origin: string;
+        /// @brief The offered subprotocols in the client's order.
+        export last protocols: string[list];
+        /// @brief The Sec-WebSocket-Extensions offer, or the empty string.
+        export last extensions: string;
+
+        /// @brief Stores the fields; `validate_client_request` makes one.
+        export let init = func(target: string, host_value: string, nonce: string, origin_value: string,
+            offered: string[list], extension_offer: string) {
+            path = target;
+            host = host_value;
+            key = nonce;
+            origin = origin_value;
+            protocols = offered;
+            extensions = extension_offer;
+        };
+
+        /// @brief The response headers that accept this offer with the chosen subprotocol and extension
+        /// response (each `None` or empty to choose none), status 101.
+        #NoDiscard
+        export let accept_headers = func(protocol: Optional<string>, extension_response: string) -> Header[list] {
+            last list: Header[list] = new;
+            list.append(new Header("Upgrade", "websocket"));
+            list.append(new Header("Connection", "Upgrade"));
+            list.append(new Header("Sec-WebSocket-Accept", accept_key(key)));
+            match (protocol) {
+                Optional.Some(name) => {
+                    list.append(new Header("Sec-WebSocket-Protocol", name));
+                },
+                Optional.None => {},
+            }
+            if (extension_response.byte_length > 0) {
+                list.append(new Header("Sec-WebSocket-Extensions", extension_response));
+            }
+            return list;
+        };
+
+        /// @brief The path, host and offered protocols.
+        export let.override to_string = func -> string =>
+            $"ClientOffer({path}, host {host}, protocols [{strings.join(protocols, ", ")}])";
+    );
+
+    /// @brief What a client learned from a valid server response (RFC 6455 section 4.1).
+    #[Final, Immutable]
+    export let ServerAcceptance = class (
+        /// @brief The subprotocol the server chose, if any.
+        export last protocol: Optional<string>;
+        /// @brief The Sec-WebSocket-Extensions response, or the empty string.
+        export last extensions: string;
+
+        /// @brief Stores the fields.
+        export let init = func(chosen: Optional<string>, extension_response: string) {
+            protocol = chosen;
+            extensions = extension_response;
+        };
+
+        /// @brief The chosen protocol and extensions.
+        export let.override to_string = func -> string {
+            last name = match (protocol) {
+                Optional.Some(p) => p,
+                Optional.None => "none",
+            };
+            return $"ServerAcceptance(protocol {name}, extensions \"{extensions}\")";
+        };
+    );
+
+    /// @brief An HTTP/1.1 request head: method, target and headers.
+    #Final
+    export let RequestHead = class (
+        /// @brief The method token.
+        export last method: string;
+        /// @brief The request target.
+        export last target: string;
+        /// @brief The HTTP version, such as `HTTP/1.1`.
+        export last version: string;
+        /// @brief The header fields in order.
+        export last headers: Header[list];
+
+        /// @brief Stores the fields.
+        export let init = func(verb: string, request_target: string, http_version: string, fields: Header[list]) {
+            method = verb;
+            target = request_target;
+            version = http_version;
+            headers = fields;
+        };
+
+        /// @brief The request line.
+        export let.override to_string = func -> string => $"{method} {target} {version}";
+    );
+
+    /// @brief An HTTP/1.1 response head: status, reason and headers.
+    #Final
+    export let ResponseHead = class (
+        /// @brief The three-digit status code.
+        export last status: int;
+        /// @brief The reason phrase, possibly empty.
+        export last reason: string;
+        /// @brief The header fields in order.
+        export last headers: Header[list];
+
+        /// @brief Stores the fields.
+        export let init = func(code: int, phrase: string, fields: Header[list]) {
+            status = code;
+            reason = phrase;
+            headers = fields;
+        };
+
+        /// @brief The status line.
+        export let.override to_string = func -> string => $"HTTP/1.1 {status} {reason}";
+    );
+
+    /// @brief The 20-byte SHA-1 hash (FIPS 180-4) of the bytes.
+    ///
+    /// Exposed for the handshake and for tests of it. SHA-1 is not collision resistant; do not use it for new
+    /// integrity or signature purposes.
+    #[NoDiscard, Pure]
+    export let sha1 = func(bytes: uint8[list]) -> uint8[list] => sha1_digest.of(bytes);
+
+    /// @brief The Sec-WebSocket-Accept value for a key: base64(SHA-1(key + Guid)) (RFC 6455 section 4.2.2).
+    #[NoDiscard, Pure]
+    export let accept_key = func(key: string) -> string =>
+        base64.encode(sha1_digest.of(strings.to_bytes(key + Guid)));
+
+    /// @brief A fresh Sec-WebSocket-Key: 16 bytes from `random`, base64 encoded (RFC 6455 section 4.1).
+    ///
+    /// RFC 6455 asks for a randomly selected nonce; pass a Random seeded from entropy in production and a
+    /// seeded one in tests.
+    #NoDiscard
+    export let generate_key = func(random: Random) -> string => base64.encode(random.fill_bytes(16));
+
+    /// @brief Whether the key is base64 text that decodes to exactly 16 bytes.
+    #[NoDiscard, Pure]
+    export let is_valid_key = func(key: string) -> bool => match (base64.decode(key)) {
+        Result.Ok(bytes) => bytes.length == 16,
+        Result.Err(_) => false,
+    };
+
+    /// @brief A client request for `path` on `host` with a key from `random`, offering the protocols and the
+    /// extension offer (empty for none).
+    #NoDiscard
+    export let client_request = func(host: string, path: string, random: Random, protocols: string[list],
+        extensions: string) -> ClientRequest => new ClientRequest(host, path, generate_key(random), protocols,
+        extensions);
+
+    /// @brief The comma-joined value of every header named `name` (ASCII case ignored), or `None` when absent.
+    #NoDiscard
+    export let header_value = func(headers: Header[list], name: string) -> Optional<string> {
+        let found = false;
+        let joined = "";
+        for (let header in headers) {
+            if (strings.equals_ignore_ascii_case(header.name, name)) {
+                joined = found ? joined + ", " + header.value : header.value;
+                found = true;
+            }
+        }
+        return found ? Optional<string>.Some(joined) : Optional<string>.None;
+    };
+
+    /// @brief The trimmed, non-empty elements of a comma-separated header value.
+    #[NoDiscard, Pure]
+    export let split_list = func(value: string) -> string[list] {
+        last items: string[list] = new;
+        for (let piece in strings.split(value, ",")) {
+            last item = strings.trim(piece);
+            if (item.byte_length > 0) {
+                items.append(item);
+            }
+        }
+        return items;
+    };
+
+    /// @brief Whether a comma-separated header value contains `token`, ASCII case ignored.
+    #[NoDiscard, Pure]
+    export let list_contains = func(value: string, token: string) -> bool {
+        for (let item in split_list(value)) {
+            if (strings.equals_ignore_ascii_case(item, token)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief Checks a client's opening request as a server must (RFC 6455 section 4.2.1).
+    ///
+    /// Requires the GET method, HTTP/1.1 or later, a Host header, an Upgrade list containing `websocket` and a
+    /// Connection list containing `Upgrade` (ASCII case ignored), a Sec-WebSocket-Key that decodes to 16 bytes,
+    /// and Sec-WebSocket-Version 13. A wrong version fails with a message naming it; a server should then answer
+    /// with `version_mismatch_headers` and status 426.
+    #NoDiscard
+    export let validate_client_request = func(head: RequestHead) -> Result<ClientOffer> {
+        if (head.method != "GET") {
+            return fail<ClientOffer>("the method must be GET, not " + head.method);
+        }
+        if (!is_http11_or_later(head.version)) {
+            return fail<ClientOffer>("the HTTP version must be 1.1 or later, not " + head.version);
+        }
+        last host = header_value(head.headers, "Host");
+        if (!is_some<string>(host)) {
+            return fail<ClientOffer>("the Host header is missing");
+        }
+        if (!list_contains(text_or_empty(header_value(head.headers, "Upgrade")), "websocket")) {
+            return fail<ClientOffer>("the Upgrade header must contain websocket");
+        }
+        if (!list_contains(text_or_empty(header_value(head.headers, "Connection")), "Upgrade")) {
+            return fail<ClientOffer>("the Connection header must contain Upgrade");
+        }
+        last key = text_or_empty(header_value(head.headers, "Sec-WebSocket-Key"));
+        if (!is_valid_key(key)) {
+            return fail<ClientOffer>("the Sec-WebSocket-Key header must be base64 of 16 bytes");
+        }
+        last version = text_or_empty(header_value(head.headers, "Sec-WebSocket-Version"));
+        if (version != Version) {
+            return fail<ClientOffer>("unsupported Sec-WebSocket-Version \"" + version + "\" (expected 13)");
+        }
+        last protocols = split_list(text_or_empty(header_value(head.headers, "Sec-WebSocket-Protocol")));
+        last extensions = text_or_empty(header_value(head.headers, "Sec-WebSocket-Extensions"));
+        return Result<ClientOffer>.Ok(new ClientOffer(head.target, text_or_empty(host), key,
+            text_or_empty(header_value(head.headers, "Origin")), protocols, extensions));
+    };
+
+    /// @brief The headers of a 426 response to a request with an unsupported version (RFC 6455 section 4.4).
+    #NoDiscard
+    export let version_mismatch_headers = func -> Header[list] {
+        last list: Header[list] = new;
+        list.append(new Header("Sec-WebSocket-Version", Version));
+        return list;
+    };
+
+    /// @brief The first of the client's protocols that the server supports, in the client's order of
+    /// preference, or `None`.
+    #NoDiscard
+    export let choose_protocol = func(offered: string[list], supported: string[list]) -> Optional<string> {
+        for (let name in offered) {
+            for (let mine in supported) {
+                if (name == mine) {
+                    return Optional<string>.Some(name);
+                }
+            }
+        }
+        return Optional<string>.None;
+    };
+
+    /// @brief Checks a server's response as a client must (RFC 6455 section 4.1, "the client MUST validate").
+    ///
+    /// Requires status 101, an Upgrade list containing `websocket`, a Connection list containing `Upgrade`, a
+    /// Sec-WebSocket-Accept equal to `accept_key(request.key)`, a Sec-WebSocket-Protocol (if any) that the
+    /// request offered, and Sec-WebSocket-Extensions (if any) naming only extensions the request offered.
+    #NoDiscard
+    export let validate_server_response = func(request: ClientRequest, head: ResponseHead) -> Result<ServerAcceptance> {
+        if (head.status != 101) {
+            return fail<ServerAcceptance>("the status must be 101, not " + head.status.to_string());
+        }
+        if (!list_contains(text_or_empty(header_value(head.headers, "Upgrade")), "websocket")) {
+            return fail<ServerAcceptance>("the Upgrade header must contain websocket");
+        }
+        if (!list_contains(text_or_empty(header_value(head.headers, "Connection")), "Upgrade")) {
+            return fail<ServerAcceptance>("the Connection header must contain Upgrade");
+        }
+        last accept = text_or_empty(header_value(head.headers, "Sec-WebSocket-Accept"));
+        if (accept != accept_key(request.key)) {
+            return fail<ServerAcceptance>("the Sec-WebSocket-Accept header does not match the key");
+        }
+        last protocol_header = header_value(head.headers, "Sec-WebSocket-Protocol");
+        let protocol = Optional<string>.None;
+        match (protocol_header) {
+            Optional.Some(text) => {
+                last chosen = strings.trim(text);
+                let offered = false;
+                for (let name in request.protocols) {
+                    if (name == chosen) {
+                        offered = true;
+                    }
+                }
+                if (!offered) {
+                    return fail<ServerAcceptance>("the server chose a subprotocol the client did not offer: " + chosen);
+                }
+                protocol = Optional<string>.Some(chosen);
+            },
+            Optional.None => {},
+        }
+        last extensions = text_or_empty(header_value(head.headers, "Sec-WebSocket-Extensions"));
+        if (extensions.byte_length > 0) {
+            last offered_names = extension_names(request.extensions);
+            for (let name in extension_names(extensions)) {
+                let known = false;
+                for (let offered_name in offered_names) {
+                    if (offered_name == name) {
+                        known = true;
+                    }
+                }
+                if (!known) {
+                    return fail<ServerAcceptance>("the server accepted an extension the client did not offer: " + name);
+                }
+            }
+        }
+        return Result<ServerAcceptance>.Ok(new ServerAcceptance(protocol, extensions));
+    };
+
+    /// @brief The extension names of a Sec-WebSocket-Extensions value, in order (parameters dropped).
+    #[NoDiscard, Pure]
+    export let extension_names = func(value: string) -> string[list] {
+        last names: string[list] = new;
+        for (let element in split_list(value)) {
+            last semicolon = strings.index_of(element, ";");
+            last name = semicolon < 0 ? element : strings.trim(element.slice(0, semicolon));
+            names.append(name);
+        }
+        return names;
+    };
+
+    /// @brief An HTTP/1.1 request head: request line, header lines and the empty line, each ending in CRLF.
+    #[NoDiscard, Pure]
+    export let request_text = func(method: string, target: string, headers: Header[list]) -> string {
+        let text = method + " " + target + " HTTP/1.1\r\n";
+        for (let header in headers) {
+            text = text + header.name + ": " + header.value + "\r\n";
+        }
+        return text + "\r\n";
+    };
+
+    /// @brief An HTTP/1.1 response head with the status and reason, ending with the empty line.
+    #[NoDiscard, Pure]
+    export let response_text = func(status: int, reason: string, headers: Header[list]) -> string {
+        let text = "HTTP/1.1 " + status.to_string() + " " + reason + "\r\n";
+        for (let header in headers) {
+            text = text + header.name + ": " + header.value + "\r\n";
+        }
+        return text + "\r\n";
+    };
+
+    /// @brief The byte offset just past the first CRLF CRLF in `bytes` (the end of an HTTP head), or -1.
+    #[NoDiscard, Pure]
+    export let head_end = func(bytes: uint8[list]) -> int {
+        for (let i = 3; i < bytes.length; i++) {
+            if (bytes[i] == 10 && bytes[i - 1] == 13 && bytes[i - 2] == 10 && bytes[i - 3] == 13) {
+                return i + 1;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Parses an HTTP/1.1 request head (request line and header lines, CRLF line ends; the final empty
+    /// line may be present or not).
+    #NoDiscard
+    export let parse_request_head = func(text: string) -> Result<RequestHead> {
+        last lines = head_lines(text);
+        if (lines.length == 0) {
+            return fail<RequestHead>("empty request head");
+        }
+        last parts = strings.split(lines[0], " ");
+        if (parts.length != 3 || parts[0].byte_length == 0 || parts[1].byte_length == 0) {
+            return fail<RequestHead>("malformed request line: " + lines[0]);
+        }
+        last headers: Header[list] = new;
+        for (let i = 1; i < lines.length; i++) {
+            match (parse_header_line(lines[i])) {
+                Result.Ok(header) => {
+                    headers.append(header);
+                },
+                Result.Err(e) => {
+                    return Result<RequestHead>.Err(e);
+                },
+            }
+        }
+        return Result<RequestHead>.Ok(new RequestHead(parts[0], parts[1], parts[2], headers));
+    };
+
+    /// @brief Parses an HTTP/1.1 response head (status line and header lines).
+    #NoDiscard
+    export let parse_response_head = func(text: string) -> Result<ResponseHead> {
+        last lines = head_lines(text);
+        if (lines.length == 0) {
+            return fail<ResponseHead>("empty response head");
+        }
+        last parts = strings.split_limit(lines[0], " ", 3);
+        if (parts.length < 2 || !strings.starts_with(parts[0], "HTTP/") || parts[1].byte_length != 3) {
+            return fail<ResponseHead>("malformed status line: " + lines[0]);
+        }
+        let status = 0;
+        for (let i = 0; i < 3; i++) {
+            last digit = parts[1].byte_at(i);
+            if (digit < 48 || digit > 57) {
+                return fail<ResponseHead>("malformed status code: " + parts[1]);
+            }
+            status = status * 10 + ((digit - 48) as int);
+        }
+        last reason = parts.length == 3 ? parts[2] : "";
+        last headers: Header[list] = new;
+        for (let i = 1; i < lines.length; i++) {
+            match (parse_header_line(lines[i])) {
+                Result.Ok(header) => {
+                    headers.append(header);
+                },
+                Result.Err(e) => {
+                    return Result<ResponseHead>.Err(e);
+                },
+            }
+        }
+        return Result<ResponseHead>.Ok(new ResponseHead(status, reason, headers));
+    };
+
+    /// @brief The non-empty lines of a head split at CRLF (a bare LF is accepted too).
+    let head_lines = func(text: string) -> string[list] {
+        last lines: string[list] = new;
+        for (let line in strings.lines(text)) {
+            if (line.byte_length > 0) {
+                lines.append(line);
+            }
+        }
+        return lines;
+    };
+
+    /// @brief One `name: value` line; the name must be non-empty and contain no space or tab.
+    let parse_header_line = func(line: string) -> Result<Header> {
+        last colon = strings.index_of(line, ":");
+        if (colon <= 0) {
+            return fail<Header>("malformed header line: " + line);
+        }
+        last name = line.slice(0, colon);
+        if (strings.contains(name, " ") || strings.contains(name, "\t")) {
+            return fail<Header>("malformed header name: " + name);
+        }
+        return Result<Header>.Ok(new Header(name, strings.trim(line.slice(colon + 1, line.byte_length))));
+    };
+
+    /// @brief Whether the version text is HTTP/1.1 or a later HTTP version.
+    let is_http11_or_later = func(version: string) -> bool {
+        if (version == "HTTP/1.1") {
+            return true;
+        }
+        if (!strings.starts_with(version, "HTTP/") || version.byte_length < 6) {
+            return false;
+        }
+        last major = version.byte_at(5);
+        return major >= 50 && major <= 57;
+    };
+
+    /// @brief The text, or the empty string for `None`.
+    let text_or_empty = func(value: Optional<string>) -> string => match (value) {
+        Optional.Some(text) => text,
+        Optional.None => "",
+    };
+
+    /// @brief A handshake failure.
+    let fail = func<T>(message: string) -> Result<T> => Result<T>.Err(errors.custom(ErrorCode, message));
+);

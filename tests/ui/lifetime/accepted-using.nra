@@ -1,0 +1,80 @@
+// Edge cases 27, 28, 32, 34, 43, 45 and 46 (docs/design/Lifetime030.md):
+// the forms of `using`, and `using` as an ordinary name elsewhere.
+let console = import:Std.Io.Console;
+let closeable = import:Std.Io.Closeable;
+let files = import:Std.Fs.File;
+let paths = import:Std.Fs.Path;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let first_bytes = func(path: paths.Path) -> Result<int> {
+    using (source = files.open(path, files.OpenMode.Read)?) {
+        let data = source.read(16)?;
+        return Result<int>.Ok(data.length);
+    }
+};
+
+#Synchronized
+let Log = class implements closeable.Closeable (
+    let lines: int = 0;
+    export let write = func(line: string) -> void {
+        lines = lines + 1;
+    };
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+
+// A reader over the resource is scoped with it and usable in the block.
+let Reader = class (
+    let log: Log;
+    export let init = func(target: Log) -> void {
+        log = target;
+    };
+    export let note = func(text: string) -> void {
+        log.write(text);
+    };
+);
+
+let work = func(log: Log) -> void {
+    log.write("task");
+};
+
+let forms = func() -> Result<int> {
+    using (
+        log = new Log()
+    )
+    // A comment before the block.
+    {
+    }
+    using (log = new Log()) {
+        last reader = new Reader(log);
+        reader.note("read");
+        scope {
+            spawn work(log);
+        }
+        using (log = new Log()) {
+            log.write("the inner binding shadows the outer one");
+        }
+    }
+    return Result<int>.Ok(0);
+};
+
+// A lambda that returns a Result may hold a `using` in a void function.
+let outer = func() -> void {
+    let inner = func() -> Result<int> {
+        using (log = new Log()) {
+            return Result<int>.Ok(1);
+        }
+    };
+    let ignored = inner();
+};
+
+let Config = class (
+    export let run = func() -> void {};
+);
+
+let using = func(a: Config, b: int) -> Config => a;
+
+let names = func(config: Config) -> void {
+    let kept = using(config, 1);
+    using(config, 2).run();
+};

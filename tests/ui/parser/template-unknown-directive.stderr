@@ -1,0 +1,7 @@
+error[E0250]: malformed binding directive
+ --> $DIR/template-unknown-directive.nra:1:28
+  |
+1 | let view = html() { <input bind:value={x}> };
+  |                            ^^^^^^^^^^ use one of 'on:', 'prop:', or 'var:'
+
+For more information about this error, try `neura explain E0250`.

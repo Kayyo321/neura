@@ -1,0 +1,27 @@
+// Startup blocks (Modules.md, Startup blocks): work that runs once, before
+// main, at its place in source order among the file's initializers, with
+// bindings of its own.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let greetings: string[] = ["hello", "bonjour", "hola"];
+
+static scope {
+    let count = greetings.length;
+    console.print_line("loaded " + count.to_string() + " greetings");
+}
+
+let Registry = module (
+    export let first: string = greetings[0];
+
+    static scope {
+        console.print_line("registry ready with " + first);
+    }
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(Registry.first);
+        return program.ExitCode.Ok;
+    };
+);

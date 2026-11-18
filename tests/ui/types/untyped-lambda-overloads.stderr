@@ -1,0 +1,13 @@
+error[E0409]: ambiguous overload of 'run'
+ --> $DIR/untyped-lambda-overloads.nra:4:11
+  |
+2 | let run = func(f: func(int) -> int) -> int => f(1)
+  |     --- this alternative takes (f: func(int32) -> int32)
+3 |     or func(f: func(string) -> int) -> int => f("a");
+  |        ---- this alternative takes (f: func(string) -> int32)
+4 | let one = run(func(x) => 1);
+  |           ^^^^^^^^^^^^^^^^^
+  |
+  = help: write the lambda's parameter types; its body does not choose an alternative
+
+For more information about this error, try `neura explain E0409`.

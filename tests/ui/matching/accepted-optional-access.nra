@@ -1,0 +1,26 @@
+// Edge cases 72, 77, 79, 81, 82 and 85: optional access and coalescing that are accepted, and conditionals that keep their meaning.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let name = func(pet: Pet) -> Optional<string> => pet ?. owner ?. name;
+let fallback = func(name: Optional<string>, owner: Owner, other: Owner) -> string {
+    let a = name ?? "x";
+    let b = owner ?? other;
+    let c: Owner = owner ?? other ?? nil;
+    return a;
+};
+let amount = func(value: Optional<int64>) -> int64 => value ?? 0;
+let conditionals = func(ok: bool, a: int, b: int) -> int {
+    let first = ok ? a : b;
+    let second = ok ? -1 : 2;
+    let third = ok ? (a) : [b][0];
+    let fourth = ok ? ok ? 1 : 2 : 3;
+    return first + second + third + fourth;
+};

@@ -1,0 +1,7 @@
+error[E1007]: URL not allowed
+ --> $DIR/bad-data-url.nra:1:37
+  |
+1 | let view = html() { <img alt="" src="data:text/html,bad"> };
+  |                                     ^^^^^^^^^^^^^^^^^^^^ use a relative URL or the https, http, mailto or tel scheme
+
+For more information about this error, try `neura explain E1007`.

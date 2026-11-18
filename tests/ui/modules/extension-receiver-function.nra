@@ -1,0 +1,2 @@
+// The receiver cannot have a function type (E0488).
+let.extension call = func(f: func(int) -> int) -> int => f(1);

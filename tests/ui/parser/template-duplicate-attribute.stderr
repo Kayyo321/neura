@@ -1,0 +1,8 @@
+error[E0245]: malformed or repeated attribute
+ --> $DIR/template-duplicate-attribute.nra:1:34
+  |
+1 | let view = html() { <p class="a" class="b"></p> };
+  |                                  ^^^^^ this attribute or binding is written more than once
+  |                        ----- first written here
+
+For more information about this error, try `neura explain E0245`.

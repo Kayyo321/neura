@@ -1,0 +1,9 @@
+error[E1007]: URL not allowed
+ --> $DIR/bad-dynamic-url.nra:1:42
+  |
+1 | let view = html(route: string) { <a href={route}></a> };
+  |                                          ^^^^^^^ a dynamic URL must have type ui.Url
+  |
+  = help: use ui.url(text) to validate a URL
+
+For more information about this error, try `neura explain E1007`.

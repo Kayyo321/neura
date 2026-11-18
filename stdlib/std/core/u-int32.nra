@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt32](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt32)
 #Since("0.1.0")
-export let UInt32 = module (
+export let UInt32 = module implements Additive<uint32>, Multiplicative<uint32>, Ordered<uint32>, Parseable<uint32> (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint32 = 0;
     /// @brief The largest value representable by this integer type.
@@ -361,4 +361,20 @@ export let UInt32 = module (
         }
         return count;
     };
+
+    /// @brief The additive identity, 0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> uint32 => 0;
+
+    /// @brief The sum `left + right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: uint32, right: uint32) -> uint32 => left + right;
+
+    /// @brief The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> uint32 => 1;
+
+    /// @brief The product `left * right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: uint32, right: uint32) -> uint32 => left * right;
 );

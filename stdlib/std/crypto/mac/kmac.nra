@@ -1,0 +1,186 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Mac.Authenticator;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let keccak = import:Std.Crypto.Internal.Keccak;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let sp800_185 = import:Std.Crypto.Internal.Sp800185;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief KMAC128 and KMAC256 of NIST SP 800-185, section 4, and their XOF forms (Stdlib.md section 21.5).
+/// @see [Std.Crypto.Mac.Kmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Kmac)
+#Since("0.3.0")
+export let Kmac = module (
+    /// @brief The cSHAKE sponge of KMAC primed with bytepad(encode_string(key), rate).
+    let start = func(rate: int, key: uint8[list], customization: uint8[list]) -> keccak.Sponge {
+        let sponge = sha3.start(rate, words.utf8("KMAC"), customization);
+        let prefix = sp800_185.bytepad(sp800_185.encode_string(key), rate);
+        sponge.absorb(prefix);
+        words.wipe(prefix);
+        return sponge;
+    };
+
+    /// @brief KMAC128 with a tag of a length fixed at construction (32 bytes by default for KMAC128, 64 for
+    /// KMAC256, or any length of at least 4). `finish_xof(length)` and `squeeze` give KMACXOF128 instead.
+    #[Final, Since("0.3.0")]
+    export let Kmac128 = class implements Authenticator (
+        let sponge: keccak.Sponge;
+        last length: int;
+        let done: bool = false;
+
+        /// @brief KMAC128 under the key with customization string S and a tag of `output_length` bytes.
+        export let init = func(key: uint8[list], customization: uint8[list], output_length: int) {
+            crypto_policy.require(Algorithm.Kmac128);
+            if (output_length < 4) {
+                trap_with_message("invalid argument: KMAC tag must be at least 4 bytes");
+            }
+            sponge = start(168, key, customization);
+            length = output_length;
+        } or func(key: uint8[list]) {
+            crypto_policy.require(Algorithm.Kmac128);
+            sponge = start(168, key, new);
+            length = 32;
+        };
+
+        /// @brief `Algorithm.Kmac128`.
+        export let algorithm = func -> Algorithm => Algorithm.Kmac128;
+        export let tag_length = func -> int => length;
+
+        export let update = func(bytes: uint8[list]) {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            sponge.absorb(bytes);
+        };
+
+        export let finish = func -> uint8[list] {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            done = true;
+            sponge.absorb(sp800_185.right_encode((length as uint64) * 8));
+            return sponge.squeeze(length);
+        };
+
+        /// @brief The first `count` bytes of KMACXOF128; `squeeze` continues. Ends the MAC like `finish`.
+        export let finish_xof = func(count: int) -> uint8[list] {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            done = true;
+            sponge.absorb(sp800_185.right_encode(0));
+            return sponge.squeeze(count);
+        };
+
+        /// @brief The next `count` bytes of KMACXOF128 output after `finish_xof`.
+        export let squeeze = func(count: int) -> uint8[list] {
+            if (!sponge.is_squeezing()) {
+                trap_with_message("invalid state: call finish_xof first");
+            }
+            return sponge.squeeze(count);
+        };
+
+        export let verify = func(tag: uint8[list]) -> bool => constant_time.ct_eq(finish(), tag);
+
+        export let.override to_string = func -> string => "Kmac128(<redacted>)";
+    );
+
+    /// @brief KMAC128(key, data, length, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let kmac128 = func(key: uint8[list], data: uint8[list], length: int, customization: uint8[list]) -> uint8[list] {
+        let mac = new Kmac128(key, customization, length);
+        mac.update(data);
+        return mac.finish();
+    };
+
+    /// @brief The first `length` bytes of KMACXOF128(key, data, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let kmac128_xof = func(key: uint8[list], data: uint8[list], length: int, customization: uint8[list])
+        -> uint8[list] {
+        let mac = new Kmac128(key, customization, 32);
+        mac.update(data);
+        return mac.finish_xof(length);
+    };
+
+    /// @brief KMAC256 with a tag of a length fixed at construction (32 bytes by default for KMAC128, 64 for
+    /// KMAC256, or any length of at least 4). `finish_xof(length)` and `squeeze` give KMACXOF256 instead.
+    #[Final, Since("0.3.0")]
+    export let Kmac256 = class implements Authenticator (
+        let sponge: keccak.Sponge;
+        last length: int;
+        let done: bool = false;
+
+        /// @brief KMAC256 under the key with customization string S and a tag of `output_length` bytes.
+        export let init = func(key: uint8[list], customization: uint8[list], output_length: int) {
+            crypto_policy.require(Algorithm.Kmac256);
+            if (output_length < 4) {
+                trap_with_message("invalid argument: KMAC tag must be at least 4 bytes");
+            }
+            sponge = start(136, key, customization);
+            length = output_length;
+        } or func(key: uint8[list]) {
+            crypto_policy.require(Algorithm.Kmac256);
+            sponge = start(136, key, new);
+            length = 64;
+        };
+
+        /// @brief `Algorithm.Kmac256`.
+        export let algorithm = func -> Algorithm => Algorithm.Kmac256;
+        export let tag_length = func -> int => length;
+
+        export let update = func(bytes: uint8[list]) {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            sponge.absorb(bytes);
+        };
+
+        export let finish = func -> uint8[list] {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            done = true;
+            sponge.absorb(sp800_185.right_encode((length as uint64) * 8));
+            return sponge.squeeze(length);
+        };
+
+        /// @brief The first `count` bytes of KMACXOF256; `squeeze` continues. Ends the MAC like `finish`.
+        export let finish_xof = func(count: int) -> uint8[list] {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            done = true;
+            sponge.absorb(sp800_185.right_encode(0));
+            return sponge.squeeze(count);
+        };
+
+        /// @brief The next `count` bytes of KMACXOF256 output after `finish_xof`.
+        export let squeeze = func(count: int) -> uint8[list] {
+            if (!sponge.is_squeezing()) {
+                trap_with_message("invalid state: call finish_xof first");
+            }
+            return sponge.squeeze(count);
+        };
+
+        export let verify = func(tag: uint8[list]) -> bool => constant_time.ct_eq(finish(), tag);
+
+        export let.override to_string = func -> string => "Kmac256(<redacted>)";
+    );
+
+    /// @brief KMAC256(key, data, length, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let kmac256 = func(key: uint8[list], data: uint8[list], length: int, customization: uint8[list]) -> uint8[list] {
+        let mac = new Kmac256(key, customization, length);
+        mac.update(data);
+        return mac.finish();
+    };
+
+    /// @brief The first `length` bytes of KMACXOF256(key, data, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let kmac256_xof = func(key: uint8[list], data: uint8[list], length: int, customization: uint8[list])
+        -> uint8[list] {
+        let mac = new Kmac256(key, customization, 32);
+        mac.update(data);
+        return mac.finish_xof(length);
+    };
+);

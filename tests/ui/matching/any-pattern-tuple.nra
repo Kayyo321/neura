@@ -1,0 +1,7 @@
+// Edge case 8: a tuple pattern on an any subject.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let read = func(v: any) -> int => match.is (v) {
+    [int, int] => 1,
+    _ => 0,
+};

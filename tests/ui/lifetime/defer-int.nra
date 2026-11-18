@@ -1,0 +1,7 @@
+// Edge case 12: a deferred call returns nothing.
+let compute = func() -> int {
+    return 1;
+};
+let work = func() -> void {
+    defer compute();
+};

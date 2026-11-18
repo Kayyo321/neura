@@ -1,0 +1,108 @@
+let app = import:Std.App;
+let error = import:Std.Core.Error;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+// Std.App outside the server host: the request and response values, the handler adapter, and a context with
+// no assigned request. tests/server/server_host_test.py covers the host.
+let AppTests = module (
+    /// @brief A request with the given target and one header field.
+    let request_of = func(target: string) -> app.Request {
+        last headers: [string, string][list] = new;
+        headers.append(["content-type", "text/plain"]);
+        return new app.Request("POST", target, headers, strings.to_bytes("héllo"), "127.0.0.1", "https", "r-1");
+    };
+
+    export let test_request_splits_path_and_query = func() -> void {
+        last request = request_of("/parts/7?page=2&size=10");
+        test.assert_equal_string("/parts/7", request.path);
+        test.assert_equal_string("page=2&size=10", request.query);
+        last bare = request_of("/parts");
+        test.assert_equal_string("/parts", bare.path);
+        test.assert_equal_string("", bare.query);
+        last empty_query = request_of("/x?");
+        test.assert_equal_string("/x", empty_query.path);
+        test.assert_equal_string("", empty_query.query);
+        test.assert_equal_string("POST /parts/7?page=2&size=10", request.to_string());
+    };
+
+    export let test_request_header_lookup_ignores_case = func() -> void {
+        last request = request_of("/");
+        test.assert_equal_string("text/plain", test.assert_some<string>(request.header("Content-Type")));
+        test.assert_none<string>(request.header("accept"));
+        test.assert_equal_string("héllo", test.assert_ok<string>(request.body_text()));
+        test.assert_equal_string("https", request.scheme);
+        test.assert_equal_string("r-1", request.request_id);
+    };
+
+    export let test_response_helpers = func() -> void {
+        last text = app.text(201, "made");
+        test.assert_equal<int>(201, text.status);
+        test.assert_equal<int>(1, text.headers.length);
+        test.assert_equal_string("text/plain; charset=utf-8", text.headers[0][1]);
+        test.assert_equal<int>(4, text.body.length);
+        test.assert_equal_string("201 (4 bytes)", text.to_string());
+        last json = app.json(200, "{}").with_header("Cache-Control", "no-store");
+        test.assert_equal<int>(2, json.headers.length);
+        test.assert_equal_string("application/json", json.headers[0][1]);
+        test.assert_equal_string("Cache-Control", json.headers[1][0]);
+        last empty = app.empty(204);
+        test.assert_equal<int>(0, empty.headers.length);
+        test.assert_equal<int>(0, empty.body.length);
+        test.assert_equal_string("text/html; charset=utf-8", app.html(200, "<p>").headers[0][1]);
+    };
+
+    export let test_handler_of_calls_the_function = func() -> void {
+        last handler = app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+            Result<app.Response>.Ok(app.text(200, request.path)));
+        last response = test.assert_ok<app.Response>(handler.handle(request_of("/echo?x")));
+        test.assert_equal<int>(5, response.body.length);
+    };
+
+    export let test_serve_without_a_host_is_denied = func() -> void {
+        last context = new app.Context();
+        test.assert_none<string>(context.config("anything"));
+        context.log(app.LogLevel.Info, "dropped without a host");
+        last handler = app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+            Result<app.Response>.Ok(app.empty(204)));
+        last refused = test.assert_err<Unit>(context.serve(handler));
+        test.assert_equal_string(
+            "CapabilityDenied: no request was assigned; run this image with neura-server-host or neura serve",
+            error.message(refused));
+        last again = test.assert_err<Unit>(context.serve(handler));
+        test.assert_equal_string("serve was already called in this execution", error.message(again));
+    };
+
+    export let test_streamed_response_keeps_its_producer = func() -> void {
+        last fields: [string, string][list] = new;
+        fields.append(["Content-Type", "text/event-stream"]);
+        last streamed = app.stream(200, fields, new func(writer: app.BodyWriter) -> Result<Unit> =>
+            writer.write_text("data: one\n\n"));
+        test.assert(streamed.is_streamed());
+        test.assert_equal<int>(0, streamed.body.length);
+        last copied = streamed.with_header("Cache-Control", "no-store");
+        test.assert(copied.is_streamed());
+        test.assert_equal<int>(2, copied.headers.length);
+        test.assert(!app.text(200, "x").is_streamed());
+        // Without a host the writer's first write is denied, and the producer passes that on.
+        last denied = test.assert_err<Unit>(copied.write_stream(new app.BodyWriter()));
+        test.assert_equal_string("CapabilityDenied: response write failed", error.message(denied));
+        test.assert_ok<Unit>(app.text(200, "x").write_stream(new app.BodyWriter()));
+    };
+
+    export let test_streaming_handler_and_metrics_without_a_host = func() -> void {
+        last context = new app.Context();
+        test.assert_err<Unit>(context.count("requests_total", 1 as int64));
+        test.assert_err<Unit>(context.gauge("depth", 3 as int64));
+        last handler = app.streaming_handler_of(new func(request: app.Request, body: app.BodyReader)
+            -> Result<app.Response> => Result<app.Response>.Ok(app.text(200, request.path)));
+        last response = test.assert_ok<app.Response>(handler.handle(request_of("/up"), new app.BodyReader()));
+        test.assert_equal<int>(3, response.body.length);
+        test.assert_err<uint8[list]>(new app.BodyReader().read(10));
+        test.assert_err<Unit>(context.serve_streamed(handler));
+        test.assert_err<Unit>(context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+            Result<app.Response>.Ok(app.empty(204)))));
+    };
+);

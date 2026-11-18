@@ -1,0 +1,35 @@
+// Lambdas with untyped parameters, and calls whose type arguments they help
+// infer: the same image as lambdas.expanded.nra, which writes every type
+// (docs/design/Calls030.md).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let transform = func<T, U>(items: T[list], convert: func(T) -> U) -> U[list] {
+    let result: U[list] = new;
+    for (let item: T in items) {
+        result.append(convert(item));
+    }
+    return result;
+};
+
+let both = func<T>(f: func(int) -> T, g: func(T) -> T) -> T => g(f(1));
+let apply = func(f: func(int, int) -> int) -> int => f(3, 4);
+let adder = func -> func(int, int) -> int {
+    return func(a, b) => a + b;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let names: string[list] = new(["a", "bc", "def"]);
+        let lengths = transform(names, func(word) => word.byte_length);
+        console.print_line(lengths.to_string());
+        console.print_line(both(func(x) => x + 1, func(y: int) -> int => y * 10).to_string());
+        console.print_line(apply(func(a, b) => a * b).to_string());
+        console.print_line(adder()(5, 6).to_string());
+        let printer: func(string) -> void = func(text) {
+            console.print_line("printed " + text);
+        };
+        printer("x");
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,7 @@
+error[E0250]: malformed binding directive
+ --> $DIR/template-empty-event.nra:1:28
+  |
+1 | let view = html() { <input on:={f}> };
+  |                            ^^^ write a directive name after the ':'
+
+For more information about this error, try `neura explain E0250`.

@@ -1,0 +1,2 @@
+// nameof needs a name (edge case 88).
+let text = nameof();

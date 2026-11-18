@@ -143,7 +143,7 @@ let collect = func(label: string, replies: channels.Receiver<string>, served: ch
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let ports0 = channels.open<int>(1);
         let ports1 = channels.open<int>(1);
         let served0 = channels.open<int>(1);

@@ -1,0 +1,13 @@
+/// @brief The root of the Std.Net contract tree: anything addressable on a network (docs/design/Net030.md).
+///
+/// `Listener` and `Connector` extend it. The address type is a parameter, so a TCP endpoint names an
+/// `Std.Net.Core.SocketAddr`, a Unix-domain endpoint a `UnixAddr`, and a test endpoint any value it likes.
+/// @see [Std.Net.Endpoint](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Endpoint)
+#Since("0.3.0")
+export let Endpoint = module (
+    /// @brief Something addressable on a network.
+    export let Endpoint = interface<Addr> (
+        /// @brief The address the endpoint is bound to (a listener) or directed at (a connector).
+        let address = func -> Addr;
+    );
+);

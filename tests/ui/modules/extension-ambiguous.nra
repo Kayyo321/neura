@@ -1,0 +1,5 @@
+// Two enabled sets with an extension function that accepts the receiver
+// (edge case 59).
+let.extensions words = import:App.Words;
+let.extensions other = import:App.Other;
+let loud = "ready".shout();

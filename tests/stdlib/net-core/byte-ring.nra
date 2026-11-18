@@ -1,0 +1,106 @@
+let rings = import:Std.Net.Core.ByteRing;
+let io = import:Std.Net.Core.IoSlice;
+let.promote _ = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// ByteRing: capacity, full and empty, wrap-around, peek and skip, and readable_slices as a gather vector.
+let ByteRingTests = module (
+    let bytes_of = func(text: string) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < text.byte_length; i++) {
+            bytes.append(text.byte_at(i));
+        }
+        return bytes;
+    };
+
+    let text_of = func(bytes: uint8[list]) -> string {
+        let [valid, text] = string.from_utf8(bytes);
+        test.assert(valid);
+        return text;
+    };
+
+    export let test_fill_and_drain = func {
+        last ring = new rings.ByteRing(8);
+        test.assert_equal_int64(8, ring.capacity() as int64);
+        test.assert(ring.is_empty());
+        test.assert_equal_int64(0, ring.readable_slices().length as int64);
+        test.assert_equal_int64(0, ring.read(4).length as int64);
+        test.assert_equal_int64(5, ring.write(bytes_of("hello")) as int64);
+        test.assert_equal_int64(3, ring.writable_space() as int64);
+        // Only the bytes that fit are taken: exactly full.
+        test.assert_equal_int64(3, ring.write(bytes_of("world")) as int64);
+        test.assert(ring.is_full());
+        test.assert_equal_int64(0, ring.write(bytes_of("!")) as int64);
+        test.assert_equal_int64(8, ring.length() as int64);
+        test.assert_equal_string("hellowor", text_of(ring.peek(100)));
+        test.assert_equal_int64(8, ring.length() as int64);
+        test.assert_equal_string("hel", text_of(ring.read(3)));
+        test.assert_equal_string("lowor", text_of(ring.read(100)));
+        test.assert(ring.is_empty());
+        test.assert_equal_string("ByteRing(length 0, capacity 8)", ring.to_string());
+    };
+
+    export let test_wrap_around = func {
+        last ring = new rings.ByteRing(8);
+        test.assert_equal_int64(6, ring.write(bytes_of("abcdef")) as int64);
+        test.assert_equal_string("abcd", text_of(ring.read(4)));
+        // Head at 4 with "ef" readable; "ghijk" fills 6, 7 and wraps to 0, 1, 2.
+        test.assert_equal_int64(5, ring.write(bytes_of("ghijk")) as int64);
+        test.assert_equal_int64(7, ring.length() as int64);
+        last views = ring.readable_slices();
+        test.assert_equal_int64(2, views.length as int64);
+        test.assert_equal_string("efgh", text_of(views[0].to_list()));
+        test.assert_equal_string("ijk", text_of(views[1].to_list()));
+        test.assert_equal_int64(4, views[0].offset() as int64);
+        test.assert_equal_int64(0, views[1].offset() as int64);
+        test.assert_equal_string(text_of(ring.peek(7)), text_of(io.gather(views)));
+        test.assert_equal_string("efghijk", text_of(ring.read(7)));
+        // Emptying resets the head, so the next write is one view again.
+        test.assert_equal_int64(8, ring.write(bytes_of("12345678")) as int64);
+        test.assert_equal_int64(1, ring.readable_slices().length as int64);
+        test.assert_equal_string("12345678", text_of(ring.readable_slices()[0].to_list()));
+    };
+
+    export let test_skip_and_clear = func {
+        last ring = new rings.ByteRing(4);
+        test.assert_equal_int64(4, ring.write(bytes_of("wxyz")) as int64);
+        test.assert_equal_int64(3, ring.skip(3) as int64);
+        test.assert_equal_int64(1, ring.skip(10) as int64);
+        test.assert_equal_int64(0, ring.skip(1) as int64);
+        test.assert_equal_int64(3, ring.write(bytes_of("abc")) as int64);
+        test.assert_equal_int64(1, ring.skip(1) as int64);
+        test.assert_equal_int64(2, ring.write(bytes_of("de")) as int64);
+        test.assert_equal_string("bcde", text_of(ring.peek(4)));
+        test.assert_equal_string("bcd", text_of(ring.peek(3)));
+        test.assert_equal_int64(0, ring.peek(0).length as int64);
+        ring.clear();
+        test.assert(ring.is_empty());
+        test.assert_equal_int64(4, ring.writable_space() as int64);
+        last one = new rings.ByteRing(1);
+        test.assert_equal_int64(1, one.write(bytes_of("pq")) as int64);
+        test.assert_equal_string("p", text_of(one.read(1)));
+        test.assert_equal_int64(1, one.write_slice(io.view(bytes_of("pq"), 1, 1)) as int64);
+        test.assert_equal_string("q", text_of(one.read(1)));
+    };
+
+    // The ring's readable views go out through a gather write whose writer takes at most 3 bytes per call; the
+    // count written is then skipped.
+    export let test_gather_write_from_ring = func {
+        last ring = new rings.ByteRing(10);
+        test.assert_equal_int64(7, ring.write(bytes_of("0123456")) as int64);
+        test.assert_equal_int64(5, ring.skip(5) as int64);
+        test.assert_equal_int64(8, ring.write(bytes_of("789abcde")) as int64);
+        last views = ring.readable_slices();
+        test.assert_equal_int64(2, views.length as int64);
+        last sink: uint8[list] = new;
+        last written = test.assert_ok<int>(io.write_gather(views, func(slice: io.IoSlice) -> Result<int> {
+            last taken = slice.length() < 3 ? slice.length() : 3;
+            slice.slice(0, taken).append_to(sink);
+            return Result<int>.Ok(taken);
+        }));
+        test.assert_equal_int64(10, written as int64);
+        test.assert_equal_string("56789abcde", text_of(sink));
+        test.assert_equal_int64(10, ring.skip(written) as int64);
+        test.assert(ring.is_empty());
+    };
+);

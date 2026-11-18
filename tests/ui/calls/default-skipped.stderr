@@ -1,0 +1,11 @@
+error[E0407]: missing an argument for parameter 'b'
+ --> $DIR/default-skipped.nra:3:11
+  |
+2 | let f = func(a: int = 1, b: int) -> int => a + b;
+  |                          - 'b' is declared here
+3 | let two = f(2);
+  |           ^^^^ 'b' has no default and is not given a value
+  |
+  = help: pass it by position or as 'b: value'
+
+For more information about this error, try `neura explain E0407`.

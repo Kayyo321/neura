@@ -1,0 +1,28 @@
+// The extension set of extensions.nra (docs/design/Calls030.md).
+let console = import:Std.Io.Console;
+
+let Texts = module (
+    export let Box = class (
+        export let label = func -> string => "member label";
+        let secret = func -> string => "private secret";
+    );
+    export let.extension shout = func(text: string, marks: int = 1) -> string {
+        console.print_line("call shout");
+        let result = text;
+        for (let i: int = 0; i < marks; i++) {
+            result = result + "!";
+        }
+        return result;
+    };
+    export let.extension label = func(box: Box) -> string => "extension label";
+    export let.extension secret = func(box: Box) -> string => "extension secret";
+    export let.extension concat = func(text: string, other: string) -> string => "extension concat";
+    export let.extension describe = func(box: Box) -> string => box == nil ? "nil box" : "a box";
+    export let.extension bump = func(value: &int, by: int) {
+        value += by;
+    };
+    export let.extension count = func<T>(items: T[list]) -> int => items.length;
+    export let Light = enum (Red, Green);
+    export let.extension next = func(light: Light) -> Light => light == Light.Red ? Light.Green : Light.Red;
+    export let.extension flipped = func(flag: bool) -> bool => !flag;
+);

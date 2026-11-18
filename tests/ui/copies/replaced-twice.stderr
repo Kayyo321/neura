@@ -1,0 +1,10 @@
+error[E0303]: duplicate replacement of 'name'
+ --> $DIR/replaced-twice.nra:4:40
+  |
+4 | let copy = new with(user) { name: "a", name: "b" };
+  |                                        ^^^^ 'name' is replaced again here
+  |                             ---- 'name' is first replaced here
+  |
+  = help: replace each field once
+
+For more information about this error, try `neura explain E0303`.

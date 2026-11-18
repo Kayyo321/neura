@@ -1,0 +1,9 @@
+// Edge case 60: an any given to a task.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let work = func(v: any) -> int => 1;
+let run = func(v: any) {
+    scope {
+        let task = spawn work(v);
+    }
+};

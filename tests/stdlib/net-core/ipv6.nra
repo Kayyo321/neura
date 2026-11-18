@@ -1,0 +1,222 @@
+let errors = import:Std.Core.Error;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+let net = import:Std.Net.Core.NetAddress;
+let optional = import:Std.Core.Optional;
+let ordering = import:Std.Core.Ordering;
+let test = import:Std.Test;
+
+// Ipv6Addr: RFC 4291 section 2.2 text forms, RFC 5952 canonical text, zones, octets, ranges and ordering.
+let Ipv6Tests = module (
+    let parsed = func(text: string) -> v6.Ipv6Addr => test.assert_ok<v6.Ipv6Addr>(v6.parse(text));
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    let hex_of = func(bytes: uint8[list]) -> string {
+        last digits = "0123456789abcdef";
+        let text = "";
+        for (let b in bytes) {
+            last v = b as int;
+            text = text + digits.slice(v / 16, v / 16 + 1) + digits.slice(v % 16, v % 16 + 1);
+        }
+        return text;
+    };
+
+    // Parses `text`, then checks the canonical text, both halves, the octets, and that the canonical text,
+    // the octets and the segments all give the same address back.
+    let check = func(text: string, canonical: string, first: uint64, second: uint64, packed: string) {
+        last a = parsed(text);
+        test.assert_equal_string(canonical, a.to_string());
+        test.assert_equal_uint64(first, a.high);
+        test.assert_equal_uint64(second, a.low);
+        test.assert_equal_string(packed, hex_of(a.octets()));
+        test.assert(parsed(canonical).equals(a));
+        last bare = a.without_zone();
+        test.assert(v6.from_bytes(a.octets(), 0).equals(bare));
+        test.assert(v6.of_segments(a.segments()).equals(bare));
+        test.assert_equal_int64(8, a.segments().length as int64);
+        test.assert(a.family() == net.AddressFamily.Ipv6);
+    };
+
+    // RFC 4291 section 2.2: the example addresses of forms 1, 2 and 3. Canonical text, values and packed bytes
+    // from python3 -I v6.py, which prints str(a), int(a) >> 64, int(a) & (2**64-1) and a.packed.hex() for
+    // a = ipaddress.IPv6Address(t) (Python 3.13.5).
+    export let test_rfc4291_forms = func {
+        check("ABCD:EF01:2345:6789:ABCD:EF01:2345:6789", "abcd:ef01:2345:6789:abcd:ef01:2345:6789",
+            12379813738877118345, 12379813738877118345, "abcdef0123456789abcdef0123456789");
+        check("2001:DB8:0:0:8:800:200C:417A", "2001:db8::8:800:200c:417a", 2306139568115548160, 2260596444381562,
+            "20010db80000000000080800200c417a");
+        check("FF01:0:0:0:0:0:0:101", "ff01::101", 18374967954648334336, 257, "ff010000000000000000000000000101");
+        check("0:0:0:0:0:0:0:1", "::1", 0, 1, "00000000000000000000000000000001");
+        check("0:0:0:0:0:0:0:0", "::", 0, 0, "00000000000000000000000000000000");
+        check("2001:DB8::8:800:200C:417A", "2001:db8::8:800:200c:417a", 2306139568115548160, 2260596444381562,
+            "20010db80000000000080800200c417a");
+        check("FF01::101", "ff01::101", 18374967954648334336, 257, "ff010000000000000000000000000101");
+        check("::1", "::1", 0, 1, "00000000000000000000000000000001");
+        check("::", "::", 0, 0, "00000000000000000000000000000000");
+        // An IPv4-compatible address is not mapped, so it prints in hex (RFC 5952 section 5 limits the dotted
+        // form to well-known prefixes; Python prints ::d01:4403 too).
+        check("0:0:0:0:0:0:13.1.68.3", "::d01:4403", 0, 218186755, "0000000000000000000000000d014403");
+        check("::13.1.68.3", "::d01:4403", 0, 218186755, "0000000000000000000000000d014403");
+        check("0:0:0:0:0:FFFF:129.144.52.38", "::ffff:129.144.52.38", 0, 281472855454758,
+            "00000000000000000000ffff81903426");
+        check("::FFFF:129.144.52.38", "::ffff:129.144.52.38", 0, 281472855454758, "00000000000000000000ffff81903426");
+    };
+
+    // RFC 5952 section 4: 4.1 leading zeros (2001:0db8::0001 -> 2001:db8::1), 4.2.1 shorten as much as possible
+    // (2001:db8:0:0:0:0:2:1 -> 2001:db8::2:1; 2001:db8::0:1 -> 2001:db8::1), 4.2.2 one zero field is not
+    // shortened (2001:db8:0:1:1:1:1:1), 4.2.3 longest run (2001:0:0:1:0:0:0:1 -> 2001:0:0:1::1) and first on a
+    // tie (2001:db8:0:0:1:0:0:1 -> 2001:db8::1:0:0:1), 4.3 lowercase; section 1 example forms of 2001:db8::1:0:0:1.
+    // Values from the same python3 -I v6.py run.
+    export let test_rfc5952_recommendations = func {
+        check("2001:0db8::0001", "2001:db8::1", 2306139568115548160, 1, "20010db8000000000000000000000001");
+        check("2001:db8:0:0:0:0:2:1", "2001:db8::2:1", 2306139568115548160, 131073, "20010db8000000000000000000020001");
+        check("2001:db8::0:1", "2001:db8::1", 2306139568115548160, 1, "20010db8000000000000000000000001");
+        check("2001:db8:0:1:1:1:1:1", "2001:db8:0:1:1:1:1:1", 2306139568115548161, 281479271743489,
+            "20010db8000000010001000100010001");
+        check("2001:0:0:1:0:0:0:1", "2001:0:0:1::1", 2306124484190404609, 1, "20010000000000010000000000000001");
+        check("2001:db8:0:0:1:0:0:1", "2001:db8::1:0:0:1", 2306139568115548160, 281474976710657,
+            "20010db8000000000001000000000001");
+        check("2001:db8::0:1:0:0:1", "2001:db8::1:0:0:1", 2306139568115548160, 281474976710657,
+            "20010db8000000000001000000000001");
+        check("2001:0db8::1:0:0:1", "2001:db8::1:0:0:1", 2306139568115548160, 281474976710657,
+            "20010db8000000000001000000000001");
+        check("2001:db8:0:0:1::1", "2001:db8::1:0:0:1", 2306139568115548160, 281474976710657,
+            "20010db8000000000001000000000001");
+        check("2001:db8:0000:0:1::1", "2001:db8::1:0:0:1", 2306139568115548160, 281474976710657,
+            "20010db8000000000001000000000001");
+        check("2001:DB8:0:0:1::1", "2001:db8::1:0:0:1", 2306139568115548160, 281474976710657,
+            "20010db8000000000001000000000001");
+        check("2001:db8:aaaa:bbbb:cccc:dddd:eeee:AaAa", "2001:db8:aaaa:bbbb:cccc:dddd:eeee:aaaa",
+            2306139570978864059, 14757414024252402346, "20010db8aaaabbbbccccddddeeeeaaaa");
+    };
+
+    // Extra round trips from the same python3 -I v6.py run.
+    export let test_python_round_trips = func {
+        check("1::", "1::", 281474976710656, 0, "00010000000000000000000000000000");
+        check("1:0:0:0:0:0:0:0", "1::", 281474976710656, 0, "00010000000000000000000000000000");
+        check("0:0:0:0:0:0:0:2", "::2", 0, 2, "00000000000000000000000000000002");
+        check("::ffff:0.0.0.0", "::ffff:0.0.0.0", 0, 281470681743360, "00000000000000000000ffff00000000");
+        check("1:2:3:4:5:6:7::", "1:2:3:4:5:6:7:0", 281483566841860, 1407400653815808,
+            "00010002000300040005000600070000");
+        check("::2:3:4:5:6:7:8", "0:2:3:4:5:6:7:8", 8590131204, 1407400653815816, "00000002000300040005000600070008");
+        check("0:1:0:1:0:1:0:1", "0:1:0:1:0:1:0:1", 4294967297, 4294967297, "00000001000000010000000100000001");
+        check("fc00::1", "fc00::1", 18158513697557839872, 1, "fc000000000000000000000000000001");
+        check("fe80::", "fe80::", 18338657682652659712, 0, "fe800000000000000000000000000000");
+        check("ff02::1", "ff02::1", 18375249429625044992, 1, "ff020000000000000000000000000001");
+    };
+
+    // Python prints str(a) == 'fe80::1%eth0' and a.scope_id == 'eth0' (same run); equality includes the zone.
+    export let test_zones = func {
+        check("fe80::1%eth0", "fe80::1%eth0", 18338657682652659712, 1, "fe800000000000000000000000000001");
+        check("fe80::1%3", "fe80::1%3", 18338657682652659712, 1, "fe800000000000000000000000000001");
+        last zoned = parsed("fe80::1%eth0");
+        test.assert_equal_string("eth0", zoned.zone);
+        test.assert(!zoned.equals(parsed("fe80::1")));
+        test.assert(!zoned.equals(parsed("fe80::1%eth1")));
+        test.assert(zoned.without_zone().equals(parsed("fe80::1")));
+        test.assert_equal_string("", zoned.without_zone().zone);
+        test.assert_equal_string("fe80::1", zoned.without_zone().to_string());
+        test.assert(zoned.is_link_local());
+        test.assert(parsed("::ffff:1.2.3.4%z").is_ipv4_mapped());
+        test.assert_equal_string("::ffff:1.2.3.4%z", parsed("::ffff:1.2.3.4%z").to_string());
+        test.assert(parsed("fe80::1").compare_to(zoned) == ordering.Ordering.Less);
+        test.assert(zoned.compare_to(parsed("fe80::1%eth1")) == ordering.Ordering.Less);
+        test.assert_equal_int64(zoned.hash_code() as int64, parsed("FE80:0::1%eth0").hash_code() as int64);
+    };
+
+    // Python 3.13.5 ipaddress.IPv6Address rejects each of these texts (same v6.py run).
+    export let test_rejections = func {
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse(""))) == errors.ParseErrorKind.Empty);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse(":"))) == errors.ParseErrorKind.Syntax);
+        test.assert_err<v6.Ipv6Addr>(v6.parse(":::"));
+        last seven = test.assert_err<v6.Ipv6Addr>(v6.parse("1:2:3:4:5:6:7"));
+        test.assert(kind_of(seven) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(13, offset_of(seven) as int64);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse("1:2:3:4:5:6:7:8:9")))
+            == errors.ParseErrorKind.Syntax);
+        last twice = test.assert_err<v6.Ipv6Addr>(v6.parse("1::2::3"));
+        test.assert(kind_of(twice) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(4, offset_of(twice) as int64);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse(":1::"))) == errors.ParseErrorKind.Syntax);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse("1::2:"))) == errors.ParseErrorKind.UnexpectedEnd);
+        last five = test.assert_err<v6.Ipv6Addr>(v6.parse("12345::"));
+        test.assert(kind_of(five) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_equal_int64(4, offset_of(five) as int64);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse("g::"))) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse("::1%"))) == errors.ParseErrorKind.Syntax);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse("::1%a%b"))) == errors.ParseErrorKind.Syntax);
+        test.assert(kind_of(test.assert_err<v6.Ipv6Addr>(v6.parse("1:2:3:4:5:6:7::8")))
+            == errors.ParseErrorKind.Syntax);
+        last short_v4 = test.assert_err<v6.Ipv6Addr>(v6.parse("::1.2.3"));
+        test.assert(kind_of(short_v4) == errors.ParseErrorKind.UnexpectedEnd);
+        test.assert_equal_int64(7, offset_of(short_v4) as int64);
+        test.assert_err<v6.Ipv6Addr>(v6.parse("1.2.3.4::"));
+        last zero_v4 = test.assert_err<v6.Ipv6Addr>(v6.parse("::01.2.3.4"));
+        test.assert(kind_of(zero_v4) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_equal_int64(2, offset_of(zero_v4) as int64);
+        test.assert_err<v6.Ipv6Addr>(v6.parse("::1.2.3.4:5"));
+        test.assert_err<v6.Ipv6Addr>(v6.parse("1:2:3:4:5:6:7:1.2.3.4"));
+        test.assert_err<v6.Ipv6Addr>(v6.parse("%eth0"));
+        test.assert_err<v6.Ipv6Addr>(v6.parse(":1:2:3:4:5:6:7"));
+        test.assert_err<v6.Ipv6Addr>(v6.parse("[::1]"));
+        test.assert_err<v6.Ipv6Addr>(v6.parse(" ::1"));
+    };
+
+    // Range flags; Python's is_loopback, is_multicast, is_link_local and ipv4_mapped (same run) agree on the
+    // shared ones. The boundary cases come from python3 -I -c "import ipaddress as I; a = I.ip_address(t);
+    // print(a in I.ip_network('fe80::/10'), a in I.ip_network('fc00::/7'), a in I.ip_network('2001:db8::/32'))"
+    // for febf:ffff:: (link-local), fec0:: (neither), fdff::1 (ULA), fe00::1 (neither), 2001:db9::1 (not doc).
+    export let test_ranges_and_mapping = func {
+        test.assert(parsed("::1").is_loopback());
+        test.assert(!parsed("::2").is_loopback());
+        test.assert(parsed("::").is_unspecified());
+        test.assert(parsed("ff02::1").is_multicast());
+        test.assert(!parsed("fe80::").is_multicast());
+        test.assert(parsed("fe80::").is_link_local());
+        test.assert(parsed("febf:ffff::").is_link_local());
+        test.assert(!parsed("fec0::").is_link_local());
+        test.assert(parsed("fc00::1").is_unique_local());
+        test.assert(parsed("fdff::1").is_unique_local());
+        test.assert(!parsed("fe00::1").is_unique_local());
+        test.assert(parsed("2001:db8::1").is_documentation());
+        test.assert(!parsed("2001:db9::1").is_documentation());
+        last mapped = parsed("::ffff:129.144.52.38");
+        test.assert(mapped.is_ipv4_mapped());
+        test.assert_equal_string("129.144.52.38", test.assert_some<v4.Ipv4Addr>(mapped.to_ipv4_mapped()).to_string());
+        test.assert_none<v4.Ipv4Addr>(parsed("::13.1.68.3").to_ipv4_mapped());
+        test.assert(v6.from_ipv4_mapped(v4.of(129, 144, 52, 38)).equals(mapped));
+        test.assert_equal_string("::1", v6.localhost().to_string());
+        test.assert_equal_string("::", v6.unspecified().to_string());
+    };
+
+    // Segments from python3 -I -c "import ipaddress as I; print([int(x, 16) for x in
+    // I.ip_address('2001:db8::8:800:200c:417a').exploded.split(':')])": [8193, 3512, 0, 0, 8, 2048, 8204, 16762].
+    export let test_ordering_and_segments = func {
+        test.assert(parsed("::1").compare_to(parsed("::2")) == ordering.Ordering.Less);
+        test.assert(parsed("8000::").compare_to(parsed("7fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))
+            == ordering.Ordering.Greater);
+        test.assert(parsed("1::").compare_to(parsed("0:ffff:ffff:ffff:ffff:ffff:ffff:ffff"))
+            == ordering.Ordering.Greater);
+        test.assert(parsed("2001:db8::1").compare_to(parsed("2001:DB8:0::1")) == ordering.Ordering.Equal);
+        last groups = parsed("2001:db8::8:800:200c:417a").segments();
+        test.assert_equal_int64(8193, groups[0] as int64);
+        test.assert_equal_int64(3512, groups[1] as int64);
+        test.assert_equal_int64(0, groups[2] as int64);
+        test.assert_equal_int64(16762, groups[7] as int64);
+        last bytes: uint8[list] = new;
+        bytes.append(7);
+        for (let b in parsed("ff01::101").octets()) {
+            bytes.append(b);
+        }
+        test.assert_equal_string("ff01::101", v6.from_bytes(bytes, 1).to_string());
+    };
+);

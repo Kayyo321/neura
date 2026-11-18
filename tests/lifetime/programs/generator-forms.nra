@@ -1,0 +1,123 @@
+// The forms of generators (docs/design/Lifetime030.md, Generators, edge
+// cases 51, 53, 69, 72, 73 and 77): a generic generator, a member that
+// reads `instance`, a generator over another generator and over a list,
+// yields in a match arm and in both branches of an if, a capture, an
+// assigned parameter, and a deferred call or an array in a block that ends
+// before the next yield.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let say = func(text: string) -> void {
+    console.print_line(text);
+};
+
+let Shape = enum (Dot, Line(int));
+
+let Inventory = class (
+    let items: string[list] = new;
+    let label: string;
+    export let init = func(name: string) -> void {
+        label = name;
+    };
+
+    export let add = func(item: string) -> void {
+        items.append(item);
+    };
+    // A member that reads `instance`.
+
+    export let each = iterator() -> string {
+        for (let item: string in items) {
+            yield label + ":" + item;
+        }
+    };
+);
+
+let GeneratorForms = module:program.Entry (
+    let all = iterator < T >(values: T[list]) -> T {
+        for (let value: T in values) {
+            yield value;
+        }
+    };
+
+    let countdown = iterator(from: int) -> int {
+        while (from > 0) {
+            yield from;
+            from = from - 1;
+        }
+    };
+
+    // Advances another generator inside its body.
+
+    let doubled = iterator(limit: int) -> int {
+        for (let value: int in countdown(limit)) {
+            yield value * 2;
+        }
+    };
+
+    let shapes = iterator(items: Shape[list]) -> string {
+        for (let shape: Shape in items) {
+            match (shape) {
+                Shape.Dot => {
+                    yield "dot";
+                },
+                Shape.Line(length) => {
+                    if (length > 2) {
+                        yield "long line";
+                    } else {
+                        yield "short line";
+                    }
+                },
+            }
+        }
+    };
+
+    let scoped = iterator(rounds: int) -> int {
+        for (let round = 0; round < rounds; round++) {
+            {
+                defer say("cleanup of round " + round.to_string());
+                let scratch = [round, round + 1, round + 2];
+                let total = 0;
+                for (let value: int in scratch) {
+                    total = total + value;
+                }
+                say("total " + total.to_string());
+            }
+            yield round;
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let words: string[list] = new(["a", "b", "c"]);
+        for (let word: string in all<string>(words)) {
+            say("word " + word);
+        }
+        let shelf = new Inventory("shelf");
+        shelf.add("cup");
+        shelf.add("plate");
+        for (let item: string in shelf.each()) {
+            say(item);
+        }
+        for (let value: int in doubled(3)) {
+            say("doubled " + value.to_string());
+        }
+        let items: Shape[list] = new([Shape.Dot, Shape.Line(1), Shape.Line(5)]);
+        for (let text: string in shapes(items)) {
+            say(text);
+        }
+        for (let value: int in scoped(2)) {
+            say("scoped " + value.to_string());
+        }
+        // A generator in an expression that captures a local.
+        let base = 100;
+        let offsets = iterator(count: int) -> int {
+            for (let index = 0; index < count; index++) {
+                yield base + index;
+            }
+        };
+        base = 200;
+        for (let value: int in offsets(2)) {
+            say("offset " + value.to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

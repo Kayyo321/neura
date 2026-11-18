@@ -1,0 +1,7 @@
+error[E1005]: attribute or property value of the wrong type
+ --> $DIR/bad-text-attribute.nra:1:42
+  |
+1 | let view = html(count: int32) { <p title={count}></p> };
+  |                                          ^^^^^^^ expected string or Optional<string>, got int32
+
+For more information about this error, try `neura explain E1005`.

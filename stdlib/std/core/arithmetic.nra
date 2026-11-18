@@ -1,0 +1,46 @@
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief Static contracts of arithmetic, ordering and parsing (Stdlib.md section 6.6).
+///
+/// Each contract is an interface of static requirements only. A class conforms by listing it after
+/// `implements` and declaring each function as an exported static function; a primitive conforms through
+/// its companion module, which declares `module implements` in the standard library. A generic function
+/// calls a requirement through its type parameter, as `T.zero()`, and each specialization calls the
+/// implementation directly. A contract's name promises nothing beyond the signature: an implementation may
+/// trap, and the integer companions' `add` and `multiply` trap on overflow at the type's width.
+/// @see [Std.Core.Arithmetic](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Arithmetic)
+#Since("0.3.0")
+export let Arithmetic = module (
+    /// @brief A type with a zero and an addition: every sized integer and float.
+    #Since("0.3.0")
+    export let Additive = interface<T> (
+        /// @brief The additive identity.
+        static let zero = func() -> T;
+        /// @brief The sum of the operands.
+        static let add = func(left: T, right: T) -> T;
+    );
+
+    /// @brief A type with a one and a multiplication: every sized integer and float.
+    #Since("0.3.0")
+    export let Multiplicative = interface<T> (
+        /// @brief The multiplicative identity.
+        static let one = func() -> T;
+        /// @brief The product of the operands.
+        static let multiply = func(left: T, right: T) -> T;
+    );
+
+    /// @brief A type with a total order: every sized integer and bool. Floats have no total compare here.
+    #Since("0.3.0")
+    export let Ordered = interface<T> (
+        /// @brief Orders the left operand before, with, or after the right one.
+        static let compare = func(a: T, b: T) -> Ordering;
+    );
+
+    /// @brief A type that parses from text: every sized integer and float, and bool.
+    #Since("0.3.0")
+    export let Parseable = interface<T> (
+        /// @brief The value the text spells, or the reason it spells none.
+        static let parse = func(text: string) -> Result<T>;
+    );
+);

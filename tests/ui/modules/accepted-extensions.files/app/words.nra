@@ -1,0 +1,3 @@
+let Words = module (
+    export let.extension shout = func(text: string, marks: int = 1) -> string => text + "!";
+);

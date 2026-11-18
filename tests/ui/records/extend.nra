@@ -1,0 +1,3 @@
+// A record is final (edge case 24).
+let P = record (x: int);
+let Q = class : P ();

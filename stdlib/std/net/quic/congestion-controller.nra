@@ -1,0 +1,83 @@
+/// @brief The pluggable congestion-control contract of `Std.Net.Quic`, and the window rules every controller
+/// shares (RFC 9002 section 7.2).
+///
+/// A controller owns the congestion window and the count of bytes in flight. Loss detection calls it: when a
+/// packet that counts toward bytes in flight is sent, acknowledged or declared lost; on an ECN-CE increase
+/// (`on_congestion_event`); and when persistent congestion is established (RFC 9002 section 7.6). Times are
+/// nanoseconds on one monotonic clock (non-negative) and sizes are bytes; windows are capped at `MaxWindow`.
+/// `NewReno`, `Cubic` and `Ledbat` implement it; `Bbr.bbr3` is a stub. `delay_nanos` of an acknowledgment is
+/// the latest round-trip time for loss-based controllers and the latest one-way delay for LEDBAT.
+/// @see [Std.Net.Quic.CongestionController](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-CongestionController)
+#Since("0.3.0")
+export let CongestionController = module (
+    /// @brief The largest congestion window, 1,000,000,000 bytes, which keeps the window arithmetic in 64 bits.
+    export const MaxWindow: int64 = 1000000000;
+    /// @brief The smallest maximum datagram size QUIC allows (RFC 9002 section B.2).
+    export const MinDatagramSize: int64 = 1200;
+
+    /// @brief A congestion controller.
+    export let CongestionController = interface (
+        /// @brief The congestion window in bytes.
+        let window = func -> int64;
+        /// @brief The bytes sent and neither acknowledged nor declared lost.
+        let bytes_in_flight = func -> int64;
+        /// @brief True when `bytes` more fit in the window.
+        let can_send = func(bytes: int64) -> bool;
+        /// @brief Records a sent packet that counts toward bytes in flight.
+        let on_packet_sent = func(bytes: int64, sent_nanos: int64);
+        /// @brief Records the acknowledgment of a packet of `bytes` sent at `sent_nanos`.
+        let on_packet_acked = func(bytes: int64, sent_nanos: int64, now_nanos: int64, delay_nanos: int64);
+        /// @brief Records lost packets totalling `bytes`, the latest of which was sent at `latest_sent_nanos`.
+        let on_packets_lost = func(bytes: int64, latest_sent_nanos: int64, now_nanos: int64);
+        /// @brief A congestion signal without loss (an ECN-CE increase) for a packet sent at `sent_nanos`.
+        let on_congestion_event = func(sent_nanos: int64, now_nanos: int64);
+        /// @brief Persistent congestion was established: collapse the window.
+        let on_persistent_congestion = func;
+        /// @brief Whether the sender is limited by the application or flow control, which stops window growth.
+        let set_app_limited = func(limited: bool);
+        /// @brief The algorithm's name, such as "NewReno".
+        let name = func -> string;
+    );
+
+    /// @brief The initial window: min(10 * size, max(14,720, 2 * size)) (RFC 9002 section 7.2).
+    #Pure
+    export let initial_window = func(max_datagram_size: int64) -> int64 {
+        last ten = 10 * max_datagram_size;
+        last floor = 2 * max_datagram_size > 14720 ? 2 * max_datagram_size : 14720;
+        return ten < floor ? ten : floor;
+    };
+
+    /// @brief The minimum window: 2 * size (RFC 9002 section 7.2).
+    #Pure
+    export let minimum_window = func(max_datagram_size: int64) -> int64 => 2 * max_datagram_size;
+
+    /// @brief Traps with "invalid argument: max datagram size" unless the size is from 1,200 through 65,527.
+    export let check_datagram_size = func(max_datagram_size: int64) {
+        if (max_datagram_size < MinDatagramSize || max_datagram_size > 65527) {
+            trap_with_message("invalid argument: max datagram size");
+        }
+    };
+
+    /// @brief Traps unless the byte count and time are non-negative.
+    export let check_event = func(bytes: int64, time_nanos: int64) {
+        if (bytes < 0) {
+            trap_with_message("invalid argument: negative byte count");
+        }
+        if (time_nanos < 0) {
+            trap_with_message("invalid argument: negative time");
+        }
+    };
+
+    /// @brief `bytes_in_flight - bytes`, trapping with "invalid argument: more bytes than in flight" below zero.
+    #Pure
+    export let remove_in_flight = func(in_flight: int64, bytes: int64) -> int64 {
+        if (bytes > in_flight) {
+            trap_with_message("invalid argument: more bytes than in flight");
+        }
+        return in_flight - bytes;
+    };
+
+    /// @brief `window` capped at `MaxWindow`.
+    #Pure
+    export let capped = func(window: int64) -> int64 => window > MaxWindow ? MaxWindow : window;
+);

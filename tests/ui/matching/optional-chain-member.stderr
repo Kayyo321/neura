@@ -1,0 +1,9 @@
+error[E0305]: type Optional<Owner> has no member 'name'
+  --> $DIR/optional-chain-member.nra:12:40
+   |
+12 | let name = func(pet: Pet) -> string => pet?.owner.name;
+   |                                        ^^^^^^^^^^^^^^^ an optional access gives an Optional
+   |
+   = help: continue the chain with '?.name', which skips when the value is absent
+
+For more information about this error, try `neura explain E0305`.

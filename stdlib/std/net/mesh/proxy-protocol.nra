@@ -1,0 +1,1197 @@
+let.promote _ = import:Std.Core.Error;
+let crcs = import:Std.Net.Mesh.Crc32c;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let sockets = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let unixes = import:Std.Net.Core.UnixAddr;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+
+/// @brief The HAProxy PROXY protocol, versions 1 and 2 (proxy-protocol.txt, HAProxy 2.9): the header an L4 load
+/// balancer such as HAProxy or an AWS Network Load Balancer puts before a relayed connection's data so the
+/// server learns the real client address.
+///
+/// Version 1 is one US-ASCII line, `PROXY TCP4|TCP6|UNKNOWN ... \r\n`, at most 107 bytes with the CRLF (section
+/// 2.1). Version 2 is binary: the 12-byte signature, a version/command byte (version 2, LOCAL or PROXY), a
+/// family/protocol byte (UNSPEC, INET, INET6 or UNIX by UNSPEC, STREAM or DGRAM), a 16-bit length, the address
+/// block, and TLVs (section 2.2). `encode` writes either form; `ProxyDecoder` reads either form from byte chunks
+/// of any size and says when it needs more bytes, so a server can detect and consume the header before any
+/// application data. Every check of section 2 is applied and a failure is an `Error.Parse` whose offset counts
+/// from the first header byte; wire bytes never reach a trapping constructor.
+///
+/// Decisions this module takes where the text is open: a version 2 LOCAL header reports no addresses and an
+/// UNSPEC transport, whatever its family byte says, and its TLVs are still read after the family's address block;
+/// a version 2 header whose family or protocol is UNSPEC reports no addresses. A CRC32C TLV holds the checksum in
+/// network byte order (the text does not name the order; HAProxy writes it big-endian) and is verified when
+/// present. A Unix address of all zero bytes (or a lone leading NUL) is an unnamed socket and reads as `None`; a
+/// path must end with a NUL inside its 108 bytes and be UTF-8. A version 1 IPv6 address must be hexadecimal
+/// groups: a zone (`%`) or an embedded dotted IPv4 tail is rejected, and `encode` writes the groups itself
+/// (RFC 5952 compression, never the `::ffff:a.b.c.d` form).
+/// @see [Std.Net.Mesh.ProxyProtocol](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-ProxyProtocol)
+#Since("0.3.0")
+export let ProxyProtocol = module (
+    /// @brief `PP2_TYPE_ALPN` (0x01): the application protocol, as in the TLS ALPN extension.
+    export const TypeAlpn: int = 1;
+    /// @brief `PP2_TYPE_AUTHORITY` (0x02): the host name the client asked for (TLS SNI), UTF-8.
+    export const TypeAuthority: int = 2;
+    /// @brief `PP2_TYPE_CRC32C` (0x03): the CRC32C of the whole header.
+    export const TypeCrc32c: int = 3;
+    /// @brief `PP2_TYPE_NOOP` (0x04): padding, ignored.
+    export const TypeNoop: int = 4;
+    /// @brief `PP2_TYPE_UNIQUE_ID` (0x05): an opaque connection id of at most 128 bytes.
+    export const TypeUniqueId: int = 5;
+    /// @brief `PP2_TYPE_SSL` (0x20): TLS facts, with sub-TLVs.
+    export const TypeSsl: int = 32;
+    /// @brief `PP2_SUBTYPE_SSL_VERSION` (0x21): the TLS version text.
+    export const SubtypeSslVersion: int = 33;
+    /// @brief `PP2_SUBTYPE_SSL_CN` (0x22): the client certificate's Common Name.
+    export const SubtypeSslCn: int = 34;
+    /// @brief `PP2_SUBTYPE_SSL_CIPHER` (0x23): the cipher name.
+    export const SubtypeSslCipher: int = 35;
+    /// @brief `PP2_SUBTYPE_SSL_SIG_ALG` (0x24): the certificate signature algorithm.
+    export const SubtypeSslSigAlg: int = 36;
+    /// @brief `PP2_SUBTYPE_SSL_KEY_ALG` (0x25): the certificate key algorithm.
+    export const SubtypeSslKeyAlg: int = 37;
+    /// @brief `PP2_TYPE_NETNS` (0x30): the network namespace name.
+    export const TypeNetns: int = 48;
+    /// @brief `PP2_CLIENT_SSL`: the client connected over TLS.
+    export const ClientSsl: int = 1;
+    /// @brief `PP2_CLIENT_CERT_CONN`: the client gave a certificate on this connection.
+    export const ClientCertConn: int = 2;
+    /// @brief `PP2_CLIENT_CERT_SESS`: the client gave a certificate in this TLS session.
+    export const ClientCertSess: int = 4;
+    /// @brief The longest version 1 line, CRLF included (section 2.1).
+    export const MaxV1Length: int = 107;
+    /// @brief The longest `PP2_TYPE_UNIQUE_ID` value (section 2.2.5).
+    export const MaxUniqueIdLength: int = 128;
+    /// @brief The fixed part of a version 2 header: signature, two bytes and the length.
+    export const V2FixedLength: int = 16;
+
+    /// @brief What the connection is: relayed for a client (PROXY) or opened by the proxy itself (LOCAL, health
+    /// checks; version 2 only).
+    export let Command = enum (Local, Proxy);
+
+    /// @brief The relayed transport: unspecified, a stream (TCP, Unix stream) or datagrams (UDP, Unix datagram).
+    export let Transport = enum (Unspec, Stream, Dgram);
+
+    /// @brief The original endpoints: none, an IP pair (both IPv4 or both IPv6), or a Unix pair where `None` is an
+    /// unnamed socket.
+    export let Addresses = enum (
+        Unspecified,
+        Inet { source: sockets.SocketAddr, destination: sockets.SocketAddr },
+        Unix { source: Optional<unixes.UnixAddr>, destination: Optional<unixes.UnixAddr> }
+    );
+
+    /// @brief What the first bytes of a connection are: too few to tell, a version 1 or 2 header, or not a PROXY
+    /// header at all (section 2.2: such a connection must be dropped).
+    export let Detection = enum (NeedMore, V1, V2, NotProxy);
+
+    /// @brief One version 2 Type-Length-Value vector.
+    #Final
+    export let Tlv = class (
+        /// @brief The type, 0 to 255.
+        export last type_code: int;
+        /// @brief The value bytes, at most 65535.
+        export last value: uint8[list];
+
+        /// @brief A TLV. Traps with "invalid argument: type_code" outside 0 to 255 and "invalid argument: value"
+        /// above 65535 bytes.
+        export let init = func(code: int, bytes: uint8[list]) {
+            if (code < 0 || code > 255) {
+                trap_with_message("invalid argument: type_code");
+            }
+            if (bytes.length > 65535) {
+                trap_with_message("invalid argument: value");
+            }
+            type_code = code;
+            value = copy_bytes(bytes);
+        };
+
+        /// @brief Equal when the type and every value byte are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Tlv)) {
+                return false;
+            }
+            last that = other as Tlv;
+            return type_code == that.type_code && same_bytes(value, that.value);
+        };
+
+        /// @brief Combines the type and the value bytes.
+        export let.override hash_code = func -> uint32 => hashing.combine(type_code as uint32, hash_bytes(value));
+
+        /// @brief Text such as "Tlv(1, 2 bytes)": the type in decimal and the value length.
+        export let.override to_string = func -> string =>
+            "Tlv(" + type_code.to_string() + ", " + value.length.to_string() + " bytes)";
+    );
+
+    /// @brief The decoded value of a `PP2_TYPE_SSL` TLV (section 2.2.6).
+    #Final
+    export let SslInfo = class (
+        /// @brief The `PP2_CLIENT_*` bit field.
+        export last client: int;
+        /// @brief Zero when the client certificate was presented and verified.
+        export last verify: uint32;
+        /// @brief The sub-TLVs in wire order.
+        export last subs: Tlv[list];
+
+        /// @brief An SSL record. Traps with "invalid argument: client" outside 0 to 255.
+        export let init = func(client_bits: int, verify_result: uint32, sub_tlvs: Tlv[list]) {
+            if (client_bits < 0 || client_bits > 255) {
+                trap_with_message("invalid argument: client");
+            }
+            client = client_bits;
+            verify = verify_result;
+            last kept: Tlv[list] = new;
+            for (let t in sub_tlvs) {
+                kept.append(t);
+            }
+            subs = kept;
+        };
+
+        /// @brief Whether the client connected over TLS (`PP2_CLIENT_SSL`).
+        export let is_tls = func -> bool => (client & ClientSsl) != 0;
+
+        /// @brief Whether the client gave a certificate on this connection (`PP2_CLIENT_CERT_CONN`).
+        export let cert_on_connection = func -> bool => (client & ClientCertConn) != 0;
+
+        /// @brief Whether the client gave a certificate in this TLS session (`PP2_CLIENT_CERT_SESS`).
+        export let cert_in_session = func -> bool => (client & ClientCertSess) != 0;
+
+        /// @brief Whether `verify` is zero.
+        export let verified = func -> bool => verify == 0;
+
+        /// @brief The text of the first sub-TLV of type `code`, if present and UTF-8.
+        #NoDiscard
+        export let text = func(code: int) -> Optional<string> {
+            for (let t in subs) {
+                if (t.type_code == code) {
+                    return text_of(t.value);
+                }
+            }
+            return Optional<string>.None;
+        };
+
+        /// @brief The TLS version (`PP2_SUBTYPE_SSL_VERSION`).
+        #NoDiscard
+        export let version = func -> Optional<string> => text(SubtypeSslVersion);
+
+        /// @brief The client certificate's Common Name (`PP2_SUBTYPE_SSL_CN`).
+        #NoDiscard
+        export let common_name = func -> Optional<string> => text(SubtypeSslCn);
+
+        /// @brief The cipher (`PP2_SUBTYPE_SSL_CIPHER`).
+        #NoDiscard
+        export let cipher = func -> Optional<string> => text(SubtypeSslCipher);
+
+        /// @brief The certificate signature algorithm (`PP2_SUBTYPE_SSL_SIG_ALG`).
+        #NoDiscard
+        export let signature_algorithm = func -> Optional<string> => text(SubtypeSslSigAlg);
+
+        /// @brief The certificate key algorithm (`PP2_SUBTYPE_SSL_KEY_ALG`).
+        #NoDiscard
+        export let key_algorithm = func -> Optional<string> => text(SubtypeSslKeyAlg);
+
+        /// @brief The TLV this record encodes to.
+        #NoDiscard
+        export let to_tlv = func -> Tlv {
+            last bytes: uint8[list] = new;
+            bytes.append(client as uint8);
+            put_u32(bytes, verify);
+            for (let t in subs) {
+                put_tlv(bytes, t);
+            }
+            return new Tlv(TypeSsl, bytes);
+        };
+
+        /// @brief Equal when the bits, the verify result and the sub-TLVs are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SslInfo)) {
+                return false;
+            }
+            last that = other as SslInfo;
+            return client == that.client && verify == that.verify && same_tlvs(subs, that.subs);
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(client as uint32, verify), hash_tlvs(subs));
+
+        /// @brief Text such as "SslInfo(client 7, verify 0, 5 sub-TLVs)".
+        export let.override to_string = func -> string => "SslInfo(client " + client.to_string() + ", verify "
+            + verify.to_string() + ", " + subs.length.to_string() + " sub-TLVs)";
+    );
+
+    /// @brief A PROXY protocol header, parsed or to be sent.
+    #Final
+    export let ProxyHeader = class (
+        /// @brief The protocol version it was read in or is meant for: 1 or 2.
+        export last version: int;
+        /// @brief LOCAL or PROXY.
+        export last command: Command;
+        /// @brief The relayed transport.
+        export last transport: Transport;
+        /// @brief The original endpoints.
+        export last addresses: Addresses;
+        /// @brief The version 2 TLVs in wire order (empty for version 1).
+        export last tlvs: Tlv[list];
+
+        /// @brief A header. Traps with "invalid argument: version" unless the version is 1 or 2.
+        export let init = func(protocol_version: int, cmd: Command, proto: Transport, endpoints: Addresses,
+            extensions: Tlv[list]) {
+            if (protocol_version != 1 && protocol_version != 2) {
+                trap_with_message("invalid argument: version");
+            }
+            version = protocol_version;
+            command = cmd;
+            transport = proto;
+            addresses = endpoints;
+            last kept: Tlv[list] = new;
+            for (let t in extensions) {
+                kept.append(t);
+            }
+            tlvs = kept;
+        };
+
+        /// @brief The original client address, when the header carries IP addresses.
+        #NoDiscard
+        export let source = func -> Optional<sockets.SocketAddr> => match (addresses) {
+            Addresses.Inet { source, destination } => Optional<sockets.SocketAddr>.Some(source),
+            Addresses.Unspecified => Optional<sockets.SocketAddr>.None,
+            Addresses.Unix { source, destination } => Optional<sockets.SocketAddr>.None,
+        };
+
+        /// @brief The original destination address, when the header carries IP addresses.
+        #NoDiscard
+        export let destination = func -> Optional<sockets.SocketAddr> => match (addresses) {
+            Addresses.Inet { source, destination } => Optional<sockets.SocketAddr>.Some(destination),
+            Addresses.Unspecified => Optional<sockets.SocketAddr>.None,
+            Addresses.Unix { source, destination } => Optional<sockets.SocketAddr>.None,
+        };
+
+        /// @brief Whether the proxy opened the connection itself (LOCAL): use the real endpoints.
+        export let is_local = func -> bool => command == Command.Local;
+
+        /// @brief The value of the first TLV of type `code`.
+        #NoDiscard
+        export let tlv = func(code: int) -> Optional<uint8[list]> {
+            for (let t in tlvs) {
+                if (t.type_code == code) {
+                    return Optional<uint8[list]>.Some(copy_bytes(t.value));
+                }
+            }
+            return Optional<uint8[list]>.None;
+        };
+
+        /// @brief The ALPN protocol bytes (`PP2_TYPE_ALPN`).
+        #NoDiscard
+        export let alpn = func -> Optional<uint8[list]> => tlv(TypeAlpn);
+
+        /// @brief The authority (`PP2_TYPE_AUTHORITY`), when present and UTF-8.
+        #NoDiscard
+        export let authority = func -> Optional<string> => text_tlv(TypeAuthority);
+
+        /// @brief The unique connection id (`PP2_TYPE_UNIQUE_ID`).
+        #NoDiscard
+        export let unique_id = func -> Optional<uint8[list]> => tlv(TypeUniqueId);
+
+        /// @brief The network namespace (`PP2_TYPE_NETNS`), when present and UTF-8.
+        #NoDiscard
+        export let netns = func -> Optional<string> => text_tlv(TypeNetns);
+
+        /// @brief The checksum carried in a `PP2_TYPE_CRC32C` TLV (already verified by the decoder).
+        #NoDiscard
+        export let crc32c = func -> Optional<uint32> => match (tlv(TypeCrc32c)) {
+            Optional.Some(bytes) => bytes.length == 4 ? Optional<uint32>.Some(get_u32(bytes, 0))
+                : Optional<uint32>.None,
+            Optional.None => Optional<uint32>.None,
+        };
+
+        /// @brief The decoded `PP2_TYPE_SSL` TLV.
+        #NoDiscard
+        export let ssl = func -> Optional<SslInfo> {
+            for (let t in tlvs) {
+                if (t.type_code == TypeSsl) {
+                    return match (decode_ssl(t.value, 0)) {
+                        Result.Ok(info) => Optional<SslInfo>.Some(info),
+                        Result.Err(e) => Optional<SslInfo>.None,
+                    };
+                }
+            }
+            return Optional<SslInfo>.None;
+        };
+
+        /// @brief Equal when every field and TLV are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is ProxyHeader)) {
+                return false;
+            }
+            last that = other as ProxyHeader;
+            return version == that.version && command == that.command && transport == that.transport
+                && same_addresses(addresses, that.addresses) && same_tlvs(tlvs, that.tlvs);
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(version as uint32, command == Command.Local ? 1 : 2);
+            hash = hashing.combine(hash, transport_code(transport) as uint32);
+            hash = hashing.combine(hash, addresses_text(addresses).hash_code());
+            return hashing.combine(hash, hash_tlvs(tlvs));
+        };
+
+        /// @brief Text such as "ProxyHeader(v2 PROXY STREAM 192.168.0.1:56324 -> 192.168.0.11:443, 0 TLVs)".
+        export let.override to_string = func -> string => "ProxyHeader(v" + version.to_string() + " "
+            + (command == Command.Local ? "LOCAL" : "PROXY") + " " + transport_name(transport) + " "
+            + addresses_text(addresses) + ", " + tlvs.length.to_string() + " TLVs)";
+
+        /// @brief The first TLV of type `code` as UTF-8 text.
+        let text_tlv = func(code: int) -> Optional<string> => match (tlv(code)) {
+            Optional.Some(bytes) => text_of(bytes),
+            Optional.None => Optional<string>.None,
+        };
+    );
+
+    /// @brief A PROXY header for a TCP connection from `source` to `destination` in `version` 1 or 2.
+    #NoDiscard
+    export let tcp = func(version: int, source: sockets.SocketAddr, destination: sockets.SocketAddr) -> ProxyHeader =>
+        new ProxyHeader(version, Command.Proxy, Transport.Stream,
+            Addresses.Inet { source: source, destination: destination }, new);
+
+    /// @brief A version 2 PROXY header with every part given.
+    #NoDiscard
+    export let v2 = func(transport: Transport, addresses: Addresses, tlvs: Tlv[list]) -> ProxyHeader =>
+        new ProxyHeader(2, Command.Proxy, transport, addresses, tlvs);
+
+    /// @brief A version 2 LOCAL header (a health check), with no addresses.
+    #NoDiscard
+    export let local = func(tlvs: Tlv[list]) -> ProxyHeader =>
+        new ProxyHeader(2, Command.Local, Transport.Unspec, Addresses.Unspecified, tlvs);
+
+    /// @brief A version 1 `PROXY UNKNOWN` header.
+    #NoDiscard
+    export let unknown = func -> ProxyHeader =>
+        new ProxyHeader(1, Command.Proxy, Transport.Unspec, Addresses.Unspecified, new);
+
+    /// @brief A TLV holding UTF-8 `text`.
+    #NoDiscard
+    export let text_tlv = func(code: int, text: string) -> Tlv => new Tlv(code, strings.to_bytes(text));
+
+    /// @brief The header in its own version's form; version 2 adds a CRC32C TLV when `with_crc` is true.
+    #NoDiscard
+    export let encode = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]> {
+        if (header.version == 1) {
+            return Result<uint8[list]>.Ok(strings.to_bytes(encode_v1(header)?));
+        }
+        return encode_v2(header, with_crc);
+    };
+
+    /// @brief The version 1 line, CRLF included. Fails for LOCAL, for Unix or datagram addresses, for mixed
+    /// families and for an IPv6 zone, none of which version 1 can say.
+    #NoDiscard
+    export let encode_v1 = func(header: ProxyHeader) -> Result<string> {
+        if (header.command == Command.Local) {
+            return Result<string>.Err(custom("mesh.proxy_unencodable", "version 1 has no LOCAL command"));
+        }
+        return match (header.addresses) {
+            Addresses.Unspecified => Result<string>.Ok("PROXY UNKNOWN\r\n"),
+            Addresses.Unix { source, destination } =>
+                Result<string>.Err(custom("mesh.proxy_unencodable", "version 1 cannot carry Unix addresses")),
+            Addresses.Inet { source, destination } => inet_line(header.transport, source, destination),
+        };
+    };
+
+    /// @brief The version 2 bytes; with `with_crc` any CRC32C TLV is replaced by a computed one at the end.
+    /// Fails for mixed IP families, for addresses with an UNSPEC transport, and above 65535 bytes after the fixed
+    /// part.
+    #NoDiscard
+    export let encode_v2 = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]> {
+        last out = signature();
+        out.append((header.command == Command.Local ? 32 : 33) as uint8);
+        last proto = transport_code(header.transport);
+        last body: uint8[list] = new;
+        let family = 0;
+        match (header.addresses) {
+            Addresses.Unspecified => {
+            },
+            Addresses.Inet { source, destination } => {
+                if (proto == 0) {
+                    return Result<uint8[list]>.Err(custom("mesh.proxy_unencodable",
+                        "addresses need a STREAM or DGRAM transport"));
+                }
+                last a = ips.octets(source.ip);
+                last b = ips.octets(destination.ip);
+                if (a.length != b.length) {
+                    return Result<uint8[list]>.Err(custom("mesh.proxy_unencodable",
+                        "source and destination families differ"));
+                }
+                family = a.length == 4 ? 1 : 2;
+                append_all(body, a);
+                append_all(body, b);
+                put_u16(body, source.port);
+                put_u16(body, destination.port);
+            },
+            Addresses.Unix { source, destination } => {
+                if (proto == 0) {
+                    return Result<uint8[list]>.Err(custom("mesh.proxy_unencodable",
+                        "addresses need a STREAM or DGRAM transport"));
+                }
+                family = 3;
+                put_unix(body, source);
+                put_unix(body, destination);
+            },
+        }
+        out.append((family * 16 + proto) as uint8);
+        for (let t in header.tlvs) {
+            if (!with_crc || t.type_code != TypeCrc32c) {
+                put_tlv(body, t);
+            }
+        }
+        if (with_crc) {
+            body.append(TypeCrc32c as uint8);
+            put_u16(body, 4);
+            put_u32(body, 0);
+        }
+        if (body.length > 65535) {
+            return Result<uint8[list]>.Err(custom("mesh.proxy_unencodable", "header longer than 65535 bytes"));
+        }
+        put_u16(out, body.length);
+        append_all(out, body);
+        if (with_crc) {
+            last sum = crcs.of(out);
+            last at = out.length - 4;
+            out[at] = ((sum >> 24) & 255) as uint8;
+            out[at + 1] = ((sum >> 16) & 255) as uint8;
+            out[at + 2] = ((sum >> 8) & 255) as uint8;
+            out[at + 3] = (sum & 255) as uint8;
+        }
+        return Result<uint8[list]>.Ok(out);
+    };
+
+    /// @brief What `bytes` start with (section 2.2 "Identifying the protocol version"), decided as soon as the
+    /// prefix cannot match either signature.
+    #NoDiscard
+    export let detect = func(bytes: uint8[list]) -> Detection => detect_at(bytes, 0);
+
+    /// @brief The header at the start of `bytes`, which must be complete; bytes after it are ignored.
+    #NoDiscard
+    export let parse = func(bytes: uint8[list]) -> Result<ProxyHeader> {
+        last step = decode_at(bytes, 0)?;
+        return match (step) {
+            Optional.Some(found) => Result<ProxyHeader>.Ok(found.header),
+            Optional.None => Result<ProxyHeader>.Err(parse_failure(ParseErrorKind.UnexpectedEnd, bytes.length,
+                "incomplete PROXY header")),
+        };
+    };
+
+    /// @brief Reads one PROXY header from a byte stream that arrives in chunks of any size.
+    ///
+    /// Push bytes, then call `next`: it returns the header, `None` while more bytes are needed, or the failure.
+    /// `needed` says how many more bytes `next` needs at least, so a reader can avoid reading past the header.
+    /// After the header, `remaining` holds the bytes that followed it. After a failure the decoder stays failed.
+    #[Final, NotThreadSafe]
+    export let ProxyDecoder = class (
+        /// @brief Bytes received so far.
+        let buffer: uint8[list] = new;
+        /// @brief The header length once decoded, else -1.
+        let consumed: int = -1;
+        /// @brief The decoded header, once there is one.
+        let found: ProxyHeader[list] = new;
+        /// @brief The failure, once there is one.
+        let failure: Error[list] = new;
+
+        /// @brief An empty decoder.
+        export let init = func {
+        };
+
+        /// @brief Adds received bytes.
+        export let push = func(chunk: uint8[list]) {
+            append_all(buffer, chunk);
+        };
+
+        /// @brief The number of bytes received.
+        export let buffered = func -> int => buffer.length;
+
+        /// @brief The header, `None` while more bytes are needed, or the failure.
+        #NoDiscard
+        export let next = func -> Result<Optional<ProxyHeader>> {
+            if (failure.length > 0) {
+                return Result<Optional<ProxyHeader>>.Err(failure[0]);
+            }
+            if (found.length > 0) {
+                return Result<Optional<ProxyHeader>>.Ok(Optional<ProxyHeader>.Some(found[0]));
+            }
+            match (decode_at(buffer, 0)) {
+                Result.Ok(step) => {
+                    match (step) {
+                        Optional.Some(decoded) => {
+                            found.append(decoded.header);
+                            consumed = decoded.length;
+                            return Result<Optional<ProxyHeader>>.Ok(Optional<ProxyHeader>.Some(decoded.header));
+                        },
+                        Optional.None => {
+                            return Result<Optional<ProxyHeader>>.Ok(Optional<ProxyHeader>.None);
+                        },
+                    }
+                },
+                Result.Err(e) => {
+                    failure.append(e);
+                    return Result<Optional<ProxyHeader>>.Err(e);
+                },
+            }
+        };
+
+        /// @brief The fewest further bytes `next` needs to make progress: 8 to tell the version (both forms are at
+        /// least 15 bytes long), then for version 1 one byte at a time up to the CRLF, and for version 2 the rest of
+        /// the 16 fixed bytes and then the announced length. Reading exactly this many never reads past the header. Zero once a header or a failure is known.
+        #NoDiscard
+        export let needed = func -> int {
+            if (found.length > 0 || failure.length > 0) {
+                return 0;
+            }
+            last n = buffer.length;
+            if (n < 8) {
+                return 8 - n;
+            }
+            last kind = detect_at(buffer, 0);
+            if (kind == Detection.NeedMore && buffer[0] == 13) {
+                return V2FixedLength - n;
+            }
+            if (kind == Detection.V2) {
+                if (n < V2FixedLength) {
+                    return V2FixedLength - n;
+                }
+                last total = V2FixedLength + get_u16(buffer, 14);
+                return total > n ? total - n : 1;
+            }
+            return kind == Detection.NotProxy ? 0 : 1;
+        };
+
+        /// @brief The bytes received after the header (empty before the header is decoded).
+        #NoDiscard
+        export let remaining = func -> uint8[list] {
+            last rest: uint8[list] = new;
+            if (consumed < 0) {
+                return rest;
+            }
+            for (let i = consumed; i < buffer.length; i++) {
+                rest.append(buffer[i]);
+            }
+            return rest;
+        };
+
+        /// @brief Text such as "ProxyDecoder(12 bytes buffered)".
+        export let.override to_string = func -> string =>
+            "ProxyDecoder(" + buffer.length.to_string() + " bytes buffered)";
+    );
+
+    /// @brief A decoded header and its length in bytes.
+    #Final
+    let Decoded = class (
+        /// @brief The header.
+        export last header: ProxyHeader;
+        /// @brief Its length on the wire.
+        export last length: int;
+
+        /// @brief Pairs the header with its length.
+        export let init = func(value: ProxyHeader, size: int) {
+            header = value;
+            length = size;
+        };
+
+        /// @brief The fixed text "Decoded".
+        export let.override to_string = func -> string => "Decoded";
+    );
+
+    /// @brief The 12-byte version 2 signature `\r\n\r\n\0\r\nQUIT\n`.
+    let signature = func -> uint8[list] {
+        last sig: uint8[list] = new;
+        for (let b in strings.to_bytes("\r\n\r\n")) {
+            sig.append(b);
+        }
+        sig.append(0);
+        for (let b in strings.to_bytes("\r\nQUIT\n")) {
+            sig.append(b);
+        }
+        return sig;
+    };
+
+    /// @brief The detection of the bytes from `start` on.
+    let detect_at = func(bytes: uint8[list], start: int) -> Detection {
+        last n = bytes.length - start;
+        if (n <= 0) {
+            return Detection.NeedMore;
+        }
+        last sig = signature();
+        if (bytes[start] == sig[0]) {
+            for (let i = 0; i < 12 && i < n; i++) {
+                if (bytes[start + i] != sig[i]) {
+                    return Detection.NotProxy;
+                }
+            }
+            if (n < 13) {
+                return Detection.NeedMore;
+            }
+            return (bytes[start + 12] >> 4) == 2 ? Detection.V2 : Detection.NotProxy;
+        }
+        last v1 = strings.to_bytes("PROXY ");
+        for (let i = 0; i < 6 && i < n; i++) {
+            if (bytes[start + i] != v1[i]) {
+                return Detection.NotProxy;
+            }
+        }
+        return n < 6 ? Detection.NeedMore : Detection.V1;
+    };
+
+    /// @brief The header starting at `start`, None when more bytes are needed, or the failure.
+    let decode_at = func(bytes: uint8[list], start: int) -> Result<Optional<Decoded>> => match (detect_at(bytes, start)) {
+        Detection.NeedMore => Result<Optional<Decoded>>.Ok(Optional<Decoded>.None),
+        Detection.NotProxy => Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, 0,
+            "not a PROXY protocol header")),
+        Detection.V1 => decode_v1(bytes, start),
+        Detection.V2 => decode_v2(bytes, start),
+    };
+
+    /// @brief A version 1 line from `start`.
+    let decode_v1 = func(bytes: uint8[list], start: int) -> Result<Optional<Decoded>> {
+        last n = bytes.length - start;
+        let end = -1;
+        for (let i = 0; i < n && i < MaxV1Length; i++) {
+            last b = bytes[start + i];
+            if (b == 10) {
+                return v1_failure(i, "a line feed without a carriage return");
+            }
+            if (b == 13) {
+                if (i + 1 >= n) {
+                    return Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
+                }
+                if (bytes[start + i + 1] != 10) {
+                    return v1_failure(i, "a carriage return without a line feed");
+                }
+                if (i + 2 > MaxV1Length) {
+                    return v1_failure(i, "line longer than 107 bytes");
+                }
+                end = i;
+                break;
+            }
+            if (b < 32 || b > 126) {
+                return v1_failure(i, "a byte outside printable US-ASCII");
+            }
+        }
+        if (end < 0) {
+            if (n >= MaxV1Length) {
+                return v1_failure(MaxV1Length, "no CRLF in the first 107 bytes");
+            }
+            return Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
+        }
+        last line_bytes: uint8[list] = new;
+        for (let i = 0; i < end; i++) {
+            line_bytes.append(bytes[start + i]);
+        }
+        last line = strings.from_bytes_lossy(line_bytes);
+        last parts = strings.split(line, " ");
+        if (parts.length >= 2 && parts[1] == "UNKNOWN") {
+            return found(unknown(), end + 2);
+        }
+        if (parts.length != 6) {
+            return v1_failure(0, "expected PROXY, protocol, two addresses and two ports separated by single spaces");
+        }
+        last protocol = parts[1];
+        if (protocol != "TCP4" && protocol != "TCP6") {
+            return v1_failure(6, "unknown protocol " + protocol);
+        }
+        last offset_source = 6 + protocol.byte_length + 1;
+        last offset_destination = offset_source + parts[2].byte_length + 1;
+        last offset_sport = offset_destination + parts[3].byte_length + 1;
+        last offset_dport = offset_sport + parts[4].byte_length + 1;
+        last source_ip = parse_ip(protocol, parts[2]);
+        last destination_ip = parse_ip(protocol, parts[3]);
+        if (!has_ip(source_ip)) {
+            return v1_failure(offset_source, "bad " + protocol + " source address");
+        }
+        if (!has_ip(destination_ip)) {
+            return v1_failure(offset_destination, "bad " + protocol + " destination address");
+        }
+        last source_port = parse_port(parts[4]);
+        if (source_port < 0) {
+            return v1_failure(offset_sport, "bad source port");
+        }
+        last destination_port = parse_port(parts[5]);
+        if (destination_port < 0) {
+            return v1_failure(offset_dport, "bad destination port");
+        }
+        last header = new ProxyHeader(1, Command.Proxy, Transport.Stream, Addresses.Inet {
+            source: new sockets.SocketAddr(the_ip(source_ip), source_port),
+            destination: new sockets.SocketAddr(the_ip(destination_ip), destination_port),
+        }, new);
+        return found(header, end + 2);
+    };
+
+    /// @brief A version 2 header from `start`.
+    let decode_v2 = func(bytes: uint8[list], start: int) -> Result<Optional<Decoded>> {
+        last n = bytes.length - start;
+        if (n < V2FixedLength) {
+            return Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
+        }
+        last ver_cmd = bytes[start + 12] as int;
+        last code = ver_cmd % 16;
+        if (code > 1) {
+            return v2_failure(12, "unassigned command " + code.to_string());
+        }
+        last fam = (bytes[start + 13] as int) / 16;
+        last proto = (bytes[start + 13] as int) % 16;
+        if (fam > 3) {
+            return v2_failure(13, "unknown address family " + fam.to_string());
+        }
+        if (proto > 2) {
+            return v2_failure(13, "unknown transport protocol " + proto.to_string());
+        }
+        last length = get_u16(bytes, start + 14);
+        last total = V2FixedLength + length;
+        if (n < total) {
+            return Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
+        }
+        last block = fam == 1 ? 12 : (fam == 2 ? 36 : (fam == 3 ? 216 : 0));
+        if (length < block) {
+            return v2_failure(14, "address length " + length.to_string() + " is shorter than the family's "
+                + block.to_string() + " bytes");
+        }
+        last command = code == 0 ? Command.Local : Command.Proxy;
+        let transport = proto == 1 ? Transport.Stream : (proto == 2 ? Transport.Dgram : Transport.Unspec);
+        let addresses = Addresses.Unspecified;
+        last at = start + V2FixedLength;
+        if (command == Command.Local) {
+            transport = Transport.Unspec;
+        } else if (proto != 0 && (fam == 1 || fam == 2)) {
+            last size = fam == 1 ? 4 : 16;
+            last source_ip = fam == 1 ? ips.IpAddr.V4(v4.from_bytes(bytes, at))
+                : ips.IpAddr.V6(v6.from_bytes(bytes, at));
+            last destination_ip = fam == 1 ? ips.IpAddr.V4(v4.from_bytes(bytes, at + size))
+                : ips.IpAddr.V6(v6.from_bytes(bytes, at + size));
+            addresses = Addresses.Inet {
+                source: new sockets.SocketAddr(source_ip, get_u16(bytes, at + 2 * size)),
+                destination: new sockets.SocketAddr(destination_ip, get_u16(bytes, at + 2 * size + 2)),
+            };
+        } else if (proto != 0 && fam == 3) {
+            last source = read_unix(bytes, at, 16)?;
+            last destination = read_unix(bytes, at + 108, 124)?;
+            addresses = Addresses.Unix { source: source, destination: destination };
+        } else {
+            transport = fam == 0 ? transport : Transport.Unspec;
+        }
+        last tlvs = read_tlvs(bytes, start, at + block, start + total, true)?;
+        return found(new ProxyHeader(2, command, transport, addresses, tlvs), total);
+    };
+
+    /// @brief The TLVs in `[from, to)`; at the top level each registered type is checked.
+    let read_tlvs = func(bytes: uint8[list], start: int, from: int, to: int, top: bool) -> Result<Tlv[list]> {
+        last list: Tlv[list] = new;
+        let p = from;
+        while (p < to) {
+            if (to - p < 3) {
+                return Result<Tlv[list]>.Err(parse_failure(ParseErrorKind.UnexpectedEnd, p - start,
+                    "truncated TLV header"));
+            }
+            last code = bytes[p] as int;
+            last size = get_u16(bytes, p + 1);
+            if (p + 3 + size > to) {
+                return Result<Tlv[list]>.Err(parse_failure(ParseErrorKind.UnexpectedEnd, p - start,
+                    "TLV value runs past the header"));
+            }
+            last value: uint8[list] = new;
+            for (let i = 0; i < size; i++) {
+                value.append(bytes[p + 3 + i]);
+            }
+            if (top) {
+                if (code == TypeUniqueId && size > MaxUniqueIdLength) {
+                    return Result<Tlv[list]>.Err(parse_failure(ParseErrorKind.OutOfRange, p - start,
+                        "unique id longer than 128 bytes"));
+                }
+                if (code == TypeCrc32c) {
+                    if (size != 4) {
+                        return Result<Tlv[list]>.Err(parse_failure(ParseErrorKind.Syntax, p - start,
+                            "CRC32C TLV must hold 4 bytes"));
+                    }
+                    last copy: uint8[list] = new;
+                    for (let i = start; i < to; i++) {
+                        copy.append(bytes[i]);
+                    }
+                    last at = p + 3 - start;
+                    for (let i = 0; i < 4; i++) {
+                        copy[at + i] = 0;
+                    }
+                    if (crcs.of(copy) != get_u32(value, 0)) {
+                        return Result<Tlv[list]>.Err(parse_failure(ParseErrorKind.Syntax, p - start,
+                            "CRC32C mismatch"));
+                    }
+                }
+                if (code == TypeSsl) {
+                    decode_ssl(value, p + 3 - start)?;
+                }
+            }
+            list.append(new Tlv(code, value));
+            p += 3 + size;
+        }
+        return Result<Tlv[list]>.Ok(list);
+    };
+
+    /// @brief The SSL record in `value`; `base` is its offset in the header, for errors.
+    let decode_ssl = func(value: uint8[list], base: int) -> Result<SslInfo> {
+        if (value.length < 5) {
+            return Result<SslInfo>.Err(parse_failure(ParseErrorKind.UnexpectedEnd, base, "SSL TLV shorter than 5 bytes"));
+        }
+        last subs = read_tlvs(value, 0, 5, value.length, false)?;
+        return Result<SslInfo>.Ok(new SslInfo(value[0] as int, get_u32(value, 1), subs));
+    };
+
+    /// @brief A 108-byte Unix address at `at`: None for an unnamed socket, or the reason it is invalid.
+    let read_unix = func(bytes: uint8[list], at: int, offset: int) -> Result<Optional<unixes.UnixAddr>> {
+        last abstract_namespace = bytes[at] == 0;
+        last first = abstract_namespace ? at + 1 : at;
+        last name: uint8[list] = new;
+        let terminated = false;
+        for (let i = first; i < at + 108; i++) {
+            if (bytes[i] == 0) {
+                terminated = true;
+                break;
+            }
+            name.append(bytes[i]);
+        }
+        if (name.length == 0) {
+            return Result<Optional<unixes.UnixAddr>>.Ok(Optional<unixes.UnixAddr>.None);
+        }
+        if (!abstract_namespace && !terminated) {
+            return Result<Optional<unixes.UnixAddr>>.Err(parse_failure(ParseErrorKind.Syntax, offset,
+                "PROXY v2: Unix path has no NUL in its 108 bytes"));
+        }
+        return match (strings.from_bytes(name)) {
+            Result.Ok(text) => Result<Optional<unixes.UnixAddr>>.Ok(Optional<unixes.UnixAddr>.Some(
+                new unixes.UnixAddr(text, abstract_namespace))),
+            Result.Err(e) => Result<Optional<unixes.UnixAddr>>.Err(parse_failure(ParseErrorKind.Syntax, offset,
+                "PROXY v2: Unix address is not UTF-8")),
+        };
+    };
+
+    /// @brief Writes a 108-byte Unix address; an unnamed socket is all zeros.
+    let put_unix = func(out: uint8[list], address: Optional<unixes.UnixAddr>) {
+        let written = 0;
+        match (address) {
+            Optional.Some(a) => {
+                if (a.is_abstract) {
+                    out.append(0);
+                    written = 1;
+                }
+                for (let b in strings.to_bytes(a.path)) {
+                    out.append(b);
+                    written++;
+                }
+            },
+            Optional.None => {
+            },
+        }
+        for (let i = written; i < 108; i++) {
+            out.append(0);
+        }
+    };
+
+    /// @brief The version 1 TCP line for an IP pair.
+    let inet_line = func(transport: Transport, source: sockets.SocketAddr, destination: sockets.SocketAddr)
+        -> Result<string> {
+        if (transport != Transport.Stream) {
+            return Result<string>.Err(custom("mesh.proxy_unencodable", "version 1 carries only TCP"));
+        }
+        last a = match (source.ip) {
+            ips.IpAddr.V4(x) => x.to_string(),
+            ips.IpAddr.V6(x) => x.zone == "" ? v6_text(x) : "",
+        };
+        last b = match (destination.ip) {
+            ips.IpAddr.V4(x) => x.to_string(),
+            ips.IpAddr.V6(x) => x.zone == "" ? v6_text(x) : "",
+        };
+        if (a == "" || b == "") {
+            return Result<string>.Err(custom("mesh.proxy_unencodable", "version 1 cannot carry an IPv6 zone"));
+        }
+        last family = ips.family(source.ip);
+        if (family != ips.family(destination.ip)) {
+            return Result<string>.Err(custom("mesh.proxy_unencodable", "source and destination families differ"));
+        }
+        last name = ips.octets(source.ip).length == 4 ? "TCP4" : "TCP6";
+        return Result<string>.Ok("PROXY " + name + " " + a + " " + b + " " + source.port.to_string() + " "
+            + destination.port.to_string() + "\r\n");
+    };
+
+    /// @brief RFC 5952 text from the groups alone: lowercase, the longest run of two or more zero groups (the
+    /// first on a tie) as `::`, and never a dotted IPv4 tail.
+    let v6_text = func(address: v6.Ipv6Addr) -> string {
+        last groups = address.segments();
+        let best_start = -1;
+        let best_length = 0;
+        let i = 0;
+        while (i < 8) {
+            if (groups[i] == 0) {
+                let j = i;
+                while (j < 8 && groups[j] == 0) {
+                    j++;
+                }
+                if (j - i >= 2 && j - i > best_length) {
+                    best_start = i;
+                    best_length = j - i;
+                }
+                i = j;
+            } else {
+                i++;
+            }
+        }
+        let text = "";
+        let k = 0;
+        while (k < 8) {
+            if (k == best_start) {
+                text += "::";
+                k += best_length;
+                continue;
+            }
+            if (text != "" && !strings.ends_with(text, ":")) {
+                text += ":";
+            }
+            text += hex_group(groups[k] as int);
+            k++;
+        }
+        return text;
+    };
+
+    /// @brief A group in lowercase hexadecimal without leading zeros.
+    let hex_group = func(value: int) -> string {
+        last digits = "0123456789abcdef";
+        if (value == 0) {
+            return "0";
+        }
+        let text = "";
+        let v = value;
+        while (v > 0) {
+            text = digits.slice(v % 16, v % 16 + 1) + text;
+            v = v / 16;
+        }
+        return text;
+    };
+
+    /// @brief An IPv6 address in version 1 form: hexadecimal groups only, no zone, no dotted tail.
+    let parse_v6_text = func(text: string) -> Optional<v6.Ipv6Addr> {
+        if (strings.contains(text, "%") || strings.contains(text, ".")) {
+            return Optional<v6.Ipv6Addr>.None;
+        }
+        return match (v6.parse(text)) {
+            Result.Ok(a) => Optional<v6.Ipv6Addr>.Some(a),
+            Result.Err(e) => Optional<v6.Ipv6Addr>.None,
+        };
+    };
+
+    /// @brief The address `text` of a version 1 `protocol` (TCP4 or TCP6), or None.
+    let parse_ip = func(protocol: string, text: string) -> Optional<ips.IpAddr> {
+        if (protocol == "TCP4") {
+            return match (v4.parse(text)) {
+                Result.Ok(a) => Optional<ips.IpAddr>.Some(ips.IpAddr.V4(a)),
+                Result.Err(e) => Optional<ips.IpAddr>.None,
+            };
+        }
+        return match (parse_v6_text(text)) {
+            Optional.Some(a) => Optional<ips.IpAddr>.Some(ips.IpAddr.V6(a)),
+            Optional.None => Optional<ips.IpAddr>.None,
+        };
+    };
+
+    /// @brief Whether an optional address is present.
+    let has_ip = func(ip: Optional<ips.IpAddr>) -> bool => match (ip) {
+        Optional.Some(a) => true,
+        Optional.None => false,
+    };
+
+    /// @brief The address in a present optional (callers check `has_ip` first).
+    let the_ip = func(ip: Optional<ips.IpAddr>) -> ips.IpAddr => match (ip) {
+        Optional.Some(a) => a,
+        Optional.None => ips.IpAddr.V4(v4.unspecified()),
+    };
+
+    /// @brief A decimal port 0 to 65535 without leading zeros, or -1.
+    let parse_port = func(text: string) -> int {
+        if (text.byte_length == 0 || text.byte_length > 5 || (text.byte_length > 1 && text.byte_at(0) == 48)) {
+            return -1;
+        }
+        let value = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            last b = text.byte_at(i);
+            if (b < 48 || b > 57) {
+                return -1;
+            }
+            value = value * 10 + ((b - 48) as int);
+        }
+        return value > 65535 ? -1 : value;
+    };
+
+    /// @brief A successful decode.
+    let found = func(header: ProxyHeader, length: int) -> Result<Optional<Decoded>> =>
+        Result<Optional<Decoded>>.Ok(Optional<Decoded>.Some(new Decoded(header, length)));
+
+    /// @brief A version 1 syntax failure at `offset`.
+    let v1_failure = func(offset: int, message: string) -> Result<Optional<Decoded>> =>
+        Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, offset, "PROXY v1: " + message));
+
+    /// @brief A version 2 syntax failure at `offset`.
+    let v2_failure = func(offset: int, message: string) -> Result<Optional<Decoded>> =>
+        Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, offset, "PROXY v2: " + message));
+
+    /// @brief A parse error.
+    let parse_failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
+
+    /// @brief The protocol nibble of a transport.
+    let transport_code = func(t: Transport) -> int => match (t) {
+        Transport.Unspec => 0,
+        Transport.Stream => 1,
+        Transport.Dgram => 2,
+    };
+
+    /// @brief The protocol name of a transport.
+    let transport_name = func(t: Transport) -> string => match (t) {
+        Transport.Unspec => "UNSPEC",
+        Transport.Stream => "STREAM",
+        Transport.Dgram => "DGRAM",
+    };
+
+    /// @brief Text for a pair of addresses.
+    let addresses_text = func(a: Addresses) -> string => match (a) {
+        Addresses.Unspecified => "unspecified",
+        Addresses.Inet { source, destination } => source.to_string() + " -> " + destination.to_string(),
+        Addresses.Unix { source, destination } => unix_text(source) + " -> " + unix_text(destination),
+    };
+
+    /// @brief A Unix address or "unnamed".
+    let unix_text = func(a: Optional<unixes.UnixAddr>) -> string => match (a) {
+        Optional.Some(x) => x.to_string(),
+        Optional.None => "unnamed",
+    };
+
+    /// @brief Whether two address pairs are equal.
+    let same_addresses = func(a: Addresses, b: Addresses) -> bool => match (a) {
+        Addresses.Unspecified => match (b) {
+            Addresses.Unspecified => true,
+            Addresses.Inet { source, destination } => false,
+            Addresses.Unix { source, destination } => false,
+        },
+        Addresses.Inet { source, destination } => match (b) {
+            Addresses.Inet { source: s, destination: d } => source.equals(s) && destination.equals(d),
+            Addresses.Unspecified => false,
+            Addresses.Unix { source: s, destination: d } => false,
+        },
+        Addresses.Unix { source, destination } => match (b) {
+            Addresses.Unix { source: s, destination: d } => unix_text(source) == unix_text(s)
+                && unix_text(destination) == unix_text(d) && same_unix(source, s) && same_unix(destination, d),
+            Addresses.Unspecified => false,
+            Addresses.Inet { source: s, destination: d } => false,
+        },
+    };
+
+    /// @brief Whether two optional Unix addresses are equal.
+    let same_unix = func(a: Optional<unixes.UnixAddr>, b: Optional<unixes.UnixAddr>) -> bool => match (a) {
+        Optional.Some(x) => match (b) {
+            Optional.Some(y) => x.equals(y),
+            Optional.None => false,
+        },
+        Optional.None => match (b) {
+            Optional.Some(y) => false,
+            Optional.None => true,
+        },
+    };
+
+    /// @brief UTF-8 text of `bytes`, or None.
+    let text_of = func(bytes: uint8[list]) -> Optional<string> => match (strings.from_bytes(bytes)) {
+        Result.Ok(text) => Optional<string>.Some(text),
+        Result.Err(e) => Optional<string>.None,
+    };
+
+    /// @brief Appends a TLV.
+    let put_tlv = func(out: uint8[list], t: Tlv) {
+        out.append(t.type_code as uint8);
+        put_u16(out, t.value.length);
+        append_all(out, t.value);
+    };
+
+    /// @brief Appends a 16-bit big-endian value.
+    let put_u16 = func(out: uint8[list], value: int) {
+        out.append(((value / 256) % 256) as uint8);
+        out.append((value % 256) as uint8);
+    };
+
+    /// @brief Appends a 32-bit big-endian value.
+    let put_u32 = func(out: uint8[list], value: uint32) {
+        out.append(((value >> 24) & 255) as uint8);
+        out.append(((value >> 16) & 255) as uint8);
+        out.append(((value >> 8) & 255) as uint8);
+        out.append((value & 255) as uint8);
+    };
+
+    /// @brief The 16-bit big-endian value at `at`.
+    let get_u16 = func(bytes: uint8[list], at: int) -> int => (bytes[at] as int) * 256 + (bytes[at + 1] as int);
+
+    /// @brief The 32-bit big-endian value at `at`.
+    let get_u32 = func(bytes: uint8[list], at: int) -> uint32 => ((bytes[at] as uint32) << 24)
+        | ((bytes[at + 1] as uint32) << 16) | ((bytes[at + 2] as uint32) << 8) | (bytes[at + 3] as uint32);
+
+    /// @brief Appends every byte of `bytes` to `out`.
+    let append_all = func(out: uint8[list], bytes: uint8[list]) {
+        for (let b in bytes) {
+            out.append(b);
+        }
+    };
+
+    /// @brief A copy of `bytes`.
+    let copy_bytes = func(bytes: uint8[list]) -> uint8[list] {
+        last copy: uint8[list] = new;
+        append_all(copy, bytes);
+        return copy;
+    };
+
+    /// @brief Whether two byte lists are equal.
+    let same_bytes = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether two TLV lists are equal.
+    let same_tlvs = func(a: Tlv[list], b: Tlv[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (!a[i].equals(b[i])) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief A hash of a byte list.
+    let hash_bytes = func(bytes: uint8[list]) -> uint32 {
+        let hash: uint32 = 17;
+        for (let b in bytes) {
+            hash = hashing.combine(hash, b as uint32);
+        }
+        return hash;
+    };
+
+    /// @brief A hash of a TLV list.
+    let hash_tlvs = func(list: Tlv[list]) -> uint32 {
+        let hash: uint32 = 31;
+        for (let t in list) {
+            hash = hashing.combine(hash, t.hash_code());
+        }
+        return hash;
+    };
+);

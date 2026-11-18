@@ -50,7 +50,7 @@ The following public declarations are taken from the module source; each links t
 - **Duration.Duration** · [`export let compare_to = func(other: Duration) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L85)
   Orders durations by their signed nanosecond counts. Tagged `#Pure`.
 - **Duration.Duration** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L97)
-  Tests equality of signed nanosecond counts. Tagged `#Pure`.
+  Tests equality of signed nanosecond counts. Reading the argument can run its class hook.
 - **Duration.Duration** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L103)
   Hashes the signed nanosecond count. Tagged `#Pure`.
 - **Duration.Duration** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L110)

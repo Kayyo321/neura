@@ -1,5 +1,7 @@
 #include "locals.hpp"
 
+#include "neura-ir/lifetime.hpp"
+
 #include <algorithm>
 
 namespace neura::optimization {
@@ -82,7 +84,8 @@ void each_statement_region(std::vector<IrNode>& body, const std::function<void(s
 }
 
 bool function_body(const IrProgram& program, const IrBody& body) {
-    return body.owner < program.symbols.size() && program.symbols[body.owner].kind == SymbolKind::Function;
+    return body.owner < program.symbols.size() && program.symbols[body.owner].kind == SymbolKind::Function &&
+           !uses_lifetime_operations(body.instructions);
 }
 
 } // namespace neura::optimization

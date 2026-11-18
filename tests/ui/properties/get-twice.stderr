@@ -1,0 +1,11 @@
+error[E0520]: duplicate 'get' accessor for 'name'
+ --> $DIR/get-twice.nra:5:11
+  |
+4 |         | get;
+  |           --- the first 'get' clause is here
+5 |         | get;
+  |           ^^^ a second 'get' clause
+  |
+  = help: remove one of them; a property has at most one 'get' and one 'set'
+
+For more information about this error, try `neura explain E0520`.

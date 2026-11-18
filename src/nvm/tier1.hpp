@@ -10,9 +10,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,6 +37,22 @@ enum class Variant : std::uint8_t;
 // between threads lifting the same block) affect timing and the statistics
 // alone.
 struct TierOptions {
+    // The browser uses the portable function programs without tier 3.
+    // The browser runtime itself reads no tier settings from the environment.
+    static TierOptions browser() {
+        TierOptions options;
+        options.programs = Programs::On;
+        options.tier3 = Tier3::Off;
+        options.defer_proofs = true;
+        options.attempt_work = std::uint64_t{1} << 19;
+        options.attempt_search = std::chrono::milliseconds(8);
+        return options;
+    }
+
+    // Count and queue due blocks during execution. Only the embedder's
+    // explicit idle callback may perform work on the queue.
+    bool defer_proofs = false;
+
     // Executions of a block with a LIFT hint before the hint is proven, and
     // of a block without one before its form is searched for, counted over
     // every run that shares the cache (the tests of `neura test`, the
@@ -62,6 +80,14 @@ struct TierOptions {
     std::uint64_t search_picoseconds = 200;
     // Wall time the searches of one image may take in total.
     std::chrono::milliseconds search_budget{250};
+    // Bounds on one attempt, so that an idle proof stays a short task on a
+    // browser's main thread (Apps030.md, budget B-W7): the overflow analysis
+    // gets at most `attempt_work` units, and a search at most
+    // `attempt_search` of wall time. A block whose proof needs more work
+    // than one attempt allows is settled unlifted; a search cut short is
+    // tried again while the image's search budget lasts. Zero: unbounded.
+    std::uint64_t attempt_work = 0;
+    std::chrono::milliseconds attempt_search{0};
     // Tier 2: arrivals of the dispatcher at a lifted block, counted over
     // every run sharing the cache, before a region is formed there. While
     // blocks the region would reach are still being lifted, formation waits
@@ -295,6 +321,13 @@ public:
     // remembered and never retried. Blocks that share a graph and a lift key
     // (lift::lift_key) share the result.
     Resolution resolve(std::uint32_t function, std::uint32_t block, std::uint64_t runs);
+    // Takes one queued attempt, if any, and returns its wall duration. The
+    // embedder calls this between slices when no host work is waiting.
+    std::optional<std::chrono::steady_clock::duration> prove_one_idle();
+    bool proofs_pending() const;
+    // The function and block of the last attempt prove_one_idle took, for
+    // the embedder's measurements; nvr::absent twice before the first.
+    std::pair<std::uint32_t, std::uint32_t> last_idle_proof() const { return last_idle_proof_; }
     // The settled result of a block, without lifting it.
     Resolution lookup(std::uint32_t function, std::uint32_t block) const;
 
@@ -398,10 +431,14 @@ private:
         // A form whose structural proof held while the overflow analysis ran
         // out of work, and whether it came from the hint.
         std::shared_ptr<const lift::LiftedForm> retry;
+        // Bounded attempts (TierOptions::attempt_work): the share of the
+        // graph the overflow analysis had settled when the last one ran out.
+        double bounded_progress = 0;
         bool from_hint = false;
         // The hint failed a proof; the block may still be searched for.
         bool hint_failed = false;
         bool attempted = false;
+        bool queued = false;
         // The count of executions at which to try again: every run sharing
         // the cache waits for it.
         std::uint64_t next_attempt = 0;
@@ -410,6 +447,7 @@ private:
 
     Entry& entry(std::uint32_t function, std::uint32_t block);
     const Entry& entry(std::uint32_t function, std::uint32_t block) const;
+    Resolution resolve_now(std::uint32_t function, std::uint32_t block, std::uint64_t runs);
 
     const nvr::Image& image_;
     TierOptions options_;
@@ -420,6 +458,13 @@ private:
     std::vector<Entry> entries_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> counts_;
     mutable std::mutex mutex_;
+    struct QueuedProof {
+        std::uint32_t function;
+        std::uint32_t block;
+        std::uint64_t runs;
+    };
+    std::deque<QueuedProof> proof_queue_;
+    std::pair<std::uint32_t, std::uint32_t> last_idle_proof_{nvr::absent, nvr::absent};
     // Accepted results by (graph, lift key), and keys whose search failed.
     std::map<Key, std::shared_ptr<const lift::LoweredBlock>> accepted_;
     std::map<Key, std::string> searched_;
@@ -431,17 +476,28 @@ private:
         std::shared_ptr<const tier2::Region> region;
         std::uint64_t next_attempt = 0;
         // Formed while blocks it would reach were not settled: form it
-        // again at `refresh_at` arrivals (at most four times).
+        // again at `refresh_at` arrivals (at most four times, unless proofs
+        // are deferred: see settled_proofs_).
         std::uint64_t refresh_at = 0;
         std::uint32_t refreshes = 0;
         bool refreshing = false;
+        // Deferred proofs: settled_proofs_ of the function when this
+        // program was formed.
+        std::uint64_t formed_after = 0;
     };
     std::vector<RegionEntry> regions_;
     // Function programs, by function, and the next program number.
     std::vector<RegionEntry> programs_;
+    // With deferred proofs, by function: how many of its blocks idle proofs
+    // have settled. A program formed while blocks were pending is formed
+    // again, without the cap of four, once this has grown since; it is
+    // checked at arrivals that grow by an eighth, so the check stays cheap
+    // and a late proof is still picked up (Providers.md, "Idle proofs").
+    std::vector<std::uint64_t> settled_proofs_;
     std::uint32_t next_program_id_ = 0;
     // Regions replaced by a refresh, which runs may still hold.
     std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;
+#ifndef NEURA_WASM_RUNTIME
     // Native code by region; null where compilation failed.
     std::map<const tier2::Region*, std::unique_ptr<jit::Program>> native_;
     // Tier 3, by program number: arrivals at its checkpoints, and its state:
@@ -464,6 +520,7 @@ private:
     std::unique_ptr<std::atomic<tier3::DispatchRecord*>[]> dispatch_records_;
     std::vector<std::unique_ptr<tier3::DispatchRecord[]>> dispatch_owned_;
     void make_dispatch_records(const tier2::Region& program);
+#endif
     bool machine_code_ = false;
     std::string machine_code_off_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;

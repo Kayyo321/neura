@@ -76,6 +76,8 @@ public:
     GraphDeviceStatistics statistics() const override;
     std::span<const GraphShape> graph_shapes() const override;
     std::string_view failure_reason() const override;
+    // Rejected, retired, or failed: every later job is declined.
+    bool declines_every_job() const override;
 
 private:
     friend struct AutoDeviceAccess;

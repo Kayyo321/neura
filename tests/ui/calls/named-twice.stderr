@@ -1,0 +1,10 @@
+error[E0483]: parameter 'b' is given two arguments
+ --> $DIR/named-twice.nra:3:23
+  |
+3 | let size = area(b: 1, b: 2);
+  |                       ^^^^ a second argument for 'b'
+  |                 - first named here
+  |
+  = help: remove one of the two arguments
+
+For more information about this error, try `neura explain E0483`.

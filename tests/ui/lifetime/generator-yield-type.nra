@@ -1,0 +1,4 @@
+// Edge case 61: the yielded value has the element type.
+let numbers = iterator() -> int {
+    yield "text";
+};

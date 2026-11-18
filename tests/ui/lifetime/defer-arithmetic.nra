@@ -1,0 +1,4 @@
+// Edge case 5: `defer` takes a call, not an arithmetic expression.
+let work = func(count: int) -> void {
+    defer count + 1;
+};

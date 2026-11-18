@@ -1,0 +1,11 @@
+error[E0477]: 'buffer' belongs to this frame and would not survive a 'yield'
+ --> $DIR/generator-yield-array.nra:4:5
+  |
+3 |     let buffer = [1, 2, 3];
+  |     ----------------------- 'buffer' has type 'int32[]'
+4 |     yield buffer[0];
+  |     ^^^^^
+  |
+  = help: use a list, which the generator's state can hold, or end the block before the 'yield'
+
+For more information about this error, try `neura explain E0477`.

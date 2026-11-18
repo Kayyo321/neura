@@ -26,7 +26,7 @@ The following public declarations are taken from the module source; each links t
 - **Uuid.Uuid** · [`export let compare_to = func(other: Uuid) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L38)
   Lexicographic over the bytes, each unsigned. Tagged `#Pure`.
 - **Uuid.Uuid** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L50)
-  Tests whether another UUID has the same two halves. Tagged `#Pure`.
+  Tests whether another UUID has the same two halves. Reading the argument can run its class hook.
 - **Uuid.Uuid** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L60)
   Starts from 17 and combines each byte in order. Tagged `#Pure`.
 - **Uuid.Uuid** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/uuid.nra#L70)

@@ -1,0 +1,2 @@
+// A default is a literal, not an expression (edge case 25).
+let f = func(a: int = 1 + 2) -> int => a;

@@ -21,7 +21,7 @@ Start with the [standard library overview](StandardLibrary), then use the [libra
 
 ## Compiler and execution
 
-The [project design](Project) describes stage boundaries and the execution model. The [backend](Backend) explains circuit conversion, while [NeuraIR optimization](IrOptimization) describes transformations and their correctness requirements. For artifact and runtime details, see [NeuraIR format](NirFormat), [NVR format](NVR), the [Neura Virtual Machine](NVM) and its execution tiers, the built-in [kernels](Kernels) behind parts of the standard library, and [wall-clock benchmarks](Benchmarks). The [decompiler](Decompiler) documentation explains how artifacts can be inspected and reconstructed. Contributors should read the [coding style](CodingStyle), which states how this release writes Neura, and [continuous integration](ContinuousIntegration) pages.
+The [project design](Project) describes stage boundaries and the execution model. The [backend](Backend) explains circuit conversion, while [NeuraIR optimization](IrOptimization) describes transformations and their correctness requirements. For artifact and runtime details, see [NeuraIR format](NirFormat), [NVR format](NVR), the [Neura Virtual Machine](NVM) and its execution tiers, the opt-in [runtime service](Service), the [server host](Server-Host) and its [SQL pools](Sql), the built-in [kernels](Kernels) behind parts of the standard library, and [wall-clock benchmarks](Benchmarks). The [decompiler](Decompiler) documentation explains how artifacts can be inspected and reconstructed. Contributors should read the [coding style](CodingStyle), which states how this release writes Neura, and [continuous integration](ContinuousIntegration) pages.
 
 ## Reading this documentation
 

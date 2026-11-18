@@ -1,0 +1,219 @@
+let errors = import:Std.Core.Error;
+let http_headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Request heads: the request-line, field lines, Host, framing fields and
+// the head limits of Std.Net.Http.Wire (RFC 9112 sections 2.2 to 6.3).
+let RequestHeadTests = module (
+    let parse = func(text: string) -> Result<wire.RequestHead> => wire.parse_request_head(strings.to_bytes(text));
+
+    let ok = func(text: string) -> wire.RequestHead => test.assert_ok<wire.RequestHead>(parse(text));
+
+    let status_of = func(text: string) -> int => wire.rejection_status(test.assert_err<wire.RequestHead>(parse(text)));
+
+    let framing = func(head: wire.RequestHead) -> string =>
+        test.assert_ok<wire.BodyFraming>(wire.request_body_length(head)).to_string();
+
+    // RFC 9110 section 3.9, the client request (lines ended with CRLF).
+    export let test_rfc9110_example_request = func {
+        last head = ok("GET /hello.txt HTTP/1.1\r\nUser-Agent: curl/7.64.1\r\nHost: www.example.com\r\n"
+            + "Accept-Language: en, mi\r\n\r\n");
+        test.assert_equal_string("GET", head.method);
+        test.assert_equal_string("/hello.txt", head.target);
+        test.assert_equal_string("HTTP/1.1", head.version);
+        test.assert_equal<int>(1, head.minor_version());
+        test.assert_equal<int>(3, head.headers.size());
+        test.assert_equal_string("curl/7.64.1", test.assert_some<string>(head.headers.get("user-agent")));
+        test.assert_equal_string("www.example.com", test.assert_some<string>(head.headers.get("HOST")));
+        last languages = head.headers.list_elements("Accept-Language");
+        test.assert_equal<int>(2, languages.length);
+        test.assert_equal_string("mi", languages[1]);
+        test.assert_equal_string(wire.BodyFraming.None.to_string(), framing(head));
+    };
+
+    // RFC 9112 sections 3.2.1 to 3.2.4, one example of each request-target form.
+    export let test_request_target_forms = func {
+        test.assert_equal_string("/where?q=now", ok("GET /where?q=now HTTP/1.1\r\nHost: www.example.org\r\n\r\n").target);
+        test.assert_equal_string("http://www.example.org/pub/WWW/TheProject.html",
+            ok("GET http://www.example.org/pub/WWW/TheProject.html HTTP/1.1\r\nHost: www.example.org\r\n\r\n").target);
+        test.assert_equal_string("www.example.com:80",
+            ok("CONNECT www.example.com:80 HTTP/1.1\r\nHost: www.example.com\r\n\r\n").target);
+        test.assert_equal_string("*", ok("OPTIONS * HTTP/1.1\r\nHost: www.example.org:8001\r\n\r\n").target);
+    };
+
+    // RFC 9112 section 2.2: empty lines before the request-line are ignored;
+    // a single LF ends a line by default; a bare CR is invalid.
+    export let test_line_ends = func {
+        test.assert_equal_string("/a", ok("\r\n\r\nGET /a HTTP/1.1\r\nHost: h\r\n\r\n").target);
+        last mixed = ok("GET /b HTTP/1.1\nHost: h\r\nX: 1\n\n");
+        test.assert_equal_string("1", test.assert_some<string>(mixed.headers.get("x")));
+        last strict = new wire.Limits(16384, 100, 1048576, 4096, 16384, false, ["GET"]);
+        last refused = wire.parse_request_head(strings.to_bytes("GET /b HTTP/1.1\nHost: h\n\n"), strict);
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<wire.RequestHead>(refused)));
+        test.assert_equal<int>(400, status_of("GET /c HTTP/1.1\r\nHost: h\rX: 1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET /c HTTP/1.1\r\nHost: h\r\n"));
+        test.assert_equal<int>(400, status_of("GET /c HTTP/1.1\r\nHost: h\r\n\r\nGET"));
+        test.assert_equal<int>(400, status_of("GET /c HTTP/1.1\r\nHost: h\r\n\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("\r\n"));
+    };
+
+    export let test_request_line_syntax = func {
+        test.assert_equal<int>(400, status_of("GET  /a HTTP/1.1\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET /a  HTTP/1.1\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET /a HTTP/1.1 \r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET /a\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of(" GET /a HTTP/1.1\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET /a\tb HTTP/1.1\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET /é HTTP/1.1\r\nHost: h\r\n\r\n"));
+    };
+
+    export let test_method_rules = func {
+        // Not a token: 400. A token the server does not know: 501.
+        test.assert_equal<int>(400, status_of("G(T / HTTP/1.1\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(501, status_of("BREW / HTTP/1.1\r\nHost: h\r\n\r\n"));
+        // Methods are case-sensitive (RFC 9110 section 9.1).
+        test.assert_equal<int>(501, status_of("get / HTTP/1.1\r\nHost: h\r\n\r\n"));
+        for (let m in ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "TRACE", "PATCH"]) {
+            test.assert_equal_string(m, ok(m + " / HTTP/1.1\r\nHost: h\r\n\r\n").method);
+        }
+        last custom = new wire.Limits(16384, 100, 1048576, 4096, 16384, true, ["GET", "BREW"]);
+        test.assert(custom.knows_method("BREW"));
+        test.assert(!custom.knows_method("POST"));
+        test.assert(!custom.knows_method("BRE"));
+        last head = wire.parse_request_head(strings.to_bytes("BREW /pot HTTP/1.1\r\nHost: h\r\n\r\n"), custom);
+        test.assert_equal_string("BREW", test.assert_ok<wire.RequestHead>(head).method);
+    };
+
+    export let test_versions = func {
+        test.assert_equal<int>(0, ok("GET / HTTP/1.0\r\nHost: h\r\n\r\n").minor_version());
+        test.assert_equal<int>(505, status_of("GET / HTTP/2.0\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(505, status_of("GET / HTTP/0.9\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.10\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / http/1.1\r\nHost: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1\r\nHost: h\r\n\r\n"));
+    };
+
+    // RFC 9112 section 3.2: Host is required in HTTP/1.1, at most once, and
+    // must be a valid value. The Backend030 host rule ("a missing or repeated
+    // Host (400)") also applies it to HTTP/1.0.
+    export let test_host_rules = func {
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nX: 1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.0\r\nX: 1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: a\r\nHost: a\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.0\r\nHost: a\r\nhost: b\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: a b\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: user@a\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: a/b\r\n\r\n"));
+        test.assert_equal_string("", test.assert_some<string>(ok("GET / HTTP/1.1\r\nHost:\r\n\r\n").headers.get("host")));
+        test.assert_equal_string("[::1]:8080",
+            test.assert_some<string>(ok("GET / HTTP/1.1\r\nHost: [::1]:8080\r\n\r\n").headers.get("host")));
+    };
+
+    // RFC 9112 sections 5.1, 5.2 and 2.2.
+    export let test_field_line_rules = func {
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: h\r\nX: a\r\n b\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: h\r\nX: a\r\n\tb\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\n Host: h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost : h\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: h\r\nX\t: 1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: h\r\nNo colon\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: h\r\n: empty\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nHost: h\r\nX(1): v\r\n\r\n"));
+        last nul = strings.to_bytes("GET / HTTP/1.1\r\nHost: h\r\nX: a?b\r\n\r\n");
+        nul[29] = 0;
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<wire.RequestHead>(wire.parse_request_head(nul))));
+        last head = ok("GET / HTTP/1.1\r\nHost: h\r\nX:  padded \t\r\nY:\r\nZ: a:b\r\nx: 2\r\n\r\n");
+        test.assert_equal_string("padded", test.assert_some<string>(head.headers.get("X")));
+        test.assert_equal_string("", test.assert_some<string>(head.headers.get("Y")));
+        test.assert_equal_string("a:b", test.assert_some<string>(head.headers.get("Z")));
+        test.assert_equal_string("padded, 2", test.assert_some<string>(head.headers.joined("x")));
+        // A UTF-8 value is kept; bytes that are not UTF-8 are 400.
+        test.assert_equal_string("café", test.assert_some<string>(ok("GET / HTTP/1.1\r\nHost: h\r\nN: café\r\n\r\n").headers.get("n")));
+        last raw = strings.to_bytes("GET / HTTP/1.1\r\nHost: h\r\nN: x\r\n\r\n");
+        raw[28] = 255;
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<wire.RequestHead>(wire.parse_request_head(raw))));
+    };
+
+    // Transfer-Encoding and Content-Length (RFC 9112 sections 6.1 to 6.3).
+    export let test_framing_rules = func {
+        last chunked = ok("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n");
+        test.assert_equal_string(wire.BodyFraming.Chunked.to_string(), framing(chunked));
+        last upper = ok("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: CHUNKED\r\n\r\n");
+        test.assert_equal_string(wire.BodyFraming.Chunked.to_string(), framing(upper));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n"));
+        test.assert_equal<int>(501, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\n\r\n"));
+        test.assert_equal<int>(501, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip, chunked\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked, chunked\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked;q=1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding:\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.0\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n"));
+        last sized = ok("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 51\r\n\r\n");
+        test.assert_equal_string(wire.BodyFraming.Length(51).to_string(), framing(sized));
+        last repeated = ok("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 7, 7\r\nContent-Length: 7\r\n\r\n");
+        test.assert_equal_string(wire.BodyFraming.Length(7).to_string(), framing(repeated));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 7, 8\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: -1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: +1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 0x10\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length:\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 99999999999999999999\r\n\r\n"));
+        // The body limit (Apps030 S-6, 1,048,576 bytes): at the limit is accepted, past it is 413.
+        test.assert_equal_string(wire.BodyFraming.Length(1048576).to_string(),
+            framing(ok("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 1048576\r\n\r\n")));
+        test.assert_equal<int>(413, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 1048577\r\n\r\n"));
+        test.assert_equal<int>(413, status_of("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 9223372036854775807\r\n\r\n"));
+    };
+
+    // The head limit (Apps030 S-5, 16,384 bytes) and the field limit (100).
+    export let test_head_limits = func {
+        // "GET / HTTP/1.1\r\nHost: a\r\nX: " is 28 bytes and the end is 4.
+        last at_limit = "GET / HTTP/1.1\r\nHost: a\r\nX: " + strings.repeat("a", 16352) + "\r\n\r\n";
+        test.assert_equal<int>(16384, at_limit.byte_length);
+        test.assert_equal<int>(16352, test.assert_some<string>(ok(at_limit).headers.get("X")).byte_length);
+        last over = "GET / HTTP/1.1\r\nHost: a\r\nX: " + strings.repeat("a", 16353) + "\r\n\r\n";
+        test.assert_equal<int>(431, status_of(over));
+        let hundred = "GET / HTTP/1.1\r\nHost: h\r\n";
+        for (let i = 1; i < 100; i++) {
+            hundred = hundred + "F" + i.to_string() + ": v\r\n";
+        }
+        test.assert_equal<int>(100, ok(hundred + "\r\n").headers.size());
+        test.assert_equal<int>(431, status_of(hundred + "F100: v\r\n\r\n"));
+        last small = new wire.Limits(64, 2, 10);
+        test.assert_equal<int>(431, wire.rejection_status(test.assert_err<wire.RequestHead>(
+            wire.parse_request_head(strings.to_bytes("GET / HTTP/1.1\r\nHost: h\r\nA: 1\r\nB: 2\r\n\r\n"), small))));
+        test.assert_equal<int>(413, wire.rejection_status(test.assert_err<wire.RequestHead>(
+            wire.parse_request_head(strings.to_bytes("PUT / HTTP/1.1\r\nHost: h\r\nContent-Length: 11\r\n\r\n"), small))));
+    };
+
+    // The first fault found decides the status (the order in the module comment).
+    export let test_precedence = func {
+        test.assert_equal<int>(505, status_of("BREW / HTTP/2.0\r\n\r\n"));
+        test.assert_equal<int>(501, status_of("BREW / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("GET / HTTP/1.1\r\nX : 1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n\r\n"));
+        test.assert_equal<int>(501, status_of("POST / HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: gzip\r\nTransfer-Encoding: chunked, chunked\r\n\r\n"));
+    };
+
+    export let test_rejection_codes = func {
+        last e = wire.rejection(431, "too big");
+        test.assert_equal<int>(431, wire.rejection_status(e));
+        test.assert_equal<int>(0, wire.rejection_status(errors.custom("http.status.4x1", "no")));
+        test.assert_equal<int>(0, wire.rejection_status(errors.custom("other", "no")));
+    };
+
+    export let test_head_value = func {
+        last a = ok("GET /x HTTP/1.1\r\nHost: h\r\nAccept: */*\r\n\r\n");
+        last b = new wire.RequestHead("GET", "/x", "HTTP/1.1", http_headers.of(new(["host", "Accept"]), new(["h", "*/*"])));
+        test.assert(a.equals(b));
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert(!a.equals(new wire.RequestHead("GET", "/y", "HTTP/1.1", http_headers.of(new(["Host"]), new(["h"])))));
+        test.assert_equal_string("RequestHead{GET /x HTTP/1.1, Headers{Host: h; Accept: */*}}", a.to_string());
+        test.assert_equal_string("GET /x HTTP/1.1\r\nHost: h\r\nAccept: */*\r\n\r\n",
+            strings.from_bytes_lossy(wire.write_request_head(a)));
+        test.assert(a.equals(test.assert_ok<wire.RequestHead>(wire.parse_request_head(wire.write_request_head(b)))));
+    };
+);

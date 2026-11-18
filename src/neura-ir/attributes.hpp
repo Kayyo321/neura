@@ -38,6 +38,7 @@ inline constexpr std::uint32_t on_local = symbol_kind_bit(SymbolKind::Local);
 inline constexpr std::uint32_t on_field = symbol_kind_bit(SymbolKind::Field);
 inline constexpr std::uint32_t on_function = symbol_kind_bit(SymbolKind::Function);
 inline constexpr std::uint32_t on_class = symbol_kind_bit(SymbolKind::Class);
+inline constexpr std::uint32_t on_parameter = symbol_kind_bit(SymbolKind::Parameter);
 // Every kind that a source declaration introduces: all but File.
 inline constexpr std::uint32_t on_declarations =
     symbol_kind_bit(SymbolKind::Module) | symbol_kind_bit(SymbolKind::Class) | symbol_kind_bit(SymbolKind::Alias) |

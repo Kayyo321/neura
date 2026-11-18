@@ -1,0 +1,140 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let aead = import:Std.Crypto.Internal.Aead;
+let aes = import:Std.Crypto.Internal.Aes;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let gf128 = import:Std.Crypto.Internal.Gf128;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief AES-GCM-SIV of RFC 8452: nonce-misuse-resistant AEAD with 96-bit nonces (Stdlib.md section 21.7).
+///
+/// Each nonce derives fresh message keys, and the tag (a POLYVAL of the data and plaintext) is the counter of
+/// the encryption. A repeated nonce reveals only whether two messages with the same associated data were
+/// equal; it does not break confidentiality or authenticity as it does for GCM.
+/// @see [Std.Crypto.Symmetric.AesGcmSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesGcmSiv)
+#Since("0.3.0")
+export let AesGcmSiv = module (
+    /// @brief AEAD_AES_128_GCM_SIV or AEAD_AES_256_GCM_SIV, chosen by the key length (16 or 32 bytes).
+    #[Final, Since("0.3.0")]
+    export let AesGcmSiv = class implements AeadCipher<SymmetricKey<AesGcmSiv>, uint8[list], uint8[list]> (
+        let key_generator: aes.Cipher;
+        let key_length: int = 32;
+        let alg: Algorithm = Algorithm.Aes256GcmSiv;
+
+        /// @brief Keys the cipher with a 16- or 32-byte key (typed, or raw bytes); another length traps.
+        export let init = func(key: SymmetricKey<AesGcmSiv>) {
+            setup(key.expose());
+        } or func(key: uint8[list]) {
+            setup(key);
+        };
+
+        let setup = func(key: uint8[list]) {
+            aead.check_key(key.length == 16 || key.length == 32, "AES-GCM-SIV", "16 or 32");
+            if (key.length == 16) {
+                alg = Algorithm.Aes128GcmSiv;
+            }
+            crypto_policy.require(alg);
+            key_length = key.length;
+            key_generator = new(key);
+        };
+
+        /// @brief `Aes128GcmSiv` or `Aes256GcmSiv`.
+        export let algorithm = func -> Algorithm => alg;
+        /// @brief 12.
+        export let nonce_length = func -> int => 12;
+        /// @brief 16.
+        export let tag_length = func -> int => 16;
+
+        export let seal = func(nonce: uint8[list], plaintext: uint8[list], associated_data: uint8[list]) -> uint8[list] {
+            aead.check_nonce(nonce, 12, "AES-GCM-SIV");
+            last keys = derive(nonce);
+            last encryption = new aes.Cipher(keys[1]);
+            last tag = tag_of(keys[0], encryption, nonce, plaintext, associated_data);
+            let out = ctr(encryption, tag, plaintext);
+            words.append_all(out, tag);
+            return out;
+        };
+
+        export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
+            -> Result<uint8[list]> {
+            aead.check_nonce(nonce, 12, "AES-GCM-SIV");
+            if (sealed.length < 16) {
+                return aead.failure();
+            }
+            last keys = derive(nonce);
+            last encryption = new aes.Cipher(keys[1]);
+            last tag = words.slice(sealed, sealed.length - 16, sealed.length);
+            let plaintext = ctr(encryption, tag, words.slice(sealed, 0, sealed.length - 16));
+            if (!constant_time.ct_eq(tag_of(keys[0], encryption, nonce, plaintext, associated_data), tag)) {
+                words.wipe(plaintext);
+                return aead.failure();
+            }
+            return Result<uint8[list]>.Ok(plaintext);
+        };
+
+        /// @brief The message-authentication key and the message-encryption key for the nonce: the first 8
+        /// bytes of E(K, le32(i) || nonce) for i = 0, 1, ...
+        let derive = func(nonce: uint8[list]) -> uint8[list][list] {
+            let auth: uint8[list] = new;
+            let enc: uint8[list] = new;
+            last blocks = key_length == 16 ? 4 : 6;
+            for (let i = 0; i < blocks; i++) {
+                let input: uint8[list] = new;
+                words.append32_le(input, i as uint32);
+                words.append_all(input, nonce);
+                last out = key_generator.encrypt(input, 0);
+                for (let k = 0; k < 8; k++) {
+                    if (i < 2) {
+                        auth.append(out[k]);
+                    } else {
+                        enc.append(out[k]);
+                    }
+                }
+            }
+            return new([auth, enc]);
+        };
+
+        let tag_of = func(auth: uint8[list], encryption: aes.Cipher, nonce: uint8[list], plaintext: uint8[list],
+            data: uint8[list]) -> uint8[list] {
+            let polyval = new gf128.Hasher(auth, true);
+            polyval.update_padded(data);
+            polyval.update_padded(plaintext);
+            let lengths: uint8[list] = new;
+            words.append64_le(lengths, (data.length as uint64) * 8);
+            words.append64_le(lengths, (plaintext.length as uint64) * 8);
+            polyval.block(lengths, 0);
+            let s = polyval.digest();
+            for (let i = 0; i < 12; i++) {
+                s[i] = s[i] ^ nonce[i];
+            }
+            s[15] = s[15] & 127;
+            return encryption.encrypt(s, 0);
+        };
+
+        /// @brief CTR from the tag with its top bit set; the first four bytes are a little-endian counter
+        /// modulo 2^32.
+        let ctr = func(encryption: aes.Cipher, tag: uint8[list], bytes: uint8[list]) -> uint8[list] {
+            let counter = words.copy(tag);
+            counter[15] = counter[15] | 128;
+            let out: uint8[list] = new;
+            for (let start = 0; start < bytes.length; start += 16) {
+                last stream = encryption.encrypt(counter, 0);
+                for (let i = 0; i < 16 && start + i < bytes.length; i++) {
+                    out.append(bytes[start + i] ^ stream[i]);
+                }
+                last next = ((words.load32_le(counter, 0) as uint64) + 1) & 4294967295;
+                counter[0] = (next & 255) as uint8;
+                counter[1] = ((next >> 8) & 255) as uint8;
+                counter[2] = ((next >> 16) & 255) as uint8;
+                counter[3] = ((next >> 24) & 255) as uint8;
+            }
+            return out;
+        };
+
+        export let.override to_string = func -> string => "AesGcmSiv(<redacted>)";
+    );
+);

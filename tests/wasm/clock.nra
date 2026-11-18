@@ -1,0 +1,18 @@
+let console = import:Std.Io.Console;
+let duration = import:Std.Time.Duration;
+let instant = import:Std.Time.Instant;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let system_clock = import:Std.Time.SystemClock;
+
+export let Clock = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let clock = system_clock.create();
+        console.print_line(args[0]);
+        console.print_line(result.expect<instant.Instant>(clock.now(), "wall").to_string());
+        let before = result.expect<duration.Duration>(clock.monotonic(), "before");
+        let after = result.expect<duration.Duration>(clock.monotonic(), "after");
+        console.print_line(after.minus(before).to_string());
+        return program.ExitCode.Ok;
+    };
+);

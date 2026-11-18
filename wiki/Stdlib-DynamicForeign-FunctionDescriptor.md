@@ -26,7 +26,7 @@ The following public declarations are taken from the module source; each links t
 - **FunctionDescriptor.FunctionDescriptor** · [`export let append_argument_layouts = func(more: ...MemoryLayout) -> FunctionDescriptor`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/function-descriptor.nra#L41)
   A descriptor with `more` appended to the arguments.
 - **FunctionDescriptor.FunctionDescriptor** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/function-descriptor.nra#L51)
-  Descriptors with the same layouts are equal. Tagged `#Pure`.
+  Descriptors with the same layouts are equal. Reading the argument can run its class hook.
 - **FunctionDescriptor.FunctionDescriptor** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/function-descriptor.nra#L60)
   Hashes the text form. Tagged `#Pure`.
 - **FunctionDescriptor.FunctionDescriptor** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/function-descriptor.nra#L64)

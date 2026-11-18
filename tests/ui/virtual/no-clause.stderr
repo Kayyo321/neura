@@ -1,0 +1,9 @@
+error[E0575]: invalid accessor override
+ --> $DIR/no-clause.nra:7:25
+  |
+7 |     export let.override label: string;
+  |                         ^^^^^ an accessor override needs a '.override' clause
+  |
+  = help: follow the declaration with '| get.override: ...;' or '| set.override: ...;'
+
+For more information about this error, try `neura explain E0575`.

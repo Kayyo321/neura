@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt64)
 #Since("0.1.0")
-export let UInt64 = module (
+export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, Ordered<uint64>, Parseable<uint64> (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint64 = 0;
     /// @brief The largest value representable by this integer type.
@@ -383,4 +383,20 @@ export let UInt64 = module (
         }
         return count;
     };
+
+    /// @brief The additive identity, 0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> uint64 => 0;
+
+    /// @brief The sum `left + right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: uint64, right: uint64) -> uint64 => left + right;
+
+    /// @brief The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> uint64 => 1;
+
+    /// @brief The product `left * right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: uint64, right: uint64) -> uint64 => left * right;
 );

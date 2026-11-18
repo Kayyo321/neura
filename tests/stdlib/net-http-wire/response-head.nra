@@ -1,0 +1,99 @@
+let http_headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Response heads, response body framing (RFC 9112 section 6.3) and head
+// serialization of Std.Net.Http.Wire.
+let ResponseHeadTests = module (
+    let parse = func(text: string) -> Result<wire.ResponseHead> => wire.parse_response_head(strings.to_bytes(text));
+
+    let ok = func(text: string) -> wire.ResponseHead => test.assert_ok<wire.ResponseHead>(parse(text));
+
+    let status_of = func(text: string) -> int => wire.rejection_status(test.assert_err<wire.ResponseHead>(parse(text)));
+
+    let framing = func(text: string, method: string) -> string =>
+        test.assert_ok<wire.BodyFraming>(wire.response_body_length(ok(text), method)).to_string();
+
+    // RFC 9110 section 3.9, the server response's head (lines ended with CRLF).
+    export let test_rfc9110_example_response = func {
+        last head = ok("HTTP/1.1 200 OK\r\nDate: Mon, 27 Jul 2009 12:28:53 GMT\r\nServer: Apache\r\n"
+            + "Last-Modified: Wed, 22 Jul 2009 19:15:56 GMT\r\nETag: \"34aa387-d-1568eb00\"\r\n"
+            + "Accept-Ranges: bytes\r\nContent-Length: 51\r\nVary: Accept-Encoding\r\nContent-Type: text/plain\r\n\r\n");
+        test.assert_equal_string("HTTP/1.1", head.version);
+        test.assert_equal<int>(200, head.status);
+        test.assert_equal_string("OK", head.reason);
+        test.assert_equal<int>(8, head.headers.size());
+        test.assert_equal_string("\"34aa387-d-1568eb00\"", test.assert_some<string>(head.headers.get("etag")));
+        test.assert_equal_string(wire.BodyFraming.Length(51).to_string(),
+            test.assert_ok<wire.BodyFraming>(wire.response_body_length(head, "GET")).to_string());
+    };
+
+    export let test_status_line = func {
+        test.assert_equal_string("", ok("HTTP/1.1 200 \r\n\r\n").reason);
+        test.assert_equal_string("", ok("HTTP/1.1 204\r\n\r\n").reason);
+        test.assert_equal_string("Not  Found\tHere", ok("HTTP/1.0 404 Not  Found\tHere\r\n\r\n").reason);
+        test.assert_equal<int>(0, ok("HTTP/1.0 404 Not Found\r\n\r\n").minor_version());
+        test.assert_equal<int>(599, ok("HTTP/1.1 599 x\r\n\r\n").status);
+        test.assert_equal<int>(400, status_of("HTTP/1.1 600 Big\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 099 Small\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 20 OK\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 2000 OK\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 2x0 OK\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1  200 OK\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1\r\n\r\n"));
+        last del = strings.to_bytes("HTTP/1.1 200 O?K\r\n\r\n");
+        del[14] = 127;
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<wire.ResponseHead>(wire.parse_response_head(del))));
+        test.assert_equal<int>(505, status_of("HTTP/2.0 200 OK\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTX/1.1 200 OK\r\n\r\n"));
+    };
+
+    // RFC 9112 sections 5.2 and 5.1 for responses: obs-fold becomes one
+    // space, whitespace before the colon is removed; whitespace right after
+    // the status-line is still invalid (section 2.2).
+    export let test_lenient_fields = func {
+        last head = ok("HTTP/1.1 200 OK\r\nX: a\r\n  b\r\n\tc\r\nY : 1\r\n\r\n");
+        test.assert_equal_string("a b c", test.assert_some<string>(head.headers.get("x")));
+        test.assert_equal_string("1", test.assert_some<string>(head.headers.get("y")));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 200 OK\r\n X: a\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.0 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"));
+        test.assert_equal<int>(400, status_of("HTTP/1.1 200 OK\r\nContent-Length: 1, 2\r\n\r\n"));
+    };
+
+    // RFC 9112 section 6.3, items 1, 2, 4, 6 and 8.
+    export let test_response_framing = func {
+        test.assert_equal_string(wire.BodyFraming.None.to_string(), framing("HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n", "HEAD"));
+        test.assert_equal_string(wire.BodyFraming.None.to_string(), framing("HTTP/1.1 101 Switching Protocols\r\n\r\n", "GET"));
+        test.assert_equal_string(wire.BodyFraming.None.to_string(), framing("HTTP/1.1 204 No Content\r\n\r\n", "DELETE"));
+        test.assert_equal_string(wire.BodyFraming.None.to_string(), framing("HTTP/1.1 304 Not Modified\r\nContent-Length: 9\r\n\r\n", "GET"));
+        test.assert_equal_string(wire.BodyFraming.None.to_string(), framing("HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n", "CONNECT"));
+        test.assert_equal_string(wire.BodyFraming.Length(9).to_string(), framing("HTTP/1.1 407 Proxy\r\nContent-Length: 9\r\n\r\n", "CONNECT"));
+        test.assert_equal_string(wire.BodyFraming.Chunked.to_string(), framing("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n", "GET"));
+        test.assert_equal_string(wire.BodyFraming.UntilClose.to_string(), framing("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n", "GET"));
+        test.assert_equal_string(wire.BodyFraming.UntilClose.to_string(), framing("HTTP/1.1 200 OK\r\n\r\n", "GET"));
+        test.assert_equal_string(wire.BodyFraming.Length(0).to_string(), framing("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", "POST"));
+        last twice = ok("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, chunked\r\n\r\n");
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<wire.BodyFraming>(wire.response_body_length(twice, "GET"))));
+    };
+
+    export let test_write_response_head = func {
+        last fields = http_headers.of(new(["Content-Type", "Content-Length"]), new(["text/plain", "5"]));
+        last plain = new wire.ResponseHead("HTTP/1.1", 404, "", fields);
+        test.assert_equal_string("HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\n",
+            strings.from_bytes_lossy(wire.write_response_head(plain)));
+        last custom = new wire.ResponseHead("HTTP/1.1", 200, "Fine", new http_headers.Headers());
+        test.assert_equal_string("HTTP/1.1 200 Fine\r\n\r\n", strings.from_bytes_lossy(wire.write_response_head(custom)));
+        last unnamed = new wire.ResponseHead("HTTP/1.1", 299, "", new http_headers.Headers());
+        test.assert_equal_string("HTTP/1.1 299 \r\n\r\n", strings.from_bytes_lossy(wire.write_response_head(unnamed)));
+        last back = test.assert_ok<wire.ResponseHead>(wire.parse_response_head(wire.write_response_head(custom)));
+        test.assert(back.equals(custom));
+        test.assert_equal<uint32>(custom.hash_code(), back.hash_code());
+        test.assert(!back.equals(plain));
+        test.assert_equal_string("ResponseHead{HTTP/1.1 200 Fine, Headers{}}", back.to_string());
+        test.assert(wire.is_version("HTTP/1.1"));
+        test.assert(!wire.is_version("HTTP/11"));
+    };
+);

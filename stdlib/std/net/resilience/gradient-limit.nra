@@ -1,0 +1,138 @@
+let limits = import:Std.Net.Resilience.AdaptiveLimit;
+let durations = import:Std.Time.Duration;
+let float64s = import:Std.Core.Float64;
+let maths = import:Std.Math.Math;
+
+/// @brief A gradient concurrency limit after `GradientLimit` in Netflix's concurrency-limits library.
+///
+/// The limit follows the ratio of the no-load RTT to the sampled RTT and adds a queue allowance so it can grow. With
+/// `L` the current estimate, `int(L)` its integer part, and `rtt_noload` the smallest RTT seen (since creation or
+/// `reset_rtt_noload`, which also cuts `L` to `max(min_limit, queue)`), each sample does:
+///
+/// 1. `queue = max(queue_floor, floor(sqrt(int(L))))` (Netflix's default allowance; `queue_floor` defaults to 4).
+/// 2. `gradient = max(0.5, min(1.0, tolerance * rtt_noload / rtt))`; `tolerance` (default 2.0) is how much RTT growth
+///    is accepted before the limit shrinks, and the 0.5 floor keeps one slow sample from halving the limit at once.
+/// 3. If dropped: `new = L * backoff_ratio` (default 0.9). Otherwise, if `in_flight < L / 2` nothing changes (the
+///    client is not using its limit). Otherwise `new = L * gradient + queue`.
+/// 4. If `new < L`: `new = max(min_limit, (1 - smoothing) * L + smoothing * new)` (smoothing default 0.2; growth is
+///    not smoothed). Then `L = max(queue, min(max_limit, new))`.
+///
+/// Netflix's version also re-probes `rtt_noload` after a randomized number of samples; this one re-probes only
+/// when `reset_rtt_noload` is called, so its behavior is deterministic.
+/// @see [Std.Net.Resilience.GradientLimit](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-GradientLimit)
+#Since("0.3.0")
+export let GradientLimit = module (
+    /// @brief A gradient adaptive limit.
+    #[Final, NotThreadSafe]
+    export let GradientLimit = class implements limits.AdaptiveLimit (
+        /// @brief The smallest limit.
+        last min_limit: int;
+        /// @brief The largest limit.
+        last max_limit: int;
+        /// @brief The weight of a decrease, in (0, 1].
+        last smoothing: float64;
+        /// @brief The accepted RTT growth factor, at least 1.
+        last tolerance: float64;
+        /// @brief The factor applied on a drop, in (0, 1].
+        last backoff_ratio: float64;
+        /// @brief The smallest queue allowance.
+        last queue_floor: int;
+        /// @brief The current estimate.
+        let estimate: float64;
+        /// @brief The no-load RTT in nanoseconds, 0 before the first sample.
+        let rtt_noload: int64 = 0;
+
+        /// @brief A limit starting at `initial`. Traps with "invalid argument: <name>" unless 1 <= min <= initial <=
+        /// max, 0 < smoothing <= 1, tolerance >= 1, 0 < backoff <= 1, and queue_floor >= 1.
+        export let init = func(initial: int, minimum: int, maximum: int, weight: float64, rtt_tolerance: float64,
+            backoff: float64, floor: int) {
+            if (minimum < 1 || minimum > maximum) {
+                trap_with_message("invalid argument: min_limit");
+            }
+            if (initial < minimum || initial > maximum) {
+                trap_with_message("invalid argument: initial_limit");
+            }
+            if (!(weight > 0.0 && weight <= 1.0)) {
+                trap_with_message("invalid argument: smoothing");
+            }
+            if (!(rtt_tolerance >= 1.0)) {
+                trap_with_message("invalid argument: tolerance");
+            }
+            if (!(backoff > 0.0 && backoff <= 1.0)) {
+                trap_with_message("invalid argument: backoff_ratio");
+            }
+            if (floor < 1) {
+                trap_with_message("invalid argument: queue_floor");
+            }
+            min_limit = minimum;
+            max_limit = maximum;
+            smoothing = weight;
+            tolerance = rtt_tolerance;
+            backoff_ratio = backoff;
+            queue_floor = floor;
+            estimate = initial as float64;
+        };
+
+        /// @brief The integer part of the estimate.
+        export let limit = func -> int => estimate as int;
+
+        /// @brief The estimate with its fraction.
+        export let estimated = func -> float64 => estimate;
+
+        /// @brief The no-load RTT, zero before the first sample.
+        export let rtt_no_load = func -> durations.Duration => durations.of_nanos(rtt_noload);
+
+        /// @brief The queue allowance for the current estimate.
+        export let queue_size = func -> int {
+            last root = maths.sqrt((estimate as int) as float64) as int;
+            return root > queue_floor ? root : queue_floor;
+        };
+
+        /// @brief Updates the estimate as described for the module. A non-positive RTT traps with "invalid argument:
+        /// rtt".
+        export let on_sample = func(rtt: durations.Duration, in_flight: int, dropped: bool) {
+            last sample = rtt.to_nanos();
+            if (sample <= 0) {
+                trap_with_message("invalid argument: rtt");
+            }
+            last queue = queue_size() as float64;
+            if (rtt_noload == 0 || sample < rtt_noload) {
+                rtt_noload = sample;
+            }
+            last gradient = float64s.max(0.5, float64s.min(1.0,
+                tolerance * (rtt_noload as float64) / (sample as float64)));
+            let next = estimate;
+            if (dropped) {
+                next = estimate * backoff_ratio;
+            } else {
+                if ((in_flight as float64) < estimate / 2.0) {
+                    return;
+                }
+                next = estimate * gradient + queue;
+            }
+            if (next < estimate) {
+                next = float64s.max(min_limit as float64, (1.0 - smoothing) * estimate + smoothing * next);
+            }
+            estimate = float64s.max(queue, float64s.min(max_limit as float64, next));
+        };
+
+        /// @brief Forgets the no-load RTT and cuts the estimate to `max(min_limit, queue)`, as Netflix's probe does.
+        export let reset_rtt_noload = func {
+            last queue = queue_size();
+            estimate = (queue > min_limit ? queue : min_limit) as float64;
+            rtt_noload = 0;
+        };
+
+        /// @brief Text such as "GradientLimit(limit 50)".
+        export let.override to_string = func -> string => "GradientLimit(limit " + limit().to_string() + ")";
+    );
+
+    /// @brief Netflix's defaults: initial 50, min 1, max 1000, smoothing 0.2, tolerance 2, backoff 0.9, queue floor 4.
+    #NoDiscard
+    export let create = func -> GradientLimit => new GradientLimit(50, 1, 1000, 0.2, 2.0, 0.9, 4);
+
+    /// @brief A limit with Netflix's default tolerance, backoff, and queue floor.
+    #NoDiscard
+    export let of = func(initial: int, min_limit: int, max_limit: int, smoothing: float64) -> GradientLimit =>
+        new GradientLimit(initial, min_limit, max_limit, smoothing, 2.0, 0.9, 4);
+);

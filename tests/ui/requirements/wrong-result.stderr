@@ -1,0 +1,13 @@
+error[E0504]: 'Money' must declare 'static let zero = func() -> Money'
+ --> $DIR/wrong-result.nra:6:5
+  |
+3 |     static let zero = func() -> T;
+  |                ---- 'zero' is required here
+...
+6 | let Money = class implements Additive<Money> (
+  |     ^^^^^ 'Money' implements 'Additive<Money>'
+...
+9 |     export static let zero = func() -> int64 => 0;
+  |                       ---- this 'zero' has another signature
+
+For more information about this error, try `neura explain E0504`.

@@ -1,0 +1,12 @@
+error[E0453]: escaping closure requires new func
+  --> $DIR/render-handler-capture.nra:11:26
+   |
+11 |     return button("Add", func(event: ui.ClickEvent) { clicks.append(event.detail); });
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: construct an owned closure
+   |
+11 |     return button("Add", new func(event: ui.ClickEvent) { clicks.append(event.detail); });
+   |                          ++++
+
+For more information about this error, try `neura explain E0453`.

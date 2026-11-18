@@ -1,0 +1,2 @@
+// A component takes no default (edge case 6).
+let P = record (x: int = 0);

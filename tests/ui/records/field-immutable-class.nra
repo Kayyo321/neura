@@ -1,0 +1,7 @@
+// Only records are class-typed record fields (edge case 20).
+#Immutable
+let Money = class (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+);
+let P = record (m: Money);

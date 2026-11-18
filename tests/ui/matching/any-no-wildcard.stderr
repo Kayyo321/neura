@@ -1,0 +1,14 @@
+error[E0410]: non-exhaustive match.is on a value of type any
+ --> $DIR/any-no-wildcard.nra:4:35
+  |
+4 | let read = func(v: any) -> int => match.is (v) {
+  |                                   ^^^^^ a value may match no arm
+  |
+  = note: type patterns never cover a class, an interface, 'class' or 'any', whatever its attributes
+  = help: add a final '_' arm
+help: insert the '_' arm before the closing brace
+  |
+7 |     _ => <value>,
+  |     +++++++++++++
+
+For more information about this error, try `neura explain E0410`.

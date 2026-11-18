@@ -1,0 +1,2 @@
+// A function has no value equality (edge case 19).
+let P = record (f: func() -> int);

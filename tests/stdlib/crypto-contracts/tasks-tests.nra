@@ -1,0 +1,41 @@
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let argon2 = import:Std.Crypto.Kdf.Argon2;
+let blake3 = import:Std.Crypto.Hash.Blake3;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let test = import:Std.Test;
+
+// Primitives can be created and used in spawned tasks: the policy is an AtomicInt64 and the constant tables
+// are built per object, so the calls are task-safe (the compiler checks every spawned call).
+let TasksTests = module (
+    let work = func(n: int) -> int {
+        last digest = sha2.sha256(new([n as uint8]));
+        last tag = hmac.mac<sha3.Sha3_256>(digest, digest);
+        last sealed = new aes_gcm.AesGcm(digest).seal(new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), tag, new);
+        last stretched = argon2.argon2id(digest, digest, new argon2.Argon2Params(8, 1, 1, 16));
+        return sealed.length + blake3.hash(stretched, 8).length;
+    };
+
+    export let test_primitives_in_tasks = func {
+        let total = 0;
+        scope (s) {
+            let a = spawn work(1);
+            let b = spawn work(2);
+            total = a.join() + b.join();
+        }
+        test.assert_equal_int32(2 * (32 + 16 + 8), total);
+    };
+
+    export let test_policy_seen_by_tasks = func {
+        crypto_policy.set_policy(crypto_policy.Policy.Cnsa2_0);
+        let seen = crypto_policy.Policy.Modern;
+        scope (s) {
+            let t = spawn crypto_policy.policy();
+            seen = t.join();
+        }
+        test.assert(seen == crypto_policy.Policy.Cnsa2_0);
+        crypto_policy.set_policy(crypto_policy.Policy.Modern);
+    };
+);

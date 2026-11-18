@@ -1,0 +1,24 @@
+// Lambdas with untyped parameters (docs/design/Calls030.md, edge cases 47,
+// 49, 51, 53 and 56).
+let transform = func<T, U>(items: T[list], convert: func(T) -> U) -> U[list] {
+    let result: U[list] = new;
+    for (let item: T in items) {
+        result.append(convert(item));
+    }
+    return result;
+};
+let sort = func<T>(items: T[list], before: func(T, T) -> bool) -> int => items.length;
+let apply = func<T>(f: func(T) -> T) -> int => 0;
+let adder = func -> func(int, int) -> int {
+    return func(a, b) => a + b;
+};
+let grouped = func(x, y: int) -> int => x + y;
+
+let use = func(names: string[list]) {
+    let lengths: int32[list] = transform(names, func(word) => word.byte_length);
+    let ordered = sort(names, func(a, b) => a.byte_length < b.byte_length);
+    let written = apply<int>(func(x) => x);
+    let typed: func(int) -> int = func(x) => x * 2;
+    let declared = transform(names, func(word) -> int64 => word.byte_length as int64);
+    let total = adder()(1, 2);
+};

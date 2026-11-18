@@ -1,6 +1,7 @@
 #include "monitors.hpp"
 
 #include "attributes.hpp"
+#include "frozen.hpp"
 #include "kernel_signature.hpp"
 #include "purity.hpp"
 #include "tags.hpp"
@@ -298,7 +299,10 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
                         .label(tag_or(id, TagId::Immutable), quoted(item.name) + " is marked #Immutable here")
                         .help("declare the field with last or const");
                 }
-                if (!immutable_type(program, member.type)) {
+                const bool frozen_storage = frozen_field(member) && member.type.kind == TypeKind::List &&
+                                            member.type.arguments.size() == 1 &&
+                                            immutable_type(program, member.type.arguments.front());
+                if (!frozen_storage && !immutable_type(program, member.type)) {
                     throw Diagnostic(name_span(field), "field " + quoted(member.name) + " of #Immutable class " +
                                                            quoted(item.name) + " has the mutable type " +
                                                       display(member.type))

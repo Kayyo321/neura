@@ -1,0 +1,22 @@
+// status: 134
+// stderr: explicit program failure .*: the registry is empty.*startup-block-trap[.]nra:
+// A trap in a startup block ends the run before main.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let entries: int32 = 0;
+
+static scope {
+    console.print_line("checking the registry");
+    if (entries == 0) {
+        trap_with_message("the registry is empty");
+    }
+    console.print_line("unreachable");
+}
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("main does not run");
+        return program.ExitCode.Ok;
+    };
+);

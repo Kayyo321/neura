@@ -1,0 +1,13 @@
+error[E0544]: a class hook cannot use the scheduler: it scopes tasks, which may suspend
+ --> $DIR/scheduler-call.nra:8:5
+  |
+3 |     scope {
+  |     -------... it scopes tasks here
+...
+8 |     | get: {
+  |     ^^^^^^^^... this hook runs while its event is open
+  |
+  = note: an event starts and ends without its task being suspended
+  = help: do the scheduling work outside the hook, and keep the hook to checks and existing objects
+
+For more information about this error, try `neura explain E0544`.

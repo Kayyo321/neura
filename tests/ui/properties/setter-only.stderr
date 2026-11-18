@@ -1,0 +1,14 @@
+error[E0504]: 'Hidden' must have an exported field 'name: string' that can be read
+ --> $DIR/setter-only.nra:6:1
+  |
+3 |     let name: string;
+  |         ---- 'name' is required here
+...
+6 | let Hidden = class implements Named (
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^... 'Hidden' does not satisfy the property 'name' of 'Named'
+7 |     export let name: string = "";
+  |                ---- 'name' is declared here
+  |
+  = note: 'name' has only a setter
+
+For more information about this error, try `neura explain E0504`.

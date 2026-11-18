@@ -1,0 +1,28 @@
+body of two
+second 2
+first 1
+now 2
+saved 1
+compute 21
+after compute 0
+held 42
+iteration body 0
+iteration end 0
+iteration end 1
+iteration body 2
+iteration end 2
+iteration end 3
+then body 1
+then end 1
+after if 2
+else end 0
+after if 2
+early outer 0
+early 1
+early late 2
+early outer 0
+early 2
+lambda body 5
+lambda end 5
+after lambda 6
+lines 27

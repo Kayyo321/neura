@@ -1,0 +1,8 @@
+// A get-only property cannot be written (edge case 71).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let rename = func(value: Named) {
+    value.name = "x";
+};

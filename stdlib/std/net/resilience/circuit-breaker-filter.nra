@@ -1,0 +1,70 @@
+let breakers = import:Std.Net.Resilience.CircuitBreaker;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Net.Filter;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief A filter that guards a service with a `CircuitBreaker` and fails fast while the breaker is open.
+///
+/// Each request asks the breaker for permission. A rejected request does not reach the service and returns the error
+/// `Custom` with the code `resilience.circuit_open` and the message "circuit breaker is open". An admitted request
+/// calls the service and reports its result to the breaker: a failure when the classifier returns true, a success
+/// otherwise. The default classifier counts every `Err` as a failure. A clock failure in the breaker is returned
+/// as the request's error.
+/// @see [Std.Net.Resilience.CircuitBreakerFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-CircuitBreakerFilter)
+#Since("0.3.0")
+export let CircuitBreakerFilter = module (
+    /// @brief The error code of a request rejected by an open breaker.
+    export const OpenCode = "resilience.circuit_open";
+
+    /// @brief Guards the next service with a circuit breaker.
+    #[Final, NotThreadSafe]
+    export let CircuitBreakerFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief The breaker that admits calls.
+        last breaker: breakers.CircuitBreaker;
+        /// @brief Returns true for a result that counts as a failure.
+        last is_failure: func(Result<Resp>) -> bool;
+
+        /// @brief A filter over `guard` that counts the results `classify` returns true for as failures.
+        export let init = func(guard: breakers.CircuitBreaker, classify: func(Result<Resp>) -> bool) {
+            breaker = guard;
+            is_failure = classify;
+        };
+
+        /// @brief Calls `next` when the breaker admits the request and reports the outcome; otherwise returns the
+        /// `resilience.circuit_open` error without calling it.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            last admitted = breaker.try_acquire()?;
+            if (!admitted) {
+                return Result<Resp>.Err(errors.custom(OpenCode, "circuit breaker is open"));
+            }
+            last outcome = next.call(request);
+            if (is_failure(outcome)) {
+                breaker.record_failure()?;
+            } else {
+                breaker.record_success()?;
+            }
+            return outcome;
+        };
+
+        /// @brief Text such as "CircuitBreakerFilter(CircuitBreaker(Open))".
+        export let.override to_string = func -> string => "CircuitBreakerFilter(" + breaker.to_string() + ")";
+    );
+
+    /// @brief A filter over `breaker` that counts every `Err` as a failure.
+    #NoDiscard
+    export let of = func<Req, Resp>(breaker: breakers.CircuitBreaker) -> CircuitBreakerFilter<Req, Resp> =>
+        new CircuitBreakerFilter<Req, Resp>(breaker, func(outcome: Result<Resp>) -> bool => is_err<Resp>(outcome));
+
+    /// @brief A filter over `breaker` with a failure classifier.
+    #NoDiscard
+    export let classified = func<Req, Resp>(breaker: breakers.CircuitBreaker, classify: func(Result<Resp>) -> bool)
+        -> CircuitBreakerFilter<Req, Resp> => new CircuitBreakerFilter<Req, Resp>(breaker, classify);
+
+    /// @brief Whether `outcome` is an `Err`.
+    #Pure
+    export let is_err = func<Resp>(outcome: Result<Resp>) -> bool => match (outcome) {
+        Result.Ok(value) => false,
+        Result.Err(e) => true,
+    };
+);

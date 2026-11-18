@@ -1,0 +1,7 @@
+error[E0233]: malformed optional access: '?.' must be followed by a member name
+  --> $DIR/optional-no-member.nra:13:16
+   |
+13 |     let x = pet?.(1);
+   |                ^^ expected a member name, found '('
+
+For more information about this error, try `neura explain E0233`.

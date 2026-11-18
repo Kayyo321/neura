@@ -1,0 +1,157 @@
+let http_headers = import:Std.Net.Http.Headers;
+let multipart = import:Std.Net.Http.Multipart;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Std.Net.Http.Multipart on the examples of RFC 2046 section 5.1.1 and
+// RFC 7578 sections 4.2, 4.5 and 4.6, and the boundary parameter.
+let MultipartVectorTests = module (
+    // RFC 2046 section 5.1.1, the example body after its Content-type line
+    // (boundary "simple boundary"), indentation removed, lines ended with CRLF.
+    const Rfc2046Body: string = "This is the preamble.  It is to be ignored, though it\r\n"
+        + "is a handy place for composition agents to include an\r\n"
+        + "explanatory note to non-MIME conformant readers.\r\n"
+        + "\r\n"
+        + "--simple boundary\r\n"
+        + "\r\n"
+        + "This is implicitly typed plain US-ASCII text.\r\n"
+        + "It does NOT end with a linebreak.\r\n"
+        + "--simple boundary\r\n"
+        + "Content-type: text/plain; charset=us-ascii\r\n"
+        + "\r\n"
+        + "This is explicitly typed plain US-ASCII text.\r\n"
+        + "It DOES end with a linebreak.\r\n"
+        + "\r\n"
+        + "--simple boundary--\r\n"
+        + "\r\n"
+        + "This is the epilogue.  It is also to be ignored.\r\n";
+
+    // RFC 7578 section 4.5, indentation removed, lines ended with CRLF. The
+    // RFC shows a fragment ending in "--AaB03x"; "--" is added to close it.
+    const Rfc7578Section45: string = "--AaB03x\r\n"
+        + "content-disposition: form-data; name=\"field1\"\r\n"
+        + "content-type: text/plain;charset=UTF-8\r\n"
+        + "content-transfer-encoding: quoted-printable\r\n"
+        + "\r\n"
+        + "Joe owes =E2=82=AC100.\r\n"
+        + "--AaB03x--";
+
+    // RFC 7578 section 4.6 as printed, indentation removed, lines ended with
+    // CRLF. Its second line "--AaB03x--" is a close delimiter, so the
+    // "field1" part and the last line are epilogue.
+    const Rfc7578Section46: string = "--AaB03x\r\n"
+        + "content-disposition: form-data; name=\"_charset_\"\r\n"
+        + "\r\n"
+        + "iso-8859-1\r\n"
+        + "--AaB03x--\r\n"
+        + "content-disposition: form-data; name=\"field1\"\r\n"
+        + "\r\n"
+        + "...text encoded in iso-8859-1 ...\r\n"
+        + "AaB03x--\r\n";
+
+    let parts_of = func(body: string, boundary: string) -> multipart.Part[list] =>
+        test.assert_ok<multipart.Part[list]>(multipart.parse_all(strings.to_bytes(body), boundary));
+
+    let text = func(part: multipart.Part) -> string => strings.from_bytes_lossy(part.body);
+
+    let boundary_status = func(content_type: string) -> int =>
+        wire.rejection_status(test.assert_err<string>(multipart.boundary_of(content_type)));
+
+    export let test_rfc2046_example = func {
+        last boundary = test.assert_ok<string>(multipart.boundary_of("multipart/mixed; boundary=\"simple boundary\""));
+        test.assert_equal_string("simple boundary", boundary);
+        last parts = parts_of(Rfc2046Body, boundary);
+        test.assert_equal<int>(2, parts.length);
+        test.assert_equal<int>(0, parts[0].headers.size());
+        test.assert_none<string>(parts[0].name());
+        test.assert_none<string>(parts[0].disposition());
+        test.assert_equal_string("text/plain", parts[0].content_type());
+        test.assert_equal_string("This is implicitly typed plain US-ASCII text.\r\nIt does NOT end with a linebreak.", text(parts[0]));
+        test.assert_equal_string("text/plain; charset=us-ascii", parts[1].content_type());
+        test.assert_equal_string("This is explicitly typed plain US-ASCII text.\r\nIt DOES end with a linebreak.\r\n", text(parts[1]));
+    };
+
+    export let test_rfc7578_examples = func {
+        last parts = parts_of(Rfc7578Section45, "AaB03x");
+        test.assert_equal<int>(1, parts.length);
+        test.assert_equal_string("field1", test.assert_some<string>(parts[0].name()));
+        test.assert_none<string>(parts[0].filename());
+        test.assert_equal_string("form-data", test.assert_some<string>(parts[0].disposition()));
+        test.assert_equal_string("text/plain;charset=UTF-8", parts[0].content_type());
+        test.assert_equal_string("quoted-printable", test.assert_some<string>(parts[0].headers.get("Content-Transfer-Encoding")));
+        test.assert_equal_string("Joe owes =E2=82=AC100.", text(parts[0]));
+        last charset = parts_of(Rfc7578Section46, "AaB03x");
+        test.assert_equal<int>(1, charset.length);
+        test.assert_equal_string("_charset_", test.assert_some<string>(charset[0].name()));
+        test.assert_equal_string("iso-8859-1", text(charset[0]));
+        // RFC 7578 section 4.2: "form-data; name=\"user\"".
+        test.assert_equal_string("user", test.assert_some<string>(test.assert_ok<Optional<string>>(
+            multipart.parameter("form-data; name=\"user\"", "name"))));
+    };
+
+    // RFC 2046 section 5.1.1: the boundary examples, and bchars of 1 to 70
+    // characters not ending in a space.
+    export let test_boundary_of = func {
+        test.assert_equal_string("gc0p4Jq0M2Yt08j34c0p", test.assert_ok<string>(multipart.boundary_of("multipart/mixed; boundary=gc0p4Jq0M2Yt08j34c0p")));
+        test.assert_equal<int>(400, boundary_status("multipart/mixed; boundary=gc0pJq0M:08jU534c0p"));
+        test.assert_equal_string("gc0pJq0M:08jU534c0p", test.assert_ok<string>(multipart.boundary_of("multipart/mixed; boundary=\"gc0pJq0M:08jU534c0p\"")));
+        test.assert_equal_string("AaB03x", test.assert_ok<string>(multipart.boundary_of("Multipart/Form-Data;charset=utf-8 ; BOUNDARY=AaB03x")));
+        test.assert_equal_string("ab", test.assert_ok<string>(multipart.boundary_of("multipart/form-data; boundary=\"a\\b\"")));
+        test.assert_equal<int>(415, boundary_status("text/plain; boundary=AaB03x"));
+        test.assert_equal<int>(415, boundary_status("multipart; boundary=AaB03x"));
+        test.assert_equal<int>(415, boundary_status("multipart/; boundary=AaB03x"));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data"));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary=a; boundary=b"));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary="));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary=\"\""));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary=\"abc \""));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary=\"a@b\""));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary=\"open"));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary = x"));
+        last seventy = strings.repeat("0123456789", 7);
+        test.assert_equal_string(seventy, test.assert_ok<string>(multipart.boundary_of("multipart/form-data; boundary=" + seventy)));
+        test.assert_equal<int>(400, boundary_status("multipart/form-data; boundary=" + seventy + "x"));
+        test.assert(multipart.is_boundary("simple boundary"));
+        test.assert(multipart.is_boundary("'()+_,-./:=?"));
+        test.assert(!multipart.is_boundary(""));
+        test.assert(!multipart.is_boundary("a "));
+        test.assert(!multipart.is_boundary("a\"b"));
+    };
+
+    export let test_parameters = func {
+        last value = "form-data; name=\"files\"; filename=\"a \\\"b\\\".txt\";; x=y";
+        test.assert_equal_string("files", test.assert_some<string>(test.assert_ok<Optional<string>>(multipart.parameter(value, "NAME"))));
+        test.assert_equal_string("a \"b\".txt", test.assert_some<string>(test.assert_ok<Optional<string>>(multipart.parameter(value, "filename"))));
+        test.assert_equal_string("y", test.assert_some<string>(test.assert_ok<Optional<string>>(multipart.parameter(value, "x"))));
+        test.assert_none<string>(test.assert_ok<Optional<string>>(multipart.parameter(value, "size")));
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<Optional<string>>(multipart.parameter("form-data; name", "name"))));
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<Optional<string>>(multipart.parameter("form-data name=a", "name"))));
+        test.assert_equal_string("é.txt", test.assert_some<string>(test.assert_ok<Optional<string>>(
+            multipart.parameter("form-data; filename=\"é.txt\"", "filename"))));
+    };
+
+    export let test_part_value = func {
+        last fields = http_headers.of(new(["Content-Disposition", "Content-Type"]),
+            new(["form-data; name=\"f\"; filename=\"x.bin\"", "application/octet-stream"]));
+        last a = new multipart.Part(fields, strings.to_bytes("abc"));
+        last b = new multipart.Part(fields.copy(), strings.to_bytes("abc"));
+        last c = new multipart.Part(fields, strings.to_bytes("abd"));
+        test.assert(a.equals(b));
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert(!a.equals(c));
+        test.assert_equal_string("x.bin", test.assert_some<string>(a.filename()));
+        test.assert_equal_string("application/octet-stream", a.content_type());
+        test.assert(strings.starts_with(a.to_string(), "Part{Headers{Content-Disposition: "));
+        test.assert(strings.ends_with(a.to_string(), ", 3 bytes}"));
+        last broken = new multipart.Part(http_headers.of(new(["Content-Disposition"]), new(["form-data; name"])), new uint8[list]());
+        test.assert_none<string>(broken.name());
+        test.assert_equal_string("form-data", test.assert_some<string>(broken.disposition()));
+        test.assert(strings.starts_with(new multipart.MultipartLimits().to_string(), "MultipartLimits{parts=1000"));
+        test.assert(new multipart.MultipartLimits().equals(new multipart.MultipartLimits(1000, 16384, 100)));
+        test.assert_equal<uint32>(new multipart.MultipartLimits().hash_code(), new multipart.MultipartLimits(1000, 16384, 100).hash_code());
+        test.assert(!new multipart.MultipartLimits().equals(new multipart.MultipartLimits(1000, 16384, 99)));
+    };
+);

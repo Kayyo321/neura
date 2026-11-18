@@ -1,0 +1,9 @@
+error[E0488]: invalid extension function
+ --> $DIR/extension-receiver-type-parameter.nra:2:30
+  |
+2 | let.extension show = func<T>(value: T) -> T => value;
+  |                              ^^^^^ the receiver cannot be a bare type parameter without a bound
+  |
+  = help: an extension function extends one type, named by its first parameter
+
+For more information about this error, try `neura explain E0488`.

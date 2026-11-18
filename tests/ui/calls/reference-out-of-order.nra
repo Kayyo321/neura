@@ -1,0 +1,9 @@
+// A primitive reference argument out of parameter order is rejected rather
+// than copied into a hidden local.
+let bump = func(target: &int, by: int) {
+    target += by;
+};
+let use = func {
+    let count = 1;
+    bump(by: 2, target: count);
+};

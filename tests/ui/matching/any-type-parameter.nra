@@ -1,0 +1,4 @@
+// A type parameter named any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let first = func<any>(value: any) => value;

@@ -1,0 +1,7 @@
+error[E0424]: integer literal is outside the range of uint8
+ --> $DIR/default-range.nra:2:25
+  |
+2 | let f = func(a: uint8 = 256) -> uint8 => a;
+  |                         ^^^
+
+For more information about this error, try `neura explain E0424`.

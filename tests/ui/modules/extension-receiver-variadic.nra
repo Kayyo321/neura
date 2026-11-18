@@ -1,0 +1,2 @@
+// The receiver cannot be variadic (E0488).
+let.extension count = func(items: ...int) -> int => items.length;

@@ -1,0 +1,1 @@
+let view = html(route: string) { <a href={route}></a> };

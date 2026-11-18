@@ -1,0 +1,7 @@
+error[E0501]: static member cannot use an enclosing class type parameter
+ --> $DIR/generic-class.nra:9:70
+  |
+9 |     export static let add = func(left: Vec<T>, right: Vec<T>) -> Vec<T> => left;
+  |                                                                      ^
+
+For more information about this error, try `neura explain E0501`.

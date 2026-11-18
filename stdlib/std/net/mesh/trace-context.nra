@@ -1,0 +1,155 @@
+let baggages = import:Std.Net.Mesh.Baggage;
+let.promote _ = import:Std.Core.Optional;
+let parents = import:Std.Net.Mesh.TraceParent;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let states = import:Std.Net.Mesh.TraceState;
+
+/// @brief The W3C trace context carried by a request: `traceparent`, `tracestate` and `baggage`, with extraction
+/// from and injection into any request type through two header functions.
+///
+/// `extract` reads the three headers through `get_header(request, name)`, which must return the field value with
+/// several fields of one name combined by commas (RFC 9110 section 5.3; `Std.Net.Http.Headers.joined` does this
+/// for HTTP). An invalid `traceparent` leaves the context without a parent and, as the spec requires, `tracestate`
+/// is then not parsed at all. An invalid `tracestate` or `baggage` is dropped without affecting the other headers.
+/// `next_hop` continues the trace with a new span id from an injected random source, or starts a new trace when
+/// there is no parent. `inject` writes the headers back through `with_header(request, name, value)`, which must
+/// replace any earlier field of that name and return the request to send; an empty value means "remove the field",
+/// so a stale `tracestate` or an invalid `baggage` the request arrived with is not passed on.
+/// @see [Std.Net.Mesh.TraceContext](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TraceContext)
+#Since("0.3.0")
+export let TraceContext = module (
+    /// @brief The `traceparent` header name.
+    export const TraceParentHeader = "traceparent";
+    /// @brief The `tracestate` header name.
+    export const TraceStateHeader = "tracestate";
+    /// @brief The `baggage` header name.
+    export const BaggageHeader = "baggage";
+
+    /// @brief The propagated context of one request.
+    #Final
+    export let TraceContext = class (
+        /// @brief The parent span, absent when the request carried no valid `traceparent`.
+        export last parent: Optional<parents.TraceParent>;
+        /// @brief The vendor state (empty without a valid parent).
+        export last state: states.TraceState;
+        /// @brief The application baggage.
+        export last baggage: baggages.Baggage;
+
+        /// @brief A context with every part given.
+        export let init = func(trace_parent: Optional<parents.TraceParent>, trace_state: states.TraceState,
+            items: baggages.Baggage) {
+            parent = trace_parent;
+            state = trace_state;
+            baggage = items;
+        };
+
+        /// @brief Whether a valid parent was received.
+        #NoDiscard
+        export let has_parent = func -> bool => match (parent) {
+            Optional.Some(p) => true,
+            Optional.None => false,
+        };
+
+        /// @brief The context to send on: with a parent, the same trace with a new random span id as parent id and
+        /// the state kept; without one, a new trace (sampled when `sample_new`) with an empty state. The baggage is
+        /// kept either way.
+        #NoDiscard
+        export let next_hop = func(random: Random, sample_new: bool) -> TraceContext => match (parent) {
+            Optional.Some(p) => new TraceContext(Optional<parents.TraceParent>.Some(
+                p.child(parents.random_id(random, parents.ParentIdBytes))), state, baggage),
+            Optional.None => new TraceContext(Optional<parents.TraceParent>.Some(parents.start(random, sample_new)),
+                states.empty(), baggage),
+        };
+
+        /// @brief Equal when the parent, state and baggage are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is TraceContext)) {
+                return false;
+            }
+            last that = other as TraceContext;
+            return to_string() == that.to_string() && baggage.equals(that.baggage);
+        };
+
+        /// @brief Combines the parts' hashes.
+        export let.override hash_code = func -> uint32 => to_string().hash_code() ^ baggage.hash_code();
+
+        /// @brief Text such as "TraceContext(00-...-01, rojo=1, Baggage(2 members))".
+        export let.override to_string = func -> string => "TraceContext(" + match (parent) {
+            Optional.Some(p) => p.to_header(),
+            Optional.None => "no parent",
+        } + ", " + state.to_header() + ", " + baggage.to_string() + ")";
+    );
+
+    /// @brief An empty context: no parent, state or baggage.
+    #NoDiscard
+    export let empty = func -> TraceContext =>
+        new TraceContext(Optional<parents.TraceParent>.None, states.empty(), baggages.empty());
+
+    /// @brief The context carried by `request`, read through `get_header` as described for the module.
+    #NoDiscard
+    export let extract = func<Req>(request: Req, get_header: func(Req, string) -> Optional<string>) -> TraceContext {
+        let parent = Optional<parents.TraceParent>.None;
+        let state = states.empty();
+        match (get_header(request, TraceParentHeader)) {
+            Optional.Some(text) => {
+                match (parents.parse(text)) {
+                    Result.Ok(p) => {
+                        parent = Optional<parents.TraceParent>.Some(p);
+                        match (get_header(request, TraceStateHeader)) {
+                            Optional.Some(state_text) => {
+                                match (states.parse(state_text)) {
+                                    Result.Ok(s) => {
+                                        state = s;
+                                    },
+                                    Result.Err(e) => {
+                                    },
+                                }
+                            },
+                            Optional.None => {
+                            },
+                        }
+                    },
+                    Result.Err(e) => {
+                    },
+                }
+            },
+            Optional.None => {
+            },
+        }
+        let items = baggages.empty();
+        match (get_header(request, BaggageHeader)) {
+            Optional.Some(text) => {
+                match (baggages.parse(text)) {
+                    Result.Ok(b) => {
+                        items = b;
+                    },
+                    Result.Err(e) => {
+                    },
+                }
+            },
+            Optional.None => {
+            },
+        }
+        return new TraceContext(parent, state, items);
+    };
+
+    /// @brief `request` with the context's headers written through `with_header`: `traceparent` (removed, by an
+    /// empty value, when there is no parent), `tracestate` (removed when the state is empty) and `baggage` (removed
+    /// when the baggage is empty).
+    #NoDiscard
+    export let inject = func<Req>(context: TraceContext, request: Req, with_header: func(Req, string, string) -> Req)
+        -> Req {
+        let out = request;
+        match (context.parent) {
+            Optional.Some(p) => {
+                out = with_header(out, TraceParentHeader, p.to_header());
+            },
+            Optional.None => {
+                out = with_header(out, TraceParentHeader, "");
+            },
+        }
+        out = with_header(out, TraceStateHeader, context.state.to_header());
+        return with_header(out, BaggageHeader, context.baggage.to_header());
+    };
+);

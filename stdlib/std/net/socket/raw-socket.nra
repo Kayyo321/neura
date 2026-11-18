@@ -1,0 +1,148 @@
+let.promote _ = import:Std.Net.Core.NetAddress;
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Net.Socket.DatagramSocket;
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A raw IP socket (`SOCK_RAW`) for one IP protocol number: a `DatagramSocket` of `Std.Net.Core.IpAddr`
+/// that sends and receives whole IP payloads (ICMP echo, for example). Needs the net capability and, on most
+/// systems, privileges the runtime does not grant on its own.
+///
+/// The checks are real; opening the socket needs a raw-socket host service that no runtime offers yet, so
+/// `open` traps in Neura 0.3.0. On IPv4 a received payload starts with the IP header, as the kernel delivers it.
+/// @see [Std.Net.Socket.RawSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-RawSocket)
+#Since("0.3.0")
+export let RawSocket = module (
+    /// @brief One raw socket of an address family and IP protocol.
+    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    export let RawSocket = class implements DatagramSocket<ips.IpAddr> (
+        /// @brief The host's socket ID.
+        last id: int64;
+        /// @brief Ipv4 or Ipv6.
+        export last family: AddressFamily;
+        /// @brief The IP protocol number, 0 through 255.
+        export last protocol: int;
+        /// @brief The read timeout in nanoseconds; zero waits without limit.
+        let timeout_nanos: int64 = 0;
+        /// @brief Tracks whether the socket may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `open`; the ID comes from the library.
+        export let init = func(opened: int64, address_family: AddressFamily, protocol_number: int) {
+            id = opened;
+            family = address_family;
+            protocol = protocol_number;
+        };
+
+        /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
+        #NoDiscard
+        export let local_address = func -> Result<ips.IpAddr> {
+            if (!open_now) {
+                return Result<ips.IpAddr>.Err(bytes.closed("socket", to_string()));
+            }
+            return match (host.local_address(id)) {
+                host.AddressOutcome.Ok(reported) => ip_of(reported),
+                host.AddressOutcome.Error(code) => Result<ips.IpAddr>.Err(
+                    host_error.io(code, "local address failed", to_string())),
+            };
+        };
+
+        /// @brief Sends one IP payload to `target`, which must be of the socket's family (else the call traps
+        /// with "invalid argument: address family").
+        #NoDiscard
+        export let send_to = func(data: uint8[list], target: ips.IpAddr) -> Result<int> {
+            if (ips.family(target) != family) {
+                trap_with_message("invalid argument: address family");
+            }
+            if (!open_now) {
+                return Result<int>.Err(bytes.closed("socket", to_string()));
+            }
+            last text = ips.to_string(target);
+            return match (host.raw_send_to(id, text, data)) {
+                host.CountOutcome.Ok(count) => Result<int>.Ok(count),
+                host.CountOutcome.Error(code) => Result<int>.Err(host_error.io(code, "send failed", text)),
+            };
+        };
+
+        /// @brief One payload of at most `max` bytes and its sender, waiting up to the read timeout.
+        #NoDiscard
+        export let receive_from = func(max: int) -> Result<Datagram<ips.IpAddr>> {
+            bytes.check_maximum(max);
+            if (!open_now) {
+                return Result<Datagram<ips.IpAddr>>.Err(bytes.closed("socket", to_string()));
+            }
+            return match (host.raw_receive_from(id, max, timeout_nanos)) {
+                host.DatagramOutcome.Ok(received) => datagram_of(received),
+                host.DatagramOutcome.Error(code) => Result<Datagram<ips.IpAddr>>.Err(
+                    host_error.io(code, "receive failed", to_string())),
+            };
+        };
+
+        /// @brief The longest a receive waits; zero waits without limit.
+        export let read_timeout = func -> Duration => of_nanos(timeout_nanos);
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            timeout_nanos = support.timeout_nanos(timeout);
+        };
+
+        /// @brief Releases the socket. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            if (!open_now) {
+                return bytes.ok();
+            }
+            open_now = false;
+            return match (host.close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "close failed", to_string())),
+            };
+        };
+
+        /// @brief Text such as "RawSocket(Ipv4, protocol 1)".
+        export let.override to_string = func -> string =>
+            "RawSocket(" + family.to_string() + ", protocol " + protocol.to_string() + ")";
+    );
+
+    /// @brief A raw socket for `family` (Ipv4 or Ipv6; Unix traps with "invalid argument: address family") and
+    /// IP protocol number `protocol` (0 through 255, else "invalid argument: protocol"). Traps in Neura 0.3.0 (no
+    /// raw-socket host service).
+    #NoDiscard
+    export let open = func(family: AddressFamily, protocol: int) -> Result<RawSocket> {
+        if (family == AddressFamily.Unix) {
+            trap_with_message("invalid argument: address family");
+        }
+        if (protocol < 0 || protocol > 255) {
+            trap_with_message("invalid argument: protocol");
+        }
+        last code = family == AddressFamily.Ipv4 ? 4 : 6;
+        return match (host.raw_open(code, protocol)) {
+            host.IdOutcome.Ok(id) => Result<RawSocket>.Ok(new RawSocket(id, family, protocol)),
+            host.IdOutcome.Error(failure) => Result<RawSocket>.Err(
+                host_error.io(failure, "raw socket failed", "protocol " + protocol.to_string())),
+        };
+    };
+
+    /// @brief An IP address from the host's [address, port] pair.
+    let ip_of = func(reported: [string, int]) -> Result<ips.IpAddr> {
+        let [text, port] = reported;
+        return match (ips.parse(text)) {
+            Result.Ok(ip) => Result<ips.IpAddr>.Ok(ip),
+            Result.Err(_) => Result<ips.IpAddr>.Err(bytes.io(errors.IoErrorKind.InvalidData,
+                "the host reported an address that is not numeric: " + text, text)),
+        };
+    };
+
+    /// @brief A datagram from the host's [bytes, address, port].
+    let datagram_of = func(received: [uint8[list], string, int]) -> Result<Datagram<ips.IpAddr>> {
+        let [data, text, port] = received;
+        last sender = ip_of([text, port])?;
+        return Result<Datagram<ips.IpAddr>>.Ok(new Datagram<ips.IpAddr>(data, Optional<ips.IpAddr>.Some(sender)));
+    };
+);

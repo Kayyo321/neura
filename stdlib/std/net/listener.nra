@@ -1,0 +1,18 @@
+let.promote _ = import:Std.Io.Closeable;
+let.promote _ = import:Std.Net.Endpoint;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief An endpoint that accepts inbound connections (docs/design/Net030.md).
+///
+/// The specification writes `Listener[Conn]` under `Endpoint[Addr]`; Neura has no way to leave the address type
+/// of the base open, so the contract takes both parameters. `Std.Net.Socket.TcpServer` implements it over the
+/// host's TCP listener.
+/// @see [Std.Net.Listener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Listener)
+#Since("0.3.0")
+export let Listener = module (
+    /// @brief An endpoint bound to `Addr` that yields connections of type `Conn`.
+    export let Listener = interface<Addr, Conn>:Endpoint<Addr>, Closeable (
+        /// @brief Waits for the next inbound connection. After close it fails with an Io error of kind Closed.
+        let accept = func -> Result<Conn>;
+    );
+);

@@ -1,0 +1,17 @@
+// An enum subject.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let Light = enum (Red, Green);
+let classify = func(value: Light) -> int => match.is (value) {
+    _ => 2,
+};

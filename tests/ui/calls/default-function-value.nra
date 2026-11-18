@@ -1,0 +1,6 @@
+// A named function read as a value loses its defaults (edge case 14).
+let f = func(a: int, b: int = 2) -> int => a + b;
+let use = func -> int {
+    let h = f;
+    return h(1);
+};

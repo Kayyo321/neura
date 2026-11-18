@@ -1,0 +1,7 @@
+error[E0418]: type argument int32 does not satisfy the bound Additive<int64> of type parameter 'T'
+ --> $DIR/primitive-other-instance.nra:4:15
+  |
+4 | let x = start<int32>();
+  |               ^^^^^
+
+For more information about this error, try `neura explain E0418`.

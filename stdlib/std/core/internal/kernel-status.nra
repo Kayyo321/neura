@@ -25,24 +25,50 @@ export let KernelStatus = module (
 
     /// @brief The message of an encoding status.
     let encoding_message = func(status: uint32) -> string {
-        if (status == 16) { return "invalid start byte"; }
-        if (status == 17) { return "invalid continuation byte"; }
-        if (status == 18) { return "unexpected end of data"; }
-        if (status == 19) { return "invalid character"; }
-        if (status == 20) { return "invalid padding"; }
-        if (status == 21) { return "unexpected padding"; }
-        if (status == 22) { return "nonzero trailing bits"; }
-        if (status == 23) { return "invalid hex digit"; }
-        if (status == 24) { return "odd number of hex digits"; }
+        if (status == 16) {
+            return "invalid start byte";
+        }
+        if (status == 17) {
+            return "invalid continuation byte";
+        }
+        if (status == 18) {
+            return "unexpected end of data";
+        }
+        if (status == 19) {
+            return "invalid character";
+        }
+        if (status == 20) {
+            return "invalid padding";
+        }
+        if (status == 21) {
+            return "unexpected padding";
+        }
+        if (status == 22) {
+            return "nonzero trailing bits";
+        }
+        if (status == 23) {
+            return "invalid hex digit";
+        }
+        if (status == 24) {
+            return "odd number of hex digits";
+        }
         trap_with_message("invalid state: unknown kernel status");
     };
 
     /// @brief The kind and message of a parse status.
     let parse_kind_and_message = func(status: uint32, type_name: string) -> [ParseErrorKind, string] {
-        if (status == 32) { return [ParseErrorKind.Empty, "empty input"]; }
-        if (status == 33) { return [ParseErrorKind.UnexpectedEnd, "expected a digit"]; }
-        if (status == 34) { return [ParseErrorKind.InvalidCharacter, "invalid character"]; }
-        if (status == 35) { return [ParseErrorKind.OutOfRange, "value out of range for " + type_name]; }
+        if (status == 32) {
+            return [ParseErrorKind.Empty, "empty input"];
+        }
+        if (status == 33) {
+            return [ParseErrorKind.UnexpectedEnd, "expected a digit"];
+        }
+        if (status == 34) {
+            return [ParseErrorKind.InvalidCharacter, "invalid character"];
+        }
+        if (status == 35) {
+            return [ParseErrorKind.OutOfRange, "value out of range for " + type_name];
+        }
         trap_with_message("invalid state: unknown kernel status");
     };
 );

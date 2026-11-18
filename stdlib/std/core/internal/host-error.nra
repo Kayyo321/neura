@@ -6,21 +6,51 @@ export let HostError = module (
     /// @brief Maps a provider error code to its library I/O category, defaulting to Other.
     #Pure
     export let kind_of = func(code: uint32) -> IoErrorKind {
-        if (code == 1) { return IoErrorKind.NotFound; }
-        if (code == 2) { return IoErrorKind.PermissionDenied; }
-        if (code == 3) { return IoErrorKind.AlreadyExists; }
-        if (code == 4) { return IoErrorKind.InvalidInput; }
-        if (code == 5) { return IoErrorKind.Interrupted; }
-        if (code == 6) { return IoErrorKind.UnexpectedEnd; }
-        if (code == 7) { return IoErrorKind.NotADirectory; }
-        if (code == 8) { return IoErrorKind.IsADirectory; }
-        if (code == 9) { return IoErrorKind.DirectoryNotEmpty; }
-        if (code == 10) { return IoErrorKind.ConnectionRefused; }
-        if (code == 11) { return IoErrorKind.ConnectionReset; }
-        if (code == 12) { return IoErrorKind.TimedOut; }
-        if (code == 13) { return IoErrorKind.Unsupported; }
-        if (code == 14) { return IoErrorKind.CapabilityDenied; }
-        if (code == 15) { return IoErrorKind.Cancelled; }
+        if (code == 1) {
+            return IoErrorKind.NotFound;
+        }
+        if (code == 2) {
+            return IoErrorKind.PermissionDenied;
+        }
+        if (code == 3) {
+            return IoErrorKind.AlreadyExists;
+        }
+        if (code == 4) {
+            return IoErrorKind.InvalidInput;
+        }
+        if (code == 5) {
+            return IoErrorKind.Interrupted;
+        }
+        if (code == 6) {
+            return IoErrorKind.UnexpectedEnd;
+        }
+        if (code == 7) {
+            return IoErrorKind.NotADirectory;
+        }
+        if (code == 8) {
+            return IoErrorKind.IsADirectory;
+        }
+        if (code == 9) {
+            return IoErrorKind.DirectoryNotEmpty;
+        }
+        if (code == 10) {
+            return IoErrorKind.ConnectionRefused;
+        }
+        if (code == 11) {
+            return IoErrorKind.ConnectionReset;
+        }
+        if (code == 12) {
+            return IoErrorKind.TimedOut;
+        }
+        if (code == 13) {
+            return IoErrorKind.Unsupported;
+        }
+        if (code == 14) {
+            return IoErrorKind.CapabilityDenied;
+        }
+        if (code == 15) {
+            return IoErrorKind.Cancelled;
+        }
         return IoErrorKind.Other;
     };
 

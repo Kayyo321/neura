@@ -1,0 +1,16 @@
+error[E0917]: #Pure function 'selected' is not pure: it reaches '$class_get', which assigns the binding 'count'
+ --> $DIR/any-selected-hook-pure.nra:7:1
+  |
+4 |     | get: { count += 1; return instance; };
+  |              ----- assigns the binding 'count' here
+...
+7 | #Pure
+  | ^^^^^ the function is marked #Pure here
+8 | let selected = func(x: any) -> bool => match.is (x) {
+9 |     item: Session => true,
+  |     ------------- calls '$class_get'
+  |
+  = note: a #Pure function may allocate and trap, but it writes only objects it allocates, reads no reassignable state, and calls only pure functions
+  = help: remove #Pure, or move the effect to the caller
+
+For more information about this error, try `neura explain E0917`.

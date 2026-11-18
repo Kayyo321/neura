@@ -1,0 +1,9 @@
+error[E0573]: invalid interface property
+ --> $DIR/set-only.nra:3:9
+  |
+3 |     let name: string;
+  |         ^^^^ an interface property needs '| get;'
+  |
+  = help: add '| get;'; a property that can only be written is not supported
+
+For more information about this error, try `neura explain E0573`.

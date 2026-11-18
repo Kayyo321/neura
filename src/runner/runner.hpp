@@ -1,8 +1,11 @@
 #pragma once
 
+#include "nvm/app_services.hpp"
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
+#include "nvm/sql_services.hpp"
+#include "nvm/secret_services.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -17,9 +20,17 @@ struct Host {
     nvm::DescriptorSource input{0};
     nvm::ConsoleWriteLine console{output};
     nvm::StandardServices services;
+    // Bound in every image; only a server-host worker passes an exchange.
+    nvm::ApplicationServices application;
+    // Bound in every image; answered only with an SQL exchange and the sql group.
+    nvm::SqlServices sql;
+    // neura.memory.lock.*, in the entropy group.
+    nvm::SecretServices secrets;
     nvm::HostRegistry registry;
 
-    explicit Host(const nvm::Capabilities& capabilities);
+    explicit Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange = nullptr,
+                  std::uint64_t response_bytes = nvm::default_response_bytes,
+                  nvm::SqlExchange* sql_exchange = nullptr);
 };
 
 struct RunOptions {
@@ -41,6 +52,19 @@ struct RunOptions {
     // when unset, when run() begins) to the report.
     bool tier_stats = false;
     std::optional<std::chrono::steady_clock::time_point> started{};
+    // Receives how the run ended, when set: whether it trapped, and the
+    // class of the trap (docs/design/Service030.md, "States and records").
+    struct Ending {
+        // The image was decoded and validated (set by the caller), and when.
+        bool loaded = false;
+        std::chrono::steady_clock::time_point loaded_at{};
+        // The run began: its host bindings were made and it was entered.
+        bool started = false;
+        std::chrono::steady_clock::time_point started_at{};
+        bool trapped = false;
+        std::string trap_class;
+    };
+    Ending* ending = nullptr;
 };
 
 // Writes scheduler events as JSON lines (docs/lang/Concurrency.md section

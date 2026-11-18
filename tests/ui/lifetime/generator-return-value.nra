@@ -1,0 +1,5 @@
+// Edge case 62: 'return' only ends a generator.
+let numbers = iterator() -> int {
+    yield 1;
+    return 1;
+};

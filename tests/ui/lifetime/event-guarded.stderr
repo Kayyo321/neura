@@ -1,0 +1,11 @@
+error[E0550]: handlers would run while the guard is held
+  --> $DIR/event-guarded.nra:12:9
+   |
+11 |     return state.with<int>(func(value: int) -> int {
+   |            -----------------------------------------... the guard is held while this lambda runs
+12 |         announce(event, value);
+   |         ^^^^^^^^^^^^^^^^^^^^^^ this call emits an event
+   |
+   = help: commit the change, leave the guard, then emit
+
+For more information about this error, try `neura explain E0550`.

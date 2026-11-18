@@ -1,0 +1,468 @@
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let reconcile = import:Std.Ui.Internal.Reconcile;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+/// @brief A UI host in memory, for tests of state, components and turns without a browser.
+/// A test scripts events in batches; each `wait` of a root posts the next batch, and a root's
+/// `run` returns when the script is exhausted. It is also a `ui.TaskHost` (a scripted
+/// `await_completion` makes a root run by `Std.Ui.Commands.run` wait for a command), a `ui.HistoryHost` with an in-memory
+/// history (`back`, `forward` and `navigate_externally` script navigations), and a `ui.FocusHost`
+/// that records the focused element. Commits are recorded as lines in `log`, and a
+/// test can make the next commit fail or be refused. By default the host does not interpret views;
+/// after `reconcile_commits()` it reconciles each commit as the browser host does, logs the
+/// operations, and refuses an invalid tree with the reconciler's diagnostic.
+#Since("0.3.0")
+export let ModelHost = module (
+    /// @brief One scripted event.
+    #[Final, NotThreadSafe]
+    let Step = class (
+        export last listener: uint64;
+        export last target: ui.Component;
+        export last coalesce: bool;
+        export last deliver: func() -> void;
+        /// A step that is not an element event, such as a navigation, and calls `special` instead.
+        export let special: func(ui.Root) -> void = new func(root: ui.Root) {};
+        export let is_special: bool = false;
+
+        export let init = func(listener: uint64, target: ui.Component, coalesce: bool, deliver: func() -> void) => set;
+
+        /// @brief `Step(listener N)`.
+        export let.override to_string = func -> string => "Step(listener " + listener.to_string() + ")";
+    );
+
+    /// @brief The steps posted by one `wait`.
+    #[Final, NotThreadSafe]
+    let Batch = class (
+        export last steps: Step[list] = new;
+        /// A barrier: the root waits here for a command to complete instead of taking events.
+        export let barrier: bool = false;
+
+        /// @brief `Batch(` the number of steps `)`.
+        export let.override to_string = func -> string => "Batch(" + steps.length.to_string() + " steps)";
+    );
+
+    /// @brief A host whose document is memory and whose events are scripted.
+    #[Final, NotThreadSafe]
+    export let Host = class implements ui.Host, ui.TaskHost, ui.HistoryHost, ui.FocusHost (
+        let targets: string[list] = new;
+        let open_roots: bool[list] = new;
+        let batches: Batch[list] = new;
+        let scripting: Batch = new;
+        let resync: Batch = new;
+        let fail_next: bool = false;
+        let invalid_next: bool = false;
+        let invalid_kind: ui.DiagnosticKind = ui.DiagnosticKind.ViewReused;
+        let root_limit: int = 16;
+        let reconciling: bool = false;
+        let reconcilers: reconcile.Reconciler[list] = new;
+        let entries: string[list] = new;
+        let position: int = 0;
+        let hash_routing: bool = true;
+        /// @brief The `id` of the element last focused through `focus`, or empty.
+        export let focused: string = "";
+        /// @brief One line per host request, in order.
+        export last log: string[list] = new;
+        // False after `stop_logging()`: opens, plain commits and closes write no line.
+        let logging: bool = true;
+        /// @brief How many events `post` refused.
+        export let refused: int = 0;
+
+        /// @brief Reconciles the commits of the roots opened after this call as the browser host does, and logs
+        /// their operations, one line each.
+        export let reconcile_commits = func {
+            reconciling = true;
+        };
+
+        /// @brief Sets the number of live roots (U-9, default 16).
+        export let set_root_limit = func(limit: int) {
+            root_limit = limit;
+        };
+
+        /// @brief Adds a click on `target`'s listener `listener` to the batch being scripted.
+        export let click = func(listener: uint64, target: ui.Component, handler: func(ui.ClickEvent) -> void) {
+            last event = new ui.ClickEvent(0, 1.0, 2.0, new ui.Modifiers(false, false, false, false), 1);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a pointer move, which a root coalesces per listener, to the batch being scripted.
+        export let pointer_move = func(listener: uint64, target: ui.Component, handler: func(ui.PointerEvent) -> void,
+            x: float64, y: float64) {
+            last event = new ui.PointerEvent(x, y, 0, ui.PointerKind.Mouse, new ui.Modifiers(false, false, false, false));
+            scripting.steps.append(new Step(listener, target, true, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds an input event with `value` to the batch being scripted.
+        export let input = func(listener: uint64, target: ui.Component, handler: func(ui.InputEvent) -> void,
+            value: string) {
+            last event = new ui.InputEvent(value, false, false);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a change event with `value` and `checked` to the batch being scripted.
+        export let change = func(listener: uint64, target: ui.Component, handler: func(ui.ChangeEvent) -> void,
+            value: string, checked: bool) {
+            last event = new ui.ChangeEvent(value, checked);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a submit event to the batch being scripted.
+        export let submit = func(listener: uint64, target: ui.Component, handler: func(ui.SubmitEvent) -> void) {
+            last event = new ui.SubmitEvent("");
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a blur event to the batch being scripted.
+        export let blur = func(listener: uint64, target: ui.Component, handler: func(ui.FocusEvent) -> void) {
+            last event = new ui.FocusEvent();
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds an input event that the host posts when a root resynchronizes after an overflow.
+        export let input_on_resynchronize = func(listener: uint64, target: ui.Component,
+            handler: func(ui.InputEvent) -> void, value: string) {
+            last event = new ui.InputEvent(value, false, false);
+            resync.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Ends the batch being scripted; the next `wait` of a root posts it.
+        export let end_batch = func {
+            batches.append(scripting);
+            scripting = new;
+        };
+
+        /// @brief Ends the batch being scripted, if it has steps, and adds a barrier: a root running
+        /// commands waits there until one completes, before it takes the next batch.
+        export let await_completion = func {
+            if (scripting.steps.length > 0) {
+                end_batch();
+            }
+            last barrier = new Batch();
+            barrier.barrier = true;
+            batches.append(barrier);
+        };
+
+        /// @brief Starts the history at `path`, as a page loaded at that address (a deep link).
+        export let start_at = func(path: string) {
+            while (entries.length > 0) {
+                entries.remove_at(entries.length - 1);
+            }
+            entries.append(path);
+            position = 0;
+        };
+
+        /// @brief Makes links use history routing (`/parts/7`) instead of hash routing (`#/parts/7`).
+        export let use_history_routing = func {
+            hash_routing = false;
+        };
+
+        /// @brief Adds a press of the browser's back button to the batch being scripted.
+        export let back = func {
+            add_navigation(-1, "");
+        };
+
+        /// @brief Adds a press of the browser's forward button to the batch being scripted.
+        export let forward = func {
+            add_navigation(1, "");
+        };
+
+        /// @brief Adds a navigation the program did not make, such as an edited address, to the batch being scripted.
+        export let navigate_externally = func(path: string) {
+            add_navigation(0, path);
+        };
+
+        /// @brief The history entries, oldest first, with the current one in brackets.
+        export let history_text = func -> string {
+            ensure_history();
+            let text = "";
+            for (let i = 0; i < entries.length; i++) {
+                if (i > 0) {
+                    text = text + " ";
+                }
+                if (i == position) {
+                    text = text + "[" + entries[i] + "]";
+                } else {
+                    text = text + entries[i];
+                }
+            }
+            return text;
+        };
+
+        let add_navigation = func(direction: int, path: string) {
+            last self = instance;
+            last step = new Step(0, nil, false, new func() {});
+            step.special = new func(root: ui.Root) {
+                self.navigate_now(root, direction, path);
+            };
+            step.is_special = true;
+            scripting.steps.append(step);
+        };
+
+        #Internal
+        export let navigate_now = func(root: ui.Root, direction: int, path: string) {
+            ensure_history();
+            if (direction == 0) {
+                push_entry(path);
+            } else {
+                last next = position + direction;
+                if (next < 0 || next >= entries.length) {
+                    log.append("navigation ignored: no entry");
+                    return;
+                }
+                position = next;
+            }
+            log.append("navigation to " + entries[position]);
+            root.post_navigation(entries[position]);
+        };
+
+        let ensure_history = func {
+            if (entries.length == 0) {
+                entries.append("/");
+                position = 0;
+            }
+        };
+
+        let push_entry = func(path: string) {
+            while (entries.length > position + 1) {
+                entries.remove_at(entries.length - 1);
+            }
+            entries.append(path);
+            position = entries.length - 1;
+        };
+
+        export let location = func -> string {
+            ensure_history();
+            return entries[position];
+        };
+
+        export let push_location = func(path: string) -> string {
+            ensure_history();
+            push_entry(path);
+            log.append("push " + path);
+            return entries[position];
+        };
+
+        export let replace_location = func(path: string) -> string {
+            ensure_history();
+            entries[position] = path;
+            log.append("replace " + path);
+            return path;
+        };
+
+        export let link = func(path: string) -> string {
+            if (hash_routing) {
+                return "#" + path;
+            }
+            return path;
+        };
+
+        export let focus = func(root: uint64, element_id: string) -> bool {
+            focused = element_id;
+            log.append("focus #" + element_id + " on root " + root.to_string());
+            return true;
+        };
+
+        export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake {
+            if (batches.length == 0) {
+                return ui.Wake.Idle;
+            }
+            last batch = batches[0];
+            batches.remove_at(0);
+            if (batch.barrier) {
+                log.append("await completion");
+                return ui.Wake.Idle;
+            }
+            post_all(root, batch);
+            return ui.Wake.Events;
+        };
+
+        /// @brief Stops recording the lines of opens, commits that the host neither refuses nor reconciles, and
+        /// closes, which a long measurement such as budget B-W9 does not read: building each line copies text
+        /// byte by byte and dominated the cost of a turn. Other requests are still recorded.
+        export let stop_logging = func {
+            logging = false;
+        };
+
+        /// @brief Forgets the recorded lines.
+        export let clear_log = func {
+            while (log.length > 0) {
+                log.remove_at(log.length - 1);
+            }
+        };
+
+        /// @brief Makes the next commit fail as a host failure while applying.
+        export let fail_next_commit = func {
+            fail_next = true;
+        };
+
+        /// @brief Makes the next commit be refused with a diagnostic of `kind`.
+        export let refuse_next_commit = func(kind: ui.DiagnosticKind) {
+            invalid_next = true;
+            invalid_kind = kind;
+        };
+
+        export let open = func(target: string) -> result.Result<uint64> {
+            let live = 0;
+            for (let i = 0; i < targets.length; i++) {
+                if (open_roots[i]) {
+                    if (targets[i] == target) {
+                        log.append("open " + target + ": refused, the target has a root");
+                        return result.Result<uint64>.Err(error.custom("ui.target", "the target already has a root"));
+                    }
+                    live += 1;
+                }
+            }
+            if (live >= root_limit) {
+                log.append("open " + target + ": refused, too many roots");
+                return result.Result<uint64>.Err(error.custom("ui.roots", "too many live roots"));
+            }
+            // A closed root's handle is reused, so mount and unmount cycles do not grow the host.
+            let index = 0;
+            while (index < targets.length && open_roots[index]) {
+                index += 1;
+            }
+            if (index == targets.length) {
+                targets.append(target);
+                open_roots.append(true);
+            } else {
+                targets[index] = target;
+                open_roots[index] = true;
+            }
+            if (reconciling) {
+                while (reconcilers.length <= index) {
+                    reconcilers.append(new reconcile.Reconciler());
+                }
+                reconcilers[index] = new reconcile.Reconciler();
+            }
+            last handle = (index + 1) as uint64;
+            if (logging) {
+                log.append("open " + target + ": root " + handle.to_string());
+            }
+            return result.Result<uint64>.Ok(handle);
+        };
+
+        export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome> {
+            let line = "";
+            if (logging) {
+                line = "commit " + batch.sequence.to_string() + " on root " + root.to_string() + ": "
+                    + batch.rendered.length.to_string() + (batch.rendered.length == 1 ? " render" : " renders");
+            }
+            if (fail_next) {
+                fail_next = false;
+                log.append(line + ", host failure");
+                return result.Result<ui.RenderOutcome>.Err(error.custom("ui.host", "the host failed while applying"));
+            }
+            if (invalid_next) {
+                invalid_next = false;
+                log.append(line + ", refused");
+                last diagnostic = new ui.Diagnostic(invalid_kind, "refused by the model host", 0, -1, "");
+                return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(diagnostic));
+            }
+            if (reconciling && (root as int) <= reconcilers.length) {
+                last reconciler = reconcilers[(root as int) - 1];
+                last plan = reconciler.prepare_turn(batch.top, batch.rendered);
+                if (plan.diagnostic != nil) {
+                    log.append(line + ", invalid: " + plan.diagnostic.message);
+                    return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(plan.diagnostic));
+                }
+                log.append(line + ", " + plan.operations.length.to_string() + " operations");
+                for (let operation in plan.operations) {
+                    log.append("  " + operation.to_string());
+                }
+                reconciler.accept(plan);
+                return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
+            }
+            if (logging) {
+                log.append(line);
+            }
+            return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
+        };
+
+        /// @brief Delivers `event` to the listener `handler` of the reconciled tree of `root`, through the root's
+        /// queue, as the browser host does. False when no mounted listener has that handler.
+        export let dispatch_click = func(root: ui.Root, handler: uint64, event: ui.ClickEvent) -> bool {
+            last reconciler = reconcilers[(root.host_handle() as int) - 1];
+            last target = reconciler.target_of(handler);
+            if (target == nil) {
+                return false;
+            }
+            return root.post(handler, target, false, new func() {
+                reconciler.deliver<ui.ClickEvent>(handler, event);
+            });
+        };
+
+        export let stats = func(root: uint64) -> ui.HostStats {
+            last index = (root as int) - 1;
+            if (index < 0 || index >= open_roots.length || !open_roots[index] || index >= reconcilers.length) {
+                return new ui.HostStats(0, 0, 0, 0);
+            }
+            last reconciler = reconcilers[index];
+            return new ui.HostStats(reconciler.node_count() as int64, reconciler.handler_count() as int64,
+                reconciler.template_count() as int64, 0);
+        };
+
+        export let wait = func(root: ui.Root) -> bool {
+            if (batches.length == 0) {
+                return false;
+            }
+            last batch = batches[0];
+            batches.remove_at(0);
+            post_all(root, batch);
+            return true;
+        };
+
+        export let resynchronize = func(root: ui.Root) {
+            log.append("resynchronize root " + root.host_handle().to_string());
+            last batch = resync;
+            resync = new;
+            post_all(root, batch);
+        };
+
+        export let reset = func(root: uint64) {
+            if (reconciling && (root as int) <= reconcilers.length) {
+                reconcilers[(root as int) - 1].reset();
+            }
+            log.append("reset root " + root.to_string());
+        };
+
+        export let close = func(root: uint64) {
+            open_roots[(root as int) - 1] = false;
+            if (reconciling && (root as int) <= reconcilers.length) {
+                reconcilers[(root as int) - 1] = new reconcile.Reconciler();
+            }
+            if (logging) {
+                log.append("close root " + root.to_string());
+            }
+        };
+
+        let post_all = func(root: ui.Root, batch: Batch) {
+            for (let i = 0; i < batch.steps.length; i++) {
+                last step = batch.steps[i];
+                if (step.is_special) {
+                    last special = step.special;
+                    special(root);
+                } else if (!root.post(step.listener, step.target, step.coalesce, step.deliver)) {
+                    refused += 1;
+                }
+            }
+        };
+
+        /// @brief `ModelHost(` the number of roots opened `)`.
+        export let.override to_string = func -> string => "ModelHost(" + targets.length.to_string() + " roots)";
+    );
+);

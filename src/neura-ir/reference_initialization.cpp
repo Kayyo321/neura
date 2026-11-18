@@ -126,7 +126,7 @@ private:
             throw Diagnostic(expr.span, "reference field '" + fields_[*field].name +
                                         "' may be read before it is bound").with_code("E0513");
         }
-        if (expr.kind == ExprKind::Lambda) return;
+        if (expr.kind == ExprKind::Lambda || expr.kind == ExprKind::Generator) return;
         if (expr.kind == ExprKind::Conditional) {
             read(expr.operands[0], flow);
             const auto selected = literal_condition(expr.operands[0]);
@@ -146,6 +146,7 @@ private:
             read(expr.match->expressions.front(), flow);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
+                if (arm.guard) read(*arm.guard, flow);
                 read(*arm.value, flow);
                 names_.pop_back();
             }
@@ -206,6 +207,7 @@ private:
         for (const auto& arm : stmt.arms) {
             auto selected = fork(before);
             begin_arm(arm);
+            if (arm.guard) read(*arm.guard, selected);
             for (const auto& child : arm.body) check_statement(child, selected, in_loop);
             names_.pop_back();
             merge(flow, selected);

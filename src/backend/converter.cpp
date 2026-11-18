@@ -1,4 +1,5 @@
 #include "converter.hpp"
+#include "cleanup_stack.hpp"
 
 #include "circuit/block_synth.hpp"
 #include "circuit/circuit.hpp"
@@ -9,12 +10,17 @@
 #include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
+#include "neura-ir/any.hpp"
+#include "neura-ir/attributes.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/containment.hpp"
+#include "neura-ir/initialization_order.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
+#include "neura-ir/lifetime.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
@@ -30,6 +36,7 @@
 #include <array>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -177,7 +184,7 @@ private:
                       const std::vector<std::uint32_t>& types, const std::vector<std::size_t>& positions,
                       const Span& span);
     void write_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> prefix, Values words,
-                     const Span& span);
+                     const Span& span, bool atomic = false);
     // An inline value at a one-word runtime boundary: allocated into its
     // heap layout, and read back from it.
     Operand box(const IrType& value, Values words, const Span& span);
@@ -186,14 +193,33 @@ private:
     // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
     Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
                       std::uint32_t result_type, const Span& span);
-    struct ScopeExit {
-        std::optional<Operand> token;
-        bool joins_tasks;
+    // The exit work of the blocks a function is inside (cleanup_stack.hpp,
+    // cleanup_stack.inc). A Region entry holds the token of the region its
+    // block allocates in, if any.
+    struct ExitWork {
+        ExitWorkKind kind;
+        // The TaskScope or Cleanup node.
+        const IrNode* node = nullptr;
+        std::optional<Operand> token{};
     };
-    void leave_scopes(std::size_t depth, const Span& span);
+    // Emits the work of every entry above `depth`, innermost first, for an
+    // exit of kind `edge` written at `span`.
+    void leave_scopes(std::size_t depth, const Span& span, ExitEdge edge);
+    void exit_work(const ExitWork& entry, const Span& span, ExitEdge edge);
+    void release_region(const ExitWork& entry, const Span& span);
+    bool has_cleanup(std::size_t depth = 0) const;
+    void return_statement(const IrNode& node);
+    Values pending_values(const IrNode& node);
+    // Generators: the resume chain at the start of a `$resume` method, and
+    // a Yield, which stores its index and returns true.
+    void resume_chain();
+    void yield_statement(const IrNode& node);
     bool needs_region(const IrNode& node);
-    void enter_scope(bool allocate_region, bool joins_tasks, const Span& span);
-    void end_scope(const Span& span);
+    // A block's scope: a Region entry, and above it a TaskScope entry when
+    // the block joins tasks. Returns the depth below them, which end_scope
+    // takes back to after falling off the block's end.
+    std::size_t enter_scope(bool allocate_region, const IrNode* task_scope, const Span& span);
+    void end_scope(std::size_t depth, const Span& span);
     void lexical_region(const std::vector<IrNode>& statements, const Span& span);
     Operand region_token();
     bool has_array_word(const std::vector<std::uint32_t>& types) const;
@@ -203,12 +229,30 @@ private:
     void region(const std::vector<IrNode>& statements);
     void statement(const IrNode& node);
     void store(const IrNode& node);
+    void store_hook(const IrNode& destination, const IrNode& admission);
+    Values previous_words(nvr::StateOp op, std::uint32_t base, const Values& place,
+                          const IrType& type, const Span& span);
     void branch_statement(const IrNode& node);
     void loop(const IrNode& node);
     void destroy(const IrNode& node);
     Operand expression(const IrNode& node);
     // The words of a node: `expression` for a node that is not inline.
     Values values(const IrNode& node);
+    Values pack_any(const IrNode& node);
+    Values unpack_any(const IrNode& node);
+    Values reference_cast(const IrNode& node);
+    Values fit_reference(Values words, const IrType& destination);
+    Operand repeat_hooked(const IrNode& node);
+    Values hook_event(const IrNode& node, Values incoming, Values previous = {});
+    Operand policy_of(const Values& reference, const Operand& fallback, const Span& span);
+    Operand present(const Operand& value);
+    Operand same_word(const Operand& left, const Operand& right);
+    Operand choose(const Operand& condition, const Operand& yes, const Operand& no);
+    Values snapshot(Values words, const Span& span);
+    Values normalize_hook_result(Values value, const IrNode& source, const Span& span);
+    std::vector<std::pair<std::uint32_t, SymbolId>> policies(const IrType& view, HookKind kind, const Span& span);
+    std::set<SymbolId> deferred_;
+
     // The words of an inline node at `positions`, in that order. Reading a
     // field, element or global reads only those words.
     Values select(const IrNode& node, const std::vector<std::size_t>& positions);
@@ -297,11 +341,18 @@ private:
         std::uint32_t exit;
         // `continue` takes the back edge itself and the loop polls there.
         bool poll_on_continue;
-        // Lexical and task scopes open where the loop began.
+        // Exit work open where the loop began.
         std::size_t scopes;
     };
     std::vector<LoopTargets> loops_;
-    std::vector<ScopeExit> scopes_;
+    // Exit work open at the statement being converted, outermost first.
+    std::vector<ExitWork> exit_stack_;
+    // The returned value while a return runs the exit work it leaves.
+    std::optional<PendingSlots> pending_;
+    // A generator's `$resume`: the field of its resume index, and the block
+    // after each Yield, by index minus one.
+    SymbolId resume_field_ = no_symbol;
+    std::vector<std::uint32_t> resume_blocks_;
     std::uint32_t result_region_slot_ = absent;
     bool static_initializer_ = false;
     std::vector<std::uint32_t> placeholders_;
@@ -357,7 +408,7 @@ public:
     // The element type of an array or list of `element`s: the element's type,
     // or an aggregate of its words for an inline value of two or more.
     std::uint32_t element_type(const IrType& element, const Span& where);
-    std::uint32_t aggregate_type(const std::vector<std::uint32_t>& components);
+    std::uint32_t aggregate_type(const std::vector<std::uint32_t>& components, bool class_reference);
     // The positions among an enum's words of payload `position` of `variant`.
     const std::vector<std::size_t>& payload_words(const IrType& enumeration, SymbolId variant, std::size_t position,
                                                   const Span& where);
@@ -387,6 +438,11 @@ public:
     std::pair<IrType, Span> value_type(SymbolId id) const { return value_types_.at(id); }
 
     SymbolId member(SymbolId owner, const std::string& name) const;
+    // The member of `scope` named as `declared` is that stands for it. A
+    // generic function's specializations are named by the simple names of
+    // their type arguments, so one scope can hold several of one name, such
+    // as copy<Row> for two classes named Row in different modules.
+    SymbolId member_for(SymbolId scope, SymbolId declared) const;
     SymbolId resolve_member(SymbolId concrete, SymbolId declared) const;
     SymbolId implementation(SymbolId cls, SymbolId method) const;
     bool derives(SymbolId cls, SymbolId base) const;
@@ -450,8 +506,10 @@ private:
     // -Wstringop-overread for ordered comparisons of std::vector<uint8_t>.
     std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> constants_;
     std::map<SymbolId, std::uint32_t> layouts_;
+    std::optional<std::uint32_t> empty_root_layout_;
     std::vector<std::pair<IrType, std::uint32_t>> box_layouts_;
     std::map<std::vector<std::uint32_t>, std::uint32_t> aggregates_;
+    std::map<std::vector<std::uint32_t>, std::uint32_t> reference_aggregates_;
     // The aggregate element type of each inline element type, and those whose
     // components are being computed or were named before them.
     std::map<std::string, std::uint32_t> element_types_;
@@ -471,7 +529,8 @@ private:
     // Lifted forms by (function, block) for the LIFT section.
     std::map<std::pair<std::uint32_t, std::uint32_t>, lift::LiftedForm> hints_;
 
-    std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
+    // Members by owner and name, in symbol order; a name can repeat (member_for).
+    std::multimap<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, std::vector<SymbolId>> constructors_;
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
@@ -546,7 +605,7 @@ std::optional<ExitVariants> Converter::standard_exit_variants(SymbolId enumerati
 
 std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
     // An inline value is a run of value words, never one value.
-    if (inline_value(type)) throw std::logic_error(describe_shape(program_, type) + " has no single type");
+    if (type.kind != TypeKind::Object && inline_value(type)) throw std::logic_error(describe_shape(program_, type) + " has no single type");
     switch (type.kind) {
     case TypeKind::Void:
         return scalar(nvr::TypeKind::Void);
@@ -577,6 +636,15 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         return type_index({type.kind == TypeKind::Array ? nvr::TypeKind::Array : nvr::TypeKind::List, 0, element});
     }
     case TypeKind::Object:
+        // A scalar-only module can have an any without declaring a class.
+        // Its inactive reference still has an object type in the image.
+        if (type.symbol == no_symbol && type.name == "class") {
+            if (!empty_root_layout_) {
+                empty_root_layout_ = static_cast<std::uint32_t>(image_.layouts.size());
+                image_.layouts.push_back({absent, {}, {}});
+            }
+            return type_index({nvr::TypeKind::Object, 0, *empty_root_layout_});
+        }
         if (!type.arguments.empty() || !symbol(type.symbol).generics.empty()) {
             throw Diagnostic(where, "generic class '" + symbol(type.symbol).name +
                                         "' is not supported: IRtoNeuronConversion does not specialize generics")
@@ -591,6 +659,7 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         throw Diagnostic(where, "type parameter '" + type.name +
                                     "' is not supported: IRtoNeuronConversion does not specialize generics")
             .with_code("E0801");
+    case TypeKind::Any:
     case TypeKind::Tuple:
     case TypeKind::Module:
     case TypeKind::Callable:
@@ -641,7 +710,9 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
         result.interfaces.push_back(layout(interface.symbol, where));
     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
         const auto& field = program_.symbols[id];
-        if (field.owner == cls && field.kind == SymbolKind::Field) {
+        // An interface's fields are property requirements, without storage
+        // (docs/design/Records030.md).
+        if (field.owner == cls && field.kind == SymbolKind::Field && item.kind != SymbolKind::Interface) {
             fields_[id] = static_cast<std::uint32_t>(result.fields.size());
             // A field that is a tuple is several consecutive fields.
             for (const auto word : word_types(field.type, field.span)) result.fields.push_back(word);
@@ -665,7 +736,7 @@ const ValueLayout& Converter::value_layout(const IrType& type, const Span& where
 
 std::vector<IrType> Converter::box_fields(const IrType& type, const Span& where) {
     const auto& layout = value_layout(type, where);
-    return layout.form == ValueLayout::Form::Enum ? layout.words : layout.parts;
+    return layout.form == ValueLayout::Form::Tuple ? layout.parts : layout.words;
 }
 
 const std::vector<std::size_t>& Converter::payload_words(const IrType& enumeration, SymbolId variant,
@@ -698,7 +769,7 @@ std::uint32_t Converter::box_layout(const IrType& type, const Span& where) {
     // One field for each element, an element that is inline being a box of
     // its own, or for each word of an enum.
     for (const auto& field : parts)
-        result.fields.push_back(inline_value(field) ? boxed_type(field, where) : type_of(field, where));
+        result.fields.push_back(type.kind == TypeKind::Tuple && inline_value(field) ? boxed_type(field, where) : type_of(field, where));
     image_.layouts[index] = std::move(result);
     return index;
 }
@@ -730,13 +801,16 @@ std::vector<std::uint32_t> Converter::word_types(const IrType& type, const Span&
     return result;
 }
 
-std::uint32_t Converter::aggregate_type(const std::vector<std::uint32_t>& components) {
-    const auto found = aggregates_.find(components);
+std::uint32_t Converter::aggregate_type(const std::vector<std::uint32_t>& components, bool class_reference) {
+    // Keep the debugger name of a stored reference separate from a tuple of
+    // the same physical shape. Both use the same inline operations.
+    auto& aggregates = class_reference ? reference_aggregates_ : aggregates_;
+    const auto found = aggregates.find(components);
     std::uint32_t layout_index = 0;
-    if (found == aggregates_.end()) {
+    if (found == aggregates.end()) {
         layout_index = static_cast<std::uint32_t>(image_.layouts.size());
         image_.layouts.push_back({absent, components, {}});
-        aggregates_.emplace(components, layout_index);
+        aggregates.emplace(components, layout_index);
     } else {
         layout_index = found->second;
     }
@@ -767,7 +841,7 @@ std::uint32_t Converter::element_type(const IrType& element, const Span& where) 
         aggregates_.emplace(components, reserved->second);
         return element_types_.at(key);
     }
-    const auto type = aggregate_type(components);
+    const auto type = aggregate_type(components, element.kind == TypeKind::Object);
     element_types_.emplace(std::move(key), type);
     return type;
 }
@@ -986,6 +1060,28 @@ SymbolId Converter::member(SymbolId owner, const std::string& name) const {
     return it == members_.end() ? no_symbol : it->second;
 }
 
+SymbolId Converter::member_for(SymbolId scope, SymbolId declared) const {
+    const auto [first, last] = members_.equal_range({scope, symbol(declared).name});
+    if (first == last) return no_symbol;
+    if (std::next(first) == last) return first->second;
+    // Several members share the name: the declared one itself, then the one
+    // that overrides it, then the one with its signature.
+    for (auto it = first; it != last; ++it)
+        if (it->second == declared) return declared;
+    for (auto it = first; it != last; ++it)
+        for (auto base = symbol(it->second).overrides; base != no_symbol; base = symbol(base).overrides)
+            if (base == declared) return it->second;
+    const auto signature = [&](SymbolId id) {
+        std::vector<IrType> types{symbol(id).type};
+        for (const auto parameter : symbol(id).parameters) types.push_back(symbol(parameter).type);
+        return types;
+    };
+    const auto wanted = signature(declared);
+    for (auto it = first; it != last; ++it)
+        if (signature(it->second) == wanted) return it->second;
+    return first->second;
+}
+
 FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
     if (selected == no_symbol) {
         if (const auto group = constructors_.find(cls); group != constructors_.end()) {
@@ -1000,9 +1096,8 @@ FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
 }
 
 SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
-    const auto& name = symbol(declared).name;
     for (auto scope = concrete; scope != no_symbol; scope = symbol(scope).base) {
-        if (const auto found = member(scope, name); found != no_symbol) {
+        if (const auto found = member_for(scope, declared); found != no_symbol) {
             return found;
         }
     }
@@ -1012,7 +1107,7 @@ SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
 SymbolId Converter::implementation(SymbolId cls, SymbolId method) const {
     const auto& name = symbol(method).name;
     for (auto scope = cls; scope != no_symbol; scope = symbol(scope).base) {
-        const auto found = member(scope, name);
+        const auto found = member_for(scope, method);
         if (found != no_symbol && symbol(found).kind == SymbolKind::Function && symbol(found).has_body) {
             return found;
         }
@@ -1121,7 +1216,7 @@ void Converter::index_program() {
 
 bool Converter::constant_initializer(const IrNode& node) const {
     return node.op == IrOp::Integer || node.op == IrOp::Boolean || node.op == IrOp::String || node.op == IrOp::Float ||
-           node.op == IrOp::Nil ||
+           (node.op == IrOp::Nil && !inline_value(node.type)) ||
            (node.op == IrOp::Reference && node.symbol != no_symbol && symbol(node.symbol).kind == SymbolKind::Variant);
 }
 
@@ -1140,66 +1235,7 @@ void Converter::order_initialization() {
     // other module or file initializer and every top-level statement runs
     // before the entry function: files that a file imports run first, ties in
     // the order the files were given, and each file runs in source order.
-    std::vector<SymbolId> files;
-    std::map<SymbolId, std::set<SymbolId>> imports;
-    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
-        const auto& item = program_.symbols[id];
-        if (item.kind == SymbolKind::File) {
-            files.push_back(id);
-        } else if (item.kind == SymbolKind::Import && item.type.symbol != no_symbol) {
-            const auto from = file_of(id);
-            const auto to = file_of(item.type.symbol);
-            if (from != no_symbol && to != no_symbol && from != to) {
-                imports[from].insert(to);
-            }
-        }
-    }
-    // Files that import each other, directly or through other files, form a
-    // cycle. A cycle runs once every file it imports from outside the cycle
-    // has run, and its files run in the given order. Without cycles this is
-    // the plain dependency order with ties in the given order.
-    std::map<SymbolId, std::set<SymbolId>> reachable;
-    for (const auto file : files) {
-        auto& seen = reachable[file];
-        std::vector<SymbolId> pending(imports[file].begin(), imports[file].end());
-        while (!pending.empty()) {
-            const auto next = pending.back();
-            pending.pop_back();
-            if (seen.insert(next).second) {
-                pending.insert(pending.end(), imports[next].begin(), imports[next].end());
-            }
-        }
-    }
-    const auto same_cycle = [&](SymbolId a, SymbolId b) {
-        return a == b || (reachable[a].contains(b) && reachable[b].contains(a));
-    };
-    std::vector<SymbolId> order;
-    std::set<SymbolId> placed;
-    while (order.size() < files.size()) {
-        bool progressed = false;
-        for (const auto file : files) {
-            if (placed.contains(file)) continue;
-            std::vector<SymbolId> cycle;
-            for (const auto member : files) {
-                if (!placed.contains(member) && same_cycle(file, member)) cycle.push_back(member);
-            }
-            const bool ready = std::ranges::all_of(cycle, [&](SymbolId member) {
-                return std::ranges::all_of(imports[member], [&](SymbolId dependency) {
-                    return placed.contains(dependency) || same_cycle(file, dependency);
-                });
-            });
-            if (!ready) continue;
-            for (const auto member : cycle) {
-                placed.insert(member);
-                order.push_back(member);
-            }
-            progressed = true;
-            break;
-        }
-        if (!progressed) {
-            throw std::logic_error("file initialization order has no ready file");
-        }
-    }
+    const auto order = file_initialization_order(program_);
     std::vector<Startup> reference_boxes;
     std::vector<Startup> reference_values;
     for (const auto file : order) {
@@ -1284,7 +1320,35 @@ FunctionOrigin Converter::entry_point() const {
         throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point").with_code("E0804");
     }
     const auto main = candidates.front();
-    return {Role::Function, main, symbol(main).owner};
+    // The entry module inherits Std.Program.Entry and overrides main, or
+    // inherits that override from a module of its own, such as a library's
+    // application module that calls a requirement the program implements
+    // (Modules.md, Interfaces and inheritance). The image runs main for the
+    // one module of that line that no other module inherits.
+    const auto owner = symbol(main).owner;
+    const auto inherits = [&](SymbolId module) {
+        for (auto scope = module; scope != no_symbol; scope = symbol(scope).base)
+            if (scope == owner) return true;
+        return false;
+    };
+    std::vector<SymbolId> line;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = program_.symbols[id];
+        if (item.kind == SymbolKind::Module && !is_static_scope(item) && inherits(id)) line.push_back(id);
+    }
+    std::vector<SymbolId> leaves;
+    for (const auto module : line) {
+        if (std::ranges::none_of(line, [&](SymbolId other) { return symbol(other).base == module; }))
+            leaves.push_back(module);
+    }
+    if (leaves.size() > 1) {
+        throw Diagnostic(symbol(leaves[1]).span, "the program has more than one entry point")
+            .with_code("E0804")
+            .label("'" + symbol(leaves[1]).name + "' and '" + symbol(leaves[0]).name + "' both inherit main from '" +
+                   symbol(owner).name + "'")
+            .help("let only one module inherit '" + symbol(owner).name + "'");
+    }
+    return {Role::Function, main, leaves.empty() ? owner : leaves.front()};
 }
 
 FunctionOrigin Converter::target(const Dispatch& dispatch, SymbolId cls) const {
@@ -1761,6 +1825,7 @@ void Converter::names() {
             }
         }
     }
+    for (const auto& [components, layout] : reference_aggregates_) names.layouts[layout] = "$reference";
     // A boxed enum's fields are its words, named as the words of a binding.
     for (const auto& [type, layout] : box_layouts_) {
         if (type.kind != TypeKind::Enum) continue;
@@ -2160,7 +2225,12 @@ Values FunctionCompiler::slots_at(std::uint32_t first, const std::vector<std::si
 }
 
 void FunctionCompiler::write_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> prefix,
-                                   Values words, const Span& span) {
+                                   Values words, const Span& span, bool atomic) {
+    if (atomic && words.size() > 1) {
+        prefix.insert(prefix.end(), words.begin(), words.end());
+        state(operation, base, std::move(prefix), c_.scalar(nvr::TypeKind::Void), span);
+        return;
+    }
     if (words.size() > 1) {
         for (auto& operand : prefix) spill(operand);
         for (auto& word : words) spill(word);
@@ -2178,7 +2248,7 @@ Operand FunctionCompiler::box_words(const IrType& value, const Values& words, st
     std::vector<Operand> fields;
     const auto parts = c_.box_fields(value, span);
     for (const auto& part : parts) {
-        if (c_.inline_value(part)) fields.push_back(box_words(part, words, cursor, span));
+        if (value.kind == TypeKind::Tuple && c_.inline_value(part)) fields.push_back(box_words(part, words, cursor, span));
         else fields.push_back(words[cursor++]);
     }
     const auto type = c_.boxed_type(value, span);
@@ -2201,7 +2271,7 @@ Values FunctionCompiler::unbox(const IrType& value, Operand handle, const Span& 
     const auto parts = c_.box_fields(value, span);
     for (std::size_t i = 0; i < parts.size(); ++i) {
         const auto& part = parts[i];
-        const bool nested = c_.inline_value(part);
+        const bool nested = value.kind == TypeKind::Tuple && c_.inline_value(part);
         const auto type = nested ? c_.boxed_type(part, span) : c_.type_of(part, span);
         const auto field = state(nvr::StateOp::ReadField, static_cast<std::uint32_t>(i), {resolve(handle)}, type, span);
         if (nested) {
@@ -2232,31 +2302,29 @@ Operand FunctionCompiler::scheduler(nvr::SchedulerOp operation, std::uint32_t ta
     return result_slot == absent ? Operand{} : slot_operand(result_slot);
 }
 
-void FunctionCompiler::leave_scopes(std::size_t depth, const Span& span) {
-    const auto nothing = c_.scalar(nvr::TypeKind::Void);
-    for (auto i = scopes_.size(); i > depth; --i) {
-        const auto& scope = scopes_[i - 1];
-        if (scope.joins_tasks) scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, span);
-        if (scope.token) state(nvr::StateOp::ReleaseRegion, 0, {*scope.token}, nothing, span);
-    }
-}
+#include "cleanup_stack.inc"
 
-void FunctionCompiler::enter_scope(bool allocate_region, bool joins_tasks, const Span& span) {
-    ScopeExit scope{std::nullopt, joins_tasks};
+std::size_t FunctionCompiler::enter_scope(bool allocate_region, const IrNode* task_scope, const Span& span) {
+    const auto depth = exit_stack_.size();
+    ExitWork scope{ExitWorkKind::Region};
     if (allocate_region && !static_initializer_) {
         scope.token = state(nvr::StateOp::EnterRegion, 0, {}, c_.scalar(nvr::TypeKind::Unsigned, 64), span);
     }
-    scopes_.push_back(scope);
+    exit_stack_.push_back(scope);
+    // The region lies below the task scope, so that leaving the block joins
+    // its tasks before releasing it.
+    if (task_scope) exit_stack_.push_back({ExitWorkKind::TaskScope, task_scope});
+    return depth;
 }
 
-void FunctionCompiler::end_scope(const Span& span) {
-    if (open()) leave_scopes(scopes_.size() - 1, span);
-    scopes_.pop_back();
+void FunctionCompiler::end_scope(std::size_t depth, const Span& span) {
+    if (open()) leave_scopes(depth, span, ExitEdge::Fall);
+    exit_stack_.resize(depth);
 }
 
 Operand FunctionCompiler::region_token() {
     if (static_initializer_) return immediate(c_.scalar(nvr::TypeKind::Unsigned, 64), nvr::static_region_token);
-    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+    for (auto scope = exit_stack_.rbegin(); scope != exit_stack_.rend(); ++scope) {
         if (scope->token) return *scope->token;
     }
     throw std::logic_error("an activation allocation has no region");
@@ -2284,19 +2352,21 @@ bool FunctionCompiler::needs_region(const IrNode& node) {
 }
 
 void FunctionCompiler::lexical_region(const std::vector<IrNode>& statements, const Span& span) {
-    enter_scope(std::ranges::any_of(statements, [&](const auto& item) { return needs_region(item); }), false, span);
+    const auto depth =
+        enter_scope(std::ranges::any_of(statements, [&](const auto& item) { return needs_region(item); }), nullptr, span);
     region(statements);
-    end_scope(span);
+    end_scope(depth, span);
 }
 
 // ---------------------------------------------------------------------------
 // Statements
 
 void FunctionCompiler::region(const std::vector<IrNode>& statements) {
+    const auto depth = exit_stack_.size();
     for (const auto& item : statements) {
         if (!open()) {
             // Control cannot reach the rest of the region.
-            return;
+            break;
         }
         statement(item);
         if (c_.debug_statements() && open()) {
@@ -2308,6 +2378,11 @@ void FunctionCompiler::region(const std::vector<IrNode>& statements) {
             begin(next, item.span);
         }
     }
+    // The Cleanup statements of the block run when it falls off its end.
+    if (exit_stack_.size() > depth) {
+        if (open()) leave_scopes(depth, statements.back().span, ExitEdge::Fall);
+        exit_stack_.resize(depth);
+    }
 }
 
 void FunctionCompiler::statement(const IrNode& node) {
@@ -2317,8 +2392,9 @@ void FunctionCompiler::statement(const IrNode& node) {
     switch (node.op) {
     case IrOp::Initialize: {
         if (c_.symbol(node.symbol).kind == SymbolKind::Global && origin_.role == Role::Start) {
-            auto value = values(node.operands.front());
-            write_words(nvr::StateOp::WriteGlobal, c_.global(node.symbol, node.span), {}, std::move(value), node.span);
+            auto value = fit_reference(values(node.operands.front()), c_.symbol(node.symbol).type);
+            write_words(nvr::StateOp::WriteGlobal, c_.global(node.symbol, node.span), {}, std::move(value), node.span,
+                        c_.value_layout(c_.symbol(node.symbol).type, node.span).carries_policy);
             return;
         }
         if (c_.symbol(node.symbol).kind != SymbolKind::Local) {
@@ -2332,9 +2408,12 @@ void FunctionCompiler::statement(const IrNode& node) {
         }
         // A deferred declaration (NIR 1.10) only creates the slots. They stay
         // uninitialized, so a read before the first store traps.
-        if (is_deferred_initialize(node)) return;
+        if (is_deferred_initialize(node)) {
+            deferred_.insert(node.symbol);
+            return;
+        }
         const auto slot = it->second;
-        auto value = values(node.operands.front());
+        auto value = fit_reference(values(node.operands.front()), c_.symbol(node.symbol).type);
         for (std::size_t i = 0; i < value.size(); ++i) assign(slot + static_cast<std::uint32_t>(i), value[i]);
         return;
     }
@@ -2359,8 +2438,8 @@ void FunctionCompiler::statement(const IrNode& node) {
         loop(node);
         return;
     case IrOp::TaskScope: {
-        enter_scope(std::ranges::any_of(node.body, [&](const auto& item) { return needs_region(item); }), true,
-                    node.span);
+        const auto depth = enter_scope(
+            std::ranges::any_of(node.body, [&](const auto& item) { return needs_region(item); }), &node, node.span);
         const auto nothing = c_.scalar(nvr::TypeKind::Void);
         if (node.symbol != no_symbol) {
             // The scope's identity, for its handle.
@@ -2375,46 +2454,26 @@ void FunctionCompiler::statement(const IrNode& node) {
             scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
         }
         region(node.body);
-        end_scope(node.span);
+        end_scope(depth, node.span);
         return;
     }
-    case IrOp::Return: {
-        ExitSpec exit;
-        exit.kind = nvr::ExitKind::Return;
-        if (!node.operands.empty()) {
-            auto value = values(node.operands.front());
-            if (result_region_slot_ != absent) {
-                for (auto& word : value) spill(word);
-                const auto nothing = c_.scalar(nvr::TypeKind::Void);
-                for (const auto& word : value) {
-                    if (c_.type_at(word.type).kind == nvr::TypeKind::Array) {
-                        state(nvr::StateOp::MoveToRegion, 1, {resolve(word), slot_operand(result_region_slot_)},
-                              nothing, node.span);
-                    }
-                }
-            }
-            if (std::ranges::any_of(scopes_, [](const auto& scope) { return scope.token || scope.joins_tasks; })) {
-                // Commit the return value before leaving the scopes. Any
-                // array result has already moved to the caller's region.
-                for (auto& word : value) spill(word);
-                leave_scopes(0, node.span);
-                for (auto& word : value) word = resolve(word);
-            }
-            exit.arguments = std::move(value);
-        } else {
-            leave_scopes(0, node.span);
-        }
-        operation_at(node.span);
-        close({exit});
+    case IrOp::Return:
+        return_statement(node);
         return;
-    }
     case IrOp::Break:
-        leave_scopes(loops_.back().scopes, node.span);
-        jump(loops_.back().exit);
+        leave_scopes(loops_.back().scopes, node.span, ExitEdge::Jump);
+        if (open()) jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        leave_scopes(loops_.back().scopes, node.span);
-        jump(loops_.back().next, loops_.back().poll_on_continue);
+        leave_scopes(loops_.back().scopes, node.span, ExitEdge::Jump);
+        if (open()) jump(loops_.back().next, loops_.back().poll_on_continue);
+        return;
+    case IrOp::Cleanup:
+        // Registered from here to every exit of the enclosing block.
+        exit_stack_.push_back({ExitWorkKind::Cleanup, &node});
+        return;
+    case IrOp::Yield:
+        yield_statement(node);
         return;
     case IrOp::Fail: {
         // The only failure NeuraIR names is a list changed during for-each.
@@ -2442,9 +2501,73 @@ void FunctionCompiler::statement(const IrNode& node) {
     }
 }
 
+Values FunctionCompiler::previous_words(nvr::StateOp op, std::uint32_t base, const Values& place,
+                                        const IrType& type, const Span& span) {
+    const auto words = c_.word_types(type, span);
+    Values previous;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        auto arguments = place;
+        if (op != nvr::StateOp::ReadComponent) arguments.push_back(immediate(words[i], 0));
+        previous.push_back(state(op, base + static_cast<std::uint32_t>(i), std::move(arguments), words[i], span));
+    }
+    return previous;
+}
+
+void FunctionCompiler::store_hook(const IrNode& destination, const IrNode& admission) {
+    const auto& span = destination.span;
+    const auto& type = destination.type;
+    if (destination.op == IrOp::Load && c_.symbol(destination.symbol).kind != SymbolKind::Global) {
+        const auto slot = slots_.at(destination.symbol);
+        auto incoming = snapshot(values(admission.operands.front()), span);
+        auto previous = deferred_.contains(destination.symbol) ? Values{} : slot_values(slot, 2);
+        auto result = hook_event(admission, std::move(incoming), std::move(previous));
+        assign(slot, result[0]);
+        assign(slot + 1, result[1]);
+        return;
+    }
+    nvr::StateOp read, write;
+    std::uint32_t base = 0;
+    Values place;
+    if (destination.op == IrOp::Field) {
+        read = nvr::StateOp::ReadField;
+        write = nvr::StateOp::WriteField;
+        base = c_.field_index(destination.symbol, span);
+        place = snapshot({expression(destination.operands.front())}, span);
+    } else if (destination.op == IrOp::Index) {
+        read = nvr::StateOp::ReadComponent;
+        write = nvr::StateOp::WriteComponent;
+        place = snapshot({expression(destination.operands[0])}, span);
+        auto index = expression(destination.operands[1]);
+        place.push_back(to_index(index, destination.operands[1].type, span));
+        place = snapshot(std::move(place), span);
+    } else if (destination.op == IrOp::Load) {
+        read = nvr::StateOp::ReadGlobal;
+        write = nvr::StateOp::WriteGlobal;
+        base = c_.global(resolve_global(destination), span);
+    } else {
+        throw Diagnostic(span, "unsupported class reference assignment destination").with_code("E0801");
+    }
+    auto incoming = snapshot(values(admission.operands.front()), span);
+    auto previous = previous_words(read, base, place, type, span);
+    auto result = hook_event(admission, std::move(incoming), std::move(previous));
+    write_words(write, base, std::move(place), std::move(result), span, true);
+}
+
 void FunctionCompiler::store(const IrNode& node) {
     const auto& destination = node.operands[0];
     const auto& source = node.operands[1];
+    if (source.op == IrOp::HookAdmit) {
+        store_hook(destination, source);
+        return;
+    }
+    if (destination.op == IrOp::Pending) {
+        auto value = values(source);
+        pending_values(destination);
+        for (std::size_t i = 0; i < value.size(); ++i)
+            assign(pending_->first + static_cast<std::uint32_t>(i), value[i]);
+        return;
+    }
+    const bool atomic = c_.value_layout(destination.type, node.span).carries_policy;
     switch (destination.op) {
     case IrOp::Load: {
         const auto kind = c_.symbol(destination.symbol).kind;
@@ -2455,7 +2578,7 @@ void FunctionCompiler::store(const IrNode& node) {
             return;
         }
         const auto global = c_.global(resolve_global(destination), destination.span);
-        write_words(nvr::StateOp::WriteGlobal, global, {}, values(source), node.span);
+        write_words(nvr::StateOp::WriteGlobal, global, {}, values(source), node.span, atomic);
         return;
     }
     case IrOp::Field: {
@@ -2467,7 +2590,7 @@ void FunctionCompiler::store(const IrNode& node) {
             check_borrow_owner(destination, object);
         }
         write_words(nvr::StateOp::WriteField, c_.field_index(destination.symbol, destination.span),
-                    {resolve(object)}, std::move(parts[1]), node.span);
+                    {resolve(object)}, std::move(parts[1]), node.span, atomic);
         return;
     }
     case IrOp::Index: {
@@ -2475,7 +2598,7 @@ void FunctionCompiler::store(const IrNode& node) {
         auto index = to_index(parts[1].front(), destination.operands[1].type, destination.span);
         // A tuple of several words is one aggregate element: each word is a component.
         if (parts[2].size() > 1) {
-            write_words(nvr::StateOp::WriteComponent, 0, {parts[0].front(), index}, std::move(parts[2]), node.span);
+            write_words(nvr::StateOp::WriteComponent, 0, {parts[0].front(), index}, std::move(parts[2]), node.span, atomic);
         } else {
             state(nvr::StateOp::WriteElement, 0, {parts[0].front(), index, parts[2].front()},
                   c_.scalar(nvr::TypeKind::Void), node.span);
@@ -2512,10 +2635,10 @@ void FunctionCompiler::loop(const IrNode& node) {
     const auto head = new_block();
     jump(head);
     begin(head, node.span);
-    enter_scope(needs_region(node.operands.front()), false, node.span);
+    const auto depth = enter_scope(needs_region(node.operands.front()), nullptr, node.span);
     auto condition = expression(node.operands.front());
-    if (scopes_.back().token) spill(condition);
-    end_scope(node.span);
+    if (exit_stack_.back().token) spill(condition);
+    end_scope(depth, node.span);
     condition = resolve(condition);
     const auto body = new_block();
     const auto exit = new_block();
@@ -2526,7 +2649,7 @@ void FunctionCompiler::loop(const IrNode& node) {
     // The poll of a loop rides on the exit that takes the back edge: the
     // jump from the latch, or without a latch every jump back to the head.
     const bool poll_at_head = node.poll && latch == head;
-    loops_.push_back({latch, exit, poll_at_head, scopes_.size()});
+    loops_.push_back({latch, exit, poll_at_head, exit_stack_.size()});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
     lexical_region(node.body, node.span);
     if (open()) {
@@ -2680,11 +2803,271 @@ Operand FunctionCompiler::integer_literal(const IrNode& node) {
     return immediate(type, c_.literal(node, type).value());
 }
 
+// The policy word is zero on a live reference and layout + 1 on a typed nil.
+Operand FunctionCompiler::present(const Operand& value) {
+    return bits(c_.scalar(nvr::TypeKind::Bool), {current().synth.circuit().any(lanes(value))});
+}
+
+Operand FunctionCompiler::same_word(const Operand& left, const Operand& right) {
+    return bits(c_.scalar(nvr::TypeKind::Bool), {equal(current().synth.circuit(), lanes(left), lanes(right))});
+}
+
+Operand FunctionCompiler::choose(const Operand& condition, const Operand& yes, const Operand& no) {
+    const auto test = lanes(condition).front();
+    auto word = lanes(yes);
+    const auto other = lanes(no);
+    for (std::size_t i = 0; i < word.size(); ++i)
+        word[i] = current().synth.circuit().choose(test, word[i], other[i]);
+    return bits(yes.type, std::move(word));
+}
+
+Values FunctionCompiler::snapshot(Values words, const Span& span) {
+    // Capture mutable slots as well as graph values before another operand
+    // can change their source. The fresh slots are initialized on one exit.
+    if (std::ranges::all_of(words, [](const auto& word) {
+            return word.kind == Operand::Kind::Immediate || word.kind == Operand::Kind::Constant;
+        })) return words;
+    std::vector<std::uint32_t> slots;
+    for (const auto& word : words) {
+        slots.push_back(new_slot(word.type));
+        assign(slots.back(), word);
+    }
+    const auto next = new_block();
+    jump(next);
+    begin(next, span);
+    for (std::size_t i = 0; i < words.size(); ++i) words[i] = slot_operand(slots[i]);
+    return words;
+}
+
+Operand FunctionCompiler::policy_of(const Values& reference, const Operand& fallback, const Span& span) {
+    if (reference.front().kind == Operand::Kind::Immediate && reference.front().bits == 0)
+        return reference.size() == 1 ? fallback : choose(present(reference[1]), reference[1], fallback);
+    const auto result = new_slot(fallback.type);
+    const auto live = new_block(), nil = new_block(), done = new_block();
+    branch(present(reference.front()), live, nil);
+    begin(live, span);
+    const auto tag = state(nvr::StateOp::ReadTag, 0, {reference.front()}, fallback.type, span);
+    assign(result, bits(fallback.type, add(current().synth.circuit(), lanes(tag), constant_word(1, 32), false).value));
+    jump(done);
+    begin(nil, span);
+    assign(result, reference.size() == 1 ? fallback : choose(present(reference[1]), reference[1], fallback));
+    jump(done);
+    begin(done, span);
+    return slot_operand(result);
+}
+
+std::vector<std::pair<std::uint32_t, SymbolId>> FunctionCompiler::policies(const IrType& view, HookKind kind,
+                                                                         const Span& span) {
+    std::vector<std::pair<std::uint32_t, SymbolId>> result;
+    for (SymbolId cls = 0; cls < c_.program().symbols.size(); ++cls) {
+        const auto& item = c_.symbol(cls);
+        if (item.kind == SymbolKind::Class && item.generics.empty() && effective_hook(c_.program(), cls, kind) != no_symbol &&
+            c_.derives(cls, view.symbol))
+            result.emplace_back(c_.layout(cls, span) + 1, cls);
+    }
+    std::ranges::sort(result);
+    return result;
+}
+
+Operand FunctionCompiler::repeat_hooked(const IrNode& node) {
+    const auto& span = node.span;
+    const auto& admission = node.operands[1];
+    const auto length = snapshot(values(node.operands[0]), span).front();
+    const auto fill = snapshot(values(admission.operands.front()), span);
+    const auto words = c_.word_types(admission.type, span);
+    const auto type = c_.type_of(node.type, span);
+    const bool region = node.type.kind == TypeKind::Array;
+    Values arguments{length, immediate(words[0], 0), immediate(words[1], 0)};
+    if (region) arguments.insert(arguments.begin(), region_token());
+    const auto collection = state(region ? nvr::StateOp::RegionRepeat : nvr::StateOp::RepeatCollection,
+                                  type, std::move(arguments), type, span);
+    const auto position = new_slot(length.type);
+    assign(position, immediate(length.type, 0));
+    const auto head = new_block(), body = new_block(), done = new_block();
+    jump(head);
+    begin(head, span);
+    branch(same_word(slot_operand(position), length), done, body);
+    begin(body, span);
+    auto value = hook_event(admission, fill);
+    write_words(nvr::StateOp::WriteComponent, 0, {collection, slot_operand(position)}, std::move(value), span, true);
+    assign(position, bits(length.type, add(current().synth.circuit(), lanes(slot_operand(position)), constant_word(1, 64), false).value));
+    jump(head);
+    begin(done, span);
+    return collection;
+}
+
+Values FunctionCompiler::fit_reference(Values words, const IrType& destination) {
+    if (destination.kind == TypeKind::Object) {
+        if (c_.inline_value(destination) && words.size() == 1)
+            words.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0));
+        else if (!c_.inline_value(destination) && words.size() == 2) words.resize(1);
+    }
+    return words;
+}
+
+Values FunctionCompiler::reference_cast(const IrNode& node) {
+    auto inputs = values(node.operands.front());
+    if (inputs.size() == 2) spill(inputs[1]);
+    const auto type = c_.type_of(node.type, node.span);
+    auto result = state(nvr::StateOp::ClassCast, c_.layout(node.type.symbol, node.span), inputs, type, node.span);
+    if (!c_.inline_value(node.type)) return {result};
+    return {result, inputs.size() == 2 ? resolve(inputs[1]) : immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0)};
+}
+
+Values FunctionCompiler::hook_event(const IrNode& node, Values incoming, Values previous) {
+    const auto& span = node.span;
+    const auto kind = node.op == IrOp::HookRead ? HookKind::Get : HookKind::Set;
+    const auto words = c_.word_types(node.type, span);
+    const auto zero = immediate(words[1], 0);
+    incoming = snapshot(std::move(incoming), span);
+    if (incoming.size() == 1) incoming.push_back(zero);
+    const bool has_previous = !previous.empty();
+    if (!has_previous) previous = {immediate(words[0], 0), zero};
+    previous = snapshot(std::move(previous), span);
+    const auto& declared = c_.symbol(node.type.symbol);
+    auto fallback = immediate(words[1], declared.kind == SymbolKind::Class && declared.name != "$class" ?
+                                         c_.layout(node.type.symbol, span) + 1 : 0);
+    auto selected = policy_of(incoming, zero, span);
+    // Read the previous object's header only if the incoming value supplies
+    // no policy. A getter has no previous destination.
+    const auto selected_slot = new_slot(words[1]);
+    const auto use_previous = new_block(), ready = new_block();
+    assign(selected_slot, selected);
+    branch(present(selected), ready, use_previous);
+    begin(use_previous, span);
+    assign(selected_slot, kind == HookKind::Set ? policy_of(previous, fallback, span) : fallback);
+    jump(ready);
+    begin(ready, span);
+    selected = slot_operand(selected_slot);
+    const auto result = new_slots(words);
+    const auto done = new_block();
+    for (const auto& [policy, cls] : policies(node.type, kind, span)) {
+        const auto target = effective_hook(c_.program(), cls, kind);
+        const auto owner = hook_owner(c_.symbol(target));
+        const auto type = c_.type_of(c_.symbol(owner).type, span);
+        const auto layout = c_.layout(owner, span);
+        const auto call_block = new_block(), next = new_block();
+        branch(same_word(selected, immediate(words[1], policy)), call_block, next);
+        begin(call_block, span);
+        Values arguments{type == incoming[0].type ? incoming[0] :
+                         state(nvr::StateOp::ClassCast, layout, {incoming[0]}, type, span)};
+        arguments.push_back(choose(present(arguments[0]), zero, selected));
+        if (kind == HookKind::Set && !has_previous) {
+            arguments.push_back(immediate(type, 0));
+            arguments.push_back(selected);
+        } else if (kind == HookKind::Set) {
+            spill(arguments[1]);
+            const auto matches = state(nvr::StateOp::ClassIs, layout, {previous[0]}, c_.scalar(nvr::TypeKind::Bool), span);
+            const auto compatible = choose(matches, previous[0], immediate(previous[0].type, 0));
+            auto old = state(nvr::StateOp::ClassCast, layout, {compatible}, type, span);
+            arguments.push_back(old);
+            arguments.push_back(choose(present(old), zero, selected));
+        }
+        for (auto& arg : arguments) arg = resolve(arg);
+        arguments.push_back(selected);
+        auto returned = invoke_values({Role::Function, target, cls}, std::move(arguments),
+                                      {type, words[1]}, span);
+        auto handle = returned.front();
+        if (handle.type != words[0]) handle = state(nvr::StateOp::ClassCast, c_.layout(node.type.symbol, span),
+                                                    {handle}, words[0], span);
+        assign(result, handle);
+        assign(result + 1, returned[1]);
+        jump(done);
+        begin(next, span);
+    }
+    assign(result, incoming[0]);
+    assign(result + 1, choose(present(incoming[0]), zero, selected));
+    jump(done);
+    begin(done, span);
+    return slot_values(result, 2);
+}
+
+Values FunctionCompiler::normalize_hook_result(Values value, const IrNode& source, const Span& span) {
+    const auto& function = c_.symbol(origin_.symbol);
+    const auto selected = slot_operand(slots_.at(function.parameters.back()));
+    const auto zero = immediate(selected.type, 0);
+    value = snapshot(std::move(value), span);
+    // The incoming handle has the selected policy by construction. A setter's
+    // previous instance may be a sibling with the same inherited clause.
+    if (source.op != IrOp::Nil && !(source.op == IrOp::Load && source.symbol == function.parameters.front())) {
+        const auto live = new_block(), success = new_block(), bad = new_block();
+        branch(present(value.front()), live, success);
+        begin(live, span);
+        const auto tag = state(nvr::StateOp::ReadTag, 0, {value.front()}, selected.type, span);
+        const auto actual = bits(selected.type, add(current().synth.circuit(), lanes(tag), constant_word(1, 32), false).value);
+        branch(same_word(actual, selected), success, bad);
+        begin(bad, span);
+        ExitSpec trap;
+        trap.kind = nvr::ExitKind::MessageTrap;
+        const auto text = c_.scalar(nvr::TypeKind::Text);
+        const auto name = c_.symbol(origin_.receiver).name;
+        trap.arguments = {{Operand::Kind::Constant, text, c_.text_constant("class hook result is not a " + name, span), 0, {}}};
+        close({trap});
+        begin(success, span);
+    }
+    state(nvr::StateOp::HookLeave, 0, {}, c_.scalar(nvr::TypeKind::Void), span);
+    return {value.front(), choose(present(value.front()), zero, selected)};
+}
+
+// Every inactive handle is overwritten. The collector sees precisely the
+// text and object words of this layout, never scalar bits as a handle.
+Values FunctionCompiler::pack_any(const IrNode& node) {
+    const auto& operand = node.operands.front();
+    const auto tag = any_tag(operand.type).value();
+    auto source = values(operand);
+    const auto types = c_.word_types(node.type, node.span);
+    Values packed;
+    for (auto type : types) packed.push_back(zero_word(type, node.span));
+    packed[0] = immediate(types[0], tag);
+    if (operand.type.kind == TypeKind::Object) {
+        packed[3] = source.front();
+        if (source.size() == 2) packed[4] = source[1];
+    } else if (operand.type.kind == TypeKind::String) {
+        packed[2] = source.front();
+    } else {
+        auto word = lanes(source.front());
+        word.resize(64, Signal::of(0));
+        packed[1] = bits(types[1], std::move(word));
+    }
+    return packed;
+}
+
+Values FunctionCompiler::unpack_any(const IrNode& node) {
+    auto packed = values(node.operands.front());
+    if (node.type.kind == TypeKind::Object) return {packed.begin() + 3, packed.end()};
+    if (node.type.kind == TypeKind::String) return {packed[2]};
+    auto word = lanes(packed[1]);
+    const auto type = c_.type_of(node.type, node.span);
+    const auto& scalar = c_.type_at(type);
+    word.resize(scalar.kind == nvr::TypeKind::Bool ? 1 : scalar.width);
+    return {bits(type, std::move(word))};
+}
+
 Values FunctionCompiler::values(const IrNode& node) {
+    if (node.op == IrOp::Pending) return pending_values(node);
     if (!c_.inline_value(node.type)) return {expression(node)};
     switch (node.op) {
-    case IrOp::Tuple:
-        return flatten(groups(node.operands));
+    case IrOp::AnyPack: return pack_any(node);
+    case IrOp::AnyUnpack: return unpack_any(node);
+    case IrOp::HookAdmit:
+    case IrOp::HookRead:
+        return hook_event(node, values(node.operands.front()));
+    case IrOp::ClassCast:
+        return reference_cast(node);
+    case IrOp::Allocate:
+    case IrOp::Receiver:
+    case IrOp::Nil: {
+        const auto type = c_.type_of(node.type, node.span);
+        const auto handle = node.op == IrOp::Allocate ? allocate(node) :
+                            node.op == IrOp::Receiver ? receiver_value(node) : immediate(type, 0);
+        return {handle, immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0)};
+    }
+    case IrOp::Tuple: {
+        auto fields = groups(node.operands);
+        for (std::size_t i = 0; i < fields.size(); ++i)
+            fields[i] = fit_reference(std::move(fields[i]), node.type.arguments[i]);
+        return flatten(fields);
+    }
     case IrOp::EnumConstruct:
         return aggregate_value(node.type, node.symbol, groups(node.operands), node.text, node.span);
     case IrOp::Load:
@@ -2773,10 +3156,14 @@ Values FunctionCompiler::select(const IrNode& node, const std::vector<std::size_
 }
 
 Operand FunctionCompiler::expression(const IrNode& node) {
+    if (node.type.kind == TypeKind::Object && c_.inline_value(node.type)) return values(node).front();
     if (c_.inline_value(node.type))
         throw std::logic_error("an inline value reached the one-word path at " + node.span.file + ":" +
                                std::to_string(node.span.line));
     switch (node.op) {
+    case IrOp::Pending: return pending_values(node).front();
+    case IrOp::AnyTag: return values(node.operands.front())[0];
+    case IrOp::AnyUnpack: return unpack_any(node).front();
     case IrOp::ValueEquals:
     case IrOp::ValueHash:
     case IrOp::ValueText:
@@ -2795,8 +3182,9 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         name.index = c_.text_constant(c_.qualified(cls), node.span);
         return state(nvr::StateOp::ClassText, 0, {object, name}, name.type, node.span);
     }
-    case IrOp::ClassIs:
-    case IrOp::ClassCast: {
+    case IrOp::ClassCast:
+        return reference_cast(node).front();
+    case IrOp::ClassIs: {
         const auto object = expression(node.operands.front());
         const bool test = node.op == IrOp::ClassIs;
         const auto& target = test ? node.type_arguments.front() : node.type;
@@ -2889,6 +3277,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return state(nvr::StateOp::AllocateCollection, type, std::move(elements), type, node.span);
     }
     case IrOp::RepeatCollection: {
+        if (node.operands[1].op == IrOp::HookAdmit) return repeat_hooked(node);
         auto arguments = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
         if (node.type.kind == TypeKind::Array) {
@@ -2956,7 +3345,9 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return state(nvr::StateOp::RemoveElement, 0, {operands[0], index}, c_.scalar(nvr::TypeKind::Void), node.span);
     }
     case IrOp::BaseInitialize: {
-        auto operands = sequence(node.operands);
+        auto parts = groups(node.operands);
+        parts.front().resize(1);
+        auto operands = flatten(parts);
         return invoke(c_.constructor(c_.symbol(self_class_).base, node.symbol), std::move(operands),
                       c_.scalar(nvr::TypeKind::Void), node.span);
     }
@@ -3043,7 +3434,8 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     const auto& op = node.text;
     const auto& operand_type = node.operands.front().type;
     if (operand_type.kind == TypeKind::Object) {
-        auto operands = sequence(node.operands);
+        const auto parts = groups(node.operands);
+        const Values operands{parts[0].front(), parts[1].front()};
         const auto left = lanes(operands[0]);
         const auto right = lanes(operands[1]);
         const auto same = equal(current().synth.circuit(), left, right);
@@ -3264,8 +3656,9 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         if (type.kind != TypeKind::Float) return word;
         const auto format = float_of(type);
         const auto first_exponent = word.begin() + format.fraction_bits;
-        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}),
-                                             circuit.any({word.begin(), first_exponent}));
+        // Fraction first, then exponent: the order of src/lift/proof.cpp.
+        const auto fraction = circuit.any({word.begin(), first_exponent});
+        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}), fraction);
         const auto canonical = constant_word(format.canonical_nan(), format.width());
         for (std::size_t bit = 0; bit < word.size(); ++bit) {
             word[bit] = circuit.choose(nan, canonical[bit], word[bit]);
@@ -3488,8 +3881,14 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
         const auto module = module_of(receiver);
         const auto implementation = c_.resolve_member(module, node.symbol);
         if (!c_.symbol(implementation).has_body) {
-            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" +
-                                            c_.symbol(node.symbol).name + "'").with_code("E0899");
+            // A call through a module of a requirement that it, and every
+            // module it inherits, leaves without a body.
+            const auto& name = c_.symbol(node.symbol).name;
+            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" + name + "'")
+                .with_code("E0434")
+                .label("this call runs in module '" + c_.symbol(module).name + "', where '" + name + "' has no body")
+                .help("implement '" + name + "' with `let.override` in '" + c_.symbol(module).name +
+                      "', or in a module that inherits it and that the call goes through");
         }
         auto arguments = sequence(node.operands, 1);
         return invoke_values({Role::Function, implementation, module}, std::move(arguments), results, node.span,
@@ -3499,7 +3898,19 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
     if (receiver.type.kind != TypeKind::Object) {
         throw Diagnostic(receiver.span, "unsupported method receiver").with_code("E0801");
     }
-    return dispatch_call(receiver.type.symbol, node.symbol, sequence(node.operands), results, node.span,
+    const auto& last = node.operands.back();
+    if (last.op == IrOp::HookAdmit && last.symbol != no_symbol && c_.symbol(last.symbol).kind == SymbolKind::Field) {
+        auto place = snapshot({expression(receiver)}, node.span);
+        auto incoming = snapshot(values(last.operands.front()), node.span);
+        auto previous = previous_words(nvr::StateOp::ReadField, c_.field_index(last.symbol, node.span), place,
+                                       last.type, node.span);
+        auto admitted = hook_event(last, std::move(incoming), std::move(previous));
+        place.insert(place.end(), admitted.begin(), admitted.end());
+        return dispatch_call(receiver.type.symbol, node.symbol, std::move(place), results, node.span, node.poll);
+    }
+    auto parts = groups(node.operands);
+    parts.front().resize(1);
+    return dispatch_call(receiver.type.symbol, node.symbol, flatten(parts), results, node.span,
                          node.poll);
 }
 
@@ -3576,10 +3987,11 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
         op == IrOp::ValueHash ? c_.scalar(nvr::TypeKind::Unsigned, 32) : c_.scalar(nvr::TypeKind::Text);
     // An inline value or a collection is compared, hashed and printed by a
     // function over its words or elements.
-    if (c_.inline_value(type) || type.kind == TypeKind::Array || type.kind == TypeKind::List)
+    if ((type.kind != TypeKind::Object && c_.inline_value(type)) || type.kind == TypeKind::Array || type.kind == TypeKind::List)
         return invoke(c_.value_function(op, type, span), std::move(operands), result_type, span);
     if (type.kind != TypeKind::Object) return scalar_member(op, type, std::move(operands), span);
 
+    if (c_.inline_value(type)) operands.erase(operands.begin() + 1);
     const auto cls = type.symbol;
     if (c_.symbol(cls).name.starts_with("$signature"))
         throw Diagnostic(span, "function values do not support equality, hashing, or text members").with_code("E0801");
@@ -3588,6 +4000,8 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     const auto method = c_.member(root, equality ? "equals" : op == IrOp::ValueHash ? "hash_code" : "to_string");
     if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract")
         .with_code("E0899");
+    if (equality && operands.size() == 2 && c_.inline_value(c_.symbol(root).type))
+        operands.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0));
     for (auto& operand : operands) spill(operand);
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
     // No lane of a nil handle is set: the test is a comparison with nil.
@@ -3707,7 +4121,7 @@ Values FunctionCompiler::select_values(const IrNode& node) {
     branch(condition, when_true, when_false);
     const auto emit_arm = [&](std::uint32_t block, const IrNode& arm) {
         begin(block, arm.span);
-        auto value = values(arm);
+        auto value = fit_reference(values(arm), node.type);
         for (std::size_t i = 0; i < value.size(); ++i) assign(result + static_cast<std::uint32_t>(i), value[i]);
         jump(join);
     };
@@ -3770,8 +4184,9 @@ void FunctionCompiler::set_borrow_owner(SymbolId box, Operand handle, std::optio
     const auto field = c_.member(box, "$owner");
     if (field == no_symbol) return;
     const auto type = c_.type_of(c_.symbol(field).type, span);
-    state(nvr::StateOp::WriteField, c_.field_index(field, span),
-          {handle, owner ? *owner : zero_word(type, span)}, c_.scalar(nvr::TypeKind::Void), span);
+    Values words{owner ? *owner : zero_word(type, span)};
+    if (c_.inline_value(c_.symbol(field).type)) words.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0));
+    write_words(nvr::StateOp::WriteField, c_.field_index(field, span), {handle}, std::move(words), span, true);
 }
 
 void FunctionCompiler::check_borrow_owner(const IrNode& field, const Operand& box) {
@@ -3868,7 +4283,8 @@ void FunctionCompiler::field_initializers(SymbolId cls) {
         }
         auto value = values(initializer->operands.front());
         write_words(nvr::StateOp::WriteField, c_.field_index(initializer->symbol, initializer->span),
-                    {slot_operand(self_slot_)}, std::move(value), initializer->span);
+                    {slot_operand(self_slot_)}, std::move(value), initializer->span,
+                    c_.value_layout(c_.symbol(initializer->symbol).type, initializer->span).carries_policy);
     }
 }
 
@@ -3884,7 +4300,9 @@ void FunctionCompiler::compile_function() {
                                c_.symbol(owner).kind == SymbolKind::Interface)) {
         self_parameter(owner);
     } else if (owner != no_symbol && c_.symbol(owner).kind == SymbolKind::Module) {
-        receiver_module_ = origin_.receiver;
+        // An inherited clause is compiled for the concrete event policy, but
+        // its static names still belong to the declaring class.
+        receiver_module_ = hook_owner(function) == no_symbol ? origin_.receiver : owner;
     }
     parameters(origin_.symbol);
     // A tuple result is several words (NVR 1.7): the first is the result type.
@@ -3894,7 +4312,16 @@ void FunctionCompiler::compile_function() {
     function_.result_type = results.front();
     function_.more_results.assign(results.begin() + 1, results.end());
     begin(new_block(), function.span);
+    if (hook_owner(function) != no_symbol) {
+        const auto kind = function.parameters.size() == 3 ? HookKind::Set : HookKind::Get;
+        const auto text = c_.scalar(nvr::TypeKind::Text);
+        Operand name{Operand::Kind::Constant, text, c_.text_constant(c_.symbol(origin_.receiver).name, function.span), 0, {}};
+        state(nvr::StateOp::HookEnter, static_cast<std::uint32_t>(kind),
+              {slot_operand(slots_.at(function.parameters.back())), slot_operand(slots_.at(function.parameters.front())), name},
+              c_.scalar(nvr::TypeKind::Void), function.span);
+    }
     static_initializer_ = is_static_initializer(function);
+    resume_chain();
     lexical_region(c_.body(origin_.symbol), function.span);
     finish();
 }
@@ -3917,7 +4344,7 @@ void FunctionCompiler::compile_constructor() {
         [&](const auto* node) { return needs_region(*node); });
     const bool has_body_region = init != no_symbol && std::ranges::any_of(c_.body(init),
         [&](const auto& node) { return needs_region(node); });
-    enter_scope(has_field_region || has_body_region, false, item.span);
+    const auto depth = enter_scope(has_field_region || has_body_region, nullptr, item.span);
     if (init != no_symbol) {
         const auto& body = c_.body(init);
         std::size_t start = 0;
@@ -3943,7 +4370,7 @@ void FunctionCompiler::compile_constructor() {
         }
         field_initializers(cls);
     }
-    end_scope(item.span);
+    end_scope(depth, item.span);
     finish();
 }
 
@@ -3998,7 +4425,10 @@ void FunctionCompiler::append_text_bytes(const Operand& buffer, const Operand& s
     const auto head = new_block();
     jump(head);
     begin(head, span);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto next = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, next);
@@ -4018,6 +4448,7 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     const bool equality = op == IrOp::ValueEquals;
     const bool hashing = op == IrOp::ValueHash;
     const bool inline_value = c_.inline_value(type);
+    const bool enumeration = type.kind == TypeKind::Enum;
     // An inline value arrives as its words, and an equality takes the words
     // of both operands; a collection arrives as one handle.
     const auto input = inline_value ? c_.word_types(type, span) : std::vector<std::uint32_t>{c_.type_of(type, span)};
@@ -4039,7 +4470,9 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     if (hashing) assign(hash, immediate(hash_type, 1));
     if (!equality && !hashing) {
         const auto list = c_.type_index({nvr::TypeKind::List, 0, byte});
-        buffer = state(nvr::StateOp::AllocateCollection, list, {immediate(byte, '[')}, list, span);
+        Values contents;
+        if (!enumeration) contents.push_back(immediate(byte, '['));
+        buffer = state(nvr::StateOp::AllocateCollection, list, std::move(contents), list, span);
     }
     const auto append = [&](unsigned char value) {
         state(nvr::StateOp::AppendElement, 0, {buffer, immediate(byte, value)}, none, span);
@@ -4066,26 +4499,71 @@ void FunctionCompiler::compile_value_member(IrOp op) {
             append_text_bytes(buffer, value, span);
         }
     };
-    if (inline_value) {
+    const auto component = [&](const IrType& field, const std::vector<std::size_t>& positions) {
+        auto operands = slots_at(left, positions);
+        if (equality) {
+            const auto other = slots_at(right, positions);
+            operands.insert(operands.end(), other.begin(), other.end());
+        }
+        process(field, std::move(operands));
+    };
+    if (enumeration) {
         const auto layout = c_.value_layout(type, span);
-        for (std::uint32_t i = 0; i < layout.parts.size(); ++i) {
+        const auto tag = slot_operand(left);
+        const auto same_tag = [&](const Operand& other) {
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(tag), lanes(other))});
+            return described(std::move(same), binary_form("==", boolean, tag, other));
+        };
+        if (equality) require_equal(same_tag(slot_operand(right)));
+        const auto done = new_block();
+        for (std::size_t i = 0; i < layout.variants.size(); ++i) {
+            const bool last = i + 1 == layout.variants.size();
+            auto next = absent;
+            if (!last) {
+                const auto selected = new_block();
+                next = new_block();
+                branch(same_tag(immediate(tag.type, i)), selected, next);
+                begin(selected, span);
+            }
+            const auto& variant = c_.symbol(layout.variants[i]);
+            const bool named = !variant.payload_names.empty();
+            const bool printing = !equality && !hashing;
+            if (hashing) assign(hash, immediate(hash_type, i + 1));
+            if (printing) {
+                for (const char ch : variant.name) append(ch);
+                if (!variant.payload_types.empty()) append(named ? '{' : '(');
+            }
+            for (std::size_t field = 0; field < variant.payload_types.size(); ++field) {
+                if (printing) {
+                    if (field != 0) { append(','); append(' '); }
+                    if (named) {
+                        for (const char ch : variant.payload_names[field]) append(ch);
+                        append(':');
+                        append(' ');
+                    }
+                }
+                component(variant.payload_types[field], layout.payloads[i][field]);
+            }
+            if (printing && !variant.payload_types.empty()) append(named ? '}' : ')');
+            jump(done);
+            if (!last) begin(next, span);
+        }
+        begin(done, span);
+    } else if (inline_value) {
+        const auto layout = c_.value_layout(type, span);
+        for (std::size_t i = 0; i < layout.parts.size(); ++i) {
             if (!equality && !hashing && i != 0) {
                 append(',');
                 append(' ');
             }
-            // Each element is a member of its own type, over its own words.
-            auto operands = slots_at(left, layout.elements[i]);
-            if (equality) {
-                const auto other = slots_at(right, layout.elements[i]);
-                operands.insert(operands.end(), other.begin(), other.end());
-            }
-            process(layout.parts[i], std::move(operands));
+            component(layout.parts[i], layout.elements[i]);
         }
     } else {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
         if (equality) {
             const auto other = state(nvr::StateOp::ReadLength, 0, {slot_operand(right)}, count, span);
-            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), lanes(other))});
+            const auto other_lanes = lanes(other);
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), other_lanes)});
             require_equal(described(std::move(same), binary_form("==", boolean, length, other)));
         }
         const auto position = new_slot(count);
@@ -4095,7 +4573,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto done = new_block();
         jump(head);
         begin(head, span);
-        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+        const auto limit = lanes(length);
+        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
         branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), next, done);
         begin(next, span);
         if (!equality && !hashing) {
@@ -4147,7 +4626,7 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     } else if (hashing) {
         return_value(slot_operand(hash));
     } else {
-        append(']');
+        if (!enumeration) append(']');
         return_value(state(nvr::StateOp::ConstructText, text, {buffer}, text, span));
     }
     finish();
@@ -4248,7 +4727,8 @@ void FunctionCompiler::compile_unbox_collection() {
     const auto done = new_block();
     jump(head);
     begin(head, span);
-    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+    const auto limit = lanes(length);
+    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
     branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), body, done);
     begin(body, span);
     const auto handle = state(nvr::StateOp::ReadElement, 0, {slot_operand(input), slot_operand(position)}, boxed, span);
@@ -4289,7 +4769,10 @@ void FunctionCompiler::compile_hash_text() {
     const auto head = new_block();
     jump(head);
     begin(head, none);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto done = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, done);
@@ -4330,7 +4813,7 @@ void FunctionCompiler::compile_start() {
     const auto& items = c_.startup();
     const auto& start = items.empty() ? main.span : items.front().node->span;
     begin(new_block(), start);
-    enter_scope(std::ranges::any_of(items, [&](const auto& item) { return needs_region(*item.node); }), false, start);
+    enter_scope(std::ranges::any_of(items, [&](const auto& item) { return needs_region(*item.node); }), nullptr, start);
     for (const auto& item : items) {
         if (!open()) {
             break;
@@ -4437,6 +4920,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     // contain itself (E0448), and its shape has a limit (E0449).
     check_containment(program);
     check_inline_limit(program);
+    elaborate_class_hooks(program);
     if (options.optimize) {
         optimize(program);
     } else {

@@ -1,0 +1,318 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief Percent-encoding of URI components (RFC 3986 section 2.1) and of HTML form data
+/// (application/x-www-form-urlencoded).
+///
+/// Encoding works on the UTF-8 bytes of the text: a byte the component's set allows is copied, every other byte
+/// becomes `%` and two uppercase hex digits (RFC 3986 section 2.1 recommends uppercase). In the Form set a space
+/// becomes `+`. Decoding is strict: a `%` must be followed by two hex digits, and the decoded bytes must be
+/// well-formed UTF-8.
+/// @see [Std.Net.Core.PercentEncoding](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-PercentEncoding)
+#Since("0.3.0")
+export let PercentEncoding = module (
+    /// @brief The bytes a component keeps unencoded, from the RFC 3986 appendix A grammar.
+    ///
+    /// Unreserved: ALPHA, DIGIT, `-`, `.`, `_`, `~`. UserInfo: unreserved, sub-delims, `:`. RegName: unreserved
+    /// and sub-delims. PathSegment: pchar (unreserved, sub-delims, `:`, `@`). Path: pchar and `/`. Query and
+    /// Fragment: pchar, `/`, `?`. QueryComponent: the Query set without `&`, `=`, `+`, for one key or value of a
+    /// query string. Form: ALPHA, DIGIT, `*`, `-`, `.`, `_`, with space written as `+` (the WHATWG URL
+    /// application/x-www-form-urlencoded serializer). `%` is never kept.
+    #Since("0.3.0")
+    export let EncodeSet = enum (
+        Unreserved, UserInfo, RegName, PathSegment, Path, Query, QueryComponent, Fragment, Form
+    );
+
+    /// @brief The uppercase hex digits used on output.
+    const HexUpper: string = "0123456789ABCDEF";
+
+    /// @brief Tests whether a byte is ALPHA, DIGIT, `-`, `.`, `_`, or `~` (RFC 3986 section 2.3).
+    #[Pure, ThreadSafe]
+    export let is_unreserved = func(b: uint8) -> bool {
+        if ((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57)) {
+            return true;
+        }
+        return b == 45 or 46 or 95 or 126;
+    };
+
+    /// @brief Tests whether a byte is one of the sub-delims `!$&'()*+,;=` (RFC 3986 section 2.2).
+    #[Pure, ThreadSafe]
+    export let is_sub_delim = func(b: uint8) -> bool =>
+        b == 33 or 36 or 38 or 39 or 40 or 41 or 42 or 43 or 44 or 59 or 61;
+
+    /// @brief Tests whether the set keeps the byte unencoded.
+    #[Pure, ThreadSafe]
+    export let is_allowed = func(b: uint8, set: EncodeSet) -> bool {
+        return match (set) {
+            EncodeSet.Unreserved => is_unreserved(b),
+            EncodeSet.UserInfo => is_unreserved(b) || is_sub_delim(b) || b == 58,
+            EncodeSet.RegName => is_unreserved(b) || is_sub_delim(b),
+            EncodeSet.PathSegment => is_pchar(b),
+            EncodeSet.Path => is_pchar(b) || b == 47,
+            EncodeSet.Query => is_pchar(b) || b == 47 or 63,
+            EncodeSet.QueryComponent => (is_pchar(b) || b == 47 or 63) && !(b == 38 or 61 or 43),
+            EncodeSet.Fragment => is_pchar(b) || b == 47 or 63,
+            EncodeSet.Form => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57)
+                || b == 42 or 45 or 46 or 95,
+        };
+    };
+
+    /// @brief The text with every byte the set does not keep percent-encoded in uppercase hex.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode = func(text: string, set: EncodeSet) -> string {
+        last bytes: uint8[list] = new;
+        last count = text.byte_length;
+        for (let i = 0; i < count; i++) {
+            bytes.append(text.byte_at(i));
+        }
+        return encode_bytes(bytes, set);
+    };
+
+    /// @brief The bytes as text, with every byte the set does not keep percent-encoded in uppercase hex.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode_bytes = func(bytes: uint8[list], set: EncodeSet) -> string {
+        last output: uint8[list] = new;
+        last form = set == EncodeSet.Form;
+        for (let b in bytes) {
+            if (is_allowed(b, set)) {
+                output.append(b);
+            } else if (form && b == 32) {
+                output.append(43);
+            } else {
+                append_triplet(output, b);
+            }
+        }
+        return ascii_text(output);
+    };
+
+    /// @brief The text with each `%XX` triplet decoded; `+` stays `+`.
+    ///
+    /// Errors: Parse InvalidCharacter at a `%` not followed by two hex digits; Encoding at the offset in the
+    /// input of the first byte that starts an ill-formed UTF-8 sequence after decoding.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode = func(text: string) -> Result<string> => decode_text(text, plus_as_space: false);
+
+    /// @brief Decodes an application/x-www-form-urlencoded key or value: `+` becomes a space, then each `%XX`
+    /// triplet is decoded. Errors as in decode.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_form = func(text: string) -> Result<string> => decode_text(text, plus_as_space: true);
+
+    /// @brief The bytes of the text with each `%XX` triplet decoded, without any UTF-8 check.
+    ///
+    /// Errors: Parse InvalidCharacter at a `%` not followed by two hex digits.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_bytes = func(text: string) -> Result<uint8[list]> {
+        last output: uint8[list] = new;
+        last offsets: int[list] = new;
+        last bad = decode_into(text, plus_as_space: false, output: output, offsets: offsets);
+        if (bad >= 0) {
+            return Result<uint8[list]>.Err(bad_triplet(bad));
+        }
+        return Result<uint8[list]>.Ok(output);
+    };
+
+    /// @brief The offset of the first byte that is neither kept by the set nor the start of a well-formed
+    /// `%XX` triplet, or -1 when every byte is valid. Bytes of a triplet are skipped together.
+    #[Pure, ThreadSafe]
+    export let first_invalid = func(text: string, set: EncodeSet) -> int {
+        last count = text.byte_length;
+        let i = 0;
+        while (i < count) {
+            last b = text.byte_at(i);
+            if (b == 37) {
+                if (!is_triplet(text, i)) {
+                    return i;
+                }
+                i += 3;
+            } else if (is_allowed(b, set)) {
+                i++;
+            } else {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Percent-encoding normalization (RFC 3986 sections 6.2.2.1 and 6.2.2.2): a triplet that encodes an
+    /// unreserved byte is decoded, every other triplet gets uppercase hex digits. A `%` that does not start a
+    /// well-formed triplet is copied unchanged.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let normalize = func(text: string) -> string {
+        last output: uint8[list] = new;
+        last count = text.byte_length;
+        let i = 0;
+        while (i < count) {
+            last b = text.byte_at(i);
+            if (b == 37 && is_triplet(text, i)) {
+                last value = ((hex_value(text.byte_at(i + 1)) * 16) + hex_value(text.byte_at(i + 2))) as uint8;
+                if (is_unreserved(value)) {
+                    output.append(value);
+                } else {
+                    append_triplet(output, value);
+                }
+                i += 3;
+            } else {
+                output.append(b);
+                i++;
+            }
+        }
+        let [valid, result] = string.from_utf8(output);
+        if (!valid) {
+            trap_with_message("invalid state: percent-encoding normalization broke UTF-8");
+        }
+        return result;
+    };
+
+    /// @brief Tests whether the text has a well-formed `%XX` triplet at the offset.
+    #[Pure, ThreadSafe]
+    export let is_triplet = func(text: string, offset: int) -> bool {
+        if (offset + 2 >= text.byte_length || text.byte_at(offset) != 37) {
+            return false;
+        }
+        return hex_value(text.byte_at(offset + 1)) >= 0 && hex_value(text.byte_at(offset + 2)) >= 0;
+    };
+
+    /// @brief The value of an ASCII hex digit in either case, or -1.
+    #[Pure, ThreadSafe]
+    export let hex_value = func(b: uint8) -> int {
+        if (b >= 48 && b <= 57) {
+            return (b as int) - 48;
+        }
+        if (b >= 65 && b <= 70) {
+            return (b as int) - 55;
+        }
+        if (b >= 97 && b <= 102) {
+            return (b as int) - 87;
+        }
+        return -1;
+    };
+
+    // Internal helpers.
+
+    /// @brief pchar without its percent-encoded form: unreserved, sub-delims, `:`, `@`.
+    let is_pchar = func(b: uint8) -> bool => is_unreserved(b) || is_sub_delim(b) || b == 58 or 64;
+
+    /// @brief Appends `%` and the byte's two uppercase hex digits.
+    let append_triplet = func(output: uint8[list], b: uint8) {
+        last value = b as int;
+        output.append(37);
+        output.append(HexUpper.byte_at(value / 16));
+        output.append(HexUpper.byte_at(value % 16));
+    };
+
+    /// @brief Decodes into `output`, recording each output byte's input offset; returns the offset of a bad
+    /// `%`, or -1.
+    let decode_into = func(text: string, plus_as_space: bool, output: uint8[list], offsets: int[list]) -> int {
+        last count = text.byte_length;
+        let i = 0;
+        while (i < count) {
+            last b = text.byte_at(i);
+            offsets.append(i);
+            if (b == 37) {
+                if (!is_triplet(text, i)) {
+                    return i;
+                }
+                output.append(((hex_value(text.byte_at(i + 1)) * 16) + hex_value(text.byte_at(i + 2))) as uint8);
+                i += 3;
+            } else if (plus_as_space && b == 43) {
+                output.append(32);
+                i++;
+            } else {
+                output.append(b);
+                i++;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Decodes and checks UTF-8, reporting failures at input offsets.
+    let decode_text = func(text: string, plus_as_space: bool) -> Result<string> {
+        last output: uint8[list] = new;
+        last offsets: int[list] = new;
+        last bad = decode_into(text, plus_as_space: plus_as_space, output: output, offsets: offsets);
+        if (bad >= 0) {
+            return Result<string>.Err(bad_triplet(bad));
+        }
+        let [valid, result] = string.from_utf8(output);
+        if (valid) {
+            return Result<string>.Ok(result);
+        }
+        last at = first_ill_formed(output);
+        return Result<string>.Err(Error.Encoding {
+            offset: offsets[at], message: "decoded bytes are not valid UTF-8"
+        });
+    };
+
+    /// @brief The parse error for a `%` that does not start a triplet.
+    let bad_triplet = func(offset: int) -> Error =>
+        Error.Parse {
+            kind: ParseErrorKind.InvalidCharacter, offset: offset, message: "'%' must be followed by two hex digits"
+        };
+
+    /// @brief The index of the first byte that starts an ill-formed UTF-8 sequence (RFC 3629 table).
+    let first_ill_formed = func(bytes: uint8[list]) -> int {
+        last count = bytes.length;
+        let i = 0;
+        while (i < count) {
+            last size = sequence_length(bytes, i);
+            if (size == 0) {
+                return i;
+            }
+            i += size;
+        }
+        return count;
+    };
+
+    /// @brief The length of the well-formed UTF-8 sequence at i, or 0.
+    let sequence_length = func(bytes: uint8[list], i: int) -> int {
+        last count = bytes.length;
+        last lead = bytes[i];
+        if (lead < 128) {
+            return 1;
+        }
+        let size = 0;
+        let low: uint8 = 128;
+        let high: uint8 = 191;
+        if (lead >= 194 && lead <= 223) {
+            size = 2;
+        } else if (lead >= 224 && lead <= 239) {
+            size = 3;
+            if (lead == 224) {
+                low = 160;
+            } else if (lead == 237) {
+                high = 159;
+            }
+        } else if (lead >= 240 && lead <= 244) {
+            size = 4;
+            if (lead == 240) {
+                low = 144;
+            } else if (lead == 244) {
+                high = 143;
+            }
+        } else {
+            return 0;
+        }
+        if (i + size > count) {
+            return 0;
+        }
+        last second = bytes[i + 1];
+        if (second < low || second > high) {
+            return 0;
+        }
+        for (let k = i + 2; k < i + size; k++) {
+            if (bytes[k] < 128 || bytes[k] > 191) {
+                return 0;
+            }
+        }
+        return size;
+    };
+
+    /// @brief The text of bytes known to be ASCII.
+    let ascii_text = func(bytes: uint8[list]) -> string {
+        let [valid, result] = string.from_utf8(bytes);
+        if (!valid) {
+            trap_with_message("invalid state: percent-encoded output is not ASCII");
+        }
+        return result;
+    };
+);

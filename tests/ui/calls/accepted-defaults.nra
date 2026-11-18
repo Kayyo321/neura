@@ -1,0 +1,39 @@
+// Constant defaults that are accepted (docs/design/Calls030.md, edge cases
+// 18, 26, 28, 29, 31 and 34).
+let Light = enum (Red, Yellow, Green);
+let Shape = class (
+    export let area = func(scale: int = 1) -> int => scale;
+);
+let Square = class : Shape (
+    export let.override area = func(scale: int = 1) -> int => scale * 4;
+);
+
+let negative = func(a: int = -1) -> int => a;
+let decimal = func(a: int = 16) -> int => a;
+let half = func(a: float32 = 1.5) -> float32 => a;
+let empty = func(a: string = "") -> string => a;
+let light = func(a: Light = Light.Red) -> Light => a;
+let shape = func(a: Shape = nil) -> Shape => a;
+let wide = func(a: uint64 = 18446744073709551615, b: int64 = -9223372036854775808, c: bool = true) -> uint64 => a;
+let later = func(a: int = 1, b: int) -> int => a + b;
+let tagged = func(#Note("x") a: int = 1) -> int => a;
+
+let pick = func(a: int) -> int => a
+    or func(a: int, b: int = 1) -> int => a + b;
+
+let Point = class (
+    export let x: int;
+    export let y: int;
+    export let init = func(x: int, y: int = 0) => set;
+);
+
+let use = func(base: Shape) {
+    let values = negative() + decimal() + later(b: 2) + later(1, 2) + tagged();
+    let text = empty() + half().to_string();
+    let chosen = light();
+    let none = shape();
+    let big = wide(c: false);
+    let two = pick(1, 2) + pick(1, b: 2);
+    let point = new Point(1);
+    let through_base = base.area();
+};

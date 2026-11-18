@@ -1,0 +1,31 @@
+let json = import:Std.Encoding.Json;
+
+let Records = module (
+    /// A point in the plane.
+    export let Point = record (x: int, y: int);
+
+    /// A labelled segment between two points.
+    export let Segment = record (
+        start: Point,
+        end: Point,
+        label: string,
+    );
+
+    export let Endpoint = enum (Origin, At { point: Point });
+    export let Pin = record (label: string, endpoint: Endpoint);
+
+    /// Encodes a pin with the public field name "name".
+    export let PinJson = derive json.Codec<Pin> {
+        field Pin.label: "name";
+    };
+
+    /// Prints the named payload in declaration order.
+    export let describe_pin = func(pin: Pin) -> string => pin.endpoint.to_string();
+
+    /// Whether two segments built from equal parts are equal values but distinct objects.
+    export let example = func() -> bool {
+        let first = new Segment(new Point(0, 0), new Point(3, 4), "a");
+        let second = new Segment(start: new Point(0, 0), end: new Point(3, 4), label: "a");
+        return first === second && first != second && first.hash_code() == second.hash_code();
+    };
+);

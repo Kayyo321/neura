@@ -1,0 +1,108 @@
+let calls = import:Std.Net.Rpc.Call;
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
+let.promote _ = import:Std.Net.Filter;
+let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+let statuses = import:Std.Net.Rpc.Status;
+let timeouts = import:Std.Net.Rpc.Timeout;
+
+/// @brief Deadline propagation: a point on a clock's monotonic time line by which a call must finish, and a
+/// `Filter` that passes the remaining budget on as `grpc-timeout` and refuses expired calls with
+/// DEADLINE_EXCEEDED (statuscodes.md "Deadline expires before server returns status").
+///
+/// A server takes the deadline of an incoming call with `of_request` when the call arrives; the filter around an
+/// outgoing channel then sends each downstream call `min(own timeout, remaining)`. The clock is injected, so a
+/// `Std.Time.FixedClock` makes the behavior deterministic.
+/// @see [Std.Net.Rpc.Deadline](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Deadline)
+#Since("0.3.0")
+export let Deadline = module (
+    /// @brief A deadline as a monotonic reading of a clock.
+    #Final
+    export let Deadline = class (
+        /// @brief The monotonic reading at which the deadline passes.
+        export last at: Duration;
+
+        /// @brief A deadline at monotonic reading `when`.
+        export let init = func(when: Duration) {
+            at = when;
+        };
+
+        /// @brief The time left on `clock`: zero or negative once passed.
+        #NoDiscard
+        export let remaining = func(clock: Clock) -> Result<Duration> => Result<Duration>.Ok(at.minus(clock.monotonic()?));
+
+        /// @brief Whether the deadline has passed on `clock`.
+        #NoDiscard
+        export let is_expired = func(clock: Clock) -> Result<bool> {
+            last left = remaining(clock)?;
+            return Result<bool>.Ok(left.is_zero() || left.is_negative());
+        };
+
+        /// @brief Equal when the readings are.
+        export let.override equals = func(other: class) -> bool => other is Deadline && (other as Deadline).at.equals(at);
+
+        /// @brief The reading's hash.
+        export let.override hash_code = func -> uint32 => at.hash_code();
+
+        /// @brief `Deadline(at ...)`.
+        export let.override to_string = func -> string => "Deadline(at " + at.to_string() + ")";
+    );
+
+    /// @brief The deadline `budget` after now on `clock`.
+    #NoDiscard
+    export let after = func(clock: Clock, budget: Duration) -> Result<Deadline> =>
+        Result<Deadline>.Ok(new Deadline((clock.monotonic()?).plus(budget)));
+
+    /// @brief The deadline of an incoming request: its timeout after now, or `None` without a timeout.
+    #NoDiscard
+    export let of_request = func(clock: Clock, request: calls.RpcRequest) -> Result<optional.Optional<Deadline>> =>
+        match (request.timeout) {
+            optional.Optional.Some(span) => Result<optional.Optional<Deadline>>.Ok(
+                optional.Optional<Deadline>.Some(after(clock, span)?)),
+            optional.Optional.None => Result<optional.Optional<Deadline>>.Ok(optional.Optional<Deadline>.None),
+        };
+
+    /// @brief Propagates a deadline to the calls it filters.
+    ///
+    /// Before a call: when the deadline has passed it fails with DEADLINE_EXCEEDED without calling the next
+    /// service; otherwise the request goes on with timeout `min(request timeout, remaining)`. After a call that
+    /// returns once the deadline has passed, the result is replaced by DEADLINE_EXCEEDED.
+    #Final
+    export let DeadlineFilter = class implements SimpleFilter<calls.RpcRequest, calls.RpcResponse> (
+        /// @brief The clock read for the remaining budget.
+        last clock: Clock;
+        /// @brief The deadline of the enclosing work.
+        export last deadline: Deadline;
+
+        /// @brief A filter for `limit` on `time`.
+        export let init = func(time: Clock, limit: Deadline) {
+            clock = time;
+            deadline = limit;
+        };
+
+        /// @brief Checks the budget, forwards with the remaining timeout, and checks again after the call.
+        export let apply = func(request: calls.RpcRequest, next: Service<calls.RpcRequest, calls.RpcResponse>)
+            -> Result<calls.RpcResponse> {
+            last left = deadline.remaining(clock)?;
+            if (left.is_zero() || left.is_negative()) {
+                return Result<calls.RpcResponse>.Err(statuses.error(statuses.Code.DeadlineExceeded,
+                    "deadline exceeded before the call started"));
+            }
+            last budget = match (request.timeout) {
+                optional.Optional.Some(own) => own.to_nanos() < left.to_nanos() ? own : left,
+                optional.Optional.None => left,
+            };
+            last result = next.call(request.with_timeout(optional.Optional<Duration>.Some(budget)));
+            if (deadline.is_expired(clock)?) {
+                return Result<calls.RpcResponse>.Err(statuses.error(statuses.Code.DeadlineExceeded,
+                    "deadline exceeded during the call (budget " + timeouts.format(budget) + ")"));
+            }
+            return result;
+        };
+
+        /// @brief The deadline.
+        export let.override to_string = func -> string => "DeadlineFilter(" + deadline.to_string() + ")";
+    );
+);

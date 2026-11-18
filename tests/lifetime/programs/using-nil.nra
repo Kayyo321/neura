@@ -1,0 +1,36 @@
+// An acquisition whose value is nil at run time fails with the
+// nil-reference failure, and nothing is registered or closed
+// (docs/design/Lifetime030.md, edge case 36).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> {
+        console.print_line("closed");
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let find = func(present: bool) -> Resource {
+    return present ? new Resource() : nil;
+};
+
+let UsingNil = module:program.Entry (
+    let work = func(present: bool) -> Result<int> {
+        using (source = find(present)) {
+            console.print_line("body");
+            return Result<int>.Ok(1);
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let first = work(true);
+        console.print_line("first done");
+        let second = work(false);
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

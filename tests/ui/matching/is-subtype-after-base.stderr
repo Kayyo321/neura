@@ -1,0 +1,11 @@
+error[E0491]: unreachable match arm
+  --> $DIR/is-subtype-after-base.nra:16:5
+   |
+15 |     Shape => 1,
+   |     ----- this earlier arm covers every value it matches
+16 |     Circle => 2,
+   |     ^^^^^^ no value reaches this arm
+   |
+   = help: remove the arm, or move it before the arms that cover it
+
+For more information about this error, try `neura explain E0491`.

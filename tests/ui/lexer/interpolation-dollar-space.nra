@@ -1,0 +1,2 @@
+// '$' begins an interpolated string only directly before '"' (edge case 80).
+let text = $ "x";

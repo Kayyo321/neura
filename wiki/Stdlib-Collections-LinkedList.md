@@ -47,7 +47,7 @@ The following public declarations are taken from the module source; each links t
   Inserts `value` at the front.
 - **LinkedList.LinkedList** · [`export let add_at = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L201)
   Inserts before `index` or appends if the index equals the size. Traps with "invalid argument: index out of range" otherwise.
-- **LinkedList.LinkedList** · [`export let add_all = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L211)
+- **LinkedList.LinkedList** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L211)
   Appends each element in order, reading by position up to the starting length.
 - **LinkedList.LinkedList** · [`export let remove_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/linked-list.nra#L221)
   Unlinks and returns the element at `index`. Traps with `invalid argument: index out of range` for an invalid index.

@@ -23,7 +23,7 @@ let Shapes = module (
 );
 ```
 
-`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 86 tags: 17 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
+`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 87 tags: 18 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
 
 ## Syntax
 
@@ -179,6 +179,10 @@ The optimizer uses the property the compiler infers, so an untagged pure functio
 
 `#Immutable` on a class says that no field of an instance changes after construction. The compiler checks that every instance field is declared `last` or `const` (`E0918`) and has an immutable type (`E0919`): `bool`, a number, `string`, a tuple or enum whose parts are immutable, or a class marked `#Immutable`. An `#Immutable` class extends only `#Immutable` classes, and every class that extends it is `#Immutable` (`E0920`). A field whose type is a type parameter counts as immutable here; a specialization whose type arguments are mutable, such as `Pair<int32[list]>` of an `#Immutable` class `Pair<T>`, is not immutable, so tasks cannot share it. Tasks may share the instances of an `#Immutable` class ([Concurrency](Concurrency#51-transferable-types)).
 
+### Frozen
+
+`#Frozen` belongs to the standard library: only `Std.Collections.Frozen` and `Std.Ui` may write it, and anywhere else it is `E0581`. On a class it says that every type argument given to the class is deeply immutable ([Collections](Collections#frozenlist)): a written argument that is not is `E0580`, and a type parameter written as such an argument carries the requirement to the arguments of its own declaration. On a `last` field of list type it marks frozen storage: the constructor assigns it once, from a list the constructor created and only filled, and the class's code reads it only by index and length; any other use is `E0581`. The `#Immutable` check accepts a frozen field whose element type is immutable. `FrozenList<T>` and `ui.State<T>` carry it.
+
 ### ThreadSafe and NotThreadSafe
 
 `#ThreadSafe` on a function or method says that it is [task-safe](Concurrency#52-task-safe-calls). The compiler checks it with the same analysis as a `spawn`, and a function that is not task-safe is error `E0608` at the tag, with the call chain that a spawn of it would report. `#ThreadSafe` on a class says that tasks may share its instances and call every exported method: the class is `#Immutable` or a [monitor](Concurrency#81-monitors) (otherwise `E0609`, with a label at the member that breaks the rule), and each exported method is task-safe (`E0608`).
@@ -276,6 +280,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | `#Requires(condition: string)` | functions, methods | reserved, repeatable | A precondition checked on entry. Instead: check the condition at the start of the body and call trap_with_message. |
 | `#Ensures(condition: string)` | functions, methods | reserved, repeatable | A postcondition checked on return. Instead: check the condition before each return. |
 | `#Invariant(condition: string)` | classes | reserved, repeatable | A condition that holds between method calls. Instead: write a validate() method and call it in tests. |
+| `#Frozen` | classes, fields | implemented | Standard library only: on a class, its type arguments are deeply immutable (E0580); on a `last` list field, storage assigned once from a list the constructor created and never exposed (E0581). |
 
 ### Optimization
 

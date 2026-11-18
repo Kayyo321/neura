@@ -1,0 +1,12 @@
+// Two interfaces require one name with different types (edge case 70).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Numbered = interface (
+    let name: int;
+        | get;
+);
+let Both = class implements Named, Numbered (
+    export let name: string = "both";
+);

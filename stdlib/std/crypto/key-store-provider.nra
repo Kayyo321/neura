@@ -1,0 +1,30 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief The contract of a key store: local memory, TPM, PKCS#11 HSM, or cloud KMS (Stdlib.md section 21.1).
+/// @see [Std.Crypto.KeyStoreProvider](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-KeyStoreProvider)
+#Since("0.3.0")
+export let KeyStoreProvider = module (
+    /// @brief Keys that never leave the store, named by handles of type `KeyHandle`.
+    #Since("0.3.0")
+    export let KeyStoreProvider = interface<KeyHandle> (
+        /// @brief A short name of the backend, such as "memory" or "pkcs11".
+        let provider_name = func -> string;
+        /// @brief Makes a key for the algorithm under the label.
+        let generate_key = func(algorithm: Algorithm, label: string) -> Result<KeyHandle>;
+        /// @brief Signs or MACs the message with the key.
+        let sign = func(key: KeyHandle, message: uint8[list]) -> Result<uint8[list]>;
+        /// @brief Encrypts a data key under the key (envelope encryption).
+        let wrap_key = func(key: KeyHandle, data_key: uint8[list], associated_data: uint8[list])
+            -> Result<uint8[list]>;
+
+        /// @brief Recovers a data key that `wrap_key` encrypted.
+        let unwrap_key = func(key: KeyHandle, wrapped: uint8[list], associated_data: uint8[list])
+            -> Result<uint8[list]>;
+
+        /// @brief Destroys the key.
+        let delete_key = func(key: KeyHandle) -> Result<Unit>;
+    );
+);

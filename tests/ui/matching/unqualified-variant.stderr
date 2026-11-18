@@ -1,0 +1,9 @@
+error[E0412]: match arm must name a variant of Shape
+ --> $DIR/unqualified-variant.nra:7:5
+  |
+7 |     Dot => 0,
+  |     ^^^ 'Dot' names no variant here
+  |
+  = help: qualify the variant with its enum: 'Shape.Dot'
+
+For more information about this error, try `neura explain E0412`.

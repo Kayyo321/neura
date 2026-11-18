@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -57,6 +58,8 @@ namespace neura {
 // A type parameter counts as immutable here; each specialization is checked
 // with its concrete type.
 bool immutable_type(const IrProgram& program, const IrType& type);
+
+class HookIndex;
 
 class PurityAnalysis {
 public:
@@ -77,6 +80,12 @@ public:
     // Why a call of `function` may be observed, or nothing when it is pure.
     std::optional<Impure> impure(SymbolId function) const;
     bool pure(SymbolId function) const;
+    // Why a call of `function` is not render-compatible (Html030.md, "Typing
+    // and ownership"), or nothing: as impure(), except that reading a
+    // reassignable or mutable binding, the static initialization a read runs
+    // and object identity are allowed.
+    // Writes to the slots in `ignored` are not reported for `function` itself.
+    std::optional<Impure> render_effect(SymbolId function, const std::set<std::size_t>& ignored = {}) const;
     // Pure, and every call of it returns normally: its body has no loop and no
     // operation that can trap, it takes part in no cycle of calls, and it calls
     // only total functions directly. The frame and step limits are run limits,
@@ -147,7 +156,8 @@ public:
         std::optional<Cause> host;
         std::optional<Cause> scheduler;
         std::optional<Cause> class_init;
-        // Reserved for the class-hook milestone; nothing sets it.
+        // A class hook clause that is not identity may run: the event, or
+        // the call that reaches one (docs/design/Hooks030.md, Summaries).
         std::optional<Cause> hooks;
         OptimizerFlags optimizer;
         // What the call stores where no slot names it (a global, a place of
@@ -169,6 +179,8 @@ public:
         }
         // Impure for a reason other than writing the objects of its slots.
         std::optional<Reason> reason;
+        // The first such reason that rendering does not allow.
+        std::optional<Reason> render;
         // The slots whose object it may write, each with the first write;
         // `deep` holds those where the write may reach past the slot's own
         // object into what it refers to.
@@ -202,11 +214,17 @@ private:
     std::vector<SymbolId> construction(SymbolId cls, SymbolId init) const;
 
     void finish(SymbolId function, Summary& summary) const;
+    std::optional<Impure> chain(SymbolId function, bool rendering, const std::set<std::size_t>& ignored) const;
+
+    // The clause functions a HookRead or HookAdmit may run (class_hooks.hpp).
+    std::vector<SymbolId> hook_targets(const IrNode& node) const;
 
     const IrProgram& program_;
     std::function<bool(SymbolId)> opaque_;
     DispatchTargets dispatch_;
     ModuleDispatch modules_;
+    // Built only for a program whose class hook events are elaborated.
+    std::shared_ptr<const HookIndex> hooks_;
     std::map<SymbolId, std::vector<const IrBody*>> bodies_;
     std::map<SymbolId, Summary> summaries_;
     mutable std::map<std::string, bool> immutable_;
@@ -222,5 +240,13 @@ private:
 // it checks each specialization of a generic function marked #Pure.
 void check_pure_tags(const IrProgram& program, const std::function<bool(SymbolId)>& opaque,
                      bool specialized = false);
+
+// Checks that every HTML factory of the program (a function with the
+// ui.factory attribute) is render-compatible (E1010), reporting at the hole
+// with the call chain to the effect. `opaque` and `specialized` are as for
+// check_pure_tags; a factory of a prebuilt module was checked when it was
+// compiled.
+void check_render_factories(const IrProgram& program, const std::function<bool(SymbolId)>& opaque,
+                            bool specialized = false);
 
 } // namespace neura

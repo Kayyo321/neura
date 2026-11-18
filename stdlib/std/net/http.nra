@@ -1,0 +1,2173 @@
+let clocks = import:Std.Time.Clock;
+let.promote _ = import:Std.Io.Closeable;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let hashing = import:Std.Core.Hash;
+let header_maps = import:Std.Net.Http.Headers;
+let json_text = import:Std.Encoding.Json;
+let logging = import:Std.Log.Logger;
+let messages = import:Std.Net.Http.Message;
+let methods = import:Std.Net.Http.Method;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let statuses = import:Std.Net.Http.Status;
+let strings = import:Std.Text.Strings;
+let system_clocks = import:Std.Time.SystemClock;
+let tree = import:Std.Net.Http.Internal.RouteTree;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Server-side HTTP for Neura applications: requests, responses, the router, middleware,
+/// authentication helpers, and the HTTP client (docs/design/Backend030.md, "HTTP").
+///
+/// The server host parses the wire and assigns one request to a worker; the application's `serve` builds a
+/// `Router` and `Std.App` hands each request to `router.dispatch`. Routing is exact on method and segment
+/// count, a literal segment beats a parameter, no match is 404, a path that matches under another method is
+/// 405 with `Allow`, and `HEAD` is answered from the `GET` route without its body. Middleware is a
+/// `func(Request, Next) -> Result<Response>`; `use` middlewares run in the order added, then the route's,
+/// then the handler. An `Err` from a handler or middleware becomes 500 with the framework envelope
+/// `{"error":{"code":...,"message":...,"request_id":...}}` and no detail; the error itself goes to the
+/// router's error sink with the request identifier. Routes may also be bound to a host pattern (an addition
+/// to Backend030, see `Routes`). A `Router` is a `Std.Net.Service<Request, Response>`, and middleware converts
+/// to and from `Std.Net.Filter` simple filters.
+///
+/// Host-dependent parts trap until the runtime provides their services: reading a body from the server host
+/// (`neura.http.server.body.read`), writing a streamed response to it (`neura.http.server.body.write`,
+/// `neura.http.server.body.close`), and the client's network call (`neura.http.fetch` version 1). Everything
+/// else, including requests with in-memory bodies, works today.
+/// @see [Std.Net.Http](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http)
+#Since("0.3.0")
+export let Http = module (
+    /// @brief The header map type (`Std.Net.Http.Headers.Headers`).
+    export let Headers = header_maps.Headers;
+
+    /// @brief The default request body limit: 1 MiB (Apps030 S-6 default).
+    export const DefaultBodyLimit: int64 = 1048576;
+
+    /// @brief The largest chunk `body()` asks a body source for.
+    const ReadChunk: int = 65536;
+
+    // ---------------------------------------------------------------- bodies
+
+    /// @brief Where a request body comes from: bytes in memory, the server host, or a test's source.
+    export let BodySource = interface (
+        /// @brief Up to `max` bytes; an empty list at the end of the body.
+        let read = func(max: int) -> Result<uint8[list]>;
+        /// @brief Releases the source.
+        let close = func -> Result<Unit>;
+    );
+
+    /// @brief A body held in memory.
+    #[Final, NotThreadSafe]
+    export let MemoryBody = class implements BodySource (
+        /// @brief The bytes.
+        last data: uint8[list];
+        /// @brief How many bytes have been read.
+        let position: int = 0;
+
+        /// @brief A source over `content`, which it keeps (it does not copy).
+        export let init = func(content: uint8[list]) {
+            data = content;
+        };
+
+        /// @brief The next bytes, at most `max`.
+        export let read = func(max: int) -> Result<uint8[list]> {
+            last chunk: uint8[list] = new;
+            while (position < data.length && chunk.length < max) {
+                chunk.append(data[position]);
+                position++;
+            }
+            return Result<uint8[list]>.Ok(chunk);
+        };
+
+        /// @brief Does nothing.
+        export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+
+        /// @brief The text "MemoryBody(N bytes)".
+        export let.override to_string = func -> string => "MemoryBody(" + data.length.to_string() + " bytes)";
+    );
+
+    /// @brief The body of the request the server host assigned to this worker. Host-dependent: its reads trap
+    /// until the runtime provides `neura.http.server.body.read`.
+    #[Final, NotThreadSafe]
+    export let HostBody = class implements BodySource (
+        /// @brief Whether the host reported the end.
+        let finished: bool = false;
+
+        /// @brief The body of the current host request.
+        export let init = func {
+        };
+
+        /// @brief The next bytes from the host, at most `max`.
+        export let read = func(max: int) -> Result<uint8[list]> {
+            if (finished) {
+                return Result<uint8[list]>.Ok(new);
+            }
+            last chunk = host_body_read(max as int32)?;
+            if (chunk.length == 0) {
+                finished = true;
+            }
+            return Result<uint8[list]>.Ok(chunk);
+        };
+
+        /// @brief Does nothing: the host releases the body when the response completes.
+        export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+
+        /// @brief The text "HostBody".
+        export let.override to_string = func -> string => "HostBody";
+    );
+
+    /// @brief Reads a request body in chunks within the request's limit; a closeable owner (close it when done;
+    /// `using` is not in this branch).
+    #[Final, NotThreadSafe]
+    export let BodyReader = class implements Closeable (
+        /// @brief The source.
+        last source: BodySource;
+        /// @brief The most bytes the body may have.
+        last limit: int64;
+        /// @brief Bytes read so far.
+        let total: int64 = 0;
+        /// @brief Whether close ran.
+        let closed: bool = false;
+
+        /// @brief A reader over `body` that fails once more than `max_bytes` arrive.
+        export let init = func(body: BodySource, max_bytes: int64) {
+            source = body;
+            limit = max_bytes;
+        };
+
+        /// @brief Up to `max` bytes; an empty list at the end. Fails with "http.body_too_large" past the limit
+        /// and with Closed after close. A maximum below 1 traps.
+        #NoDiscard
+        export let read = func(max: int) -> Result<uint8[list]> {
+            if (max < 1) {
+                trap_with_message("invalid argument: maximum below 1");
+            }
+            if (closed) {
+                return Result<uint8[list]>.Err(io_error(errors.IoErrorKind.Closed, "request body closed"));
+            }
+            last chunk = source.read(max)?;
+            total = total + (chunk.length as int64);
+            if (total > limit) {
+                return Result<uint8[list]>.Err(too_large(limit));
+            }
+            return Result<uint8[list]>.Ok(chunk);
+        };
+
+        /// @brief Bytes read so far.
+        export let bytes_read = func -> int64 => total;
+
+        /// @brief Closes the source; closing again does nothing.
+        export let close = func -> Result<Unit> {
+            if (closed) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            closed = true;
+            return source.close();
+        };
+
+        /// @brief The text "BodyReader(N bytes read)".
+        export let.override to_string = func -> string => "BodyReader(" + total.to_string() + " bytes read)";
+    );
+
+    /// @brief Where a response body goes: memory, or the server host.
+    export let BodySink = interface (
+        /// @brief Writes bytes, waiting while the receiver applies backpressure.
+        let write = func(data: uint8[list]) -> Result<Unit>;
+        /// @brief Ends the body.
+        let close = func -> Result<Unit>;
+    );
+
+    /// @brief A sink that collects the body in memory (for tests and conversions).
+    #[Final, NotThreadSafe]
+    export let MemorySink = class implements BodySink (
+        /// @brief The bytes written.
+        last collected: uint8[list] = new;
+        /// @brief Whether close ran.
+        let closed: bool = false;
+
+        /// @brief An empty sink.
+        export let init = func {
+        };
+
+        /// @brief Appends the bytes; fails with Closed after close.
+        export let write = func(data: uint8[list]) -> Result<Unit> {
+            if (closed) {
+                return Result<Unit>.Err(io_error(errors.IoErrorKind.Closed, "response body closed"));
+            }
+            for (let b in data) {
+                collected.append(b);
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Marks the body complete.
+        export let close = func -> Result<Unit> {
+            closed = true;
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The bytes written so far (the sink's own list).
+        export let bytes = func -> uint8[list] => collected;
+
+        /// @brief Whether close ran.
+        export let is_closed = func -> bool => closed;
+
+        /// @brief The text "MemorySink(N bytes)".
+        export let.override to_string = func -> string => "MemorySink(" + collected.length.to_string() + " bytes)";
+    );
+
+    /// @brief The response body of the current host request. Host-dependent: writes trap until the runtime
+    /// provides `neura.http.server.body.write` and `neura.http.server.body.close`.
+    #[Final, NotThreadSafe]
+    export let HostSink = class implements BodySink (
+        /// @brief The sink of the current host response.
+        export let init = func {
+        };
+
+        /// @brief Hands the bytes to the host, which applies backpressure.
+        export let write = func(data: uint8[list]) -> Result<Unit> => host_body_write(data);
+
+        /// @brief Ends the body at the host.
+        export let close = func -> Result<Unit> => host_body_close();
+
+        /// @brief The text "HostSink".
+        export let.override to_string = func -> string => "HostSink";
+    );
+
+    // ---------------------------------------------------------------- requests
+
+    /// @brief The authenticated identity of a request, produced by an `Authenticator`.
+    #[Final, NotThreadSafe]
+    export let Principal = class (
+        /// @brief The identity: a user or service identifier.
+        export last subject: string;
+        /// @brief How it was established, such as "bearer" or "session".
+        export last scheme: string;
+        /// @brief The granted scopes or roles, in order.
+        last granted: string[list];
+
+        /// @brief A principal without scopes, or with the given scopes (copied).
+        export let init = func(identity: string, method: string) {
+            subject = identity;
+            scheme = method;
+            granted = new;
+        } or func(identity: string, method: string, scopes: string[list]) {
+            subject = identity;
+            scheme = method;
+            granted = new;
+            for (let s in scopes) {
+                granted.append(s);
+            }
+        };
+
+        /// @brief The scopes, as a new list.
+        #NoDiscard
+        export let scopes = func -> string[list] {
+            last copy: string[list] = new;
+            for (let s in granted) {
+                copy.append(s);
+            }
+            return copy;
+        };
+
+        /// @brief Whether `scope` was granted.
+        export let has_scope = func(scope: string) -> bool {
+            for (let s in granted) {
+                if (s == scope) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Equal subject, scheme and scopes.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Principal)) {
+                return false;
+            }
+            last p = other as Principal;
+            if (p.subject != subject || p.scheme != scheme) {
+                return false;
+            }
+            last theirs = p.scopes();
+            if (theirs.length != granted.length) {
+                return false;
+            }
+            for (let i = 0; i < granted.length; i++) {
+                if (theirs[i] != granted[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines subject, scheme and scopes.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, strings.hash(subject));
+            hash = hashing.combine(hash, strings.hash(scheme));
+            for (let s in granted) {
+                hash = hashing.combine(hash, strings.hash(s));
+            }
+            return hash;
+        };
+
+        /// @brief The text "Principal(scheme:subject)".
+        export let.override to_string = func -> string => "Principal(" + scheme + ":" + subject + ")";
+    );
+
+    /// @brief An ordered list of names and values: the path parameters of a matched route, or query pairs.
+    #[Final, NotThreadSafe]
+    export let Params = class (
+        /// @brief The names in order.
+        last names: string[list] = new;
+        /// @brief The values, parallel to `names`.
+        last values: string[list] = new;
+
+        /// @brief An empty list.
+        export let init = func {
+        };
+
+        /// @brief Appends a pair.
+        export let add = func(name: string, value: string) {
+            names.append(name);
+            values.append(value);
+        };
+
+        /// @brief The first value of `name`.
+        #NoDiscard
+        export let get = func(name: string) -> Optional<string> {
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == name) {
+                    return Optional<string>.Some(values[i]);
+                }
+            }
+            return Optional<string>.None;
+        };
+
+        /// @brief Every value of `name` in order.
+        #NoDiscard
+        export let get_all = func(name: string) -> string[list] {
+            last found: string[list] = new;
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == name) {
+                    found.append(values[i]);
+                }
+            }
+            return found;
+        };
+
+        /// @brief The value of `name`, or an InvalidInput error naming it (for handlers: `params.value("id")?`).
+        #NoDiscard
+        export let value = func(name: string) -> Result<string> {
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == name) {
+                    return Result<string>.Ok(values[i]);
+                }
+            }
+            return Result<string>.Err(io_error(errors.IoErrorKind.InvalidInput, "missing parameter " + name));
+        };
+
+        /// @brief The number of pairs.
+        export let size = func -> int => names.length;
+
+        /// @brief The name of pair `index`.
+        export let name_at = func(index: int) -> string => names[index];
+
+        /// @brief The value of pair `index`.
+        export let value_at = func(index: int) -> string => values[index];
+
+        /// @brief Equal pairs in equal order.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Params)) {
+                return false;
+            }
+            last p = other as Params;
+            if (p.size() != names.length) {
+                return false;
+            }
+            for (let i = 0; i < names.length; i++) {
+                if (p.name_at(i) != names[i] || p.value_at(i) != values[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines every name and value.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let i = 0; i < names.length; i++) {
+                hash = hashing.combine(hash, strings.hash(names[i]));
+                hash = hashing.combine(hash, strings.hash(values[i]));
+            }
+            return hash;
+        };
+
+        /// @brief The text "Params{a=1, b=2}".
+        export let.override to_string = func -> string {
+            last parts: string[list] = new;
+            for (let i = 0; i < names.length; i++) {
+                parts.append(names[i] + "=" + values[i]);
+            }
+            return "Params{" + strings.join(parts, ", ") + "}";
+        };
+    );
+
+    /// @brief One HTTP request: immutable fields and a body read once (Backend030, "HTTP").
+    ///
+    /// `path` is the request target's path, still percent-encoded; `query` the text after `?` without it ("" when
+    /// absent). An absolute-form target (`http://host/path`) keeps its path and query. `body()` reads the whole
+    /// body within the limit and keeps it, so later calls and `open_body()` see the same bytes; `open_body()`
+    /// before `body()` streams the body and can be called once. `headers` returns a copy, so a handler cannot
+    /// change the request.
+    #[Final, NotThreadSafe]
+    export let Request = class (
+        /// @brief The method token, such as "GET".
+        export last method: string;
+        /// @brief The request target as received.
+        export last target: string;
+        /// @brief The path of the target, percent-encoded as received.
+        export last path: string;
+        /// @brief The query of the target without `?`, or "".
+        export last query: string;
+        /// @brief The peer's address text (from the connection; see Backend030 on trusted proxies), or "".
+        export last client: string;
+        /// @brief "http" or "https" (from the connection).
+        export last scheme: string;
+        /// @brief The host's identifier of this request, used in logs and the error envelope.
+        export last request_id: string;
+        /// @brief The most body bytes `body()` and `open_body()` accept.
+        export last body_limit: int64;
+        /// @brief The header fields as received.
+        last fields: Headers;
+        /// @brief Where the body comes from.
+        last source: BodySource;
+        /// @brief Shared body state: element 0 is the cached whole body, once read.
+        let cache: uint8[list][list];
+        /// @brief Shared flag list: non-empty once the body was opened for streaming.
+        let opened: bool[list];
+        /// @brief Zero or one authenticated principal.
+        last identity: Principal[list];
+
+        /// @brief A request with an in-memory body (for tests and conversions): client "", scheme "http",
+        /// request id "", the default body limit. The second form gives every field. An invalid method traps
+        /// with "invalid argument: method".
+        export let init = func(request_method: string, request_target: string, request_headers: Headers,
+            content: uint8[list]) {
+            check_method(request_method);
+            method = request_method;
+            target = request_target;
+            path = path_of(request_target);
+            query = query_of(request_target);
+            client = "";
+            scheme = "http";
+            request_id = "";
+            body_limit = DefaultBodyLimit;
+            fields = request_headers.copy();
+            source = new MemoryBody(content);
+            cache = new;
+            opened = new;
+            identity = new;
+        } or func(request_method: string, request_target: string, request_headers: Headers, body_source: BodySource,
+            limit: int64, peer: string, request_scheme: string, id: string) {
+            check_method(request_method);
+            method = request_method;
+            target = request_target;
+            path = path_of(request_target);
+            query = query_of(request_target);
+            client = peer;
+            scheme = request_scheme;
+            request_id = id;
+            body_limit = limit;
+            fields = request_headers.copy();
+            source = body_source;
+            cache = new;
+            opened = new;
+            identity = new;
+        };
+
+        /// @brief A copy of the header fields.
+        export let headers: Headers;
+            | get: fields.copy();
+
+        /// @brief The first value of header `name`.
+        #NoDiscard
+        export let header = func(name: string) -> Optional<string> => fields.get(name);
+
+        /// @brief The host the request is for: the Host header's host, lowercase, without a port; "" when absent.
+        export let host = func -> string => match (fields.get("Host")) {
+            Optional.Some(value) => host_without_port(strings.to_ascii_lower(value)),
+            Optional.None => "",
+        };
+
+        /// @brief The query's pairs, decoded as `application/x-www-form-urlencoded`.
+        #NoDiscard
+        export let query_params = func -> Params => parse_query(query);
+
+        /// @brief The authenticated principal, set by `require`.
+        #NoDiscard
+        export let principal = func -> Optional<Principal> {
+            if (identity.length == 0) {
+                return Optional<Principal>.None;
+            }
+            return Optional<Principal>.Some(identity[0]);
+        };
+
+        /// @brief The whole body within `body_limit`, read once and kept. Fails with "http.body_too_large" past
+        /// the limit, and with InvalidInput after `open_body()` streamed it.
+        #NoDiscard
+        export let body = func -> Result<uint8[list]> {
+            if (cache.length == 1) {
+                return Result<uint8[list]>.Ok(copy_bytes(cache[0]));
+            }
+            if (opened.length > 0) {
+                return Result<uint8[list]>.Err(io_error(errors.IoErrorKind.InvalidInput, "request body already opened"));
+            }
+            opened.append(true);
+            last reader = new BodyReader(source, body_limit);
+            last whole: uint8[list] = new;
+            while (true) {
+                last chunk = reader.read(ReadChunk)?;
+                if (chunk.length == 0) {
+                    break;
+                }
+                for (let b in chunk) {
+                    whole.append(b);
+                }
+            }
+            reader.close()?;
+            cache.append(whole);
+            return Result<uint8[list]>.Ok(copy_bytes(whole));
+        };
+
+        /// @brief The body as UTF-8 text; invalid UTF-8 is an Encoding error.
+        #NoDiscard
+        export let body_text = func -> Result<string> => strings.from_bytes(body()?);
+
+        /// @brief The body as a chunk reader within `body_limit`; close it when done. After `body()` it reads the
+        /// kept bytes; otherwise it can be opened once.
+        #NoDiscard
+        export let open_body = func -> Result<BodyReader> {
+            if (cache.length == 1) {
+                return Result<BodyReader>.Ok(new BodyReader(new MemoryBody(copy_bytes(cache[0])), body_limit));
+            }
+            if (opened.length > 0) {
+                return Result<BodyReader>.Err(io_error(errors.IoErrorKind.InvalidInput, "request body already opened"));
+            }
+            opened.append(true);
+            return Result<BodyReader>.Ok(new BodyReader(source, body_limit));
+        };
+
+        /// @brief The same request carrying `who` as its principal. The copy shares the body.
+        #NoDiscard
+        export let with_principal = func(who: Principal) -> Request {
+            last copy = new Request(method, target, fields, source, body_limit, client, scheme, request_id);
+            copy.share_body(cache, opened);
+            copy.set_principal(who);
+            return copy;
+        };
+
+        /// @brief Makes this request share another's body state (used by `with_principal`).
+        let share_body = func(other_cache: uint8[list][list], other_opened: bool[list]) {
+            cache = other_cache;
+            opened = other_opened;
+        };
+
+        /// @brief Sets the principal of a fresh copy.
+        let set_principal = func(who: Principal) {
+            identity.append(who);
+        };
+
+        /// @brief The text "Request(METHOD target)".
+        export let.override to_string = func -> string => "Request(" + method + " " + target + ")";
+    );
+
+    // ---------------------------------------------------------------- responses
+
+    /// @brief An HTTP response: a status, headers, and a body of bytes or a stream (Backend030, "HTTP").
+    ///
+    /// The header map is the response's own and mutable, so middleware can add fields on the way out. A streamed
+    /// body is a producer that writes to a `BodySink` when the response is sent (`write_to`).
+    #[Final, NotThreadSafe]
+    export let Response = class (
+        /// @brief The status code, 100 through 599.
+        export last status: int;
+        /// @brief The header fields (mutable).
+        export last headers: Headers;
+        /// @brief The body bytes when not streamed.
+        last content: uint8[list];
+        /// @brief Whether the body is a stream.
+        last streamed: bool;
+        /// @brief The stream's producer (a no-op for a byte body).
+        last producer: func(BodySink) -> Result<Unit>;
+
+        /// @brief A response with no fields and an empty body; with fields and a body; or streamed from
+        /// `writer`. A status outside 100 through 599 traps with "invalid argument: status".
+        export let init = func(code: int) {
+            check_status(code);
+            status = code;
+            headers = new Headers();
+            content = new;
+            streamed = false;
+            producer = no_stream;
+        } or func(code: int, fields: Headers, body: uint8[list]) {
+            check_status(code);
+            status = code;
+            headers = fields;
+            content = body;
+            streamed = false;
+            producer = no_stream;
+        } or func(code: int, fields: Headers, writer: func(BodySink) -> Result<Unit>) {
+            check_status(code);
+            status = code;
+            headers = fields;
+            content = new;
+            streamed = true;
+            producer = writer;
+        };
+
+        /// @brief The body bytes (the response's own list); empty for a streamed body.
+        export let body = func -> uint8[list] => content;
+
+        /// @brief The body as UTF-8 text, invalid sequences replaced.
+        export let body_text = func -> string => strings.from_bytes_lossy(content);
+
+        /// @brief Whether the body is a stream.
+        export let is_streamed = func -> bool => streamed;
+
+        /// @brief Writes the body to `sink` and closes it: the bytes, or whatever the producer writes.
+        #NoDiscard
+        export let write_to = func(sink: BodySink) -> Result<Unit> {
+            if (streamed) {
+                last run = producer;
+                run(sink)?;
+            } else if (content.length > 0) {
+                sink.write(content)?;
+            }
+            return sink.close();
+        };
+
+        /// @brief The same status and a copy of the fields with no body, as a HEAD answer: a byte body's length
+        /// becomes `Content-Length` unless the field is already set; a stream is not run.
+        #NoDiscard
+        export let without_body = func -> Response {
+            last fields = headers.copy();
+            if (!streamed && !fields.contains("Content-Length") && !statuses.has_no_content(status)) {
+                fields.set("Content-Length", content.length.to_string());
+            }
+            return new Response(status, fields, new uint8[list]());
+        };
+
+        /// @brief The text "Response(STATUS, N bytes)" or "Response(STATUS, streamed)".
+        export let.override to_string = func -> string {
+            if (streamed) {
+                return "Response(" + status.to_string() + ", streamed)";
+            }
+            return "Response(" + status.to_string() + ", " + content.length.to_string() + " bytes)";
+        };
+    );
+
+    /// @brief A response with an empty body.
+    #NoDiscard
+    export let empty = func(status: int) -> Response => new Response(status);
+
+    /// @brief A `text/plain; charset=utf-8` response.
+    #NoDiscard
+    export let text = func(status: int, body: string) -> Response {
+        last fields = new Headers();
+        fields.set("Content-Type", "text/plain; charset=utf-8");
+        return new Response(status, fields, strings.to_bytes(body));
+    };
+
+    /// @brief A response with the given content type and bytes.
+    #NoDiscard
+    export let binary = func(status: int, content_type: string, body: uint8[list]) -> Response {
+        last fields = new Headers();
+        fields.set("Content-Type", content_type);
+        return new Response(status, fields, body);
+    };
+
+    /// @brief An `application/json` response of `value` encoded with `encode`, the codec's encode function
+    /// (Records030, "The JSON codec": pass `SomeCodec.encode`). An encoding error is returned.
+    ///
+    /// Backend030 writes `http.json(status, value, codec)` with the codec itself; `Std.Encoding.Json.Codec<T>` is
+    /// a static contract not in this branch, so this form takes its `encode` function.
+    #NoDiscard
+    export let json = func<T>(status: int, value: T, encode: func(T) -> Result<string>) -> Result<Response> {
+        last encoded = encode(value)?;
+        return Result<Response>.Ok(json_body(status, encoded));
+    };
+
+    /// @brief An `application/json` response of a JSON tree.
+    #NoDiscard
+    export let json_value = func(status: int, value: json_text.JsonValue) -> Response =>
+        json_body(status, json_text.write(value));
+
+    /// @brief A streamed response whose body `writer` produces when it is sent.
+    #NoDiscard
+    export let stream = func(status: int, fields: Headers, writer: func(BodySink) -> Result<Unit>) -> Response =>
+        new Response(status, fields, writer);
+
+    /// @brief The framework envelope `{"error":{"code":...,"message":...,"request_id":...}}` as an
+    /// `application/json` response.
+    #NoDiscard
+    export let envelope = func(status: int, code: string, message: string, request_id: string) -> Response {
+        last inner: [string, json_text.JsonValue][list] = new;
+        inner.append(["code", json_text.JsonValue.Text(code)]);
+        inner.append(["message", json_text.JsonValue.Text(message)]);
+        inner.append(["request_id", json_text.JsonValue.Text(request_id)]);
+        last outer: [string, json_text.JsonValue][list] = new;
+        outer.append(["error", json_text.JsonValue.Object(inner)]);
+        return json_value(status, json_text.JsonValue.Object(outer));
+    };
+
+    /// @brief A request with an empty header map and body (for tests).
+    #NoDiscard
+    export let request = func(method: string, target: string) -> Request =>
+        new Request(method, target, new Headers(), new uint8[list]());
+
+    /// @brief A request with the given fields and in-memory body (for tests).
+    #NoDiscard
+    export let request_with = func(method: string, target: string, fields: Headers, body: uint8[list]) -> Request =>
+        new Request(method, target, fields, body);
+
+    /// @brief The request the server host assigned (`neura.http.server.next` gives these fields to `Std.App`).
+    /// Its body is read from the host.
+    #NoDiscard
+    export let host_request = func(method: string, target: string, fields: Headers, limit: int64, peer: string,
+        scheme: string, request_id: string) -> Request =>
+            new Request(method, target, fields, new HostBody(), limit, peer, scheme, request_id);
+
+    // ---------------------------------------------------------------- message conversions
+
+    /// @brief The request as a protocol-agnostic message with its whole body (read within the limit).
+    #NoDiscard
+    export let to_message = func(request: Request) -> Result<messages.HttpRequest<uint8[list]>> {
+        last body = request.body()?;
+        last method = match (methods.parse(request.method)) {
+            Optional.Some(m) => m,
+            Optional.None => methods.HttpMethod.Extension(request.method),
+        };
+        return Result<messages.HttpRequest<uint8[list]>>.Ok(
+            new messages.HttpRequest<uint8[list]>(method, request.target, request.headers, body,
+                messages.Version.Http11));
+    };
+
+    /// @brief A request with the message's method, target, fields and body.
+    #NoDiscard
+    export let from_message = func(message: messages.HttpRequest<uint8[list]>) -> Request =>
+        new Request(message.method_name(), message.target, message.headers, message.body);
+
+    /// @brief The response as a message; a streamed body is run into memory.
+    #NoDiscard
+    export let response_to_message = func(response: Response) -> Result<messages.HttpResponse<uint8[list]>> {
+        last sink = new MemorySink();
+        response.write_to(sink)?;
+        return Result<messages.HttpResponse<uint8[list]>>.Ok(
+            new messages.HttpResponse<uint8[list]>(response.status, response.headers.copy(), sink.bytes(),
+                messages.Version.Http11));
+    };
+
+    /// @brief A response with the message's status, fields and body.
+    #NoDiscard
+    export let response_from_message = func(message: messages.HttpResponse<uint8[list]>) -> Response =>
+        new Response(message.status, message.headers.copy(), message.body);
+
+    // ---------------------------------------------------------------- middleware
+
+    /// @brief The rest of the chain a middleware calls: the next middleware or the handler. A
+    /// `Std.Net.Service<Request, Response>`.
+    #[Final, NotThreadSafe]
+    export let Next = class implements services.Service<Request, Response> (
+        /// @brief The service the chain continues with.
+        last rest: services.Service<Request, Response>;
+
+        /// @brief Continues with `service`.
+        export let init = func(service: services.Service<Request, Response>) {
+            rest = service;
+        };
+
+        /// @brief Runs the rest of the chain.
+        export let call = func(request: Request) -> Result<Response> => rest.call(request);
+
+        /// @brief The text "Next".
+        export let.override to_string = func -> string => "Next";
+    );
+
+    /// @brief One middleware stored in a router or route group.
+    #[Final, NotThreadSafe]
+    let Layer = class (
+        /// @brief The middleware function.
+        export last run: func(Request, Next) -> Result<Response>;
+
+        /// @brief Wraps `middleware`.
+        export let init = func(middleware: func(Request, Next) -> Result<Response>) {
+            run = middleware;
+        };
+
+        /// @brief The text "Layer".
+        export let.override to_string = func -> string => "Layer";
+    );
+
+    /// @brief A middleware applied around a service.
+    #[Final, NotThreadSafe]
+    let LayerService = class implements services.Service<Request, Response> (
+        /// @brief The middleware.
+        last layer: Layer;
+        /// @brief What it calls next.
+        last next: Next;
+
+        /// @brief Binds `outer` to `inner`.
+        export let init = func(outer: Layer, inner: services.Service<Request, Response>) {
+            layer = outer;
+            next = new Next(inner);
+        };
+
+        /// @brief Runs the middleware.
+        export let call = func(request: Request) -> Result<Response> {
+            last run = layer.run;
+            return run(request, next);
+        };
+
+        /// @brief The text "LayerService".
+        export let.override to_string = func -> string => "LayerService";
+    );
+
+    /// @brief A matched route's handler with its parameters, as a service.
+    #[Final, NotThreadSafe]
+    let HandlerService = class implements services.Service<Request, Response> (
+        /// @brief The handler.
+        last handler: func(Request, Params) -> Result<Response>;
+        /// @brief The matched parameters.
+        last params: Params;
+
+        /// @brief Binds `body` to `matched`.
+        export let init = func(body: func(Request, Params) -> Result<Response>, matched: Params) {
+            handler = body;
+            params = matched;
+        };
+
+        /// @brief Runs the handler.
+        export let call = func(request: Request) -> Result<Response> {
+            last run = handler;
+            return run(request, params);
+        };
+
+        /// @brief The text "HandlerService".
+        export let.override to_string = func -> string => "HandlerService";
+    );
+
+    /// @brief A fixed response, as a service (404, 405).
+    #[Final, NotThreadSafe]
+    let FixedService = class implements services.Service<Request, Response> (
+        /// @brief The status.
+        last status: int;
+        /// @brief The envelope code.
+        last code: string;
+        /// @brief The envelope message.
+        last message: string;
+        /// @brief The Allow value, or "".
+        last allow: string;
+
+        /// @brief A fixed answer.
+        export let init = func(answer: int, error_code: string, text: string, allowed: string) {
+            status = answer;
+            code = error_code;
+            message = text;
+            allow = allowed;
+        };
+
+        /// @brief The envelope for this request.
+        export let call = func(request: Request) -> Result<Response> {
+            last response = envelope(status, code, message, request.request_id);
+            if (allow.byte_length > 0) {
+                response.headers.set("Allow", allow);
+            }
+            return Result<Response>.Ok(response);
+        };
+
+        /// @brief The text "FixedService(STATUS)".
+        export let.override to_string = func -> string => "FixedService(" + status.to_string() + ")";
+    );
+
+    /// @brief A middleware as a `Std.Net.Filter.SimpleFilter<Request, Response>`.
+    #[Final, NotThreadSafe]
+    export let MiddlewareFilter = class implements filters.SimpleFilter<Request, Response> (
+        /// @brief The middleware.
+        last layer: Layer;
+
+        /// @brief Wraps `middleware`.
+        export let init = func(middleware: func(Request, Next) -> Result<Response>) {
+            layer = new Layer(middleware);
+        };
+
+        /// @brief Runs the middleware with `next` as the rest of the chain.
+        export let apply = func(request: Request, next: services.Service<Request, Response>) -> Result<Response> {
+            last run = layer.run;
+            return run(request, new Next(next));
+        };
+
+        /// @brief The text "MiddlewareFilter".
+        export let.override to_string = func -> string => "MiddlewareFilter";
+    );
+
+    /// @brief `middleware` as a simple filter.
+    #NoDiscard
+    export let as_filter = func(middleware: func(Request, Next) -> Result<Response>)
+        -> filters.SimpleFilter<Request, Response> => new MiddlewareFilter(middleware);
+
+    /// @brief A simple filter as a middleware.
+    #NoDiscard
+    export let from_filter = func(filter: filters.SimpleFilter<Request, Response>)
+        -> func(Request, Next) -> Result<Response> =>
+            new func(request: Request, next: Next) -> Result<Response> => filter.apply(request, next);
+
+    /// @brief A middleware that logs one line per request ("ID METHOD PATH STATUS Nms", or "error" in place of
+    /// the status) at Info through `logger`, timing with `clock`'s monotonic time.
+    #NoDiscard
+    export let request_log_to = func(logger: logging.Logger, clock: clocks.Clock)
+        -> func(Request, Next) -> Result<Response> =>
+            new func(request: Request, next: Next) -> Result<Response> {
+                last started = elapsed_or_zero(clock);
+                last outcome = next.call(request);
+                last millis = (elapsed_or_zero(clock).to_nanos() - started.to_nanos()) / 1000000;
+                last outcome_text = match (outcome) {
+                    Result.Ok(response) => response.status.to_string(),
+                    Result.Err(_) => "error",
+                };
+                logger.info(request.request_id + " " + request.method + " " + request.path + " " + outcome_text + " "
+                    + millis.to_string() + "ms");
+                return outcome;
+            };
+
+    /// @brief `request_log_to` with a logger named "http" writing to standard error and the system clock.
+    #NoDiscard
+    export let request_log = func -> func(Request, Next) -> Result<Response> =>
+        request_log_to(logging.create("http", stderr_line, logging.LogLevel.Info), system_clocks.create());
+
+    // ---------------------------------------------------------------- routes and the router
+
+    /// @brief One route: method, path pattern, optional host pattern, handler and the route's own middleware.
+    #[Final, NotThreadSafe]
+    export let Route = class (
+        /// @brief The method token.
+        export last method: string;
+        /// @brief The path pattern, such as "/parts/{id}".
+        export last pattern: string;
+        /// @brief The host pattern, or "" for any host.
+        export last host: string;
+        /// @brief The handler.
+        export last handler: func(Request, Params) -> Result<Response>;
+        /// @brief The route's middleware, in order.
+        export last layers: Layer[list] = new;
+
+        /// @brief A route without middleware.
+        export let init = func(route_method: string, path_pattern: string, host_pattern: string,
+            body: func(Request, Params) -> Result<Response>) {
+            method = route_method;
+            pattern = path_pattern;
+            host = host_pattern;
+            handler = body;
+        };
+
+        /// @brief Appends a middleware that runs after the earlier ones and before the handler.
+        export let use = func(middleware: func(Request, Next) -> Result<Response>) {
+            layers.append(new Layer(middleware));
+        };
+
+        /// @brief The number of the route's own middlewares.
+        export let middleware_count = func -> int => layers.length;
+
+        /// @brief The text "Route(METHOD host/pattern)".
+        export let.override to_string = func -> string => "Route(" + method + " " + host + pattern + ")";
+    );
+
+    /// @brief A group of routes for `Router.mount`, such as a generated contract adapter's.
+    ///
+    /// A group may be bound to a host pattern (an addition to Backend030): an exact host name such as
+    /// "api.example.com", or "*.example.com" for any host with one or more labels before ".example.com"; case
+    /// is ignored and the request's port is not compared. The group's `use` middlewares run before each route's
+    /// own middlewares, after the router's.
+    #[Final, NotThreadSafe]
+    export let Routes = class (
+        /// @brief The host pattern, or "".
+        export last host: string;
+        /// @brief The routes in the order added.
+        last entries: Route[list] = new;
+        /// @brief The group's middleware.
+        export last layers: Layer[list] = new;
+
+        /// @brief A group for any host, or for `host_pattern` (lowercased).
+        export let init = func {
+            host = "";
+        } or func(host_pattern: string) {
+            host = strings.to_ascii_lower(host_pattern);
+        };
+
+        /// @brief Adds a GET route.
+        export let get = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            add("GET", pattern, handler);
+
+        /// @brief Adds a POST route.
+        export let post = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            add("POST", pattern, handler);
+
+        /// @brief Adds a PUT route.
+        export let put = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            add("PUT", pattern, handler);
+
+        /// @brief Adds a PATCH route.
+        export let patch = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            add("PATCH", pattern, handler);
+
+        /// @brief Adds a DELETE route.
+        export let delete = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            add("DELETE", pattern, handler);
+
+        /// @brief Adds a route for any method token and returns it, so the caller can add the route's own
+        /// middleware with `Route.use`.
+        export let add = func(method: string, pattern: string, handler: func(Request, Params) -> Result<Response>)
+            -> Route {
+            last route = new Route(method, pattern, host, handler);
+            entries.append(route);
+            return route;
+        };
+
+        /// @brief Adds a middleware for every route of the group.
+        export let use = func(middleware: func(Request, Next) -> Result<Response>) {
+            layers.append(new Layer(middleware));
+        };
+
+        /// @brief The number of routes.
+        export let size = func -> int => entries.length;
+
+        /// @brief Route `index`.
+        export let route_at = func(index: int) -> Route => entries[index];
+
+        /// @brief The text "Routes(host, N routes)".
+        export let.override to_string = func -> string => "Routes(" + host + ", " + entries.length.to_string() + " routes)";
+    );
+
+    /// @brief A registered route with its group's middleware and parsed pattern.
+    #[Final, NotThreadSafe]
+    let Entry = class (
+        /// @brief The route.
+        export last route: Route;
+        /// @brief The group's middleware.
+        export last group_layers: Layer[list];
+        /// @brief The pattern's parameter names, in order.
+        export last parameter_names: string[list];
+
+        /// @brief An entry.
+        export let init = func(registered: Route, group: Layer[list], names: string[list]) {
+            route = registered;
+            group_layers = group;
+            parameter_names = names;
+        };
+
+        /// @brief The text "Entry".
+        export let.override to_string = func -> string => "Entry(" + route.to_string() + ")";
+    );
+
+    /// @brief The routes of one host pattern.
+    #[Final, NotThreadSafe]
+    let HostTree = class (
+        /// @brief The host pattern, or "".
+        export last host: string;
+        /// @brief The root node.
+        export last root: tree.Node = new;
+
+        /// @brief An empty tree for `pattern`.
+        export let init = func(pattern: string) {
+            host = pattern;
+        };
+
+        /// @brief The text "HostTree(host)".
+        export let.override to_string = func -> string => "HostTree(" + host + ")";
+    );
+
+    /// @brief The application's routes and middleware; dispatches one request to one response (Backend030,
+    /// "HTTP"). A `Std.Net.Service<Request, Response>` whose `call` never fails.
+    ///
+    /// Patterns are "/" or "/" followed by segments separated by "/": a literal segment of path characters
+    /// without braces, or `{name}` with an identifier name, which matches one non-empty segment. Registration
+    /// never fails; an invalid pattern or a second route with the same host, method and shape (parameter names
+    /// ignored) is recorded and reported by `check`, the startup check, and such a route is never matched.
+    ///
+    /// Dispatch: the request's host selects the trees to search: exact host groups, then wildcard groups, in
+    /// the order mounted, then the routes for any host. The first tree with a route for the method and path
+    /// wins (literal before parameter at every segment, backtracking). HEAD uses the GET route and drops the
+    /// body. Without a match, a path that some route matches under other methods is 405 with `Allow` (GET, HEAD,
+    /// POST, PUT, PATCH, DELETE in that order, then other methods as registered; HEAD is listed with GET),
+    /// otherwise 404; both carry the framework envelope. The router's `use` middlewares wrap every request,
+    /// including 404 and 405 answers (so `cors` can answer preflight requests and `request_log` sees misses);
+    /// a route's group and own middlewares wrap only that route's handler.
+    #[Final, NotThreadSafe]
+    export let Router = class implements services.Service<Request, Response> (
+        /// @brief The trees, the any-host tree first.
+        last trees: HostTree[list] = new;
+        /// @brief The registered routes.
+        last entries: Entry[list] = new;
+        /// @brief The router's middleware.
+        last layers: Layer[list] = new;
+        /// @brief Registration problems found so far.
+        last problems: string[list] = new;
+        /// @brief Where errors from handlers and middleware are logged.
+        let error_sink: func(string) -> void = stderr_line;
+
+        /// @brief An empty router.
+        export let init = func {
+            trees.append(new HostTree(""));
+        };
+
+        /// @brief Adds a GET route.
+        export let get = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            register(new Route("GET", pattern, "", handler), new Layer[list]());
+
+        /// @brief Adds a POST route.
+        export let post = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            register(new Route("POST", pattern, "", handler), new Layer[list]());
+
+        /// @brief Adds a PUT route.
+        export let put = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            register(new Route("PUT", pattern, "", handler), new Layer[list]());
+
+        /// @brief Adds a PATCH route.
+        export let patch = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            register(new Route("PATCH", pattern, "", handler), new Layer[list]());
+
+        /// @brief Adds a DELETE route.
+        export let delete = func(pattern: string, handler: func(Request, Params) -> Result<Response>) =>
+            register(new Route("DELETE", pattern, "", handler), new Layer[list]());
+
+        /// @brief Adds every route of `group`, with the group's host pattern and middleware.
+        export let mount = func(group: Routes) {
+            last group_layers: Layer[list] = new;
+            for (let layer in group.layers) {
+                group_layers.append(layer);
+            }
+            for (let i = 0; i < group.size(); i++) {
+                register(group.route_at(i), group_layers);
+            }
+        };
+
+        /// @brief Adds a middleware around every request; it runs after the ones added before it.
+        export let use = func(middleware: func(Request, Next) -> Result<Response>) {
+            layers.append(new Layer(middleware));
+        };
+
+        /// @brief Sends each handler or middleware error, as "request ID failed: MESSAGE", to `sink` instead of
+        /// standard error.
+        export let on_error = func(sink: func(string) -> void) {
+            error_sink = sink;
+        };
+
+        /// @brief The number of routes registered without problems.
+        export let size = func -> int {
+            let total = 0;
+            for (let t in trees) {
+                total += t.root.count();
+            }
+            return total;
+        };
+
+        /// @brief The startup check: Ok when every route is valid and unique; otherwise an error whose message
+        /// lists the problems.
+        #NoDiscard
+        export let check = func -> Result<Unit> {
+            if (problems.length == 0) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            return Result<Unit>.Err(errors.custom("http.router.invalid", strings.join(problems, "; ")));
+        };
+
+        /// @brief The registration problems, as a new list.
+        #NoDiscard
+        export let problems_found = func -> string[list] {
+            last copy: string[list] = new;
+            for (let p in problems) {
+                copy.append(p);
+            }
+            return copy;
+        };
+
+        /// @brief The answer to the host's startup check request, without calling a route: 200
+        /// `{"status":"ok","routes":N}`, or 500 with the envelope code "startup_check_failed" and the problems.
+        #NoDiscard
+        export let startup_response = func -> Response {
+            if (problems.length > 0) {
+                return envelope(500, "startup_check_failed", strings.join(problems, "; "), "");
+            }
+            last members: [string, json_text.JsonValue][list] = new;
+            members.append(["status", json_text.JsonValue.Text("ok")]);
+            members.append(["routes", json_text.number_of_int64(size() as int64)]);
+            return json_value(200, json_text.JsonValue.Object(members));
+        };
+
+        /// @brief Answers `request`. Never fails: an `Err` from a handler or middleware is logged and becomes 500
+        /// with the framework envelope.
+        #NoDiscard
+        export let dispatch = func(request: Request) -> Response => answer(request, true);
+
+        /// @brief `dispatch` for a host that drops a HEAD response's body itself and computes `Content-Length`
+        /// from the body it was given (the `Std.App` server host): a HEAD request is answered from the GET route
+        /// with the body kept.
+        #NoDiscard
+        export let dispatch_for_host = func(request: Request) -> Response => answer(request, false);
+
+        /// @brief Dispatches; `strip_head` removes a HEAD answer's body.
+        let answer = func(request: Request, strip_head: bool) -> Response {
+            last head = request.method == "HEAD";
+            last lookup = head ? "GET" : request.method;
+            last segments = split_path(request.path);
+            last candidates = trees_for(request.host());
+            let inner: services.Service<Request, Response> = new FixedService(404, "not_found", "no route matches", "");
+            let matched = false;
+            for (let t in candidates) {
+                last values: string[list] = new;
+                last index = t.root.find(segments, 0, lookup, values);
+                if (index >= 0) {
+                    inner = route_service(entries[index], values);
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                last allowed: string[list] = new;
+                for (let t in candidates) {
+                    t.root.collect_methods(segments, 0, allowed);
+                }
+                if (allowed.length > 0) {
+                    inner = new FixedService(405, "method_not_allowed", "method not allowed", allow_text(allowed));
+                }
+            }
+            let service = inner;
+            for (let i = layers.length - 1; i >= 0; i--) {
+                service = new LayerService(layers[i], service);
+            }
+            last outcome = service.call(request);
+            match (outcome) {
+                Result.Ok(response) => {
+                    return head && strip_head ? response.without_body() : response;
+                },
+                Result.Err(problem) => {
+                    report_failure(request.request_id, problem);
+                },
+            }
+            return envelope(500, "internal_error", "internal server error", request.request_id);
+        };
+
+        /// @brief Sends "request ID failed: MESSAGE" for `problem` to the error sink (`on_error`), as `dispatch`
+        /// does for a handler or middleware error. Adapters that fail after dispatch, such as
+        /// `Std.Net.Http.AppHandler` collecting a streamed body, report through it so every failure reaches one
+        /// sink.
+        export let report_failure = func(request_id: string, problem: errors.Error) {
+            last sink = error_sink;
+            sink("request " + request_id + " failed: " + errors.message(problem));
+        };
+
+        /// @brief `dispatch` as a service call: always Ok.
+        export let call = func(request: Request) -> Result<Response> => Result<Response>.Ok(dispatch(request));
+
+        /// @brief The text "Router(N routes)".
+        export let.override to_string = func -> string => "Router(" + size().to_string() + " routes)";
+
+        /// @brief The handler of `entry` wrapped in its group's and its own middleware.
+        let route_service = func(entry: Entry, values: string[list]) -> services.Service<Request, Response> {
+            last params = new Params();
+            for (let i = 0; i < values.length; i++) {
+                params.add(entry.parameter_names[i], percent_decode_segment(values[i]));
+            }
+            let service: services.Service<Request, Response> = new HandlerService(entry.route.handler, params);
+            for (let i = entry.route.layers.length - 1; i >= 0; i--) {
+                service = new LayerService(entry.route.layers[i], service);
+            }
+            for (let i = entry.group_layers.length - 1; i >= 0; i--) {
+                service = new LayerService(entry.group_layers[i], service);
+            }
+            return service;
+        };
+
+        /// @brief Validates and stores a route, recording any problem.
+        let register = func(route: Route, group_layers: Layer[list]) {
+            last label = route.method + " " + route.host + route.pattern;
+            if (!header_maps.is_token(route.method)) {
+                problems.append(label + ": invalid method");
+                return;
+            }
+            if (!is_valid_host_pattern(route.host)) {
+                problems.append(label + ": invalid host pattern");
+                return;
+            }
+            last shape: string[list] = new;
+            last names: string[list] = new;
+            last problem = parse_pattern(route.pattern, shape, names);
+            if (problem.byte_length > 0) {
+                problems.append(label + ": " + problem);
+                return;
+            }
+            last host_tree = tree_for(route.host);
+            last index = entries.length;
+            last existing = tree.insert(host_tree.root, shape, route.method, index);
+            if (existing >= 0) {
+                problems.append(label + ": duplicate of " + entries[existing].route.method + " " + entries[existing].route.host
+                    + entries[existing].route.pattern);
+                return;
+            }
+            entries.append(new Entry(route, group_layers, names));
+        };
+
+        /// @brief The tree of `host`, created when absent.
+        let tree_for = func(host: string) -> HostTree {
+            for (let t in trees) {
+                if (t.host == host) {
+                    return t;
+                }
+            }
+            last created = new HostTree(host);
+            trees.append(created);
+            return created;
+        };
+
+        /// @brief The trees to search for `host`: exact, then wildcard, then the any-host tree.
+        let trees_for = func(host: string) -> HostTree[list] {
+            last chosen: HostTree[list] = new;
+            for (let t in trees) {
+                if (t.host.byte_length > 0 && !strings.starts_with(t.host, "*.") && t.host == host) {
+                    chosen.append(t);
+                }
+            }
+            for (let t in trees) {
+                if (strings.starts_with(t.host, "*.") && matches_wildcard(t.host, host)) {
+                    chosen.append(t);
+                }
+            }
+            chosen.append(trees[0]);
+            return chosen;
+        };
+    );
+
+    // ---------------------------------------------------------------- authentication
+
+    /// @brief Establishes who sent a request: Ok(Some) for an authenticated principal, Ok(None) for none, Err
+    /// when the check itself failed (Backend030, "HTTP").
+    export let Authenticator = interface (
+        /// @brief Authenticates `request`.
+        let authenticate = func(request: Request) -> Result<Optional<Principal>>;
+    );
+
+    /// @brief Bearer tokens (RFC 6750 section 2.1) checked by a function the application supplies. The library
+    /// defines no token format.
+    #[Final, NotThreadSafe]
+    export let BearerAuthenticator = class implements Authenticator (
+        /// @brief The application's check.
+        last verify: func(string) -> Result<Optional<Principal>>;
+
+        /// @brief Checks tokens with `check`.
+        export let init = func(check: func(string) -> Result<Optional<Principal>>) {
+            verify = check;
+        };
+
+        /// @brief None without an `Authorization: Bearer` field or with a malformed token; otherwise the check's
+        /// answer.
+        export let authenticate = func(request: Request) -> Result<Optional<Principal>> {
+            last run = verify;
+            return match (bearer_token(request)) {
+                Optional.None => Result<Optional<Principal>>.Ok(Optional<Principal>.None),
+                Optional.Some(t) => run(t),
+            };
+        };
+
+        /// @brief The fixed text "BearerAuthenticator" (it holds no token).
+        export let.override to_string = func -> string => "BearerAuthenticator";
+    );
+
+    /// @brief A bearer authenticator over `check`.
+    #NoDiscard
+    export let bearer = func(check: func(string) -> Result<Optional<Principal>>) -> Authenticator =>
+        new BearerAuthenticator(check);
+
+    /// @brief The token of an `Authorization: Bearer <token>` field (scheme case-insensitive, token of
+    /// b64token characters, RFC 6750 section 2.1), or None.
+    #NoDiscard
+    export let bearer_token = func(request: Request) -> Optional<string> {
+        last field = request.header("Authorization");
+        last value = match (field) {
+            Optional.Some(v) => v,
+            Optional.None => "",
+        };
+        if (value.byte_length < 8 || !strings.starts_with(strings.to_ascii_lower(value), "bearer ")) {
+            return Optional<string>.None;
+        }
+        let start = 7;
+        while (start < value.byte_length && value.byte_at(start) == 32) {
+            start++;
+        }
+        last token = value.slice(start, value.byte_length);
+        if (token.byte_length == 0) {
+            return Optional<string>.None;
+        }
+        let i = 0;
+        while (i < token.byte_length && is_b64token_char(token.byte_at(i))) {
+            i++;
+        }
+        while (i < token.byte_length && token.byte_at(i) == 61) {
+            i++;
+        }
+        if (i != token.byte_length) {
+            return Optional<string>.None;
+        }
+        return Optional<string>.Some(token);
+    };
+
+    /// @brief A middleware that requires a principal: 401 with the envelope (and `WWW-Authenticate: Bearer` for
+    /// a bearer authenticator) when there is none; otherwise the rest of the chain sees the request carrying it
+    /// (`request.principal()`). An `Err` from the authenticator is returned (500).
+    #NoDiscard
+    export let require = func(authenticator: Authenticator) -> func(Request, Next) -> Result<Response> =>
+        new func(request: Request, next: Next) -> Result<Response> {
+            last found = authenticator.authenticate(request)?;
+            match (found) {
+                Optional.Some(who) => {
+                    return next.call(request.with_principal(who));
+                },
+                Optional.None => {},
+            }
+            last response = envelope(401, "unauthorized", "authentication required", request.request_id);
+            if (authenticator is BearerAuthenticator) {
+                response.headers.set("WWW-Authenticate", "Bearer");
+            }
+            return Result<Response>.Ok(response);
+        };
+
+    /// @brief A middleware for cookie-authenticated routes: a request with an unsafe method (not GET, HEAD,
+    /// OPTIONS, TRACE) passes only with `Sec-Fetch-Site: same-origin`, or, without that field, an `Origin` equal
+    /// to the request's own origin (scheme and Host); otherwise 403 with the envelope. Safe methods pass.
+    #NoDiscard
+    export let same_origin = func -> func(Request, Next) -> Result<Response> =>
+        new func(request: Request, next: Next) -> Result<Response> {
+            if (methods.is_safe_name(request.method) || is_same_origin(request)) {
+                return next.call(request);
+            }
+            return Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
+        };
+
+    /// @brief Whether `request` shows a same-origin `Sec-Fetch-Site` or `Origin`.
+    let is_same_origin = func(request: Request) -> bool {
+        match (request.header("Sec-Fetch-Site")) {
+            Optional.Some(site) => {
+                return site == "same-origin";
+            },
+            Optional.None => {},
+        }
+        return match (request.header("Origin")) {
+            Optional.Some(origin) => match (request.header("Host")) {
+                Optional.Some(host) => same_origin_text(origin, request.scheme + "://" + host),
+                Optional.None => false,
+            },
+            Optional.None => false,
+        };
+    };
+
+    // ---------------------------------------------------------------- CORS
+
+    /// @brief Which cross-origin requests `cors` admits: an explicit list of origins (no wildcard), methods,
+    /// request headers, exposed headers, credentials and the preflight cache time.
+    #[Final, NotThreadSafe]
+    export let CorsPolicy = class (
+        /// @brief The admitted origins, lowercase scheme and host.
+        last origins: string[list] = new;
+        /// @brief The admitted methods.
+        last allowed_methods: string[list] = new;
+        /// @brief The admitted request headers, lowercase.
+        last allowed_headers: string[list] = new;
+        /// @brief Response headers scripts may read.
+        last exposed_headers: string[list] = new;
+        /// @brief Whether credentials are allowed.
+        let credentials: bool = false;
+        /// @brief The preflight cache time in seconds, or -1 for none.
+        let max_age: int = -1;
+
+        /// @brief A policy for `allowed_origins` (each "scheme://host[:port]"), admitting GET, HEAD and POST
+        /// and no extra headers. "*", "null" or an empty origin traps with "invalid argument: origin".
+        export let init = func(allowed_origins: string[list]) {
+            for (let origin in allowed_origins) {
+                if (origin == "*" || origin == "null" || !strings.contains(origin, "://")) {
+                    trap_with_message("invalid argument: origin");
+                }
+                origins.append(normalize_origin(origin));
+            }
+            allowed_methods.append("GET");
+            allowed_methods.append("HEAD");
+            allowed_methods.append("POST");
+        };
+
+        /// @brief Replaces the admitted methods.
+        export let allow_methods = func(names: string[list]) {
+            while (allowed_methods.length > 0) {
+                allowed_methods.remove_at(0);
+            }
+            for (let m in names) {
+                allowed_methods.append(m);
+            }
+        };
+
+        /// @brief Replaces the admitted request headers.
+        export let allow_headers = func(names: string[list]) {
+            while (allowed_headers.length > 0) {
+                allowed_headers.remove_at(0);
+            }
+            for (let n in names) {
+                allowed_headers.append(strings.to_ascii_lower(n));
+            }
+        };
+
+        /// @brief Replaces the exposed response headers.
+        export let expose_headers = func(names: string[list]) {
+            while (exposed_headers.length > 0) {
+                exposed_headers.remove_at(0);
+            }
+            for (let n in names) {
+                exposed_headers.append(n);
+            }
+        };
+
+        /// @brief Sets whether credentials are allowed.
+        export let allow_credentials = func(allowed: bool) {
+            credentials = allowed;
+        };
+
+        /// @brief Sets the preflight cache time; negative sends none.
+        export let set_max_age = func(seconds: int) {
+            max_age = seconds;
+        };
+
+        /// @brief Whether `origin` is admitted.
+        export let admits_origin = func(origin: string) -> bool {
+            last normal = normalize_origin(origin);
+            for (let o in origins) {
+                if (o == normal) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Whether `method` is admitted.
+        export let admits_method = func(method: string) -> bool {
+            for (let m in allowed_methods) {
+                if (m == method) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Whether every comma-separated name in `requested` is admitted.
+        export let admits_headers = func(requested: string) -> bool {
+            for (let name in header_maps.split_list(requested)) {
+                let found = false;
+                for (let h in allowed_headers) {
+                    if (h == strings.to_ascii_lower(name)) {
+                        found = true;
+                    }
+                }
+                if (!found) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Adds the response fields for an admitted actual request from `origin`.
+        export let decorate = func(response: Response, origin: string) {
+            response.headers.set("Access-Control-Allow-Origin", origin);
+            response.headers.add("Vary", "Origin");
+            if (credentials) {
+                response.headers.set("Access-Control-Allow-Credentials", "true");
+            }
+            if (exposed_headers.length > 0) {
+                response.headers.set("Access-Control-Expose-Headers", strings.join(exposed_headers, ", "));
+            }
+        };
+
+        /// @brief The 204 answer to an admitted preflight request from `origin`.
+        #NoDiscard
+        export let preflight = func(origin: string) -> Response {
+            last response = new Response(204);
+            decorate(response, origin);
+            response.headers.set("Access-Control-Allow-Methods", strings.join(allowed_methods, ", "));
+            if (allowed_headers.length > 0) {
+                response.headers.set("Access-Control-Allow-Headers", strings.join(allowed_headers, ", "));
+            }
+            if (max_age >= 0) {
+                response.headers.set("Access-Control-Max-Age", max_age.to_string());
+            }
+            return response;
+        };
+
+        /// @brief The text "CorsPolicy(origins)".
+        export let.override to_string = func -> string => "CorsPolicy(" + strings.join(origins, ", ") + ")";
+    );
+
+    /// @brief A middleware applying `policy` (Fetch standard CORS protocol). A request without `Origin` passes
+    /// unchanged. A preflight (OPTIONS with `Access-Control-Request-Method`) is answered here: 204 with the
+    /// policy's fields when the origin, method and requested headers are admitted, 403 with the envelope
+    /// otherwise. Other requests run the chain; an admitted origin's response gets `Access-Control-Allow-Origin`
+    /// (the origin itself, never "*") and `Vary: Origin`; a refused origin's response is left without them, so
+    /// the browser withholds it.
+    #NoDiscard
+    export let cors = func(policy: CorsPolicy) -> func(Request, Next) -> Result<Response> =>
+        new func(request: Request, next: Next) -> Result<Response> {
+            last origin = match (request.header("Origin")) {
+                Optional.Some(o) => o,
+                Optional.None => "",
+            };
+            if (origin.byte_length == 0) {
+                return next.call(request);
+            }
+            last requested_method = request.header("Access-Control-Request-Method");
+            if (request.method == "OPTIONS" && optional_is_some(requested_method)) {
+                last wanted = optional_text(requested_method);
+                last wanted_headers = optional_text(request.header("Access-Control-Request-Headers"));
+                if (policy.admits_origin(origin) && policy.admits_method(wanted) && policy.admits_headers(wanted_headers)) {
+                    return Result<Response>.Ok(policy.preflight(origin));
+                }
+                return Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
+            }
+            last response = next.call(request)?;
+            if (policy.admits_origin(origin)) {
+                policy.decorate(response, origin);
+            }
+            return Result<Response>.Ok(response);
+        };
+
+    // ---------------------------------------------------------------- client
+
+    /// @brief Whether a fetch sends credentials (cookies, HTTP authentication): the `neura.http.fetch` mode
+    /// codes 0, 1, 2 (Components030, "HTTP clients").
+    export let CredentialsMode = enum (Omit, SameOrigin, Include);
+
+    /// @brief The `uint32` code of `mode` for `neura.http.fetch`.
+    #[Pure, ThreadSafe]
+    export let credentials_code = func(mode: CredentialsMode) -> uint32 => match (mode) {
+        CredentialsMode.Omit => 0,
+        CredentialsMode.SameOrigin => 1,
+        CredentialsMode.Include => 2,
+    };
+
+    /// @brief An outgoing request: method, URL, header fields, body, deadline and credentials mode.
+    #[Final, NotThreadSafe]
+    export let ClientRequest = class (
+        /// @brief The method token.
+        export last method: string;
+        /// @brief The absolute `http` or `https` URL.
+        export last url: string;
+        /// @brief The header fields (mutable).
+        export last headers: Headers;
+        /// @brief The body bytes.
+        let content: uint8[list] = new;
+        /// @brief The longest the exchange may take; zero means no deadline beyond the host's (W-3).
+        let timeout: durations.Duration = durations.of_nanos(0);
+        /// @brief The credentials mode.
+        let credentials: CredentialsMode = CredentialsMode.SameOrigin;
+
+        /// @brief A request without fields or body; or with them. An invalid method traps with "invalid
+        /// argument: method".
+        export let init = func(request_method: string, target_url: string) {
+            check_method(request_method);
+            method = request_method;
+            url = target_url;
+            headers = new Headers();
+        } or func(request_method: string, target_url: string, fields: Headers, body: uint8[list]) {
+            check_method(request_method);
+            method = request_method;
+            url = target_url;
+            headers = fields;
+            content = body;
+        };
+
+        /// @brief The body bytes.
+        export let body = func -> uint8[list] => content;
+
+        /// @brief Replaces the body.
+        export let set_body = func(body: uint8[list]) {
+            content = body;
+        };
+
+        /// @brief The deadline as a duration from the start of the exchange.
+        export let deadline = func -> durations.Duration => timeout;
+
+        /// @brief Sets the deadline; a negative one traps with "invalid argument: negative deadline".
+        export let set_deadline = func(span: durations.Duration) {
+            if (span.is_negative()) {
+                trap_with_message("invalid argument: negative deadline");
+            }
+            timeout = span;
+        };
+
+        /// @brief The credentials mode (default SameOrigin, as in the Fetch standard).
+        export let credentials_mode = func -> CredentialsMode => credentials;
+
+        /// @brief Sets the credentials mode.
+        export let set_credentials = func(mode: CredentialsMode) {
+            credentials = mode;
+        };
+
+        /// @brief The text "ClientRequest(METHOD url)".
+        export let.override to_string = func -> string => "ClientRequest(" + method + " " + url + ")";
+    );
+
+    /// @brief What carries a client request: the host's `neura.http.fetch`, or a test double.
+    export let Transport = interface (
+        /// @brief Performs one exchange.
+        let fetch = func(request: ClientRequest) -> Result<Response>;
+    );
+
+    /// @brief The host transport: `neura.http.fetch` version 1. Host-dependent: traps until the runtime provides
+    /// the service.
+    #[Final, NotThreadSafe]
+    export let HostTransport = class implements Transport (
+        /// @brief The host transport.
+        export let init = func {
+        };
+
+        /// @brief Sends the request through the host.
+        export let fetch = func(request: ClientRequest) -> Result<Response> {
+            last names: string[list] = new;
+            last values: string[list] = new;
+            for (let i = 0; i < request.headers.size(); i++) {
+                names.append(request.headers.name_at(i));
+                values.append(request.headers.value_at(i));
+            }
+            return host_fetch(request.method, request.url, names, values, request.body(), request.deadline().to_nanos(),
+                credentials_code(request.credentials_mode()));
+        };
+
+        /// @brief The text "HostTransport".
+        export let.override to_string = func -> string => "HostTransport";
+    );
+
+    /// @brief An HTTP client over a transport (Components030, "HTTP clients"); a `Std.Net.Service<ClientRequest,
+    /// Response>`. The URL must be absolute `http` or `https`; otherwise the send fails with InvalidInput before
+    /// the transport is called.
+    #[Final, NotThreadSafe]
+    export let Client = class implements services.Service<ClientRequest, Response> (
+        /// @brief The transport.
+        last transport: Transport;
+        /// @brief Fields added to every request that does not set them.
+        last defaults: Headers = new;
+
+        /// @brief A client over the host's `neura.http.fetch`, or over `carrier`.
+        export let init = func {
+            transport = new HostTransport();
+        } or func(carrier: Transport) {
+            transport = carrier;
+        };
+
+        /// @brief Adds a field sent with every request that lacks it.
+        export let add_default_header = func(name: string, value: string) {
+            defaults.add(name, value);
+        };
+
+        /// @brief Sends `request`.
+        #NoDiscard
+        export let send = func(request: ClientRequest) -> Result<Response> {
+            last lower = strings.to_ascii_lower(request.url);
+            if (!strings.starts_with(lower, "http://") && !strings.starts_with(lower, "https://")) {
+                return Result<Response>.Err(io_error(errors.IoErrorKind.InvalidInput, "URL must be absolute http or https"));
+            }
+            for (let i = 0; i < defaults.size(); i++) {
+                if (!request.headers.contains(defaults.name_at(i))) {
+                    request.headers.add(defaults.name_at(i), defaults.value_at(i));
+                }
+            }
+            return transport.fetch(request);
+        };
+
+        /// @brief `send` as a service call.
+        export let call = func(request: ClientRequest) -> Result<Response> => send(request);
+
+        /// @brief A GET of `url`.
+        #NoDiscard
+        export let get = func(url: string) -> Result<Response> => send(new ClientRequest("GET", url));
+
+        /// @brief A POST of `body` with `content_type` to `url`.
+        #NoDiscard
+        export let post = func(url: string, content_type: string, body: uint8[list]) -> Result<Response> {
+            last request = new ClientRequest("POST", url);
+            request.headers.set("Content-Type", content_type);
+            request.set_body(body);
+            return send(request);
+        };
+
+        /// @brief The text "Client".
+        export let.override to_string = func -> string => "Client";
+    );
+
+    // ---------------------------------------------------------------- host service wrappers
+
+    /// @brief Reads the current host request's body: `neura.http.server.body.read` version 1 (maximum count
+    /// `int32`; bytes, empty at the end; overlapping and cancellable).
+    /// @stub needs the server host service neura.http.server.body.read (A4 runtime lane)
+    let host_body_read = func(max: int32) -> Result<uint8[list]> {
+        trap_with_message("unsupported: Std.Net.Http.host_body_read is not implemented in Neura 0.3.0 (needs the server host service neura.http.server.body.read)");
+    };
+
+    /// @brief Writes response body bytes to the host: `neura.http.server.body.write` version 1 (bytes; none,
+    /// once the host has taken them; overlapping and cancellable).
+    /// @stub needs the server host service neura.http.server.body.write (A4 runtime lane)
+    let host_body_write = func(data: uint8[list]) -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.host_body_write is not implemented in Neura 0.3.0 (needs the server host service neura.http.server.body.write)");
+    };
+
+    /// @brief Ends the streamed response body: `neura.http.server.body.close` version 1 (no arguments; none).
+    /// @stub needs the server host service neura.http.server.body.close (A4 runtime lane)
+    let host_body_close = func -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Http.host_body_close is not implemented in Neura 0.3.0 (needs the server host service neura.http.server.body.close)");
+    };
+
+    /// @brief One client exchange: `neura.http.fetch` version 1 (method text, URL text, header name and value
+    /// pairs, body bytes, deadline nanoseconds `int64`, credentials mode `uint32`; status, header pairs, body
+    /// bytes; overlapping and cancellable; recorded for replay).
+    /// @stub needs the host service neura.http.fetch version 1 (Components030; A4 runtime lane)
+    let host_fetch = func(method: string, url: string, names: string[list], values: string[list], body: uint8[list],
+        deadline_nanos: int64, credentials: uint32) -> Result<Response> {
+        trap_with_message("unsupported: Std.Net.Http.host_fetch is not implemented in Neura 0.3.0 (needs the host service neura.http.fetch version 1)");
+    };
+
+    // ---------------------------------------------------------------- helpers
+
+    /// @brief The pairs of an `application/x-www-form-urlencoded` query: split on "&", then on the first "=";
+    /// "+" is a space and percent escapes are decoded (invalid escapes and invalid UTF-8 are kept as written).
+    #NoDiscard
+    export let parse_query = func(query: string) -> Params {
+        last pairs = new Params();
+        if (query.byte_length == 0) {
+            return pairs;
+        }
+        for (let part in strings.split(query, "&")) {
+            if (part.byte_length == 0) {
+                continue;
+            }
+            last equals_at = strings.index_of(part, "=");
+            if (equals_at < 0) {
+                pairs.add(form_decode(part), "");
+            } else {
+                pairs.add(form_decode(part.slice(0, equals_at)), form_decode(part.slice(equals_at + 1, part.byte_length)));
+            }
+        }
+        return pairs;
+    };
+
+    /// @brief `text` with percent escapes decoded; the text unchanged when an escape is malformed or the result
+    /// is not UTF-8.
+    #[Pure, ThreadSafe]
+    export let percent_decode_segment = func(text: string) -> string => decode_escapes(text, false);
+
+    /// @brief Form decoding: "+" is a space, then percent escapes.
+    let form_decode = func(text: string) -> string => decode_escapes(text, true);
+
+    /// @brief Decodes escapes, optionally "+" as a space.
+    let decode_escapes = func(text: string, plus_is_space: bool) -> string {
+        if (!strings.contains(text, "%") && !(plus_is_space && strings.contains(text, "+"))) {
+            return text;
+        }
+        last out: uint8[list] = new;
+        let i = 0;
+        while (i < text.byte_length) {
+            last b = text.byte_at(i);
+            if (b == 37) {
+                if (i + 2 >= text.byte_length) {
+                    return text;
+                }
+                last high = hex_digit(text.byte_at(i + 1));
+                last low = hex_digit(text.byte_at(i + 2));
+                if (high < 0 || low < 0) {
+                    return text;
+                }
+                out.append((high * 16 + low) as uint8);
+                i += 3;
+            } else if (b == 43 && plus_is_space) {
+                out.append(32);
+                i++;
+            } else {
+                out.append(b);
+                i++;
+            }
+        }
+        const [valid, decoded] = string.from_utf8(out);
+        return valid ? decoded : text;
+    };
+
+    /// @brief The value of a hex digit, or -1.
+    let hex_digit = func(b: uint8) -> int {
+        if (b >= 48 && b <= 57) {
+            return (b as int) - 48;
+        }
+        if (b >= 65 && b <= 70) {
+            return (b as int) - 55;
+        }
+        if (b >= 97 && b <= 102) {
+            return (b as int) - 87;
+        }
+        return -1;
+    };
+
+    /// @brief The path of a request target: origin form up to "?", the path of an absolute form, "*" as is.
+    let path_of = func(target: string) -> string {
+        let start = 0;
+        last scheme_end = strings.index_of(target, "://");
+        if (scheme_end > 0 && !strings.starts_with(target, "/")) {
+            last after = scheme_end + 3;
+            last slash = strings.index_of_from(target, "/", after);
+            if (slash < 0) {
+                return "/";
+            }
+            start = slash;
+        }
+        last question = strings.index_of_from(target, "?", start);
+        if (question < 0) {
+            return target.slice(start, target.byte_length);
+        }
+        return target.slice(start, question);
+    };
+
+    /// @brief The query of a request target without "?", or "".
+    let query_of = func(target: string) -> string {
+        last question = strings.index_of(target, "?");
+        if (question < 0) {
+            return "";
+        }
+        return target.slice(question + 1, target.byte_length);
+    };
+
+    /// @brief The segments of a path: "/" has none; "/a/b" has "a" and "b"; "/a/" has "a" and "".
+    let split_path = func(path: string) -> string[list] {
+        last segments: string[list] = new;
+        if (path.byte_length == 0 || path == "/" || path.byte_at(0) != 47) {
+            if (path.byte_length > 0 && path.byte_at(0) != 47) {
+                segments.append(path);
+            }
+            return segments;
+        }
+        for (let s in strings.split(path.slice(1, path.byte_length), "/")) {
+            segments.append(s);
+        }
+        return segments;
+    };
+
+    /// @brief Parses a pattern into its shape (`{}` for parameters) and parameter names; returns "" or the
+    /// problem.
+    let parse_pattern = func(pattern: string, shape: string[list], names: string[list]) -> string {
+        if (pattern.byte_length == 0 || pattern.byte_at(0) != 47) {
+            return "pattern must start with /";
+        }
+        if (pattern == "/") {
+            return "";
+        }
+        for (let segment in strings.split(pattern.slice(1, pattern.byte_length), "/")) {
+            if (segment.byte_length == 0) {
+                return "empty segment";
+            }
+            if (segment.byte_at(0) == 123) {
+                if (segment.byte_at(segment.byte_length - 1) != 125 || segment.byte_length < 3) {
+                    return "invalid parameter segment " + segment;
+                }
+                last name = segment.slice(1, segment.byte_length - 1);
+                if (!is_identifier(name)) {
+                    return "invalid parameter name " + name;
+                }
+                for (let other in names) {
+                    if (other == name) {
+                        return "repeated parameter " + name;
+                    }
+                }
+                names.append(name);
+                shape.append("{}");
+            } else {
+                for (let i = 0; i < segment.byte_length; i++) {
+                    last b = segment.byte_at(i);
+                    if (b == 123 || b == 125 || b == 63 || b == 35 || b <= 32 || b == 127) {
+                        return "invalid literal segment " + segment;
+                    }
+                }
+                shape.append(segment);
+            }
+        }
+        return "";
+    };
+
+    /// @brief Whether `name` is an ASCII identifier.
+    let is_identifier = func(name: string) -> bool {
+        if (name.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < name.byte_length; i++) {
+            last b = name.byte_at(i);
+            last letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
+            if (!letter && !(i > 0 && b >= 48 && b <= 57)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether `pattern` is "", a host name, or "*." followed by a host name.
+    let is_valid_host_pattern = func(pattern: string) -> bool {
+        if (pattern.byte_length == 0) {
+            return true;
+        }
+        let rest = pattern;
+        if (strings.starts_with(pattern, "*.")) {
+            rest = pattern.slice(2, pattern.byte_length);
+        }
+        if (rest.byte_length == 0) {
+            return false;
+        }
+        for (let i = 0; i < rest.byte_length; i++) {
+            last b = rest.byte_at(i);
+            if (!((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45 || b == 46)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether `host` has at least one label before the suffix of wildcard `pattern` ("*.example.com").
+    let matches_wildcard = func(pattern: string, host: string) -> bool {
+        last suffix = pattern.slice(1, pattern.byte_length);
+        return host.byte_length > suffix.byte_length && strings.ends_with(host, suffix);
+    };
+
+    /// @brief A Host value without its port; an IPv6 literal keeps its brackets.
+    let host_without_port = func(value: string) -> string {
+        if (strings.starts_with(value, "[")) {
+            last close = strings.index_of(value, "]");
+            return close < 0 ? value : value.slice(0, close + 1);
+        }
+        last colon = strings.index_of(value, ":");
+        return colon < 0 ? value : value.slice(0, colon);
+    };
+
+    /// @brief The Allow value for `found` methods in the fixed order.
+    let allow_text = func(found: string[list]) -> string {
+        last ordered: string[list] = new;
+        last standard: string[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
+        for (let m in standard) {
+            let present = false;
+            for (let f in found) {
+                if (f == m || (m == "HEAD" && f == "GET")) {
+                    present = true;
+                }
+            }
+            if (present) {
+                ordered.append(m);
+            }
+        }
+        for (let f in found) {
+            let known = false;
+            for (let m in standard) {
+                if (f == m) {
+                    known = true;
+                }
+            }
+            if (!known) {
+                ordered.append(f);
+            }
+        }
+        return strings.join(ordered, ", ");
+    };
+
+    /// @brief Whether two origins are equal: scheme and host without case, default ports dropped.
+    let same_origin_text = func(a: string, b: string) -> bool => normalize_origin(a) == normalize_origin(b);
+
+    /// @brief An origin lowercased, without a trailing "/", with ":80" dropped for http and ":443" for https.
+    let normalize_origin = func(origin: string) -> string {
+        let text = strings.to_ascii_lower(origin);
+        if (strings.ends_with(text, "/")) {
+            text = text.slice(0, text.byte_length - 1);
+        }
+        if (strings.starts_with(text, "http://") && strings.ends_with(text, ":80")) {
+            return text.slice(0, text.byte_length - 3);
+        }
+        if (strings.starts_with(text, "https://") && strings.ends_with(text, ":443")) {
+            return text.slice(0, text.byte_length - 4);
+        }
+        return text;
+    };
+
+    /// @brief Whether `b` is a b64token character other than "=" (RFC 6750 section 2.1).
+    let is_b64token_char = func(b: uint8) -> bool =>
+        (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 45 or 46 or 95 or 126 or 43 or 47;
+
+    /// @brief Whether an optional text is present.
+    let optional_is_some = func(o: Optional<string>) -> bool => match (o) {
+        Optional.Some(_) => true,
+        Optional.None => false,
+    };
+
+    /// @brief An optional text, or "".
+    let optional_text = func(o: Optional<string>) -> string => match (o) {
+        Optional.Some(t) => t,
+        Optional.None => "",
+    };
+
+    /// @brief A JSON response from encoded text.
+    let json_body = func(status: int, encoded: string) -> Response {
+        last fields = new Headers();
+        fields.set("Content-Type", "application/json");
+        return new Response(status, fields, strings.to_bytes(encoded));
+    };
+
+    /// @brief The producer of a byte body: writes nothing.
+    let no_stream = func(sink: BodySink) -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+
+    /// @brief Writes a line to standard error, ignoring a failed write.
+    let stderr_line = func(line: string) {
+        match (console.try_error_line(line)) {
+            Result.Ok(_) => {},
+            Result.Err(_) => {},
+        }
+    };
+
+    /// @brief The clock's monotonic time, or zero when it fails.
+    let elapsed_or_zero = func(clock: clocks.Clock) -> durations.Duration => match (clock.monotonic()) {
+        Result.Ok(d) => d,
+        Result.Err(_) => durations.of_nanos(0),
+    };
+
+    /// @brief A copy of a byte list.
+    let copy_bytes = func(data: uint8[list]) -> uint8[list] {
+        last copy: uint8[list] = new;
+        for (let b in data) {
+            copy.append(b);
+        }
+        return copy;
+    };
+
+    /// @brief An Io error without a path.
+    let io_error = func(kind: errors.IoErrorKind, message: string) -> errors.Error =>
+        errors.Error.Io { kind: kind, message: message, path: "" };
+
+    /// @brief The error for a body over `limit` bytes.
+    let too_large = func(limit: int64) -> errors.Error =>
+        errors.custom("http.body_too_large", "request body exceeds " + limit.to_string() + " bytes");
+
+    /// @brief Traps unless `method` is a token.
+    let check_method = func(method: string) {
+        if (!header_maps.is_token(method)) {
+            trap_with_message("invalid argument: method");
+        }
+    };
+
+    /// @brief Traps unless `code` is a status code.
+    let check_status = func(code: int) {
+        if (!statuses.is_valid(code)) {
+            trap_with_message("invalid argument: status");
+        }
+    };
+);

@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-no-receiver.nra:2:5
+  |
+2 | let.extension nothing = func -> int => 1;
+  |     ^^^^^^^^^ an extension function takes its receiver as its first parameter
+
+For more information about this error, try `neura explain E0228`.

@@ -1,0 +1,201 @@
+let backoffs = import:Std.Net.Resilience.Backoff;
+let budgets = import:Std.Net.Resilience.RetryBudget;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let randoms = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let retries = import:Std.Net.Resilience.RetryFilter;
+let services = import:Std.Net.Service;
+let test = import:Std.Test;
+
+// Exponential backoff with jitter, retry budgets, and the retry filter over a fixed clock (its sleep advances
+// the clock, so the monotonic reading is the total backoff).
+//
+// Jittered delays were generated with a Python model of Std.Random.Random (SplitMix64 seeding, xoshiro256**,
+// next_float64 = (x >> 11) * 2^-53) and the formulas of Std.Net.Resilience.Backoff:
+//   python3 -I vectors.py, with vectors.py:
+//   # Reference for Std.Random.Random: SplitMix64 seeding + xoshiro256**, next_float64 = (x >> 11) * 2^-53.
+//   import sys
+//   M = (1 << 64) - 1
+//   def mix(z):
+//       z = ((z ^ (z >> 30)) * 13787848793156543929) & M
+//       z = ((z ^ (z >> 27)) * 10723151780598845931) & M
+//       return z ^ (z >> 31)
+//   def seeded(seed):
+//       s = []; st = seed
+//       for _ in range(4):
+//           st = (st + 11400714819323198485) & M; s.append(mix(st))
+//       return s
+//   def rotl(x, k): return ((x << k) | (x >> (64 - k))) & M
+//   def nxt(s):
+//       out = (rotl((s[1] * 5) & M, 7) * 9) & M
+//       t = (s[1] << 17) & M
+//       s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3]; s[2] ^= t; s[3] = rotl(s[3], 45)
+//       return out
+//   def f64(s): return (nxt(s) >> 11) * 2.0**-53
+//   def delays(seed, base, cap, mode, n):
+//       s = seeded(seed); out = []
+//       for a in range(1, n + 1):
+//           c = min(cap, base * 2 ** (a - 1))
+//           if mode == "full": out.append(int(float(c) * f64(s)))
+//           elif mode == "equal": h = c // 2; out.append(h + int(float(c - h) * f64(s)))
+//           else: out.append(c)
+//       return out
+//   print("full 42", delays(42, 100_000_000, 1_000_000_000, "full", 5))
+//   print("equal 7", delays(7, 100_000_000, 300_000_000, "equal", 4))
+//   print("full 42 sum3", sum(delays(42, 100_000_000, 1_000_000_000, "full", 3)))
+//   full 42  -> [8386297, 75796050, 272017364, 739754356, 991803914]   base 100 ms, cap 1 s
+//   equal 7  -> [85028824, 127875122, 275944119, 297164658]           base 100 ms, cap 300 ms
+let RetryTests = module (
+    export let test_backoff_ceilings = func {
+        last backoff = backoffs.exponential(durations.of_millis(100), durations.of_seconds(1), backoffs.Jitter.None,
+            randoms.seeded(1));
+        test.assert_equal<int64>(100000000, backoff.delay(1).to_nanos());
+        test.assert_equal<int64>(200000000, backoff.delay(2).to_nanos());
+        test.assert_equal<int64>(400000000, backoff.delay(3).to_nanos());
+        test.assert_equal<int64>(800000000, backoff.delay(4).to_nanos());
+        test.assert_equal<int64>(1000000000, backoff.delay(5).to_nanos());
+        test.assert_equal<int64>(1000000000, backoff.delay(60).to_nanos());
+        test.assert_equal_string("Backoff(PT0.1S to PT1S, None jitter)", backoff.to_string());
+        // Doubling never overflows: a huge cap is reached by saturation.
+        last wide = backoffs.exponential(durations.of_nanos(1), durations.of_days(36500), backoffs.Jitter.None,
+            randoms.seeded(1));
+        test.assert_equal<int64>(durations.of_days(36500).to_nanos(), wide.ceiling(1000).to_nanos());
+    };
+
+    export let test_full_jitter_vectors = func {
+        last backoff = backoffs.exponential(durations.of_millis(100), durations.of_seconds(1), backoffs.Jitter.Full,
+            randoms.seeded(42));
+        test.assert_equal<int64>(8386297, backoff.delay(1).to_nanos());
+        test.assert_equal<int64>(75796050, backoff.delay(2).to_nanos());
+        test.assert_equal<int64>(272017364, backoff.delay(3).to_nanos());
+        test.assert_equal<int64>(739754356, backoff.delay(4).to_nanos());
+        test.assert_equal<int64>(991803914, backoff.delay(5).to_nanos());
+    };
+
+    export let test_equal_jitter_vectors = func {
+        last backoff = backoffs.exponential(durations.of_millis(100), durations.of_millis(300), backoffs.Jitter.Equal,
+            randoms.seeded(7));
+        test.assert_equal<int64>(85028824, backoff.delay(1).to_nanos());
+        test.assert_equal<int64>(127875122, backoff.delay(2).to_nanos());
+        test.assert_equal<int64>(275944119, backoff.delay(3).to_nanos());
+        test.assert_equal<int64>(297164658, backoff.delay(4).to_nanos());
+    };
+
+    export let test_retry_budget_ratio = func {
+        // 20 retries per 100 requests, starting with 1, holding at most 2.
+        last budget = budgets.of(20, 1, 2);
+        test.assert_equal_string("RetryBudget(20 percent, balance 1.00)", budget.to_string());
+        test.assert(budget.try_withdraw());
+        test.assert(!budget.try_withdraw());
+        for (let i = 0; i < 4; i++) {
+            budget.deposit();
+        }
+        test.assert_equal_string("RetryBudget(20 percent, balance 0.80)", budget.to_string());
+        test.assert(!budget.try_withdraw());
+        budget.deposit();
+        test.assert(budget.try_withdraw());
+        for (let i = 0; i < 100; i++) {
+            budget.deposit();
+        }
+        // Capped at 2 retries.
+        test.assert_equal<int>(2, budget.available());
+        test.assert(budgets.unlimited().try_withdraw());
+    };
+
+    // A service that fails its first `failures` calls with code "busy" (or "fatal") and then answers.
+    let Flaky = class implements services.Service<string, string> (
+        let failures: int;
+        last code: string;
+        export let calls: int = 0;
+
+        export let init = func(count: int, error_code: string) {
+            failures = count;
+            code = error_code;
+        };
+
+        export let call = func(request: string) -> result.Result<string> {
+            calls++;
+            if (calls <= failures) {
+                return result.Result<string>.Err(errors.custom(code, "attempt " + calls.to_string()));
+            }
+            return result.Result<string>.Ok(request + " after " + calls.to_string());
+        };
+
+        export let.override to_string = func -> string => "Flaky";
+    );
+
+    let elapsed = func(clock: fixed_clock.FixedClock) -> int64 =>
+        test.assert_ok<durations.Duration>(clock.monotonic()).to_nanos();
+
+    let full_jitter = func -> backoffs.Backoff =>
+        backoffs.exponential(durations.of_millis(100), durations.of_seconds(1), backoffs.Jitter.Full,
+            randoms.seeded(42));
+
+    export let test_retries_until_success = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last retry = retries.on_error<string, string>(4, full_jitter(), budgets.unlimited(), clock);
+        last backend = new Flaky(2, "busy");
+        last service = filters.bind<string, string, string, string>(retry, backend);
+        test.assert_equal_string("x after 3", test.assert_ok<string>(service.call("x")));
+        test.assert_equal<int>(3, backend.calls);
+        test.assert_equal<int64>(2, retry.retries());
+        // Slept 8386297 + 75796050 ns.
+        test.assert_equal<int64>(84182347, elapsed(clock));
+        test.assert_equal_string("RetryFilter(4 attempts)", retry.to_string());
+    };
+
+    export let test_stops_at_max_attempts = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last retry = retries.on_error<string, string>(4, full_jitter(), budgets.unlimited(), clock);
+        last backend = new Flaky(100, "busy");
+        last service = filters.bind<string, string, string, string>(retry, backend);
+        last e = test.assert_err<string>(service.call("x"));
+        test.assert_equal_string("attempt 4", errors.message(e));
+        test.assert_equal<int>(4, backend.calls);
+        // Three sleeps: 8386297 + 75796050 + 272017364 ns.
+        test.assert_equal<int64>(356199711, elapsed(clock));
+    };
+
+    let is_busy = func(outcome: result.Result<string>) -> bool => match (outcome) {
+        result.Result.Ok(value) => false,
+        result.Result.Err(e) => match (e) {
+            errors.Error.Custom(detail) => detail.code() == "busy",
+            _ => false,
+        },
+    };
+
+    export let test_retry_predicate = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last retry = retries.when<string, string>(5, is_busy, full_jitter(), budgets.unlimited(), clock);
+        last fatal = new Flaky(1, "fatal");
+        test.assert_err<string>(filters.bind<string, string, string, string>(retry, fatal).call("x"));
+        test.assert_equal<int>(1, fatal.calls);
+        test.assert_equal<int64>(0, elapsed(clock));
+        last busy = new Flaky(1, "busy");
+        test.assert_ok<string>(filters.bind<string, string, string, string>(retry, busy).call("x"));
+        test.assert_equal<int>(2, busy.calls);
+    };
+
+    export let test_budget_limits_retries = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last none = backoffs.exponential(durations.of_millis(1), durations.of_millis(1), backoffs.Jitter.None,
+            randoms.seeded(1));
+        // 50 retries per 100 requests, nothing in reserve.
+        last retry = retries.on_error<string, string>(3, none, budgets.of(50, 0, 10), clock);
+        last backend = new Flaky(1000, "busy");
+        last service = filters.bind<string, string, string, string>(retry, backend);
+        // Request 1: balance 0.50, the retry is refused.
+        test.assert_err<string>(service.call("a"));
+        test.assert_equal<int>(1, backend.calls);
+        // Request 2: balance 1.00, one retry (balance 0), the second retry is refused.
+        test.assert_err<string>(service.call("b"));
+        test.assert_equal<int>(3, backend.calls);
+        test.assert_equal<int64>(1, retry.retries());
+        test.assert_equal<int64>(2, retry.budget_refusals());
+        test.assert_equal<int64>(1000000, elapsed(clock));
+    };
+);

@@ -1,0 +1,9 @@
+error[E0419]: cannot infer type parameter 'T'
+ --> $DIR/inference-empty-collection.nra:3:12
+  |
+3 | let none = first([]);
+  |            ^^^^^^^^^ no argument or expected type gives 'T'
+  |
+  = help: write the type arguments, as in 'first<T>(...)'
+
+For more information about this error, try `neura explain E0419`.

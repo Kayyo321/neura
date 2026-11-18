@@ -14,7 +14,8 @@ the repository. For each entry of `GENERATED` this script writes
     are unchanged, and so is everything inside a code span or fenced block.
 
 `HAND_WRITTEN` lists the wiki pages that are maintained by hand, plus the
-`Stdlib-<Area>-<Module>.md` module pages, which `update-stdlib-wiki-api.py`
+`Stdlib-<Area>-<Module>.md` module pages (one level more for each
+subdirectory, as in `Stdlib-Net-Core-Uri.md`), which `update-stdlib-wiki-api.py`
 refreshes. A wiki page that is neither generated nor hand-written is an error.
 
 By default the script writes the pages. `--check` writes nothing, and exits 1
@@ -66,13 +67,22 @@ GENERATED: dict[str, str] = {
     "docs/lang/Status.md": "Status",
     "docs/lang/Tags.md": "Tags",
     "docs/lang/Stdlib.md": "Stdlib-Design",
+    "docs/apps/Html.md": "HtmlFactories",
+    "docs/apps/Components.md": "StateAndComponents",
+    "docs/apps/Css.md": "Stylesheets",
+    "docs/apps/WebApp.md": "FirstWebApp",
     "docs/lang/Testing.md": "Testing",
     "docs/lang/Tooling.md": "Tooling",
     "docs/lang/Tutorial.md": "Tutorial",
     "docs/lang/Types.md": "Types",
     "docs/runtime/NVM.md": "NVM",
+    "docs/runtime/Service.md": "Service",
     "docs/runtime/Kernels.md": "Kernels",
     "docs/runtime/NVR.md": "NVR",
+    "docs/runtime/ServerHost.md": "Server-Host",
+    "docs/runtime/Sql.md": "Sql",
+    "docs/runtime/Providers.md": "Providers",
+    "docs/apps/Desktop.md": "Apps-Desktop",
     "docs/style/CodingStyle.md": "CodingStyle",
 }
 
@@ -88,13 +98,23 @@ REPOSITORY_ONLY = (
     "docs/design/Release030.md",
     "docs/design/Representation030.md",
     "docs/design/Parameters030.md",
+    "docs/design/Products030.md",
     "docs/design/Storage030.md",
+    "docs/design/Calls030.md",
+    "docs/design/Matching030.md",
+    "docs/design/Lifecycle030.md",
+    "docs/design/Service030.md",
+    "docs/design/Hooks030.md",
+    "docs/design/Records030.md",
+    "docs/design/Lifetime030.md",
+    "docs/design/Crypto030.md",
     "docs/design/Apps030.md",
     "docs/design/Html030.md",
     "docs/design/Components030.md",
     "docs/design/Backend030.md",
     "docs/design/Desktop030.md",
     "docs/design/Projects030.md",
+    "docs/design/Net030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )
@@ -109,7 +129,7 @@ REPOSITORY_ONLY_PATTERNS = (
 # Wiki pages written by hand. The standard-library module pages, which
 # `update-stdlib-wiki-api.py` maintains, are matched by MODULE_PAGE.
 HAND_WRITTEN = frozenset({"Home", "_Sidebar", "Neurons-and-Circuits", "Stdlib"})
-MODULE_PAGE = re.compile(r"^Stdlib-[A-Z][A-Za-z0-9]*(?:-[A-Z][A-Za-z0-9]*)?$")
+MODULE_PAGE = re.compile(r"^Stdlib-[A-Z][A-Za-z0-9]*(?:-[A-Z][A-Za-z0-9]*){0,4}$")
 
 # The generated-file comment, and the header under each title.
 COMMENT = "<!-- Generated from {path} by scripts/generate-wiki.py. Edit that file, not this one. -->"

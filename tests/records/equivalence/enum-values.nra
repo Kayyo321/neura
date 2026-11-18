@@ -1,0 +1,51 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Optional;
+
+let Mark = enum (A, B);
+let Node = record (value: int);
+let Envelope = record (pair: [int, string], state: Optional<Node>, mode: Mark);
+let Shape = enum (Empty, Pair(int, int), Named { x: int, y: int }, Weight(float64));
+let Box = enum (Store(Shape));
+let visits = 0;
+let Probe = class (
+    export let.override equals = func(other: class) -> bool {
+        visits += 1;
+        return false;
+    };
+);
+let Values = enum (Missing, Pair(Probe, Probe));
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let named = Shape.Named { y: 4, x: 3 };
+        let pair = Shape.Pair(3, 4);
+        console.print_line(named.to_string());
+        console.print_line(pair.to_string());
+        console.print_line(Shape.Empty.to_string());
+        console.print_line(Box.Store(named).to_string());
+        console.print_line(named.hash_code().to_string());
+        console.print_line(pair.hash_code().to_string());
+        console.print_line(Shape.Empty.hash_code().to_string());
+        if (named === pair || !(named === Shape.Named { x: 3, y: 4 })) { return program.ExitCode.Failure; }
+        let node = new Node(7);
+        let entry = new Envelope([3, "s"], Optional<Node>.Some(node), Mark.B);
+        console.print_line(entry.to_string());
+        if (!(entry === new Envelope([3, "s"], Optional<Node>.Some(new Node(7)), Mark.B))) {
+            return program.ExitCode.Failure;
+        }
+        let missing = Optional<Node>.None;
+        let empty = Optional<Node>.Some(nil);
+        console.print_line(missing.to_string() + " " + empty.to_string());
+        if (missing === empty || !(empty === Optional<Node>.Some(nil))) { return program.ExitCode.Failure; }
+        let first = Shape.Weight(float64.from_bits(9218868437227405313));
+        let other = Shape.Weight(float64.from_bits(18446744073709551615));
+        if (!(first === other) || first.hash_code() != other.hash_code()) { return program.ExitCode.Failure; }
+        let positive = Shape.Weight(float64.from_bits(0));
+        let negative = Shape.Weight(float64.from_bits(9223372036854775808));
+        if (positive === negative || positive.hash_code() == negative.hash_code()) { return program.ExitCode.Failure; }
+        let probes = Values.Pair(new Probe(), new Probe());
+        if (probes === Values.Missing || visits != 0) { return program.ExitCode.Failure; }
+        if (probes === probes || visits != 1) { return program.ExitCode.Failure; }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,180 @@
+let hex = import:Std.Encoding.Hex;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// The protobuf wire format. Every vector comes from a pure Python encoder run with
+// `python3 -I vec.py` (std-net-rpc scratch; recorded in notes-rpc.md):
+//   def v(n): n &= (1<<64)-1; emit 7 bits at a time, low first, 0x80 on every byte but the last
+//   zz64(n) = ((n<<1)^(n>>63)) & (2**64-1); zz32(n) = ((n<<1)^(n>>31)) & (2**32-1)
+//   fixed values: struct.pack('<I'|'<i'|'<Q'|'<q'|'<f'|'<d', ...)
+let ProtoWireTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let varint_hex = func(value: uint64) -> string => hex.encode(proto.varint(value));
+
+    // python3: v(0) 00, v(1) 01, v(127) 7f, v(128) 8001, v(150) 9601, v(300) ac02, v(16384) 808001,
+    // v(2**32-1) ffffffff0f, v(2**63-1) ffffffffffffffff7f, v(2**64-1) ffffffffffffffffff01
+    export let test_varint_vectors = func {
+        test.assert_equal_string("00", varint_hex(0));
+        test.assert_equal_string("01", varint_hex(1));
+        test.assert_equal_string("7f", varint_hex(127));
+        test.assert_equal_string("8001", varint_hex(128));
+        test.assert_equal_string("9601", varint_hex(150));
+        test.assert_equal_string("ac02", varint_hex(300));
+        test.assert_equal_string("808001", varint_hex(16384));
+        test.assert_equal_string("ffffffff0f", varint_hex(4294967295));
+        test.assert_equal_string("ffffffffffffffff7f", varint_hex(9223372036854775807));
+        test.assert_equal_string("ffffffffffffffffff01", varint_hex(18446744073709551615));
+        test.assert_equal<int>(10, proto.varint_size(18446744073709551615));
+        test.assert_equal<int>(2, proto.varint_size(300));
+        for (let text in ["00", "7f", "9601", "ac02", "808001", "ffffffff0f", "ffffffffffffffffff01"]) {
+            last r = proto.reader(bytes_of(text));
+            last value = test.assert_ok<uint64>(r.read_varint());
+            test.assert_equal_string(text, varint_hex(value));
+            test.assert(!r.has_next());
+        }
+    };
+
+    export let test_varint_rejections = func {
+        // Truncated: continuation bit on the last byte.
+        test.assert_err<uint64>(proto.reader(bytes_of("96")).read_varint());
+        test.assert_err<uint64>(proto.reader(bytes_of("")).read_varint());
+        // A 10th byte above 1 overflows 64 bits.
+        test.assert_err<uint64>(proto.reader(bytes_of("ffffffffffffffffff02")).read_varint());
+        // 11 bytes.
+        test.assert_err<uint64>(proto.reader(bytes_of("ffffffffffffffffff8101")).read_varint());
+    };
+
+    // python3: zz32 0->0, -1->1, 1->2, -2->3, 2147483647->4294967294, -2147483648->4294967295;
+    // zz64 9223372036854775807->18446744073709551614, -9223372036854775808->18446744073709551615
+    export let test_zigzag_vectors = func {
+        test.assert_equal_uint64(0, proto.zigzag64(0));
+        test.assert_equal_uint64(1, proto.zigzag64(-1));
+        test.assert_equal_uint64(2, proto.zigzag64(1));
+        test.assert_equal_uint64(3, proto.zigzag64(-2));
+        test.assert_equal_uint64(18446744073709551614, proto.zigzag64(9223372036854775807));
+        test.assert_equal_uint64(18446744073709551615, proto.zigzag64(-9223372036854775807 - 1));
+        test.assert_equal<uint32>(4294967294, proto.zigzag32(2147483647));
+        test.assert_equal<uint32>(4294967295, proto.zigzag32(-2147483647 - 1));
+        test.assert_equal_int64(-9223372036854775807 - 1, proto.unzigzag64(18446744073709551615));
+        test.assert_equal_int64(9223372036854775807, proto.unzigzag64(18446744073709551614));
+        test.assert_equal_int32(-2, proto.unzigzag32(3));
+        test.assert_equal_int32(-2147483647 - 1, proto.unzigzag32(4294967295));
+    };
+
+    // python3: struct.pack('<I',0x12345678) 78563412, struct.pack('<i',-2) feffffff,
+    // struct.pack('<Q',0x0102030405060708) 0807060504030201, struct.pack('<q',-2) feffffffffffffff,
+    // struct.pack('<f',1.5) 0000c03f, struct.pack('<d',1.5) 000000000000f83f
+    export let test_fixed_width_vectors = func {
+        last w = proto.writer();
+        w.write_fixed32(1, 305419896);
+        w.write_sfixed32(2, -2);
+        w.write_fixed64(3, 72623859790382856);
+        w.write_sfixed64(4, -2);
+        w.write_float(5, 1.5 as float32);
+        w.write_double(6, 1.5);
+        // tags: 1<<3|5 = 0d, 2<<3|5 = 15, 3<<3|1 = 19, 4<<3|1 = 21, 5<<3|5 = 2d, 6<<3|1 = 31
+        test.assert_equal_string("0d78563412" + "15feffffff" + "190807060504030201" + "21feffffffffffffff"
+            + "2d0000c03f" + "31000000000000f83f", hex.encode(w.to_bytes()));
+        last r = proto.reader(w.to_bytes());
+        test.assert_equal<int>(5, test.assert_ok<proto.FieldKey>(r.read_key()).wire_type);
+        test.assert_equal<uint32>(305419896, test.assert_ok<uint32>(r.read_fixed32()));
+        last ignored = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal_int32(-2, test.assert_ok<int32>(r.read_sfixed32()));
+        last k3 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal_uint64(72623859790382856, test.assert_ok<uint64>(r.read_fixed64()));
+        last k4 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal_int64(-2, test.assert_ok<int64>(r.read_sfixed64()));
+        last k5 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal_float64(1.5, test.assert_ok<float32>(r.read_float()) as float64);
+        last k6 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal_float64(1.5, test.assert_ok<float64>(r.read_double()));
+        test.assert(!r.has_next());
+    };
+
+    // python3: v(1<<3|0)+v(150) + v(2<<3|2)+v(7)+b'testing' + v(3<<3|0)+v(zz32(-2)) + v(4<<3|5)+pack('<I',7)
+    //   + v(5<<3|1)+pack('<Q',9) + v(6<<3|0)+v(-1)
+    last MessageHex: string = "089601120774657374696e671803250700000029090000000000000030ffffffffffffffffff01";
+
+    export let test_message_round_trip = func {
+        last w = proto.writer();
+        w.write_uint64(1, 150);
+        w.write_string(2, "testing");
+        w.write_sint32(3, -2);
+        w.write_fixed32(4, 7);
+        w.write_fixed64(5, 9);
+        w.write_int32(6, -1);
+        test.assert_equal_string(MessageHex, hex.encode(w.to_bytes()));
+
+        last r = proto.reader(bytes_of(MessageHex));
+        last k1 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert(k1.equals(new proto.FieldKey(1, proto.Varint)));
+        test.assert_equal_uint64(150, test.assert_ok<uint64>(r.read_uint64()));
+        last k2 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal<int>(proto.LengthDelimited, k2.wire_type);
+        test.assert_equal_string("testing", test.assert_ok<string>(r.read_string()));
+        last k3 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal_int32(-2, test.assert_ok<int32>(r.read_sint32()));
+        // Skip fields 4 and 5 by wire type.
+        last k4 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_ok<unit.Unit>(r.skip(k4.wire_type));
+        last k5 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_ok<unit.Unit>(r.skip(k5.wire_type));
+        last k6 = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_equal<int>(6, k6.field);
+        test.assert_equal_int32(-1, test.assert_ok<int32>(r.read_int32()));
+        test.assert(!r.has_next());
+    };
+
+    export let test_embedded_and_packed = func {
+        last inner = proto.writer();
+        inner.write_string(1, "svc");
+        last outer = proto.writer();
+        outer.write_message(7, inner);
+        outer.write_packed_uint64(8, new([1 as uint64, 300, 150]));
+        // python3: v(7<<3|2)+v(5)+(v(1<<3|2)+v(3)+b'svc') + v(8<<3|2)+v(5)+v(1)+v(300)+v(150)
+        test.assert_equal_string("3a050a03737663" + "420501ac029601", hex.encode(outer.to_bytes()));
+        last r = proto.reader(outer.to_bytes());
+        last k = test.assert_ok<proto.FieldKey>(r.read_key());
+        last sub = test.assert_ok<proto.ProtoReader>(r.read_message());
+        last sub_key = test.assert_ok<proto.FieldKey>(sub.read_key());
+        test.assert_equal_string("svc", test.assert_ok<string>(sub.read_string()));
+        test.assert(!sub.has_next());
+        last k8 = test.assert_ok<proto.FieldKey>(r.read_key());
+        last packed = test.assert_ok<uint64[list]>(r.read_packed_uint64());
+        test.assert_equal<int>(3, packed.length);
+        test.assert_equal_uint64(300, packed[1]);
+    };
+
+    export let test_malformed_messages = func {
+        // Field number 0.
+        test.assert_err<proto.FieldKey>(proto.reader(bytes_of("0001")).read_key());
+        // Wire types 3, 4, 6, 7.
+        test.assert_err<proto.FieldKey>(proto.reader(bytes_of("0b")).read_key());
+        test.assert_err<proto.FieldKey>(proto.reader(bytes_of("0c")).read_key());
+        test.assert_err<proto.FieldKey>(proto.reader(bytes_of("0e")).read_key());
+        test.assert_err<proto.FieldKey>(proto.reader(bytes_of("0f")).read_key());
+        // A length past the end, including one that does not fit int.
+        last r = proto.reader(bytes_of("120574657374"));
+        last k = test.assert_ok<proto.FieldKey>(r.read_key());
+        test.assert_err<uint8[list]>(r.read_bytes());
+        last huge = proto.reader(bytes_of("12ffffffffffffffffff01"));
+        last hk = test.assert_ok<proto.FieldKey>(huge.read_key());
+        test.assert_err<uint8[list]>(huge.read_bytes());
+        // Truncated fixed values.
+        test.assert_err<uint32>(proto.reader(bytes_of("010203")).read_fixed32());
+        test.assert_err<uint64>(proto.reader(bytes_of("01020304050607")).read_fixed64());
+        // Invalid UTF-8 in a string field.
+        last bad = proto.reader(bytes_of("1201ff"));
+        last bk = test.assert_ok<proto.FieldKey>(bad.read_key());
+        test.assert_err<string>(bad.read_string());
+    };
+
+    export let test_bit_helpers = func {
+        test.assert_equal_uint64(18446744073709551615, proto.int64_bits(-1));
+        test.assert_equal_int64(-1, proto.bits_int64(18446744073709551615));
+        test.assert_equal_int64(-9223372036854775807 - 1, proto.bits_int64(9223372036854775808));
+        test.assert_equal_int32(-1, proto.low_int32(18446744073709551615));
+    };
+);

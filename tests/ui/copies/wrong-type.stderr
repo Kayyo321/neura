@@ -1,0 +1,10 @@
+error[E0403]: expected int64, got string
+ --> $DIR/wrong-type.nra:4:33
+  |
+2 | let User = record (id: int64, name: string, active: bool);
+  |                    -- field 'id' is declared here
+3 | let user = new User(7, "Ada", true);
+4 | let copy = new with(user) { id: "seven" };
+  |                                 ^^^^^^^ expected int64, found string
+
+For more information about this error, try `neura explain E0403`.

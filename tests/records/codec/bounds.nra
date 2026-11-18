@@ -1,0 +1,76 @@
+// Integer bounds, the input bound, nesting and two independent codecs of one
+// record (docs/design/Records030.md, edge cases 128, 133 and 136).
+let json = import:Std.Encoding.Json;
+let errors = import:Std.Core.Error;
+let strings = import:Std.Text.Strings;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+
+let Wide = record (low: int64, high: int64, zero: uint64, top: uint64, small: int8);
+let WideJson = derive json.Codec<Wide>;
+let PinnedJson = derive json.Codec<Wide> {
+    field Wide.low: "min";
+    field Wide.top: "max";
+};
+
+let result_line = func<T>(value: Result<T>) {
+    match (value) {
+        Result.Ok(_) => {
+            console.print_line("ok");
+        },
+        Result.Err(e) => {
+            match (e) {
+                errors.Error.Custom(detail) => {
+                    console.print_line(detail.code() + " " + detail.message());
+                },
+                errors.Error.Parse { kind, offset, message: _ } => {
+                    console.print_line("parse " + kind.to_string() + " " + offset.to_string());
+                },
+                _ => {
+                    console.print_line("unexpected error");
+                },
+            }
+        },
+    }
+};
+
+let text_of = func(value: Result<string>) -> string => match (value) {
+    Result.Ok(text) => text,
+    Result.Err(_) => "error",
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last wide = new Wide(-9223372036854775808, 9223372036854775807, 0, 18446744073709551615, -128);
+        last encoded = text_of(WideJson.encode(wide));
+        console.print_line(encoded);
+        console.print_line(text_of(PinnedJson.encode(wide)));
+        match (WideJson.decode(encoded)) {
+            Result.Ok(decoded) => {
+                console.print_line(decoded.equals(wide) ? "round trip" : "changed");
+            },
+            Result.Err(_) => {
+                return program.ExitCode.Failure;
+            },
+        }
+        result_line(PinnedJson.decode(encoded));
+        result_line(WideJson.decode("{\"low\":0,\"high\":9223372036854775808,\"zero\":0,\"top\":0,\"small\":0}"));
+        result_line(WideJson.decode("{\"low\":0,\"high\":0,\"zero\":-1,\"top\":0,\"small\":0}"));
+        result_line(WideJson.decode("{\"low\":0,\"high\":0,\"zero\":0,\"top\":0,\"small\":128}"));
+        result_line(WideJson.decode("{\"low\":0,\"high\":0,\"zero\":0,\"top\":0,\"small\":-0.0}"));
+
+        // 2^23 two-byte characters: exactly 16,777,216 bytes reach the parser.
+        let text = "é";
+        for (let i = 0; i < 23; i++) {
+            text = strings.replace(text, "é", "éé");
+        }
+        result_line(WideJson.decode(text));
+        result_line(WideJson.decode(strings.replace_first(text, "é", "éx")));
+
+        last deep = strings.repeat("[", 513) + strings.repeat("]", 513);
+        result_line(WideJson.decode(deep));
+        result_line(json.parse(deep));
+        return program.ExitCode.Ok;
+    };
+);

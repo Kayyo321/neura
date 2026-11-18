@@ -1,0 +1,4 @@
+// Parenthesized, the callee is a call with a named argument (edge case 13).
+let record = func(count: int) -> int => count;
+let limit = 3;
+let x = (record)(count: limit);

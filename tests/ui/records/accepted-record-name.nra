@@ -1,0 +1,3 @@
+// A binding named `record` is a name (edge case 14).
+let record = 1;
+let r: int = record;

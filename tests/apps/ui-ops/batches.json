@@ -1,0 +1,504 @@
+[
+  {
+    "name": "mount, then reuse and move siblings",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"ul","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":3,"parent":2,"before":null,"value":"Alpha"},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":5,"parent":4,"before":null,"value":"Beta"},
+          {"op":"element","id":6,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":7,"parent":6,"before":null,"value":"Gamma"},
+          {"op":"attribute","id":1,"name":"aria-label","value":"Items"},
+          {"op":"attribute","id":4,"name":"data-selected","value":"true"}
+        ],
+        "tree": [
+          {"tag":"ul","attrs":{"aria-label":"Items"},"children":[
+            {"tag":"li","children":["Alpha"]},
+            {"tag":"li","attrs":{"data-selected":"true"},"children":["Beta"]},
+            {"tag":"li","children":["Gamma"]}
+          ]}
+        ]
+      },
+      {
+        "operations": [
+          {"op":"remove","id":2},
+          {"op":"move","id":6,"parent":1,"before":4},
+          {"op":"element","id":8,"parent":1,"before":4,"name":"li","svg":false},
+          {"op":"text","id":9,"parent":8,"before":null,"value":"Delta"},
+          {"op":"attribute","id":4,"name":"data-selected","value":null},
+          {"op":"setText","id":5,"value":"Beta updated"}
+        ],
+        "tree": [
+          {"tag":"ul","attrs":{"aria-label":"Items"},"children":[
+            {"tag":"li","children":["Gamma"]},
+            {"tag":"li","children":["Delta"]},
+            {"tag":"li","children":["Beta updated"]}
+          ]}
+        ]
+      }
+    ]
+  },
+  {
+    "name": "SVG namespace and literal text",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"div","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"svg","svg":true},
+          {"op":"element","id":3,"parent":2,"before":null,"name":"path","svg":true},
+          {"op":"text","id":4,"parent":1,"before":null,"value":"<b>plain & literal</b>"},
+          {"op":"attribute","id":2,"name":"viewBox","value":"0 0 4 4"},
+          {"op":"attribute","id":3,"name":"d","value":"M 0 0 L 4 4"}
+        ],
+        "tree": [
+          {"tag":"div","children":[
+            {"tag":"svg","svg":true,"attrs":{"viewBox":"0 0 4 4"},"children":[
+              {"tag":"path","svg":true,"attrs":{"d":"M 0 0 L 4 4"}}
+            ]},
+            "<b>plain & literal</b>"
+          ]}
+        ]
+      }
+    ]
+  },
+  {
+    "name": "reconciler: mount, keyed update, equal commit and replacement",
+    "source": "tests/apps/ui-ops/reconcile.py",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"section","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"h1","svg":false},
+          {"op":"text","id":3,"parent":2,"before":null,"value":"Parts"},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"ul","svg":false},
+          {"op":"element","id":5,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":6,"parent":5,"before":null,"value":"a"},
+          {"op":"element","id":7,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":8,"parent":7,"before":null,"value":"b"},
+          {"op":"element","id":9,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":10,"parent":9,"before":null,"value":"c"},
+          {"op":"text","id":11,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":12,"parent":1,"before":null,"name":"em","svg":false},
+          {"op":"text","id":13,"parent":12,"before":null,"value":"new"},
+          {"op":"text","id":14,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":15,"parent":1,"before":null,"name":"p","svg":false},
+          {"op":"text","id":16,"parent":15,"before":null,"value":"Wide"},
+          {"op":"element","id":17,"parent":1,"before":null,"name":"input","svg":false},
+          {"op":"element","id":18,"parent":1,"before":null,"name":"button","svg":false},
+          {"op":"text","id":19,"parent":18,"before":null,"value":"Go"},
+          {"op":"attribute","id":1,"name":"title","value":"Stock"},
+          {"op":"attribute","id":1,"name":"aria-busy","value":"false"},
+          {"op":"variable","id":15,"name":"--gap","value":{"number":2.0,"unit":"rem"}},
+          {"op":"attribute","id":17,"name":"type","value":"text"},
+          {"op":"attribute","id":18,"name":"type","value":"button"},
+          {"op":"handler","id":18,"event":"click","handler":1,"preventDefault":false,"stopPropagation":false},
+          {"op":"property","id":17,"name":"value","value":"x"}
+        ],
+        "tree": [{"tag":"section","attrs":{"aria-busy":"false","title":"Stock"},"children":[{"tag":"h1","children":["Parts"]},{"tag":"ul","children":[{"tag":"li","children":["a"]},{"tag":"li","children":["b"]},{"tag":"li","children":["c"]}]}," ",{"tag":"em","children":["new"]}," ",{"tag":"p","vars":{"--gap":"2rem"},"children":["Wide"]},{"tag":"input","attrs":{"type":"text"},"props":{"value":"x"}},{"tag":"button","attrs":{"type":"button"},"children":["Go"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[5,[0,1,0]],[6,[0,1,0,0]],[7,[0,1,1]],[8,[0,1,1,0]],[9,[0,1,2]],[10,[0,1,2,0]],[11,[0,2]],[12,[0,3]],[13,[0,3,0]],[14,[0,4]],[15,[0,5]],[16,[0,5,0]],[17,[0,6]],[18,[0,7]],[19,[0,7,0]]],
+        "events": [{"path":[0,7],"event":"click","node":18,"handler":1,"preventDefault":false,"stopPropagation":false}]
+      },
+      {
+        "operations": [
+          {"op":"remove","id":7},
+          {"op":"remove","id":15},
+          {"op":"remove","id":18},
+          {"op":"move","id":9,"parent":4,"before":5},
+          {"op":"element","id":20,"parent":4,"before":5,"name":"li","svg":false},
+          {"op":"text","id":21,"parent":20,"before":null,"value":"d"},
+          {"op":"element","id":22,"parent":1,"before":17,"name":"p","svg":false},
+          {"op":"text","id":23,"parent":22,"before":null,"value":"Narrow"},
+          {"op":"element","id":24,"parent":1,"before":null,"name":"button","svg":false},
+          {"op":"text","id":25,"parent":24,"before":null,"value":"Go"},
+          {"op":"attribute","id":1,"name":"aria-busy","value":"true"},
+          {"op":"attribute","id":1,"name":"title","value":null},
+          {"op":"setText","id":13,"value":"old"},
+          {"op":"attribute","id":17,"name":"disabled","value":""},
+          {"op":"attribute","id":24,"name":"type","value":"button"},
+          {"op":"handler","id":24,"event":"click","handler":2,"preventDefault":true,"stopPropagation":false},
+          {"op":"property","id":17,"name":"value","value":"y"}
+        ],
+        "tree": [{"tag":"section","attrs":{"aria-busy":"true"},"children":[{"tag":"h1","children":["Parts"]},{"tag":"ul","children":[{"tag":"li","children":["c"]},{"tag":"li","children":["d"]},{"tag":"li","children":["a"]}]}," ",{"tag":"em","children":["old"]}," ",{"tag":"p","children":["Narrow"]},{"tag":"input","attrs":{"disabled":"","type":"text"},"props":{"value":"y"}},{"tag":"button","attrs":{"type":"button"},"children":["Go"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[9,[0,1,0]],[10,[0,1,0,0]],[20,[0,1,1]],[21,[0,1,1,0]],[5,[0,1,2]],[6,[0,1,2,0]],[11,[0,2]],[12,[0,3]],[13,[0,3,0]],[14,[0,4]],[22,[0,5]],[23,[0,5,0]],[17,[0,6]],[24,[0,7]],[25,[0,7,0]]],
+        "events": [{"path":[0,7],"event":"click","node":24,"handler":2,"preventDefault":true,"stopPropagation":false}]
+      },
+      {
+        "operations": [
+          {"op":"property","id":17,"name":"value","value":"y"}
+        ],
+        "tree": [{"tag":"section","attrs":{"aria-busy":"true"},"children":[{"tag":"h1","children":["Parts"]},{"tag":"ul","children":[{"tag":"li","children":["c"]},{"tag":"li","children":["d"]},{"tag":"li","children":["a"]}]}," ",{"tag":"em","children":["old"]}," ",{"tag":"p","children":["Narrow"]},{"tag":"input","attrs":{"disabled":"","type":"text"},"props":{"value":"y"}},{"tag":"button","attrs":{"type":"button"},"children":["Go"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[9,[0,1,0]],[10,[0,1,0,0]],[20,[0,1,1]],[21,[0,1,1,0]],[5,[0,1,2]],[6,[0,1,2,0]],[11,[0,2]],[12,[0,3]],[13,[0,3,0]],[14,[0,4]],[22,[0,5]],[23,[0,5,0]],[17,[0,6]],[24,[0,7]],[25,[0,7,0]]],
+        "events": [{"path":[0,7],"event":"click","node":24,"handler":2,"preventDefault":true,"stopPropagation":false}]
+      },
+      {
+        "operations": [
+          {"op":"remove","id":9},
+          {"op":"remove","id":20},
+          {"op":"remove","id":5},
+          {"op":"remove","id":22},
+          {"op":"remove","id":24},
+          {"op":"element","id":26,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":27,"parent":26,"before":null,"value":"z"},
+          {"op":"element","id":28,"parent":1,"before":17,"name":"p","svg":false},
+          {"op":"text","id":29,"parent":28,"before":null,"value":"Wide"},
+          {"op":"element","id":30,"parent":1,"before":null,"name":"button","svg":false},
+          {"op":"text","id":31,"parent":30,"before":null,"value":"Go"},
+          {"op":"attribute","id":1,"name":"aria-busy","value":"false"},
+          {"op":"setText","id":13,"value":"m"},
+          {"op":"variable","id":28,"name":"--gap","value":{"number":2.0,"unit":"rem"}},
+          {"op":"attribute","id":17,"name":"disabled","value":null},
+          {"op":"attribute","id":30,"name":"type","value":"button"},
+          {"op":"handler","id":30,"event":"click","handler":3,"preventDefault":false,"stopPropagation":false},
+          {"op":"property","id":17,"name":"value","value":""}
+        ],
+        "tree": [{"tag":"section","attrs":{"aria-busy":"false"},"children":[{"tag":"h1","children":["Parts"]},{"tag":"ul","children":[{"tag":"li","children":["z"]}]}," ",{"tag":"em","children":["m"]}," ",{"tag":"p","vars":{"--gap":"2rem"},"children":["Wide"]},{"tag":"input","attrs":{"type":"text"},"props":{"value":""}},{"tag":"button","attrs":{"type":"button"},"children":["Go"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[26,[0,1,0]],[27,[0,1,0,0]],[11,[0,2]],[12,[0,3]],[13,[0,3,0]],[14,[0,4]],[28,[0,5]],[29,[0,5,0]],[17,[0,6]],[30,[0,7]],[31,[0,7,0]]],
+        "events": [{"path":[0,7],"event":"click","node":30,"handler":3,"preventDefault":false,"stopPropagation":false}]
+      }
+    ]
+  },
+  {
+    "name": "reconciler: keyed items before a static sibling",
+    "source": "tests/apps/ui-ops/reconcile.py",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"ul","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":3,"parent":2,"before":null,"value":"a"},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":5,"parent":4,"before":null,"value":"b"},
+          {"op":"element","id":6,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":7,"parent":6,"before":null,"value":"c"},
+          {"op":"element","id":8,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":9,"parent":8,"before":null,"value":"d"},
+          {"op":"element","id":10,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":11,"parent":10,"before":null,"value":"e"},
+          {"op":"element","id":12,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":13,"parent":12,"before":null,"value":"end"}
+        ],
+        "tree": [{"tag":"ul","children":[{"tag":"li","children":["a"]},{"tag":"li","children":["b"]},{"tag":"li","children":["c"]},{"tag":"li","children":["d"]},{"tag":"li","children":["e"]},{"tag":"li","children":["end"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[5,[0,1,0]],[6,[0,2]],[7,[0,2,0]],[8,[0,3]],[9,[0,3,0]],[10,[0,4]],[11,[0,4,0]],[12,[0,5]],[13,[0,5,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"move","id":10,"parent":1,"before":2},
+          {"op":"move","id":8,"parent":1,"before":2},
+          {"op":"move","id":6,"parent":1,"before":2},
+          {"op":"move","id":4,"parent":1,"before":2}
+        ],
+        "tree": [{"tag":"ul","children":[{"tag":"li","children":["e"]},{"tag":"li","children":["d"]},{"tag":"li","children":["c"]},{"tag":"li","children":["b"]},{"tag":"li","children":["a"]},{"tag":"li","children":["end"]}]}],
+        "ids": [[1,[0]],[10,[0,0]],[11,[0,0,0]],[8,[0,1]],[9,[0,1,0]],[6,[0,2]],[7,[0,2,0]],[4,[0,3]],[5,[0,3,0]],[2,[0,4]],[3,[0,4,0]],[12,[0,5]],[13,[0,5,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":10},
+          {"op":"remove","id":8},
+          {"op":"remove","id":4},
+          {"op":"element","id":14,"parent":1,"before":6,"name":"li","svg":false},
+          {"op":"text","id":15,"parent":14,"before":null,"value":"x"},
+          {"op":"move","id":2,"parent":1,"before":6},
+          {"op":"element","id":16,"parent":1,"before":6,"name":"li","svg":false},
+          {"op":"text","id":17,"parent":16,"before":null,"value":"y"},
+          {"op":"element","id":18,"parent":1,"before":12,"name":"li","svg":false},
+          {"op":"text","id":19,"parent":18,"before":null,"value":"z"},
+          {"op":"setText","id":13,"value":"tail"}
+        ],
+        "tree": [{"tag":"ul","children":[{"tag":"li","children":["x"]},{"tag":"li","children":["a"]},{"tag":"li","children":["y"]},{"tag":"li","children":["c"]},{"tag":"li","children":["z"]},{"tag":"li","children":["tail"]}]}],
+        "ids": [[1,[0]],[14,[0,0]],[15,[0,0,0]],[2,[0,1]],[3,[0,1,0]],[16,[0,2]],[17,[0,2,0]],[6,[0,3]],[7,[0,3,0]],[18,[0,4]],[19,[0,4,0]],[12,[0,5]],[13,[0,5,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":14},
+          {"op":"remove","id":2},
+          {"op":"remove","id":16},
+          {"op":"remove","id":6},
+          {"op":"remove","id":18}
+        ],
+        "tree": [{"tag":"ul","children":[{"tag":"li","children":["tail"]}]}],
+        "ids": [[1,[0]],[12,[0,0]],[13,[0,0,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"element","id":20,"parent":1,"before":12,"name":"li","svg":false},
+          {"op":"text","id":21,"parent":20,"before":null,"value":"p"},
+          {"op":"element","id":22,"parent":1,"before":12,"name":"li","svg":false},
+          {"op":"text","id":23,"parent":22,"before":null,"value":"q"},
+          {"op":"setText","id":13,"value":"end"}
+        ],
+        "tree": [{"tag":"ul","children":[{"tag":"li","children":["p"]},{"tag":"li","children":["q"]},{"tag":"li","children":["end"]}]}],
+        "ids": [[1,[0]],[20,[0,0]],[21,[0,0,0]],[22,[0,1]],[23,[0,1,0]],[12,[0,2]],[13,[0,2,0]]],
+        "events": []
+      }
+    ]
+  },
+  {
+    "name": "reconciler: nested blocks and child views at the root",
+    "source": "tests/apps/ui-ops/reconcile.py",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"section","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"h2","svg":false},
+          {"op":"text","id":3,"parent":2,"before":null,"value":"g1"},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"ol","svg":false},
+          {"op":"element","id":5,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":6,"parent":5,"before":null,"value":"a"},
+          {"op":"element","id":7,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":8,"parent":7,"before":null,"value":"g1"},
+          {"op":"element","id":9,"parent":7,"before":null,"name":"strong","svg":false},
+          {"op":"text","id":10,"parent":9,"before":null,"value":"lead"},
+          {"op":"element","id":11,"parent":4,"before":null,"name":"li","svg":false},
+          {"op":"text","id":12,"parent":11,"before":null,"value":"z"},
+          {"op":"element","id":13,"parent":0,"before":null,"name":"section","svg":false},
+          {"op":"element","id":14,"parent":13,"before":null,"name":"h2","svg":false},
+          {"op":"text","id":15,"parent":14,"before":null,"value":"g2"},
+          {"op":"element","id":16,"parent":13,"before":null,"name":"ol","svg":false},
+          {"op":"element","id":17,"parent":16,"before":null,"name":"li","svg":false},
+          {"op":"text","id":18,"parent":17,"before":null,"value":"a"},
+          {"op":"element","id":19,"parent":16,"before":null,"name":"li","svg":false},
+          {"op":"text","id":20,"parent":19,"before":null,"value":"g2"},
+          {"op":"element","id":21,"parent":19,"before":null,"name":"strong","svg":false},
+          {"op":"text","id":22,"parent":21,"before":null,"value":"lead"},
+          {"op":"element","id":23,"parent":16,"before":null,"name":"li","svg":false},
+          {"op":"text","id":24,"parent":23,"before":null,"value":"z"},
+          {"op":"element","id":25,"parent":0,"before":null,"name":"footer","svg":false},
+          {"op":"text","id":26,"parent":25,"before":null,"value":"end"}
+        ],
+        "tree": [{"tag":"section","children":[{"tag":"h2","children":["g1"]},{"tag":"ol","children":[{"tag":"li","children":["a"]},{"tag":"li","children":["g1",{"tag":"strong","children":["lead"]}]},{"tag":"li","children":["z"]}]}]},{"tag":"section","children":[{"tag":"h2","children":["g2"]},{"tag":"ol","children":[{"tag":"li","children":["a"]},{"tag":"li","children":["g2",{"tag":"strong","children":["lead"]}]},{"tag":"li","children":["z"]}]}]},{"tag":"footer","children":["end"]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[5,[0,1,0]],[6,[0,1,0,0]],[7,[0,1,1]],[8,[0,1,1,0]],[9,[0,1,1,1]],[10,[0,1,1,1,0]],[11,[0,1,2]],[12,[0,1,2,0]],[13,[1]],[14,[1,0]],[15,[1,0,0]],[16,[1,1]],[17,[1,1,0]],[18,[1,1,0,0]],[19,[1,1,1]],[20,[1,1,1,0]],[21,[1,1,1,1]],[22,[1,1,1,1,0]],[23,[1,1,2]],[24,[1,1,2,0]],[25,[2]],[26,[2,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":4},
+          {"op":"remove","id":16},
+          {"op":"move","id":13,"parent":0,"before":1},
+          {"op":"element","id":27,"parent":13,"before":null,"name":"p","svg":false},
+          {"op":"text","id":28,"parent":27,"before":null,"value":"closed"},
+          {"op":"element","id":29,"parent":1,"before":null,"name":"p","svg":false},
+          {"op":"text","id":30,"parent":29,"before":null,"value":"closed"},
+          {"op":"element","id":31,"parent":0,"before":25,"name":"section","svg":false},
+          {"op":"element","id":32,"parent":31,"before":null,"name":"h2","svg":false},
+          {"op":"text","id":33,"parent":32,"before":null,"value":"g3"},
+          {"op":"element","id":34,"parent":31,"before":null,"name":"p","svg":false},
+          {"op":"text","id":35,"parent":34,"before":null,"value":"closed"}
+        ],
+        "tree": [{"tag":"section","children":[{"tag":"h2","children":["g2"]},{"tag":"p","children":["closed"]}]},{"tag":"section","children":[{"tag":"h2","children":["g1"]},{"tag":"p","children":["closed"]}]},{"tag":"section","children":[{"tag":"h2","children":["g3"]},{"tag":"p","children":["closed"]}]},{"tag":"footer","children":["end"]}],
+        "ids": [[13,[0]],[14,[0,0]],[15,[0,0,0]],[27,[0,1]],[28,[0,1,0]],[1,[1]],[2,[1,0]],[3,[1,0,0]],[29,[1,1]],[30,[1,1,0]],[31,[2]],[32,[2,0]],[33,[2,0,0]],[34,[2,1]],[35,[2,1,0]],[25,[3]],[26,[3,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":13},
+          {"op":"remove","id":29},
+          {"op":"remove","id":34},
+          {"op":"move","id":31,"parent":0,"before":1},
+          {"op":"element","id":36,"parent":31,"before":null,"name":"ol","svg":false},
+          {"op":"element","id":37,"parent":36,"before":null,"name":"li","svg":false},
+          {"op":"text","id":38,"parent":37,"before":null,"value":"a"},
+          {"op":"element","id":39,"parent":36,"before":null,"name":"li","svg":false},
+          {"op":"text","id":40,"parent":39,"before":null,"value":"g3"},
+          {"op":"element","id":41,"parent":39,"before":null,"name":"strong","svg":false},
+          {"op":"text","id":42,"parent":41,"before":null,"value":"lead"},
+          {"op":"element","id":43,"parent":36,"before":null,"name":"li","svg":false},
+          {"op":"text","id":44,"parent":43,"before":null,"value":"z"},
+          {"op":"element","id":45,"parent":1,"before":null,"name":"ol","svg":false},
+          {"op":"element","id":46,"parent":45,"before":null,"name":"li","svg":false},
+          {"op":"text","id":47,"parent":46,"before":null,"value":"a"},
+          {"op":"element","id":48,"parent":45,"before":null,"name":"li","svg":false},
+          {"op":"text","id":49,"parent":48,"before":null,"value":"g1"},
+          {"op":"element","id":50,"parent":48,"before":null,"name":"strong","svg":false},
+          {"op":"text","id":51,"parent":50,"before":null,"value":"lead"},
+          {"op":"element","id":52,"parent":45,"before":null,"name":"li","svg":false},
+          {"op":"text","id":53,"parent":52,"before":null,"value":"z"}
+        ],
+        "tree": [{"tag":"section","children":[{"tag":"h2","children":["g3"]},{"tag":"ol","children":[{"tag":"li","children":["a"]},{"tag":"li","children":["g3",{"tag":"strong","children":["lead"]}]},{"tag":"li","children":["z"]}]}]},{"tag":"section","children":[{"tag":"h2","children":["g1"]},{"tag":"ol","children":[{"tag":"li","children":["a"]},{"tag":"li","children":["g1",{"tag":"strong","children":["lead"]}]},{"tag":"li","children":["z"]}]}]},{"tag":"footer","children":["end"]}],
+        "ids": [[31,[0]],[32,[0,0]],[33,[0,0,0]],[36,[0,1]],[37,[0,1,0]],[38,[0,1,0,0]],[39,[0,1,1]],[40,[0,1,1,0]],[41,[0,1,1,1]],[42,[0,1,1,1,0]],[43,[0,1,2]],[44,[0,1,2,0]],[1,[1]],[2,[1,0]],[3,[1,0,0]],[45,[1,1]],[46,[1,1,0]],[47,[1,1,0,0]],[48,[1,1,1]],[49,[1,1,1,0]],[50,[1,1,1,1]],[51,[1,1,1,1,0]],[52,[1,1,2]],[53,[1,1,2,0]],[25,[2]],[26,[2,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":31},
+          {"op":"remove","id":1}
+        ],
+        "tree": [{"tag":"footer","children":["end"]}],
+        "ids": [[25,[0]],[26,[0,0]]],
+        "events": []
+      }
+    ]
+  },
+  {
+    "name": "reconciler: child views change template",
+    "source": "tests/apps/ui-ops/reconcile.py",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"div","svg":false},
+          {"op":"text","id":2,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":3,"parent":1,"before":null,"name":"em","svg":false},
+          {"op":"text","id":4,"parent":3,"before":null,"value":"x"},
+          {"op":"text","id":5,"parent":1,"before":null,"value":" "},
+          {"op":"text","id":6,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":7,"parent":1,"before":null,"name":"small","svg":false},
+          {"op":"text","id":8,"parent":7,"before":null,"value":"y"},
+          {"op":"text","id":9,"parent":1,"before":null,"value":" "}
+        ],
+        "tree": [{"tag":"div","children":[" ",{"tag":"em","children":["x"]}," "," ",{"tag":"small","children":["y"]}," "]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,1]],[4,[0,1,0]],[5,[0,2]],[6,[0,3]],[7,[0,4]],[8,[0,4,0]],[9,[0,5]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":2},
+          {"op":"remove","id":3},
+          {"op":"remove","id":5},
+          {"op":"remove","id":6},
+          {"op":"remove","id":7},
+          {"op":"remove","id":9},
+          {"op":"text","id":10,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":11,"parent":1,"before":null,"name":"small","svg":false},
+          {"op":"text","id":12,"parent":11,"before":null,"value":"y"},
+          {"op":"text","id":13,"parent":1,"before":null,"value":" "},
+          {"op":"text","id":14,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":15,"parent":1,"before":null,"name":"em","svg":false},
+          {"op":"text","id":16,"parent":15,"before":null,"value":"x"},
+          {"op":"text","id":17,"parent":1,"before":null,"value":" "}
+        ],
+        "tree": [{"tag":"div","children":[" ",{"tag":"small","children":["y"]}," "," ",{"tag":"em","children":["x"]}," "]}],
+        "ids": [[1,[0]],[10,[0,0]],[11,[0,1]],[12,[0,1,0]],[13,[0,2]],[14,[0,3]],[15,[0,4]],[16,[0,4,0]],[17,[0,5]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"remove","id":14},
+          {"op":"remove","id":15},
+          {"op":"remove","id":17},
+          {"op":"text","id":18,"parent":1,"before":null,"value":" "},
+          {"op":"element","id":19,"parent":1,"before":null,"name":"small","svg":false},
+          {"op":"text","id":20,"parent":19,"before":null,"value":"v"},
+          {"op":"text","id":21,"parent":1,"before":null,"value":" "},
+          {"op":"setText","id":12,"value":"w"}
+        ],
+        "tree": [{"tag":"div","children":[" ",{"tag":"small","children":["w"]}," "," ",{"tag":"small","children":["v"]}," "]}],
+        "ids": [[1,[0]],[10,[0,0]],[11,[0,1]],[12,[0,1,0]],[13,[0,2]],[18,[0,3]],[19,[0,4]],[20,[0,4,0]],[21,[0,5]]],
+        "events": []
+      }
+    ]
+  },
+  {
+    "name": "reconciler: properties, custom properties, URLs and handlers",
+    "source": "tests/apps/ui-ops/reconcile.py",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"form","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"input","svg":false},
+          {"op":"element","id":3,"parent":1,"before":null,"name":"textarea","svg":false},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"details","svg":false},
+          {"op":"element","id":5,"parent":4,"before":null,"name":"summary","svg":false},
+          {"op":"text","id":6,"parent":5,"before":null,"value":"More"},
+          {"op":"element","id":7,"parent":4,"before":null,"name":"p","svg":false},
+          {"op":"text","id":8,"parent":7,"before":null,"value":"Body"},
+          {"op":"element","id":9,"parent":1,"before":null,"name":"select","svg":false},
+          {"op":"element","id":10,"parent":9,"before":null,"name":"option","svg":false},
+          {"op":"text","id":11,"parent":10,"before":null,"value":"A"},
+          {"op":"element","id":12,"parent":9,"before":null,"name":"option","svg":false},
+          {"op":"text","id":13,"parent":12,"before":null,"value":"B"},
+          {"op":"element","id":14,"parent":1,"before":null,"name":"div","svg":false},
+          {"op":"text","id":15,"parent":14,"before":null,"value":"Styled"},
+          {"op":"element","id":16,"parent":1,"before":null,"name":"a","svg":false},
+          {"op":"text","id":17,"parent":16,"before":null,"value":"Link"},
+          {"op":"element","id":18,"parent":1,"before":null,"name":"button","svg":false},
+          {"op":"text","id":19,"parent":18,"before":null,"value":"Go"},
+          {"op":"attribute","id":2,"name":"type","value":"checkbox"},
+          {"op":"attribute","id":10,"name":"value","value":"a"},
+          {"op":"attribute","id":12,"name":"value","value":"b"},
+          {"op":"variable","id":14,"name":"--accent","value":{"number":16746496.0,"unit":"rgb"}},
+          {"op":"variable","id":14,"name":"--ratio","value":{"number":25.0,"unit":"%"}},
+          {"op":"variable","id":14,"name":"--scale","value":{"number":1.5,"unit":""}},
+          {"op":"attribute","id":16,"name":"href","value":"/parts/7"},
+          {"op":"attribute","id":18,"name":"type","value":"button"},
+          {"op":"handler","id":3,"event":"input","handler":1,"preventDefault":false,"stopPropagation":false},
+          {"op":"handler","id":18,"event":"click","handler":2,"preventDefault":false,"stopPropagation":false},
+          {"op":"property","id":2,"name":"checked","value":true},
+          {"op":"property","id":2,"name":"indeterminate","value":false},
+          {"op":"property","id":3,"name":"value","value":"hello"},
+          {"op":"property","id":4,"name":"open","value":true},
+          {"op":"property","id":9,"name":"value","value":"b"}
+        ],
+        "tree": [{"tag":"form","children":[{"tag":"input","attrs":{"type":"checkbox"},"props":{"checked":true,"indeterminate":false}},{"tag":"textarea","props":{"value":"hello"}},{"tag":"details","attrs":{"open":""},"children":[{"tag":"summary","children":["More"]},{"tag":"p","children":["Body"]}]},{"tag":"select","props":{"value":"b"},"children":[{"tag":"option","attrs":{"value":"a"},"children":["A"]},{"tag":"option","attrs":{"value":"b"},"children":["B"]}]},{"tag":"div","vars":{"--accent":"#ff8800","--ratio":"25%","--scale":"1.5"},"children":["Styled"]},{"tag":"a","attrs":{"href":"/parts/7"},"children":["Link"]},{"tag":"button","attrs":{"type":"button"},"children":["Go"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,1]],[4,[0,2]],[5,[0,2,0]],[6,[0,2,0,0]],[7,[0,2,1]],[8,[0,2,1,0]],[9,[0,3]],[10,[0,3,0]],[11,[0,3,0,0]],[12,[0,3,1]],[13,[0,3,1,0]],[14,[0,4]],[15,[0,4,0]],[16,[0,5]],[17,[0,5,0]],[18,[0,6]],[19,[0,6,0]]],
+        "events": [{"path":[0,1],"event":"input","node":3,"handler":1,"preventDefault":false,"stopPropagation":false},{"path":[0,6],"event":"click","node":18,"handler":2,"preventDefault":false,"stopPropagation":false}]
+      },
+      {
+        "operations": [
+          {"op":"remove","id":18},
+          {"op":"element","id":20,"parent":1,"before":null,"name":"button","svg":false},
+          {"op":"text","id":21,"parent":20,"before":null,"value":"Stop"},
+          {"op":"variable","id":14,"name":"--accent","value":{"number":255.0,"unit":"rgb"}},
+          {"op":"variable","id":14,"name":"--ratio","value":{"number":12.5,"unit":"%"}},
+          {"op":"attribute","id":16,"name":"href","value":"https://example.org/x"},
+          {"op":"attribute","id":20,"name":"type","value":"button"},
+          {"op":"handler","id":20,"event":"click","handler":3,"preventDefault":false,"stopPropagation":true},
+          {"op":"property","id":2,"name":"checked","value":false},
+          {"op":"property","id":2,"name":"indeterminate","value":true},
+          {"op":"property","id":3,"name":"value","value":"hi"},
+          {"op":"property","id":4,"name":"open","value":false},
+          {"op":"property","id":9,"name":"value","value":"a"}
+        ],
+        "tree": [{"tag":"form","children":[{"tag":"input","attrs":{"type":"checkbox"},"props":{"checked":false,"indeterminate":true}},{"tag":"textarea","props":{"value":"hi"}},{"tag":"details","children":[{"tag":"summary","children":["More"]},{"tag":"p","children":["Body"]}]},{"tag":"select","props":{"value":"a"},"children":[{"tag":"option","attrs":{"value":"a"},"children":["A"]},{"tag":"option","attrs":{"value":"b"},"children":["B"]}]},{"tag":"div","vars":{"--accent":"#0000ff","--ratio":"12.5%","--scale":"1.5"},"children":["Styled"]},{"tag":"a","attrs":{"href":"https://example.org/x"},"children":["Link"]},{"tag":"button","attrs":{"type":"button"},"children":["Stop"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,1]],[4,[0,2]],[5,[0,2,0]],[6,[0,2,0,0]],[7,[0,2,1]],[8,[0,2,1,0]],[9,[0,3]],[10,[0,3,0]],[11,[0,3,0,0]],[12,[0,3,1]],[13,[0,3,1,0]],[14,[0,4]],[15,[0,4,0]],[16,[0,5]],[17,[0,5,0]],[20,[0,6]],[21,[0,6,0]]],
+        "events": [{"path":[0,1],"event":"input","node":3,"handler":1,"preventDefault":false,"stopPropagation":false},{"path":[0,6],"event":"click","node":20,"handler":3,"preventDefault":false,"stopPropagation":true}]
+      },
+      {
+        "operations": [
+          {"op":"property","id":2,"name":"checked","value":false},
+          {"op":"property","id":2,"name":"indeterminate","value":true},
+          {"op":"property","id":3,"name":"value","value":"hi"},
+          {"op":"property","id":4,"name":"open","value":false},
+          {"op":"property","id":9,"name":"value","value":"a"}
+        ],
+        "tree": [{"tag":"form","children":[{"tag":"input","attrs":{"type":"checkbox"},"props":{"checked":false,"indeterminate":true}},{"tag":"textarea","props":{"value":"hi"}},{"tag":"details","children":[{"tag":"summary","children":["More"]},{"tag":"p","children":["Body"]}]},{"tag":"select","props":{"value":"a"},"children":[{"tag":"option","attrs":{"value":"a"},"children":["A"]},{"tag":"option","attrs":{"value":"b"},"children":["B"]}]},{"tag":"div","vars":{"--accent":"#0000ff","--ratio":"12.5%","--scale":"1.5"},"children":["Styled"]},{"tag":"a","attrs":{"href":"https://example.org/x"},"children":["Link"]},{"tag":"button","attrs":{"type":"button"},"children":["Stop"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,1]],[4,[0,2]],[5,[0,2,0]],[6,[0,2,0,0]],[7,[0,2,1]],[8,[0,2,1,0]],[9,[0,3]],[10,[0,3,0]],[11,[0,3,0,0]],[12,[0,3,1]],[13,[0,3,1,0]],[14,[0,4]],[15,[0,4,0]],[16,[0,5]],[17,[0,5,0]],[20,[0,6]],[21,[0,6,0]]],
+        "events": [{"path":[0,1],"event":"input","node":3,"handler":1,"preventDefault":false,"stopPropagation":false},{"path":[0,6],"event":"click","node":20,"handler":3,"preventDefault":false,"stopPropagation":true}]
+      }
+    ]
+  },
+  {
+    "name": "reconciler: static SVG with a dynamic caption",
+    "source": "tests/apps/ui-ops/reconcile.py",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"figure","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"svg","svg":true},
+          {"op":"element","id":3,"parent":2,"before":null,"name":"path","svg":true},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"figcaption","svg":false},
+          {"op":"text","id":5,"parent":4,"before":null,"value":"first"},
+          {"op":"attribute","id":2,"name":"viewBox","value":"0 0 4 4"},
+          {"op":"attribute","id":2,"name":"aria-hidden","value":"true"},
+          {"op":"attribute","id":3,"name":"d","value":"M 0 0 L 4 4"}
+        ],
+        "tree": [{"tag":"figure","children":[{"tag":"svg","svg":true,"attrs":{"aria-hidden":"true","viewBox":"0 0 4 4"},"children":[{"tag":"path","svg":true,"attrs":{"d":"M 0 0 L 4 4"}}]},{"tag":"figcaption","children":["first"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[5,[0,1,0]]],
+        "events": []
+      },
+      {
+        "operations": [
+          {"op":"setText","id":5,"value":"second"}
+        ],
+        "tree": [{"tag":"figure","children":[{"tag":"svg","svg":true,"attrs":{"aria-hidden":"true","viewBox":"0 0 4 4"},"children":[{"tag":"path","svg":true,"attrs":{"d":"M 0 0 L 4 4"}}]},{"tag":"figcaption","children":["second"]}]}],
+        "ids": [[1,[0]],[2,[0,0]],[3,[0,0,0]],[4,[0,1]],[5,[0,1,0]]],
+        "events": []
+      }
+    ]
+  }
+]

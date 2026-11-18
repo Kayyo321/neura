@@ -1,0 +1,2 @@
+// let.extension declares a function (edge case 66).
+let.extension twice = 2;

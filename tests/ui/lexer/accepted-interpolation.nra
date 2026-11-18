@@ -1,0 +1,23 @@
+// Interpolated strings that are accepted (docs/design/Calls030.md, edge
+// cases 72, 73, 74, 76 and 77).
+let console = import:Std.Io.Console;
+
+let Box = class (
+    export let get = func(key: string) -> string => key;
+);
+
+let f = func(a: int) -> int => a;
+
+let use = func(a: int, w: int, p: int, x: float64, ok: bool, map: Box) {
+    let empty = $"";
+    let plain = $"plain";
+    let two = $"{a}{a}";
+    let spaced = $"{ a }";
+    let aligned = $"{a:>8}";
+    let dynamic = $"{x:{w}.{p}f}";
+    let braces = $"{{{a}}}";
+    let nested_literal = $"{map.get("k")}";
+    let nested = $"{$"{a}"}";
+    let conditional = $"{(ok ? 1 : 2)}";
+    let named = $"{f(a: 1)}";
+};

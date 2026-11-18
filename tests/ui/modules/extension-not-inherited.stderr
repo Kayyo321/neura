@@ -1,0 +1,9 @@
+error[E0305]: unknown or inaccessible member 'shout' of string
+ --> $DIR/extension-not-inherited.nra:4:27
+  |
+4 | let loud = relay.prefix + "ready".shout();
+  |                           ^^^^^^^^^^^^^ string has no member 'shout'
+  |
+  = help: 'shout' is an extension function of the module Words, whose set this file or module does not enable; a set is enabled with 'let.extensions'
+
+For more information about this error, try `neura explain E0305`.

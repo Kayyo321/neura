@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-in-class.nra:3:16
+  |
+3 |     export let.extension twice = func(value: int) -> int => value * 2;
+  |                ^^^^^^^^^ 'let.extension' belongs to a file or a module, not a class
+
+For more information about this error, try `neura explain E0228`.

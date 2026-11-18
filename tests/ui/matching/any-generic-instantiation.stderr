@@ -1,0 +1,12 @@
+error[E0492]: a value of type int32[] cannot be held in any
+ --> $DIR/any-generic-instantiation.nra:4:40
+  |
+4 | let wrap = func<T>(value: T) -> any => value as any;
+  |                                        ^^^^^^^^^^^^ packed here in a generic body
+...
+8 |         let v = wrap([1, 2]);
+  |                 ------------ instantiated here
+  |
+  = help: hold it in a class and pack the reference
+
+For more information about this error, try `neura explain E0492`.

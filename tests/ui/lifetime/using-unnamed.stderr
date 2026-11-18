@@ -1,0 +1,9 @@
+error[E0220]: 'using' binds one resource: using (name = value) { ... }
+  --> $DIR/using-unnamed.nra:11:12
+   |
+11 |     using (open()) {
+   |            ^^^^ expected a name and '=' here, found 'open'
+   |
+   = help: bind the resource to a name, which the block uses
+
+For more information about this error, try `neura explain E0220`.

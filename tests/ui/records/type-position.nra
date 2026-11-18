@@ -1,0 +1,4 @@
+// A record is not a type expression (edge case 39).
+let P = record (x: int);
+let q = new P(1);
+let p: record (x: int) = q;

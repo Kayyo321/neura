@@ -1,0 +1,10 @@
+error[E0492]: a value of type Optional<int32> cannot be held in any
+ --> $DIR/any-optional.nra:4:14
+  |
+4 | let v: any = Optional<int>.Some(1);
+  |              ^^^^^^^^^^^^^^^^^^^^^ this has type Optional<int32>
+  |
+  = note: an any holds a bool, a sized integer, a float, a string, a class or interface reference, or nil
+  = help: hold it in a class and pack the reference
+
+For more information about this error, try `neura explain E0492`.

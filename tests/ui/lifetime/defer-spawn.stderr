@@ -1,0 +1,9 @@
+error[E0219]: 'defer' takes one call
+ --> $DIR/defer-spawn.nra:6:15
+  |
+6 |         defer spawn task();
+  |               ^^^^^^^^^^^^ this starts a task; a deferred call runs in the frame that is left
+  |
+  = help: put the statements in a function and defer a call of it
+
+For more information about this error, try `neura explain E0219`.

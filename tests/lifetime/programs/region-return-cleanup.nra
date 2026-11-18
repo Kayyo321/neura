@@ -1,0 +1,18 @@
+// Return expression transfers its array while deferred work still sees it.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let show = func(values: int[]) {
+    console.println("cleanup {}", values[1]);
+};
+let make = func() -> int[] {
+    let values = [4, 7, 11];
+    defer show(values);
+    return values;
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let values = make();
+        console.println("returned {} {} {}", values[0], values[1], values[2]);
+        return program.ExitCode.Ok;
+    };
+);

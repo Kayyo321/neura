@@ -1,0 +1,6 @@
+// Edge case 7: `new` after `defer` makes it the keyword, and a construction
+// is not a call.
+let Guard = class ( export let init = func() -> void {}; );
+let work = func() -> void {
+    defer new Guard();
+};

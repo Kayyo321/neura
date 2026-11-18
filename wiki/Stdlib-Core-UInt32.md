@@ -91,6 +91,14 @@ The following public declarations are taken from the module source; each links t
   Parses a base-10 integer, returning an error for invalid text or a value outside the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **UInt32** · [`export let parse_radix = func(text: string, radix: int) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int32.nra#L345)
   An optional `+` or `-`, then one or more digits of the radix in either case. Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending byte); a well-formed value outside the type fails with OutOfRange at offset 0. A `-` is accepted only for zero. A radix outside 2 through 36 traps. The neura.integer.parse_u64 kernel parses the text as uint64, and the value is then checked against the type's range. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
+- **UInt32** · [`export let zero = func() -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int32.nra#L367)
+  The additive identity, 0 (Std.Core.Arithmetic.Additive). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **UInt32** · [`export let add = func(left: uint32, right: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int32.nra#L371)
+  The sum `left + right`, at the type's width; traps (reason 1) on overflow. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **UInt32** · [`export let one = func() -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int32.nra#L375)
+  The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
+- **UInt32** · [`export let multiply = func(left: uint32, right: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/u-int32.nra#L379)
+  The product `left * right`, at the type's width; traps (reason 1) on overflow. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

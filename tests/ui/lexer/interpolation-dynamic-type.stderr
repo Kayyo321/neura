@@ -1,0 +1,9 @@
+error[E0486]: dynamic width or precision requires an integer
+ --> $DIR/interpolation-dynamic-type.nra:4:18
+  |
+4 | let text = $"{a:{w}}";
+  |                  ^ this nested hole is string
+  |
+  = help: a width or precision hole holds an expression of an integer type
+
+For more information about this error, try `neura explain E0486`.

@@ -1,0 +1,13 @@
+// One of two requirements asks for set (edge case 70).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Renamable = interface (
+    let name: string;
+        | get;
+        | set;
+);
+let Both = class implements Named, Renamable (
+    export last name: string = "both";
+);

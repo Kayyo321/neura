@@ -173,7 +173,7 @@ export let Path = module (
         export let compare_to = func(other: Path) -> Ordering => compare_text(text, other.to_string());
 
         /// @brief Tests equality of the normalized path text.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Path)) {
                 return false;

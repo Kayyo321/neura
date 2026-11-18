@@ -1,0 +1,7 @@
+error[E1008]: value cannot be iterated by a template
+ --> $DIR/bad-iteration-source.nra:1:57
+  |
+1 | let view = html(items: int32[list]) { @for (let item in items; key: item) { <p>{item}</p> } };
+  |                                                         ^^^^^ use an array or FrozenList, got int32[list]
+
+For more information about this error, try `neura explain E1008`.

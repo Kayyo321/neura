@@ -208,11 +208,11 @@ export let LinkedList = module (
 
         /// @brief Appends each element in order, reading by position up to the
         /// starting length.
-        export let add_all = func(values: T[list]) {
-            last total = values.length;
+        export let add_all = func(items: T[list]) {
+            last total = items.length;
             let i = 0;
             while (i < total) {
-                link_before(nil, values[i]);
+                link_before(nil, items[i]);
                 i += 1;
             }
         };

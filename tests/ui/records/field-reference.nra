@@ -1,0 +1,2 @@
+// A primitive reference is not a value (edge case 19).
+let P = record (r: &int);

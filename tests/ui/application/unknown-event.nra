@@ -1,0 +1,1 @@
+let view = html() { <button on:clik={unresolved}></button> };

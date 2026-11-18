@@ -1,0 +1,158 @@
+let errors = import:Std.Core.Error;
+let punycode = import:Std.Net.Core.Punycode;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Punycode (RFC 3492): the section 7.1 sample strings, overflow and malformed input.
+let PunycodeTests = module (
+    let points = func(values: int[]) -> uint32[list] {
+        last list: uint32[list] = new;
+        for (let v in values) {
+            list.append(v as uint32);
+        }
+        return list;
+    };
+
+    // Encodes the code points and compares with the RFC text (exactly, or ignoring the RFC's optional
+    // mixed-case annotation when `exact` is false), then decodes the RFC text back to the code points.
+    let check = func(expected: string, values: int[], exact: bool) {
+        last cps = points(values);
+        last encoded = test.assert_ok<string>(punycode.encode(cps));
+        if (exact) {
+            test.assert_equal_string(expected, encoded);
+        } else {
+            test.assert_equal_string(strings.to_ascii_lower(expected), encoded);
+        }
+        last decoded = test.assert_ok<uint32[list]>(punycode.decode(expected));
+        test.assert_equal<int>(cps.length, decoded.length);
+        for (let i = 0; i < cps.length; i++) {
+            test.assert_equal<uint32>(cps[i], decoded[i]);
+        }
+    };
+
+    let parse_offset = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    let parse_kind = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    // RFC 3492 section 7.1, samples (A) to (S): code points and Punycode copied from the fetched RFC text by
+    // a script that parses the section; each was also checked against python3 -I with
+    // "".join(map(chr, cps)).encode("punycode"), which agrees except for the case annotation of (I).
+    export let test_rfc3492_samples = func {
+        // (A) exact; python encode egbpdaj6bu4bxfgehfvwxn
+        check("egbpdaj6bu4bxfgehfvwxn", [1604, 1610, 1607, 1605, 1575, 1576, 1578, 1603, 1604, 1605, 1608, 1588, 1593, 1585, 1576, 1610, 1567], true);
+        // (B) exact; python encode ihqwcrb4cv8a8dqg056pqjye
+        check("ihqwcrb4cv8a8dqg056pqjye", [20182, 20204, 20026, 20160, 20040, 19981, 35828, 20013, 25991], true);
+        // (C) exact; python encode ihqwctvzc91f659drss3x8bo0yb
+        check("ihqwctvzc91f659drss3x8bo0yb", [20182, 20497, 29234, 20160, 40637, 19981, 35498, 20013, 25991], true);
+        // (D) exact; python encode Proprostnemluvesky-uyb24dma41a
+        check("Proprostnemluvesky-uyb24dma41a", [80, 114, 111, 269, 112, 114, 111, 115, 116, 283, 110, 101, 109, 108, 117, 118, 237, 269, 101, 115, 107, 121], true);
+        // (E) exact; python encode 4dbcagdahymbxekheh6e0a7fei0b
+        check("4dbcagdahymbxekheh6e0a7fei0b", [1500, 1502, 1492, 1492, 1501, 1508, 1513, 1493, 1496, 1500, 1488, 1502, 1491, 1489, 1512, 1497, 1501, 1506, 1489, 1512, 1497, 1514], true);
+        // (F) exact; python encode i1baa7eci9glrd9b2ae1bj0hfcgg6iyaf8o0a1dig0cd
+        check("i1baa7eci9glrd9b2ae1bj0hfcgg6iyaf8o0a1dig0cd", [2351, 2361, 2354, 2379, 2327, 2361, 2367, 2344, 2381, 2342, 2368, 2325, 2381, 2351, 2379, 2306, 2344, 2361, 2368, 2306, 2348, 2379, 2354, 2360, 2325, 2340, 2375, 2361, 2376, 2306], true);
+        // (G) exact; python encode n8jok5ay5dzabd5bym9f0cm5685rrjetr6pdxa
+        check("n8jok5ay5dzabd5bym9f0cm5685rrjetr6pdxa", [12394, 12380, 12415, 12435, 12394, 26085, 26412, 35486, 12434, 35441, 12375, 12390, 12367, 12428, 12394, 12356, 12398, 12363], true);
+        // (H) exact; python encode 989aomsvi5e83db1d2a355cv1e0vak1dwrv93d5xbh15a0dt30a5jpsd879ccm6fea98c
+        check("989aomsvi5e83db1d2a355cv1e0vak1dwrv93d5xbh15a0dt30a5jpsd879ccm6fea98c", [49464, 44228, 51032, 47784, 46304, 49324, 46988, 46308, 51060, 54620, 44397, 50612, 47484, 51060, 54644, 54620, 45796, 47732, 50620, 47560, 45208, 51339, 51012, 44620], true);
+        // (I) case-annotated in RFC; python encode b1abfaaepdrnnbgefbadotcwatmq2g4l
+        check("b1abfaaepdrnnbgefbaDotcwatmq2g4l", [1087, 1086, 1095, 1077, 1084, 1091, 1078, 1077, 1086, 1085, 1080, 1085, 1077, 1075, 1086, 1074, 1086, 1088, 1103, 1090, 1087, 1086, 1088, 1091, 1089, 1089, 1082, 1080], false);
+        // (J) exact; python encode PorqunopuedensimplementehablarenEspaol-fmd56a
+        check("PorqunopuedensimplementehablarenEspaol-fmd56a", [80, 111, 114, 113, 117, 233, 110, 111, 112, 117, 101, 100, 101, 110, 115, 105, 109, 112, 108, 101, 109, 101, 110, 116, 101, 104, 97, 98, 108, 97, 114, 101, 110, 69, 115, 112, 97, 241, 111, 108], true);
+        // (K) exact; python encode TisaohkhngthchnitingVit-kjcr8268qyxafd2f1b9g
+        check("TisaohkhngthchnitingVit-kjcr8268qyxafd2f1b9g", [84, 7841, 105, 115, 97, 111, 104, 7885, 107, 104, 244, 110, 103, 116, 104, 7875, 99, 104, 7881, 110, 243, 105, 116, 105, 7871, 110, 103, 86, 105, 7879, 116], true);
+        // (L) exact; python encode 3B-ww4c5e180e575a65lsy2b
+        check("3B-ww4c5e180e575a65lsy2b", [51, 24180, 66, 32068, 37329, 20843, 20808, 29983], true);
+        // (M) exact; python encode -with-SUPER-MONKEYS-pc58ag80a8qai00g7n9n
+        check("-with-SUPER-MONKEYS-pc58ag80a8qai00g7n9n", [23433, 23460, 22856, 32654, 24693, 45, 119, 105, 116, 104, 45, 83, 85, 80, 69, 82, 45, 77, 79, 78, 75, 69, 89, 83], true);
+        // (N) exact; python encode Hello-Another-Way--fc4qua05auwb3674vfr0b
+        check("Hello-Another-Way--fc4qua05auwb3674vfr0b", [72, 101, 108, 108, 111, 45, 65, 110, 111, 116, 104, 101, 114, 45, 87, 97, 121, 45, 12381, 12428, 12382, 12428, 12398, 22580, 25152], true);
+        // (O) exact; python encode 2-u9tlzr9756bt3uc0v
+        check("2-u9tlzr9756bt3uc0v", [12402, 12392, 12388, 23627, 26681, 12398, 19979, 50], true);
+        // (P) exact; python encode MajiKoi5-783gue6qz075azm5e
+        check("MajiKoi5-783gue6qz075azm5e", [77, 97, 106, 105, 12391, 75, 111, 105, 12377, 12427, 53, 31186, 21069], true);
+        // (Q) exact; python encode de-jg4avhby1noc0d
+        check("de-jg4avhby1noc0d", [12497, 12501, 12451, 12540, 100, 101, 12523, 12531, 12496], true);
+        // (R) exact; python encode d9juau41awczczp
+        check("d9juau41awczczp", [12381, 12398, 12473, 12500, 12540, 12489, 12391], true);
+        // (S) exact; python encode -> $1.00 <--
+        check("-> $1.00 <--", [45, 62, 32, 36, 49, 46, 48, 48, 32, 60, 45], true);
+    };
+
+    // Generated with: python3 -I -c "print('bücher'.encode('punycode'))" (and the same for each word).
+    export let test_python_words = func {
+        test.assert_equal_string("bcher-kva", test.assert_ok<string>(punycode.encode_text("bücher")));
+        test.assert_equal_string("mnchen-3ya", test.assert_ok<string>(punycode.encode_text("münchen")));
+        test.assert_equal_string("r8jz45g", test.assert_ok<string>(punycode.encode_text("例え")));
+        test.assert_equal_string("zckzah", test.assert_ok<string>(punycode.encode_text("テスト")));
+        test.assert_equal_string("80aealotwbjpid2k", test.assert_ok<string>(punycode.encode_text("правительство")));
+        test.assert_equal_string("p1ai", test.assert_ok<string>(punycode.encode_text("рф")));
+        test.assert_equal_string("tda", test.assert_ok<string>(punycode.encode_text("ü")));
+        test.assert_equal_string("", test.assert_ok<string>(punycode.encode_text("")));
+        test.assert_equal_string("bücher", test.assert_ok<string>(punycode.decode_text("bcher-kva")));
+        test.assert_equal_string("правительство", test.assert_ok<string>(punycode.decode_text("80AEALOTWBJPID2K")));
+    };
+
+    export let test_malformed_input = func {
+        // A digit sequence cut short (python3 -I: b"b".decode("punycode") also fails as incomplete).
+        last truncated = test.assert_err<uint32[list]>(punycode.decode("b"));
+        test.assert(parse_kind(truncated) == errors.ParseErrorKind.UnexpectedEnd);
+        // Not a base-36 digit.
+        last bad_digit = test.assert_err<uint32[list]>(punycode.decode("ab!c"));
+        test.assert(parse_kind(bad_digit) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_equal<int>(2, parse_offset(bad_digit));
+        // Non-basic code point before the delimiter.
+        last non_basic = test.assert_err<uint32[list]>(punycode.decode("ü-tda"));
+        test.assert(parse_kind(non_basic) == errors.ParseErrorKind.InvalidCharacter);
+        // RFC 3492 section 6.2 consumes the last delimiter only after basic code points, so a leading "-" is
+        // read as a digit and rejected (Python's codec consumes it instead and decodes "-abc").
+        test.assert_err<uint32[list]>(punycode.decode("-abc"));
+        // "a" decodes to U+0080, a lone digit with value 0: valid by the RFC algorithm (python3 -I agrees).
+        last single = test.assert_ok<uint32[list]>(punycode.decode("a"));
+        test.assert_equal<int>(1, single.length);
+        test.assert_equal<uint32>(128, single[0]);
+    };
+
+    export let test_overflow_is_reported = func {
+        // Digit "9" (35) never ends an integer, so eight of them push the weight past maxint (RFC 3492
+        // section 6.4); Python's unbounded codec reports the same input as incomplete.
+        last overflow = test.assert_err<uint32[list]>(punycode.decode("99999999"));
+        test.assert(parse_kind(overflow) == errors.ParseErrorKind.OutOfRange);
+        // python3 -I -c "print(b'9999k'.decode('punycode'))" fails with "Invalid character U+19e8dd": the value
+        // is above U+10FFFF. b'9999a' decodes to U+737B5.
+        last above = test.assert_err<uint32[list]>(punycode.decode("9999k"));
+        test.assert(parse_kind(above) == errors.ParseErrorKind.OutOfRange);
+        last below = test.assert_ok<uint32[list]>(punycode.decode("9999a"));
+        test.assert_equal<int>(1, below.length);
+        test.assert_equal<uint32>(473013, below[0]);
+        // Twenty "z" digits end early in a value and then run out of input (Python: incomplete).
+        test.assert_err<uint32[list]>(punycode.decode("zzzzzzzzzzzzzzzzzzzz"));
+        // Encoder overflow (this library's bound, RFC 3492 section 6.4; Python's codec is unbounded): 2000 basic
+        // code points and U+10FFFF need a first delta of (0x10FFFF - 0x80) * 2001, above 2^31 - 1.
+        last many: uint32[list] = new;
+        for (let i = 0; i < 2000; i++) {
+            many.append(97);
+        }
+        many.append(1114111);
+        test.assert(parse_kind(test.assert_err<string>(punycode.encode(many))) == errors.ParseErrorKind.OutOfRange);
+        // Encoder input outside the scalar range.
+        last surrogate = test.assert_err<string>(punycode.encode(points([97, 55296])));
+        test.assert_equal<int>(1, parse_offset(surrogate));
+        test.assert_err<string>(punycode.encode(points([1114112])));
+    };
+
+    export let test_round_trip_mixed = func {
+        last cps = points([65, 1114111, 66, 128, 67, 65535]);
+        last encoded = test.assert_ok<string>(punycode.encode(cps));
+        last back = test.assert_ok<uint32[list]>(punycode.decode(encoded));
+        test.assert_equal<int>(6, back.length);
+        for (let i = 0; i < 6; i++) {
+            test.assert_equal<uint32>(cps[i], back[i]);
+        }
+    };
+);

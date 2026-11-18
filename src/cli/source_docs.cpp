@@ -1,5 +1,6 @@
 #include "source_docs.hpp"
 
+#include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
+#include <variant>
 
 namespace neura {
 namespace {
@@ -183,6 +185,7 @@ std::string_view kind_name(const Declaration& declaration, bool variant) {
     if (variant) return "variant";
     if (declaration.cast_target) return "cast";
     if (declaration.singleton) return "singleton";
+    if (declaration.record) return "record";
     switch (declaration.kind) {
     case DeclKind::Binding: return declaration.constant ? "constant" : "binding";
     case DeclKind::Function: return "function";
@@ -244,6 +247,11 @@ private:
             result += "func(";
             list(type.arguments, type.arguments.size() - 1);
             result += ") -> " + type_text(type.arguments.back());
+        } else if (type.name == "[generator]") {
+            // A generator's result (docs/design/Lifetime030.md).
+            result += "Sequence<";
+            list(type.arguments, type.arguments.size());
+            result += '>';
         } else {
             result += type.name + '<';
             list(type.arguments, type.arguments.size());
@@ -277,11 +285,38 @@ private:
             if (declaration.type) {
                 result += ": ";
                 result += type_text(*declaration.type);
+            } else if (declaration.initializer && declaration.initializer->html_factory) {
+                // A factory (Html030.md): its parameters and result, never its body.
+                const auto& factory = *declaration.initializer->html_factory;
+                result += factory.retained ? " = new html(" : " = html(";
+                for (std::size_t i = 0; i < factory.parameters.size(); ++i) {
+                    if (i != 0) result += ", ";
+                    result += factory.parameters[i].name + ": " + type_text(factory.parameters[i].type);
+                }
+                result += ") -> ui.View";
+                if (const auto* path = std::get_if<Token>(&factory.source)) result += " from " + path->text;
+            } else if (declaration.initializer && declaration.initializer->stylesheet) {
+                const auto& sheet = *declaration.initializer->stylesheet;
+                result += sheet.module ? " = css.module" : " = css";
+                if (sheet.source.kind != TokenKind::CssIsland) result += " from " + sheet.source.text;
             }
             result += accessor_text(declaration);
             return result;
+        } else if (declaration.derive) {
+            return declaration.name + " = derive " + derivation_text(*declaration.derive);
+        } else if (declaration.record) {
+            // A record shows its components, as written (docs/design/Records030.md, Tooling).
+            result = declaration.name + " = record";
+            if (!declaration.interfaces.empty()) {
+                result += " implements ";
+                for (std::size_t i = 0; i < declaration.interfaces.size(); ++i)
+                    result += (i == 0 ? "" : ", ") + type_text(declaration.interfaces[i]);
+            }
+            return result + " (" + components(declaration) + ")";
         } else {
-            result = declaration.name + " = ";
+            // A static function, including an interface's static requirement.
+            if (declaration.kind == DeclKind::Function && declaration.static_member) result = "static ";
+            result += declaration.name + " = ";
             result += declaration.kind == DeclKind::Function ? "func" : kind;
         }
         if (!declaration.generics.empty()) {
@@ -312,6 +347,12 @@ private:
                 if (!parameter.name.empty()) result += parameter.name + ": ";
                 if (parameter.variadic) result += "...";
                 result += type_text(parameter.type);
+                // A default as written (docs/design/Calls030.md).
+                if (parameter.default_value) {
+                    const auto& value = parameter.default_value->span;
+                    result += " = ";
+                    result += source_.substr(value.offset, value.length);
+                }
             }
             result += declaration.named_payload ? '}' : ')';
         }
@@ -320,6 +361,62 @@ private:
             result += type_text(*declaration.type);
         }
         return result;
+    }
+
+    std::string components(const Declaration& record) const {
+        std::string result;
+        for (const auto& member : record.members) {
+            if (member.kind != DeclKind::Binding || member.static_member) continue;
+            if (!result.empty()) result += ", ";
+            result += member.name + ": " + (member.type ? type_text(*member.type) : std::string());
+        }
+        return result;
+    }
+
+    std::string derivation_text(const DeriveSyntax& derive) const {
+        std::string result = derive.generator.name + "<";
+        for (std::size_t i = 0; i < derive.arguments.size(); ++i)
+            result += (i == 0 ? "" : ", ") + type_text(derive.arguments[i]);
+        result += ">";
+        if (derive.mappings.empty()) return result;
+        result += " {";
+        for (const auto& mapping : derive.mappings) {
+            result += mapping.variant ? " variant " : " field ";
+            for (std::size_t i = 0; i < mapping.parts.size(); ++i) result += (i == 0 ? "" : ".") + mapping.parts[i];
+            // The wire literal as written, so escapes survive.
+            result += ": " + std::string(source_.substr(mapping.wire_span.offset, mapping.wire_span.length)) + ";";
+        }
+        return result + " }";
+    }
+
+    // The members lowering generates for a documented record or derivation:
+    // a record's constructor, and a derived codec's four functions, whose
+    // signatures are those of Std.Encoding.Json.Codec<T> for the derived type.
+    void generated_members(const Declaration& declaration) {
+        // They have no comment of their own: an empty text at the declaration's comment.
+        const DocComment none{declaration.documentation->span, {}};
+        const auto& selection = declaration.name_span ? *declaration.name_span : declaration.span;
+        if (declaration.record) {
+            std::string parameters;
+            for (const auto& member : declaration.members) {
+                if (member.kind != DeclKind::Function || member.name != "init") continue;
+                for (std::size_t i = 0; i < member.parameters.size(); ++i)
+                    parameters += (i == 0 ? "" : ", ") + member.parameters[i].name + ": " +
+                                  type_text(member.parameters[i].type);
+            }
+            symbol("init", "function", "init = func(" + parameters + ") => set", declaration.span, selection, none);
+        }
+        if (declaration.derive && declaration.derive->arguments.size() == 1) {
+            const auto root = type_text(declaration.derive->arguments.front());
+            symbol("to_json", "function", "to_json = func(value: " + root + ") -> Result<JsonValue>",
+                   declaration.span, selection, none);
+            symbol("encode", "function", "encode = func(value: " + root + ") -> Result<string>",
+                   declaration.span, selection, none);
+            symbol("from_json", "function", "from_json = func(value: JsonValue) -> Result<" + root + ">",
+                   declaration.span, selection, none);
+            symbol("decode", "function", "decode = func(text: string) -> Result<" + root + ">",
+                   declaration.span, selection, none);
+        }
     }
 
     void symbol(std::string_view name, std::string_view kind, std::string_view signature,
@@ -358,7 +455,10 @@ private:
                    *declaration.name_span, *declaration.documentation, declaration.tags);
         }
         if (!declaration.name.empty()) scope_.push_back(declaration.name);
+        if (declaration.documentation && declaration.name_span) generated_members(declaration);
         for (const auto& member : declaration.members) {
+            // A record's constructor is generated; it is listed above.
+            if (declaration.record && member.kind == DeclKind::Function) continue;
             this->declaration(member, declaration.kind == DeclKind::Enum);
         }
         if (declaration.initializer) expression(*declaration.initializer);
@@ -430,6 +530,8 @@ std::string doxygen_type(const TypeSyntax& type) {
             doxygen_types(type.arguments, type.arguments.size() - 1) + ")>";
     } else if (type.name == "[variadic argument]") {
         result = "NeuraValue";
+    } else if (type.name == "[generator]") {
+        result = "Sequence<" + doxygen_types(type.arguments, type.arguments.size()) + '>';
     } else if (type.name == "class" || type.anonymous) {
         // An anonymous class has no name to give Doxygen.
         result = "NeuraObject";
@@ -449,6 +551,15 @@ std::string doxygen_type(const TypeSyntax& type) {
     return result;
 }
 
+// A default as the source spells it: a literal, a negated number, nil, or
+// a qualified variant.
+std::string default_spelling(const Expr& value) {
+    if (value.kind == Expr::Kind::Unary && !value.operands.empty()) return value.text + value.operands.front().text;
+    if (value.kind == Expr::Kind::Member && !value.operands.empty())
+        return default_spelling(value.operands.front()) + "." + value.text;
+    return value.text;
+}
+
 std::string doxygen_parameters(const Declaration& decl) {
     std::string result = "(";
     for (std::size_t i = 0; i < decl.parameters.size(); ++i) {
@@ -458,6 +569,7 @@ std::string doxygen_parameters(const Declaration& decl) {
         if (param.variadic) type = "NeuraVariadic<" + type + '>';
         result += type;
         if (!param.name.empty()) result += ' ' + param.name;
+        if (param.default_value) result += " = " + default_spelling(*param.default_value);
     }
     result += ')';
     return result;

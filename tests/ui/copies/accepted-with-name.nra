@@ -1,0 +1,3 @@
+// `with` is a name everywhere but after `new` (edge case 58).
+let with = 3;
+let w = with + 1;

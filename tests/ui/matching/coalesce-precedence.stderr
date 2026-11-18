@@ -1,0 +1,9 @@
+error[E0495]: invalid left operand of '??'
+  --> $DIR/coalesce-precedence.nra:12:62
+   |
+12 | let pick = func(ready: bool, done: bool, x: bool) -> bool => ready || done ?? x;
+   |                                                              ^^^^^^^^^^^^^ bool is not a reference or an Optional
+   |
+   = note: '??' gives its right operand when the left one is nil or None
+
+For more information about this error, try `neura explain E0495`.

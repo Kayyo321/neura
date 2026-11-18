@@ -1,0 +1,211 @@
+let balancers = import:Std.Net.Resilience.LoadBalancer;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let p2c = import:Std.Net.Resilience.PowerOfTwoChoices;
+let peak = import:Std.Net.Resilience.PeakEwma;
+let randoms = import:Std.Random.Random;
+let round_robin = import:Std.Net.Resilience.RoundRobin;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Client-side load balancers with seeded random sources and a fixed clock. The expected picks come from a Python
+// simulation of the documented algorithms over a model of Std.Random.Random (SplitMix64 seeding, xoshiro256**,
+// next_int_below by masked rejection):
+//   python3 -I balancers.py, with balancers.py:
+//   # Reference for Std.Random.Random: SplitMix64 seeding + xoshiro256**, next_float64 = (x >> 11) * 2^-53.
+//   import sys
+//   M = (1 << 64) - 1
+//   def mix(z):
+//       z = ((z ^ (z >> 30)) * 13787848793156543929) & M
+//       z = ((z ^ (z >> 27)) * 10723151780598845931) & M
+//       return z ^ (z >> 31)
+//   def seeded(seed):
+//       s = []; st = seed
+//       for _ in range(4):
+//           st = (st + 11400714819323198485) & M; s.append(mix(st))
+//       return s
+//   def rotl(x, k): return ((x << k) | (x >> (64 - k))) & M
+//   def nxt(s):
+//       out = (rotl((s[1] * 5) & M, 7) * 9) & M
+//       t = (s[1] << 17) & M
+//       s[2] ^= s[0]; s[3] ^= s[1]; s[1] ^= s[2]; s[0] ^= s[3]; s[2] ^= t; s[3] = rotl(s[3], 45)
+//       return out
+//   def f64(s): return (nxt(s) >> 11) * 2.0**-53
+//   # next_int_below as in Std.Random.Random: mask covering bound-1, draw (next_uint64 >> 32) & mask until < bound.
+//   import math
+//   def below(s, bound):
+//       m = bound - 1
+//       for k in (1, 2, 4, 8, 16): m |= m >> k
+//       while True:
+//           c = (nxt(s) >> 32) & m
+//           if c < bound: return c
+//   def p2c_pairs(seed, n, count):
+//       s = seeded(seed); out = []
+//       for _ in range(count):
+//           a = below(s, n); b = below(s, n - 1)
+//           if b >= a: b += 1
+//           out.append((a, b))
+//       return out
+//   print("p2c pairs seed 3 n 3:", p2c_pairs(3, 3, 8))
+//   print("p2c pairs seed 9 n 2:", p2c_pairs(9, 2, 4))
+//   # Peak EWMA: tau 1 s, default 100 ms. Endpoint estimates after observations.
+//   tau = 1e9
+//   def observe(est, stamp, x, now):
+//       if x > est: est = x
+//       else:
+//           w = math.exp(-max(0, now - stamp) / tau); est = est * w + x * (1 - w)
+//       return est, max(stamp, now)
+//   e, st = 1e8, 0
+//   e, st = observe(e, st, 3e8, 0); print("peak", repr(e))
+//   e2, st2 = observe(e, st, 0.0, 500_000_000); print("decayed 0.5s", repr(e2))
+//   e3, st3 = observe(e2, st2, 5e7, 500_000_000); print("sample 50ms at same time", repr(e3))
+//   e4, st4 = observe(e3, st3, 1e8, 1_500_000_000); print("sample 100ms 1s later (after zero-observe decay at same stamp?)", repr(e4))
+//   # Full simulations of the documented PowerOfTwoChoices and PeakEwma picks.
+//   def p2c_sim(seed, n, script):
+//       s = seeded(seed); w = [0] * n; out = []
+//       for op in script:
+//           if op == "pick":
+//               a = below(s, n); b = below(s, n - 1)
+//               if b >= a: b += 1
+//               i = b if w[b] < w[a] else a; w[i] += 1; out.append(i)
+//           else: w[op] = max(0, w[op] - 1)
+//       return out, w
+//   print("p2c sim", p2c_sim(3, 3, ["pick"] * 5 + [1, 1] + ["pick"] * 3))
+//   def ewma_sim(seed, n, script, tau=1e9, default=1e8):
+//       s = seeded(seed); w = [0] * n; est = [default] * n; st = [0] * n; now = 0; out = []
+//       def obs(i, x):
+//           if x > est[i]: est[i] = x
+//           else:
+//               g = math.exp(-max(0, now - st[i]) / tau); est[i] = est[i] * g + x * (1 - g)
+//           st[i] = max(st[i], now)
+//       for op in script:
+//           if op[0] == "pick":
+//               a = below(s, n); b = below(s, n - 1)
+//               if b >= a: b += 1
+//               obs(a, 0.0); ca = est[a] * (w[a] + 1); obs(b, 0.0); cb = est[b] * (w[b] + 1)
+//               i = b if cb < ca else a; w[i] += 1; out.append((i, a, b, ca, cb))
+//           elif op[0] == "report":
+//               w[op[1]] = max(0, w[op[1]] - 1); obs(op[1], float(op[2]))
+//           elif op[0] == "advance": now += op[1]
+//       return out, est, w
+//   script = [("pick",), ("pick",), ("report", 2, 300_000_000), ("report", 1, 50_000_000), ("advance", 500_000_000),
+//             ("pick",), ("pick",), ("pick",), ("report", 1, 20_000_000), ("advance", 2_000_000_000), ("pick",), ("pick",)]
+//   out, est, w = ewma_sim(3, 3, script)
+//   for o in out: print("ewma pick", o)
+//   print("ewma est", [repr(x) for x in est], "pending", w)
+//   p2c sim  -> picks [2, 1, 1, 2, 0, 1, 0, 2] for seed 3, 3 endpoints, reports of endpoint 1 twice after pick 5
+//   ewma     -> picks [2, 1, 1, 1, 0, 1, 0] for seed 3, tau 1 s, default 100 ms (script in the test below)
+let LoadBalancerTests = module (
+    let endpoints = func -> string[list] {
+        last list: string[list] = new;
+        list.append("a");
+        list.append("b");
+        list.append("c");
+        return list;
+    };
+
+    let pick = func(balancer: balancers.LoadBalancer<string>) -> balancers.Selection<string> =>
+        test.assert_ok<balancers.Selection<string>>(balancer.pick());
+
+    let report = func(balancer: balancers.LoadBalancer<string>, selection: balancers.Selection<string>, millis: int64) {
+        test.assert_ok<unit.Unit>(balancer.report(selection, durations.of_millis(millis), true));
+    };
+
+    export let test_round_robin_cycles = func {
+        last balancer = round_robin.of<string>(endpoints());
+        test.assert_equal_string("a", pick(balancer).endpoint);
+        test.assert_equal_string("b", pick(balancer).endpoint);
+        last third = pick(balancer);
+        test.assert_equal_string("c", third.endpoint);
+        test.assert_equal<int>(2, third.index);
+        test.assert_equal_string("a", pick(balancer).endpoint);
+        test.assert_equal<int>(2, balancer.pending(0));
+        report(balancer, third, 5);
+        test.assert_equal<int>(0, balancer.pending(2));
+        test.assert_equal_string("RoundRobin(3 endpoints)", balancer.to_string());
+        test.assert_equal_string("Selection(index 2)", third.to_string());
+    };
+
+    export let test_empty_balancer = func {
+        last empty: string[list] = new;
+        last e = test.assert_err<balancers.Selection<string>>(round_robin.of<string>(empty).pick());
+        last code = match (e) {
+            errors.Error.Custom(detail) => detail.code(),
+            _ => "",
+        };
+        test.assert_equal_string(balancers.NoEndpointsCode, code);
+        test.assert_err<balancers.Selection<string>>(p2c.of<string>(empty, randoms.seeded(1)).pick());
+    };
+
+    export let test_p2c_picks_less_pending = func {
+        last balancer = p2c.of<string>(endpoints(), randoms.seeded(3));
+        // Pairs (a, b) drawn: (2,0) (2,1) (1,2) (2,1) (1,0), then (1,0) (0,1) (2,0).
+        test.assert_equal<int>(2, pick(balancer).index);
+        last second = pick(balancer);
+        test.assert_equal<int>(1, second.index);
+        last third = pick(balancer);
+        test.assert_equal<int>(1, third.index);
+        test.assert_equal<int>(2, pick(balancer).index);
+        test.assert_equal<int>(0, pick(balancer).index);
+        report(balancer, second, 1);
+        report(balancer, third, 1);
+        test.assert_equal<int>(1, pick(balancer).index);
+        test.assert_equal<int>(0, pick(balancer).index);
+        test.assert_equal<int>(2, pick(balancer).index);
+        test.assert_equal<int>(2, balancer.pending(0));
+        test.assert_equal<int>(1, balancer.pending(1));
+        test.assert_equal<int>(3, balancer.pending(2));
+    };
+
+    export let test_p2c_single_endpoint_draws_nothing = func {
+        last one: string[list] = new;
+        one.append("only");
+        last random = randoms.seeded(5);
+        last balancer = p2c.of<string>(one, random);
+        test.assert_equal_string("only", pick(balancer).endpoint);
+        // The generator was not used: its next value is the seed's first.
+        test.assert_equal<uint64>(randoms.seeded(5).next_uint64(), random.next_uint64());
+    };
+
+    export let test_peak_ewma_picks = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last balancer = peak.of<string>(endpoints(), durations.of_seconds(1), durations.of_millis(100),
+            randoms.seeded(3), clock);
+        // (2,0): equal cost 1e8, the tie goes to the first draw.
+        last first = pick(balancer);
+        test.assert_equal<int>(2, first.index);
+        // (2,1): 2e8 against 1e8.
+        last second = pick(balancer);
+        test.assert_equal<int>(1, second.index);
+        // A peak replaces the estimate at once.
+        report(balancer, first, 300);
+        test.assert_float_near(300000000.0, balancer.estimate(2), 0.001);
+        // A lower sample with no time elapsed has weight 1 - exp(0) = 0.
+        report(balancer, second, 50);
+        test.assert_float_near(100000000.0, balancer.estimate(1), 0.001);
+        clock.advance(durations.of_millis(500));
+        // (1,2): 1e8 e^-0.5 = 60653065.97 against 3e8 e^-0.5 = 181959197.91.
+        last third = pick(balancer);
+        test.assert_equal<int>(1, third.index);
+        test.assert_float_near(181959197.91379002, balancer.estimate(2), 0.0001);
+        // (2,1): 181959197.91 against 60653065.97 * 2.
+        test.assert_equal<int>(1, pick(balancer).index);
+        // (1,0): 60653065.97 * 3 against 60653065.97.
+        test.assert_equal<int>(0, pick(balancer).index);
+        report(balancer, third, 20);
+        clock.advance(durations.of_seconds(2));
+        // (1,0): both 8208499.86 * 2, a tie: endpoint 1.
+        test.assert_equal<int>(1, pick(balancer).index);
+        // (0,1): 8208499.86 * 2 against 8208499.86 * 3.
+        test.assert_equal<int>(0, pick(balancer).index);
+        test.assert_float_near(8208499.86238988, balancer.estimate(0), 0.0001);
+        test.assert_float_near(8208499.86238988, balancer.estimate(1), 0.0001);
+        test.assert_equal<int>(2, balancer.pending(0));
+        test.assert_equal<int>(2, balancer.pending(1));
+        // Cost = estimate * (pending + 1).
+        test.assert_float_near(24625499.58716964, test.assert_ok<float64>(balancer.cost(0)), 0.0001);
+        test.assert_equal_string("PeakEwma(3 endpoints)", balancer.to_string());
+    };
+);

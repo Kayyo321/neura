@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "wasm-runtime",
+      "displayName": "Browser WebAssembly runtime",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/wasm-runtime",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{NEURA_EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "NEURA_WASM_RUNTIME": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "wasm-runtime", "configurePreset": "wasm-runtime" }
+  ]
+}

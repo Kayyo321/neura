@@ -1,0 +1,146 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let aead = import:Std.Crypto.Internal.Aead;
+let aes = import:Std.Crypto.Internal.Aes;
+let aes_cmac = import:Std.Crypto.Mac.AesCmac;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief AES-SIV of RFC 5297: deterministic and nonce-based authenticated encryption (Stdlib.md section 21.7).
+///
+/// The synthetic IV is S2V, a CMAC over the associated-data items and the plaintext, so encrypting the same
+/// plaintext with the same items gives the same output: a database column encrypted this way can still be
+/// matched by equality, and nothing else about the plaintext leaks. The output is the 16-byte IV followed by
+/// the ciphertext.
+/// @see [Std.Crypto.Symmetric.AesSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesSiv)
+#Since("0.3.0")
+export let AesSiv = module (
+    /// @brief AES-SIV with a 32-, 48- or 64-byte key: the first half keys CMAC, the second half CTR. As an
+    /// `AeadCipher`, `seal(nonce, plaintext, data)` uses the items [data] for an empty nonce (deterministic) and
+    /// [data, nonce] otherwise, so a nonce may have any length. `seal_items` takes RFC 5297's item vector.
+    #[Final, Since("0.3.0")]
+    export let AesSiv = class implements AeadCipher<SymmetricKey<AesSiv>, uint8[list], uint8[list]> (
+        let mac_key: uint8[list] = new;
+        let ctr_cipher: aes.Cipher;
+        let alg: Algorithm = Algorithm.Aes512Siv;
+
+        /// @brief Keys the cipher with a 32-, 48- or 64-byte key (typed, or raw bytes); another length traps.
+        export let init = func(key: SymmetricKey<AesSiv>) {
+            setup(key.expose());
+        } or func(key: uint8[list]) {
+            setup(key);
+        };
+
+        let setup = func(key: uint8[list]) {
+            aead.check_key(key.length == 32 || key.length == 48 || key.length == 64, "AES-SIV", "32, 48 or 64");
+            if (key.length == 32) {
+                alg = Algorithm.Aes256Siv;
+            } else if (key.length == 48) {
+                alg = Algorithm.Aes384Siv;
+            }
+            crypto_policy.require(alg);
+            last half = key.length / 2;
+            mac_key = words.slice(key, 0, half);
+            ctr_cipher = new(words.slice(key, half, key.length));
+        };
+
+        /// @brief `Aes256Siv`, `Aes384Siv` or `Aes512Siv` (named by the total key size).
+        export let algorithm = func -> Algorithm => alg;
+        /// @brief 0: AES-SIV takes a nonce of any length, or none.
+        export let nonce_length = func -> int => 0;
+        /// @brief 16, the synthetic IV.
+        export let tag_length = func -> int => 16;
+
+        export let seal = func(nonce: uint8[list], plaintext: uint8[list], associated_data: uint8[list]) -> uint8[list] =>
+            seal_items(items_of(nonce, associated_data), plaintext);
+
+        export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
+            -> Result<uint8[list]> => open_items(items_of(nonce, associated_data), sealed);
+
+        let items_of = func(nonce: uint8[list], data: uint8[list]) -> uint8[list][list] {
+            let items: uint8[list][list] = new([data]);
+            if (nonce.length > 0) {
+                items.append(nonce);
+            }
+            return items;
+        };
+
+        /// @brief The IV followed by the ciphertext, for up to 126 associated-data items (more trap).
+        #NoDiscard
+        export let seal_items = func(items: uint8[list][list], plaintext: uint8[list]) -> uint8[list] {
+            last iv = s2v(items, plaintext);
+            let out = words.copy(iv);
+            words.append_all(out, ctr(iv, plaintext));
+            return out;
+        };
+
+        /// @brief The plaintext of `seal_items`' output, or the "crypto.authentication" error.
+        #NoDiscard
+        export let open_items = func(items: uint8[list][list], sealed: uint8[list]) -> Result<uint8[list]> {
+            if (sealed.length < 16) {
+                return aead.failure();
+            }
+            last iv = words.slice(sealed, 0, 16);
+            let plaintext = ctr(iv, words.slice(sealed, 16, sealed.length));
+            if (!constant_time.ct_eq(s2v(items, plaintext), iv)) {
+                words.wipe(plaintext);
+                return aead.failure();
+            }
+            return Result<uint8[list]>.Ok(plaintext);
+        };
+
+        /// @brief S2V of RFC 5297, section 2.4, with the plaintext as the last string.
+        let s2v = func(items: uint8[list][list], plaintext: uint8[list]) -> uint8[list] {
+            if (items.length > 126) {
+                trap_with_message("invalid argument: AES-SIV takes at most 126 associated-data items");
+            }
+            let d = aes_cmac.mac(mac_key, words.zeros(16));
+            for (let item in items) {
+                d = words.xor(aes_cmac.double(d), aes_cmac.mac(mac_key, item));
+            }
+            let t: uint8[list] = new;
+            if (plaintext.length >= 16) {
+                t = words.copy(plaintext);
+                last at = plaintext.length - 16;
+                for (let i = 0; i < 16; i++) {
+                    t[at + i] = t[at + i] ^ d[i];
+                }
+            } else {
+                let padded = words.copy(plaintext);
+                padded.append(128);
+                while (padded.length < 16) {
+                    padded.append(0);
+                }
+                t = words.xor(aes_cmac.double(d), padded);
+            }
+            return aes_cmac.mac(mac_key, t);
+        };
+
+        /// @brief CTR from the IV with bits 63 and 31 cleared, as a 128-bit big-endian counter.
+        let ctr = func(iv: uint8[list], bytes: uint8[list]) -> uint8[list] {
+            let counter = words.copy(iv);
+            counter[8] = counter[8] & 127;
+            counter[12] = counter[12] & 127;
+            let out: uint8[list] = new;
+            for (let start = 0; start < bytes.length; start += 16) {
+                last stream = ctr_cipher.encrypt(counter, 0);
+                for (let i = 0; i < 16 && start + i < bytes.length; i++) {
+                    out.append(bytes[start + i] ^ stream[i]);
+                }
+                let carry: uint32 = 1;
+                for (let i = 15; i >= 0; i--) {
+                    last sum = (counter[i] as uint32) + carry;
+                    counter[i] = (sum & 255) as uint8;
+                    carry = sum >> 8;
+                }
+            }
+            return out;
+        };
+
+        export let.override to_string = func -> string => "AesSiv(<redacted>)";
+    );
+);

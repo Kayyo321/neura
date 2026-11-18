@@ -1,0 +1,254 @@
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let errors = import:Std.Core.Error;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let hex = import:Std.Encoding.Hex;
+let messages = import:Std.Net.Realtime.Ws.Message;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The RFC 6455 frame codec, the incremental decoder, close bodies and message reassembly.
+let FrameTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let none_mask = func -> optional.Optional<uint8[list]> => optional.Optional<uint8[list]>.None;
+
+    let mask_of = func(text: string) -> optional.Optional<uint8[list]> =>
+        optional.Optional<uint8[list]>.Some(bytes_of(text));
+
+    let encode_hex = func(frame: frames.Frame, mask: optional.Optional<uint8[list]>) -> string =>
+        hex.encode(test.assert_ok<uint8[list]>(frames.encode(frame, mask)));
+
+    let decode_one = func(role: frames.Role, wire: uint8[list]) -> frames.Frame {
+        last decoder = new frames.FrameDecoder(role, 1048576, 0);
+        decoder.push(wire);
+        last frame = test.assert_some<frames.Frame>(test.assert_ok<optional.Optional<frames.Frame>>(decoder.next()));
+        test.assert_equal<int>(0, decoder.buffered());
+        return frame;
+    };
+
+    let status_of_failure = func<T>(outcome: result.Result<T>) -> int =>
+        close_status.status_of(test.assert_err<T>(outcome));
+
+    // RFC 6455 section 5.7, "Examples".
+    export let test_rfc6455_examples_encode = func {
+        last hello = strings.to_bytes("Hello");
+        // A single-frame unmasked text message: 0x81 0x05 0x48 0x65 0x6c 0x6c 0x6f.
+        test.assert_equal_string("810548656c6c6f", encode_hex(frames.of(frames.Text, hello), none_mask()));
+        // A single-frame masked text message: 0x81 0x85 0x37 0xfa 0x21 0x3d 0x7f 0x9f 0x4d 0x51 0x58.
+        test.assert_equal_string("818537fa213d7f9f4d5158",
+            encode_hex(frames.of(frames.Text, hello), mask_of("37fa213d")));
+        // A fragmented unmasked text message: 0x01 0x03 0x48 0x65 0x6c and 0x80 0x02 0x6c 0x6f.
+        last parts = messages.fragment(messages.Message.Text("Hello"), 3);
+        test.assert_equal<int>(2, parts.length);
+        test.assert_equal_string("010348656c", encode_hex(parts[0], none_mask()));
+        test.assert_equal_string("80026c6f", encode_hex(parts[1], none_mask()));
+        // Unmasked Ping request and masked Ping response (the pong).
+        test.assert_equal_string("890548656c6c6f", encode_hex(frames.of(frames.Ping, hello), none_mask()));
+        test.assert_equal_string("8a8537fa213d7f9f4d5158",
+            encode_hex(frames.of(frames.Pong, hello), mask_of("37fa213d")));
+    };
+
+    let zeros = func(n: int) -> uint8[list] {
+        last data: uint8[list] = new;
+        for (let i = 0; i < n; i++) {
+            data.append(0);
+        }
+        return data;
+    };
+
+    // RFC 6455 section 5.7: 256 bytes give 0x82 0x7E 0x0100; 64 KiB give 0x82 0x7F 0x0000000000010000.
+    export let test_rfc6455_extended_lengths = func {
+        last medium = test.assert_ok<uint8[list]>(frames.encode(frames.of(frames.Binary, zeros(256)), none_mask()));
+        test.assert_equal<int>(260, medium.length);
+        test.assert_equal_string("827e0100", hex.encode(slice(medium, 0, 4)));
+        last large = test.assert_ok<uint8[list]>(frames.encode(frames.of(frames.Binary, zeros(65536)), none_mask()));
+        test.assert_equal<int>(65546, large.length);
+        test.assert_equal_string("827f0000000000010000", hex.encode(slice(large, 0, 10)));
+        last decoded = decode_one(frames.Role.Client, large);
+        test.assert_equal<int>(65536, decoded.payload.length);
+        test.assert_equal<int>(256, decode_one(frames.Role.Client, medium).payload.length);
+        // The boundaries of the 7-bit and 16-bit forms.
+        last at125 = test.assert_ok<uint8[list]>(frames.encode(frames.of(frames.Binary, zeros(125)), none_mask()));
+        test.assert_equal_string("827d", hex.encode(slice(at125, 0, 2)));
+        last at126 = test.assert_ok<uint8[list]>(frames.encode(frames.of(frames.Binary, zeros(126)), none_mask()));
+        test.assert_equal_string("827e007e", hex.encode(slice(at126, 0, 4)));
+        last at65535 = test.assert_ok<uint8[list]>(frames.encode(frames.of(frames.Binary, zeros(65535)), none_mask()));
+        test.assert_equal_string("827effff", hex.encode(slice(at65535, 0, 4)));
+    };
+
+    let slice = func(data: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(data[i]);
+        }
+        return out;
+    };
+
+    export let test_rfc6455_examples_decode = func {
+        last masked = decode_one(frames.Role.Server, bytes_of("818537fa213d7f9f4d5158"));
+        test.assert(masked.fin);
+        test.assert_equal<int>(frames.Text, masked.opcode);
+        test.assert_equal_string("Hello", strings.from_bytes_lossy(masked.payload));
+        last unmasked = decode_one(frames.Role.Client, bytes_of("810548656c6c6f"));
+        test.assert(unmasked.equals(masked));
+        last first = decode_one(frames.Role.Client, bytes_of("010348656c"));
+        test.assert(!first.fin);
+        test.assert_equal<int>(frames.Text, first.opcode);
+        last ping = decode_one(frames.Role.Client, bytes_of("890548656c6c6f"));
+        test.assert(ping.is_control());
+        test.assert_equal_string("Frame(opcode 9, FIN, 5 bytes)", ping.to_string());
+    };
+
+    // Every split of a two-frame stream into two chunks decodes the same frames.
+    export let test_decoder_over_every_chunk_split = func {
+        last wire = bytes_of("818537fa213d7f9f4d5158" + "8a8537fa213d7f9f4d5158");
+        for (let cut = 0; cut <= wire.length; cut++) {
+            last decoder = new frames.FrameDecoder(frames.Role.Server, 1024, 0);
+            last got: frames.Frame[list] = new;
+            decoder.push(slice(wire, 0, cut));
+            drain(decoder, got);
+            decoder.push(slice(wire, cut, wire.length));
+            drain(decoder, got);
+            test.assert_equal<int>(2, got.length);
+            test.assert_equal<int>(frames.Text, got[0].opcode);
+            test.assert_equal<int>(frames.Pong, got[1].opcode);
+            test.assert_equal_string("Hello", strings.from_bytes_lossy(got[1].payload));
+        }
+    };
+
+    let drain = func(decoder: frames.FrameDecoder, got: frames.Frame[list]) {
+        while (true) {
+            last next = test.assert_ok<optional.Optional<frames.Frame>>(decoder.next());
+            match (next) {
+                optional.Optional.Some(frame) => {
+                    got.append(frame);
+                },
+                optional.Optional.None => {
+                    return;
+                },
+            }
+        }
+    };
+
+    let decode_status = func(role: frames.Role, max: int, rsv: int, wire: string) -> int {
+        last decoder = new frames.FrameDecoder(role, max, rsv);
+        decoder.push(bytes_of(wire));
+        return status_of_failure<optional.Optional<frames.Frame>>(decoder.next());
+    };
+
+    export let test_decoder_rejections = func {
+        // Masking: a server needs masked frames, a client unmasked ones.
+        test.assert_equal<int>(1002, decode_status(frames.Role.Server, 1024, 0, "810548656c6c6f"));
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "818537fa213d7f9f4d5158"));
+        // Reserved bits without an extension; RSV1 is accepted when allowed.
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "c10548656c6c6f"));
+        last allowed = new frames.FrameDecoder(frames.Role.Client, 1024, 4);
+        allowed.push(bytes_of("c10548656c6c6f"));
+        last compressed = test.assert_some<frames.Frame>(test.assert_ok<optional.Optional<frames.Frame>>(allowed.next()));
+        test.assert(compressed.rsv1);
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 4, "a10548656c6c6f"));
+        // Reserved opcodes 3 and 11.
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "8300"));
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "8b00"));
+        // A fragmented ping and a ping of 126 bytes.
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "0900"));
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "897e007e"));
+        // Non-minimal lengths and a 64-bit length with its top bit set.
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1024, 0, "827e007d"));
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1048576, 0, "827f000000000000ffff"));
+        test.assert_equal<int>(1002, decode_status(frames.Role.Client, 1048576, 0, "827f8000000000000000"));
+        // Over the size limit: rejected from the header alone, including the largest 63-bit length.
+        test.assert_equal<int>(1009, decode_status(frames.Role.Client, 200, 0, "827e00c9"));
+        test.assert_equal<int>(1009, decode_status(frames.Role.Client, 1048576, 0, "827f7fffffffffffffff"));
+        // A failed decoder stays failed.
+        last decoder = new frames.FrameDecoder(frames.Role.Client, 1024, 0);
+        decoder.push(bytes_of("8300"));
+        test.assert_err<optional.Optional<frames.Frame>>(decoder.next());
+        test.assert_err<optional.Optional<frames.Frame>>(decoder.next());
+    };
+
+    export let test_encoder_rejections = func {
+        test.assert_equal<int>(1002, status_of_failure<uint8[list]>(
+            frames.encode(frames.of(frames.Ping, zeros(126)), none_mask())));
+        test.assert_equal<int>(1002, status_of_failure<uint8[list]>(frames.encode(
+            new frames.Frame(false, false, false, false, frames.Close, zeros(0)), none_mask())));
+        test.assert_equal<int>(1002, status_of_failure<uint8[list]>(frames.encode(frames.of(4, zeros(0)), none_mask())));
+        test.assert_ok<uint8[list]>(frames.encode(frames.of(frames.Ping, zeros(125)), none_mask()));
+    };
+
+    export let test_close_bodies = func {
+        last body = test.assert_ok<uint8[list]>(close_status.encode_body(1000, "bye"));
+        test.assert_equal_string("03e8627965", hex.encode(body));
+        last reason = test.assert_ok<close_status.CloseReason>(close_status.decode_body(body));
+        test.assert(reason.equals(new close_status.CloseReason(1000, "bye")));
+        test.assert_equal_string("1000 bye", reason.to_string());
+        test.assert_equal<int>(1005, test.assert_ok<close_status.CloseReason>(close_status.decode_body(zeros(0))).code);
+        // One byte, reserved and undefined codes, and a reason that is not UTF-8.
+        test.assert_equal<int>(1002, status_of_failure<close_status.CloseReason>(close_status.decode_body(bytes_of("03"))));
+        test.assert_equal<int>(1002, status_of_failure<close_status.CloseReason>(close_status.decode_body(bytes_of("03ed"))));
+        test.assert_equal<int>(1002, status_of_failure<close_status.CloseReason>(close_status.decode_body(bytes_of("03ee"))));
+        test.assert_equal<int>(1002, status_of_failure<close_status.CloseReason>(close_status.decode_body(bytes_of("03f7"))));
+        test.assert_equal<int>(1002, status_of_failure<close_status.CloseReason>(close_status.decode_body(bytes_of("03e7"))));
+        test.assert_equal<int>(1007, status_of_failure<close_status.CloseReason>(close_status.decode_body(bytes_of("03e8ff"))));
+        test.assert_equal<int>(4999, test.assert_ok<close_status.CloseReason>(close_status.decode_body(bytes_of("1387"))).code);
+        // The codes RFC 6455 section 7.4 allows on the wire.
+        for (let code = 0; code < 5100; code++) {
+            last expected = (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1011)
+                || (code >= 3000 && code <= 4999);
+            test.assert_equal_bool(expected, close_status.is_valid_on_wire(code));
+        }
+        test.assert_err<uint8[list]>(close_status.encode_body(1005, ""));
+        test.assert_err<uint8[list]>(close_status.encode_body(1000, strings.repeat("x", 124)));
+        test.assert_ok<uint8[list]>(close_status.encode_body(1000, strings.repeat("x", 123)));
+    };
+
+    let add = func(assembler: messages.MessageAssembler, frame: frames.Frame) -> result.Result<optional.Optional<messages.Message>> =>
+        assembler.add(frame);
+
+    let frame = func(fin: bool, code: int, text: string) -> frames.Frame =>
+        new frames.Frame(fin, false, false, false, code, strings.to_bytes(text));
+
+    export let test_reassembly = func {
+        last assembler = new messages.MessageAssembler(1024);
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(
+            add(assembler, frame(false, frames.Text, "Hel"))));
+        test.assert(assembler.in_message());
+        last done = test.assert_some<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(
+            add(assembler, frame(true, frames.Continuation, "lo"))));
+        match (done) {
+            messages.Message.Text(text) => {
+                test.assert_equal_string("Hello", text);
+            },
+            messages.Message.Binary(_) => {
+                test.fail("expected text");
+            },
+        }
+        // A text message split inside a multi-byte character is valid once whole.
+        // U+20AC EURO SIGN, UTF-8 e2 82 ac.
+        last euro = bytes_of("e282ac");
+        test.assert_ok<optional.Optional<messages.Message>>(assembler.add(new frames.Frame(false, false, false, false,
+            frames.Text, slice(euro, 0, 1))));
+        last whole = test.assert_ok<optional.Optional<messages.Message>>(assembler.add(new frames.Frame(true, false,
+            false, false, frames.Continuation, slice(euro, 1, 3))));
+        test.assert(optional.is_some<messages.Message>(whole));
+        // Sequence errors.
+        test.assert_equal<int>(1002, status_of_failure<optional.Optional<messages.Message>>(
+            add(assembler, frame(true, frames.Continuation, "x"))));
+        test.assert_ok<optional.Optional<messages.Message>>(add(assembler, frame(false, frames.Binary, "x")));
+        test.assert_equal<int>(1002, status_of_failure<optional.Optional<messages.Message>>(
+            add(assembler, frame(true, frames.Text, "y"))));
+        // Invalid UTF-8 and the size limit.
+        test.assert_equal<int>(1007, status_of_failure<optional.Optional<messages.Message>>(assembler.add(
+            new frames.Frame(true, false, false, false, frames.Text, bytes_of("c3")))));
+        last small = new messages.MessageAssembler(4);
+        test.assert_ok<optional.Optional<messages.Message>>(add(small, frame(false, frames.Binary, "abc")));
+        test.assert_equal<int>(1009, status_of_failure<optional.Optional<messages.Message>>(
+            add(small, frame(true, frames.Continuation, "de"))));
+        // An empty message is one empty final frame.
+        last empty = messages.fragment(messages.Message.Binary(zeros(0)), 10);
+        test.assert_equal<int>(1, empty.length);
+        test.assert(empty[0].fin);
+    };
+);

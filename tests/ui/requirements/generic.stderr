@@ -1,0 +1,10 @@
+error[E0576]: invalid static requirement
+ --> $DIR/generic.nra:3:28
+  |
+3 |     static let make = func<U>() -> U;
+  |                            ^ a static requirement is not generic
+  |
+  = note: a static requirement is a plain signature that each implementing class declares
+  = help: write it as 'static let make = func(parameters) -> T;'
+
+For more information about this error, try `neura explain E0576`.

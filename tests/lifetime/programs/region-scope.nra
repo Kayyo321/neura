@@ -1,0 +1,26 @@
+// A scope exits by running its deferred work, joining, then releasing the region.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let show = func(values: int[]) {
+    console.println("deferred {}", values[0]);
+};
+let consume = func(receiver: channels.Receiver<int>) {
+    match (receiver.receive()) {
+        channels.Received.Value(_) => {},
+        _ => {},
+    }
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        const [sender, receiver, closer] = channels.open<int>(1);
+        scope {
+            let values = [42];
+            defer closer.close();
+            defer show(values);
+            spawn consume(receiver);
+        }
+        console.print_line("joined");
+        return program.ExitCode.Ok;
+    };
+);

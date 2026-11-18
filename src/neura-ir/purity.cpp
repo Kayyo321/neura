@@ -1,8 +1,11 @@
 #include "purity.hpp"
+#include "class_hooks.hpp"
+#include "frozen.hpp"
 
 #include "host_binding.hpp"
 #include "integer.hpp"
 #include "kernel_signature.hpp"
+#include "attributes.hpp"
 #include "tags.hpp"
 
 #include <algorithm>
@@ -85,7 +88,13 @@ bool immutable_type(const IrProgram& program, const IrType& type) {
             for (auto cls = item.symbol; cls < program.symbols.size() && chain.insert(cls).second;
                  cls = program.symbols[cls].base) {}
             for (const auto& field : program.symbols) {
-                if (field.kind == SymbolKind::Field && chain.contains(field.owner) && !check(field.type)) return false;
+                if (field.kind != SymbolKind::Field || !chain.contains(field.owner)) continue;
+                // #Frozen list storage is immutable when its elements are.
+                const auto& stored = frozen_field(field) && field.type.kind == TypeKind::List &&
+                                             field.type.arguments.size() == 1
+                                         ? field.type.arguments.front()
+                                         : field.type;
+                if (!check(stored)) return false;
             }
             return true;
         }
@@ -107,7 +116,8 @@ bool PurityAnalysis::Roots::join(const Roots& other) {
 }
 
 bool PurityAnalysis::Summary::same(const Summary& other) const {
-    if (reason.has_value() != other.reason.has_value() || links != other.links || !(result == other.result) ||
+    if (reason.has_value() != other.reason.has_value() || render.has_value() != other.render.has_value() ||
+        links != other.links || !(result == other.result) ||
         !(fresh_graph == other.fresh_graph) || deep != other.deep || writes.size() != other.writes.size() ||
         allocates.has_value() != other.allocates.has_value() || allocation_unknown != other.allocation_unknown ||
         traps.has_value() != other.traps.has_value() || host.has_value() != other.host.has_value() ||
@@ -217,7 +227,11 @@ private:
     Roots typed(const IrType& type, Roots roots) const {
         return type.kind == TypeKind::Void || a_.immutable(type) ? Roots{} : roots;
     }
-    void impure(Reason reason) {
+    // `renders` is true for the reasons that rendering allows (Html030.md,
+    // "Typing and ownership"): reads of reassignable or mutable bindings, the
+    // static initialization a read runs, and object identity.
+    void impure(Reason reason, bool renders = false) {
+        if (!renders && !out_.render) out_.render = reason;
         if (!out_.reason) out_.reason = std::move(reason);
     }
     void assign(SymbolId local, const Roots& value) {
@@ -388,7 +402,8 @@ private:
             // returns something no one here knows.
             if (!a_.bodies_.contains(target) && !kernel_bound(a_.symbol(target)) && a_.symbol(target).external)
                 result.join(unknown());
-            if (summary->reason) impure(Reason{{}, span, target, std::nullopt});
+            if (summary->reason) impure(Reason{{}, span, target, std::nullopt}, true);
+            if (summary->render && !out_.render) out_.render = Reason{{}, span, target, std::nullopt};
             for (const auto& [k, why] : summary->writes) {
                 write(summary->deep.contains(k) ? graph(slot(k)) : slot(k), Reason{{}, span, target, k});
             }
@@ -435,12 +450,12 @@ private:
             return typed(node.type, locals_[node.symbol]);
         }
         if (auto start = static_start(node.symbol)) {
-            impure(Reason{*start, node.span});
+            impure(Reason{*start, node.span}, true);
         } else if (!item.constant) {
-            impure(Reason{"reads the reassignable binding '" + item.name + "'", node.span});
+            impure(Reason{"reads the reassignable binding '" + item.name + "'", node.span}, true);
         } else if (!a_.immutable(item.type)) {
             impure(Reason{"reads the binding '" + item.name + "', whose type " + display(item.type) + " is mutable",
-                          node.span});
+                          node.span}, true);
         }
         return typed(node.type, global());
     }
@@ -454,6 +469,13 @@ private:
             return;
         }
         const auto& destination = node.operands.front();
+        if (destination.op == IrOp::Pending) {
+            // A cleanup's return list replaces the value being returned.
+            const auto value = eval(node.operands.back());
+            retain(out_.result, value, "returns it", node.span);
+            if (!value.empty() && !result_cause_) result_cause_ = Cause{"returns it", node.span, no_symbol};
+            return;
+        }
         if (destination.op == IrOp::Load) {
             const bool local = a_.valid(destination.symbol) &&
                                (a_.symbol(destination.symbol).kind == SymbolKind::Local ||
@@ -523,6 +545,9 @@ private:
         case IrOp::Reference:
         case IrOp::Receiver:
         case IrOp::ReinterpretFloat:
+        case IrOp::AnyPack:
+        case IrOp::AnyTag:
+        case IrOp::AnyUnpack:
         case IrOp::ShortCircuit:
         case IrOp::ComparisonChain:
         case IrOp::ScopedValue:
@@ -534,6 +559,12 @@ private:
         case IrOp::Continue:
         case IrOp::Return:
         case IrOp::Discard:
+        // A cleanup list runs at its block's exits; its operations are
+        // visited as children. Pending is the value a return carries, and a
+        // Yield suspends a generator's $resume, which returns true there.
+        case IrOp::Cleanup:
+        case IrOp::Pending:
+        case IrOp::Yield:
             break;
         case IrOp::Load:
             // A global that has not been initialized faults when read.
@@ -542,7 +573,7 @@ private:
         case IrOp::Store:
             if (node.operands.size() != 2) {
                 unknown_operation(node, "stores to an unknown place");
-            } else if (node.operands.front().op != IrOp::Load) {
+            } else if (node.operands.front().op != IrOp::Load && node.operands.front().op != IrOp::Pending) {
                 trap(node, "stores to a field or an element");
             }
             break;
@@ -599,6 +630,10 @@ private:
             allocate(node, "allocates");
             trap(node, "allocates");
             break;
+        case IrOp::ConformanceCall:
+            // Its implementation is decided on each specialization.
+            trap(node, "calls a function, which may reach the frame-depth limit");
+            break;
         case IrOp::Call:
             // Every call can reach the frame-depth limit.
             trap(node, "calls a function, which may reach the frame-depth limit");
@@ -618,6 +653,14 @@ private:
             break;
         case IrOp::CallClosure:
             unknown_operation(node, "calls a function value");
+            break;
+        case IrOp::HookRead:
+        case IrOp::HookAdmit:
+            // An event calls each clause it may run; its facts join in eval.
+            if (const auto targets = a_.hook_targets(node); !targets.empty()) {
+                trap(node, "runs a class hook, which may reach the frame-depth limit");
+                for (const auto target : targets) merge_optimizer(target);
+            }
             break;
         case IrOp::ExternalCall:
             if (a_.valid(node.symbol) && kernel_bound(a_.symbol(node.symbol))) {
@@ -706,7 +749,10 @@ public:
             }
             return typed(node.type, from);
         }
-        case IrOp::ClassCast: {
+        case IrOp::ClassCast:
+        // An `any` holds the reference it packs (docs/design/Matching030.md).
+        case IrOp::AnyPack:
+        case IrOp::AnyUnpack: {
             Roots value;
             for (const auto& child : node.operands) value.join(eval(child));
             return typed(node.type, value);
@@ -805,6 +851,29 @@ public:
                 impure(Reason{"makes a host request", node.span});
             }
             return typed(node.type, unknown());
+        case IrOp::HookRead:
+        case IrOp::HookAdmit: {
+            const auto value = node.operands.empty() ? Roots{} : eval(node.operands.front());
+            const auto targets = a_.hook_targets(node);
+            if (targets.empty()) return value;
+            const auto& clause = a_.symbol(targets.front());
+            const auto owner = hook_owner(clause);
+            may(out_.hooks, std::string("runs the '") + (node.op == IrOp::HookRead ? "get" : "set") +
+                                "' hook of '" + (a_.valid(owner) ? a_.symbol(owner).name : clause.name) + "'",
+                node.span);
+            // Slot 1 is the operand (`instance` of a getter, `value` of a
+            // setter); a setter's `instance` is what the destination held.
+            std::vector<Roots> slots{Roots{}, value, unknown(), Roots{}};
+            auto result = typed(node.type, apply(targets, slots, node.span));
+            for (const auto target : targets) merge_facts(target, node.span);
+            result.join(value);
+            return result;
+        }
+        case IrOp::ConformanceCall:
+            // Deferred, as a value member of a type parameter is: each
+            // specialization calls its implementation directly.
+            operands(node, 0);
+            return {};
         case IrOp::ValueEquals:
         case IrOp::ValueHash:
         case IrOp::ValueText: {
@@ -845,7 +914,7 @@ public:
         case IrOp::ClassHash:
         case IrOp::ClassText:
             children(node);
-            impure(Reason{"uses an object's identity", node.span});
+            impure(Reason{"uses an object's identity", node.span}, true);
             return {};
         case IrOp::Destroy:
             // A destructor may keep its receiver.
@@ -887,6 +956,14 @@ public:
         case IrOp::Nil:
         case IrOp::Reference:
             return node.type.kind == TypeKind::Module ? unknown() : Roots{};
+        case IrOp::Cleanup:
+            children(node);
+            return {};
+        case IrOp::Yield:
+            return {};
+        case IrOp::Pending:
+            // What a return carries; the Return that set it retained it.
+            return typed(node.type, out_.result);
         default:
             children(node);
             return typed(node.type, unknown());
@@ -894,8 +971,13 @@ public:
     }
 };
 
+std::vector<SymbolId> PurityAnalysis::hook_targets(const IrNode& node) const {
+    return hooks_ ? hooks_->targets(node) : std::vector<SymbolId>{};
+}
+
 PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(SymbolId)> opaque)
-    : program_(program), opaque_(std::move(opaque)), dispatch_(program), modules_(program) {
+    : program_(program), opaque_(std::move(opaque)), dispatch_(program), modules_(program),
+      hooks_(program.hooks_elaborated ? std::make_shared<const HookIndex>(program) : nullptr) {
     for (const auto& body : program.bodies) bodies_[body.owner].push_back(&body);
     const auto is_opaque = [&](SymbolId id) {
         return opaque_ && valid(id) && symbol(id).kind == SymbolKind::Function && opaque_(id);
@@ -1197,6 +1279,10 @@ void PurityAnalysis::callees(const IrNode& node, std::vector<SymbolId>& out) con
     case IrOp::VirtualCall:
         for (const auto id : targets(node)) out.push_back(id);
         break;
+    case IrOp::HookRead:
+    case IrOp::HookAdmit:
+        for (const auto id : hook_targets(node)) out.push_back(id);
+        break;
     case IrOp::BaseInitialize:
         for (const auto id : construction(!node.operands.empty() && node.operands.front().type.kind == TypeKind::Object
                                               ? node.operands.front().type.symbol
@@ -1227,16 +1313,30 @@ void PurityAnalysis::callees(const IrNode& node, std::vector<SymbolId>& out) con
 }
 
 std::optional<PurityAnalysis::Impure> PurityAnalysis::impure(SymbolId function) const {
-    const auto first = [](const Summary& summary) -> const Reason* {
-        if (summary.reason) return &*summary.reason;
-        return summary.writes.empty() ? nullptr : &summary.writes.begin()->second;
+    return chain(function, false, {});
+}
+
+std::optional<PurityAnalysis::Impure> PurityAnalysis::render_effect(SymbolId function,
+                                                                    const std::set<std::size_t>& ignored) const {
+    return chain(function, true, ignored);
+}
+
+std::optional<PurityAnalysis::Impure> PurityAnalysis::chain(SymbolId function, bool rendering,
+                                                            const std::set<std::size_t>& ignored) const {
+    const auto first = [rendering](const Summary& summary, const std::set<std::size_t>& skip) -> const Reason* {
+        const auto& own = rendering ? summary.render : summary.reason;
+        if (own) return &*own;
+        for (const auto& [slot, why] : summary.writes) {
+            if (!skip.contains(slot)) return &why;
+        }
+        return nullptr;
     };
     const auto* start = summary(function);
     if (!start) {
         if (valid(function)) return Impure{{}, "has no body to check", symbol(function).span};
         return Impure{{}, "is not a function", {}};
     }
-    const auto* reason = first(*start);
+    const auto* reason = first(*start, ignored);
     if (!reason) return std::nullopt;
     Impure result;
     std::set<SymbolId> seen{function};
@@ -1249,7 +1349,7 @@ std::optional<PurityAnalysis::Impure> PurityAnalysis::impure(SymbolId function) 
             const auto found = next_summary->writes.find(*reason->slot);
             if (found != next_summary->writes.end()) next = &found->second;
         } else {
-            next = first(*next_summary);
+            next = first(*next_summary, {});
         }
         if (!next) break;
         reason = next;
@@ -1389,6 +1489,67 @@ void check_pure_tags(const IrProgram& program, const std::function<bool(SymbolId
         error.note("a #Pure function may allocate and trap, but it writes only objects it allocates, reads no "
                    "reassignable state, and calls only pure functions");
         error.help("remove #Pure, or move the effect to the caller");
+        throw error;
+    }
+}
+
+void check_render_factories(const IrProgram& program, const std::function<bool(SymbolId)>& opaque,
+                            bool specialized) {
+    const auto valid = [&](SymbolId id) { return id < program.symbols.size(); };
+    const auto factory = [&](const IrSymbol& item) {
+        return item.kind == SymbolKind::Function && find_attribute(item, AttributeId::UiFactory) != nullptr;
+    };
+    if (std::ranges::none_of(program.symbols, factory)) return;
+    const auto in_template = [&](SymbolId id) {
+        std::set<SymbolId> seen;
+        for (auto scope = id; valid(scope) && seen.insert(scope).second; scope = program.symbols[scope].owner) {
+            if (!program.symbols[scope].generics.empty()) return true;
+        }
+        return false;
+    };
+    const PurityAnalysis analysis(program, specialized ? std::function<bool(SymbolId)>{} : opaque);
+    for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+        const auto& item = program.symbols[id];
+        if (!factory(item) || !item.has_body) continue;
+        if (!specialized && opaque && opaque(id)) continue;
+        if (specialized && in_template(id)) continue;
+        // A function value cannot be written: its captures cannot be reassigned, and what they refer to is
+        // reached only by calling it, which is an effect of its own. A write the analysis attributes to such a
+        // parameter comes from tracking the objects the factory allocated together, and is not one.
+        std::set<std::size_t> ignored;
+        // After specialization a function type is the interface of its signature.
+        const auto function_type = [&](const IrType& type) {
+            return type.kind == TypeKind::Callable ||
+                   (valid(type.symbol) && program.symbols[type.symbol].name.starts_with("$signature"));
+        };
+        for (std::size_t i = 0; i < item.parameters.size(); ++i) {
+            const auto parameter = item.parameters[i];
+            if (valid(parameter) && function_type(program.symbols[parameter].type)) ignored.insert(i + 1);
+        }
+        const auto effect = analysis.render_effect(id, ignored);
+        if (!effect) continue;
+        std::vector<std::pair<SymbolId, Span>> hops;
+        for (const auto& [callee, span] : effect->calls) {
+            const auto& called = program.symbols[callee];
+            if (called.kind != SymbolKind::Function || called.name == "$invoke") continue;
+            hops.emplace_back(callee, span);
+        }
+        // The expression in the template that leads to the effect.
+        const auto at = hops.empty() ? effect->span : hops.front().second;
+        auto text = std::string("effect not allowed while rendering: ");
+        text += hops.empty() ? "the template " + effect->operation
+                             : "it reaches '" + program.symbols[hops.back().first].name + "', which " +
+                                   effect->operation;
+        auto error = Diagnostic(at, std::move(text)).with_code("E1010");
+        for (std::size_t i = 0; i < hops.size(); ++i) {
+            const auto& [callee, span] = hops[i];
+            if (i == 0) error.label("calls '" + program.symbols[callee].name + "' while the view is built");
+            else error.label(span, "calls '" + program.symbols[callee].name + "'");
+        }
+        if (!hops.empty()) error.label(effect->span, effect->operation + " here");
+        error.note("a template may allocate and read, but it may not write what it did not create, assign a "
+                   "binding, make a host request, start or wait for tasks, or call a function value");
+        error.help("do it in a handler or a command, and pass the result to the factory");
         throw error;
     }
 }

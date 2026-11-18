@@ -1,0 +1,7 @@
+error[E0244]: malformed template tag
+ --> $DIR/template-self-closing-html.nra:1:21
+  |
+1 | let view = html() { <div/> };
+  |                     ^^^^^^ write both a start tag and an end tag
+
+For more information about this error, try `neura explain E0244`.

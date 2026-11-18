@@ -1,0 +1,9 @@
+// A requirement is called, not taken as a value (edge case 107).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let make = func<T: Additive<T>>() -> int {
+    let f = T.add;
+    return 0;
+};

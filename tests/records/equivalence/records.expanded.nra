@@ -1,0 +1,74 @@
+// The class that records.record.nra declares as a record, written out.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+#[Final, Immutable]
+let Node = class (
+    export last value: int;
+    export last next: Node;
+    export let init = func(value: int, next: Node) => set;
+    export let.override equals = func(other: class) -> bool {
+        if (!(other is Node)) {
+            return false;
+        }
+        const that = other as Node;
+        return instance.value.equals(that.value) &&
+            (instance.next == nil ? that.next == nil : instance.next.equals(that.next));
+    };
+    export let.override hash_code = func() -> uint32 {
+        let hash: uint32 = 1;
+        hash = ((hash as uint64 * 31 + instance.value.hash_code() as uint64) & 4294967295) as uint32;
+        hash = ((hash as uint64 * 31 + (instance.next == nil ? 0 : instance.next.hash_code() as uint64))
+            & 4294967295) as uint32;
+        return hash;
+    };
+    export let.override to_string = func() -> string =>
+        "Node(value: " + instance.value.to_string() + ", next: " +
+        (instance.next == nil ? "nil" : instance.next.to_string()) + ")";
+);
+
+#[Final, Immutable]
+let User = class (
+    export last id: int64;
+    export last name: string;
+    export last score: float64;
+    export last pair: [int, bool];
+    export last owner: Node;
+    export let init = func(id: int64, name: string, score: float64, pair: [int, bool], owner: Node) => set;
+    export let.override equals = func(other: class) -> bool {
+        if (!(other is User)) {
+            return false;
+        }
+        const that = other as User;
+        return instance.id.equals(that.id) && instance.name.equals(that.name) &&
+            instance.score.equals(that.score) && instance.pair.equals(that.pair) &&
+            (instance.owner == nil ? that.owner == nil : instance.owner.equals(that.owner));
+    };
+    export let.override hash_code = func() -> uint32 {
+        let hash: uint32 = 1;
+        hash = ((hash as uint64 * 31 + instance.id.hash_code() as uint64) & 4294967295) as uint32;
+        hash = ((hash as uint64 * 31 + instance.name.hash_code() as uint64) & 4294967295) as uint32;
+        hash = ((hash as uint64 * 31 + instance.score.hash_code() as uint64) & 4294967295) as uint32;
+        hash = ((hash as uint64 * 31 + instance.pair.hash_code() as uint64) & 4294967295) as uint32;
+        hash = ((hash as uint64 * 31 + (instance.owner == nil ? 0 : instance.owner.hash_code() as uint64))
+            & 4294967295) as uint32;
+        return hash;
+    };
+    export let.override to_string = func() -> string =>
+        "User(id: " + instance.id.to_string() + ", name: " + instance.name.to_string() + ", score: " +
+        instance.score.to_string() + ", pair: " + instance.pair.to_string() + ", owner: " +
+        (instance.owner == nil ? "nil" : instance.owner.to_string()) + ")";
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let node = new Node(1, new Node(2, nil));
+        let user = new User(7, "Ada", 1.5, [3, true], node);
+        let same = new User(7, "Ada", 1.5, [3, true], new Node(1, new Node(2, nil)));
+        console.print_line(user.to_string());
+        console.print_line(user.hash_code().to_string());
+        console.print_line((user === same).to_string() + " " + (user == same).to_string());
+        console.print_line(new User(7, "Ada", 1.5, [3, true], nil).to_string());
+        return program.ExitCode.Ok;
+    };
+);

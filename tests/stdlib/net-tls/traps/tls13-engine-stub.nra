@@ -1,0 +1,24 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Tls\.Handshake\.tls13 is not implemented in Neura 0\.3\.0
+// run-options: --allow-net
+// There is no pure-Neura TLS 1.3 engine in 0.3.0.
+let config = import:Std.Net.Tls.TlsConfig;
+let duration = import:Std.Time.Duration;
+let handshake = import:Std.Net.Tls.Handshake;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let tcp_server = import:Std.Net.Socket.TcpServer;
+let tcp_socket = import:Std.Net.Socket.TcpSocket;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last loopback = result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"), "address");
+        last server = result.expect<tcp_server.TcpServer>(tcp_server.bind(loopback), "bind");
+        last client = result.expect<tcp_socket.TcpSocket>(tcp_socket.connect(server.address(),
+            duration.of_seconds(5)), "connect");
+        last settings = result.expect<config.TlsConfig>(config.builder().build_client(), "config");
+        let _ = handshake.tls13(settings, client);
+        return program.ExitCode.Ok;
+    };
+);

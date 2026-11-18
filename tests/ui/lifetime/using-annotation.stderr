@@ -1,0 +1,9 @@
+error[E0220]: a 'using' binding has no type annotation
+  --> $DIR/using-annotation.nra:11:18
+   |
+11 |     using (source: Resource = open()) {
+   |                  ^ the resource's type is the type of its value
+   |
+   = help: write 'using (source = value) { ... }'
+
+For more information about this error, try `neura explain E0220`.

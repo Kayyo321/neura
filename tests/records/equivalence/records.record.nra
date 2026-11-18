@@ -1,0 +1,20 @@
+// A record builds the image of the class written out in records.expanded.nra
+// (docs/design/Records030.md, Gate and acceptance: generated bodies conform).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Node = record (value: int, next: Node);
+let User = record (id: int64, name: string, score: float64, pair: [int, bool], owner: Node);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let node = new Node(1, new Node(2, nil));
+        let user = new User(7, "Ada", 1.5, [3, true], node);
+        let same = new User(7, "Ada", 1.5, [3, true], new Node(1, new Node(2, nil)));
+        console.print_line(user.to_string());
+        console.print_line(user.hash_code().to_string());
+        console.print_line((user === same).to_string() + " " + (user == same).to_string());
+        console.print_line(new User(7, "Ada", 1.5, [3, true], nil).to_string());
+        return program.ExitCode.Ok;
+    };
+);

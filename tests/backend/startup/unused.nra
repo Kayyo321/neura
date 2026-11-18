@@ -1,0 +1,10 @@
+// Imported by main.nra, which uses nothing it declares: its block still runs.
+let console = import:Std.Io.Console;
+
+export let Unused = module (
+    export let value: int32 = 0;
+);
+
+static scope {
+    console.print_line("unused: block");
+}

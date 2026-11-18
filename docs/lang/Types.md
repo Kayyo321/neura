@@ -374,6 +374,24 @@ let implicit = accept(reading);
 
 Function arguments can use one visible conversion when their type is otherwise incompatible with the parameter. Assignments and returns require ordinary assignability or an explicit `as`. A conversion from `Reading` to `int64` therefore cannot satisfy an `int32` parameter. An unexported cast is only available within its declaring class.
 
+### match.is
+
+`match.is (subject) { arms }` selects an arm by the type of the subject's value ([design](../design/Matching030.md), implemented, proposed). An arm's pattern is a type, `name: Type`, `nil`, or `_`, with an optional guard; `name: Type` binds a constant of that type, made by the checked refinement of the subject, never by a source `as`. The subject is evaluated once, and the arms are tried in written order. The subject is a class or interface reference, `class`, [`any`](#the-type-any), a scalar or a string; a bare type parameter is [E0411](../diagnostics/E0411.md), and `as any` states the intent. A class or interface pattern matches a live reference of that type or a type derived from it, and is a passive test that runs no initializer. A scalar or string pattern matches a value of exactly that resolved type: `int32` never matches an `int64`, and no conversion takes part. `nil` matches an absent reference, and a type pattern never does. A pattern the subject's type can never have is [E0490](../diagnostics/E0490.md), and an arm an earlier unguarded arm covers is [E0491](../diagnostics/E0491.md). A class, interface, `class` or `any` subject ends with an unguarded `_`; a scalar or string subject needs an unguarded arm of its type, or `_` ([E0410](../diagnostics/E0410.md)). A malformed `match.is` is [E0230](../diagnostics/E0230.md).
+
+<!-- example: check -->
+```neura
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+
+let describe = func(value: class) -> string => match.is (value) {
+    Circle => "a circle",
+    shape: Shape if shape.sides > 4 => "a large shape",
+    Shape => "a shape",
+    nil => "nothing",
+    _ => "something else",
+};
+```
+
 ### Accessors
 
 An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.
@@ -430,7 +448,49 @@ A field with only `get` is read-only outside its class: assigning it there, or u
 
 **Places.** A primitive reference cannot alias a field that is reached through its accessors. Passing `my_data.non_zero` to an `&int` parameter, or binding it to a reference, is error `E0524`. Copy the value into a local, pass the local, and assign the result back.
 
-**Limits in this release.** Accessors resolve statically to the declaring class: they are not virtual and cannot be overridden, and a subclass cannot redeclare the field. Interfaces cannot require accessors. Accessors are allowed only on exported instance fields (`E0516`, `E0517`, `E0518`, `E0519`). A `const` or `last` field can have a getter but not a setter (`E0521`). A field named `value` cannot have a setter (`E0522`). A primitive reference field cannot have accessors (`E0523`). Calling an accessor through a nil reference traps like any instance method. A getter or setter call is an ordinary method call to the [task-safety](#task-safe-calls) analysis and the optimizer. In NeuraIR the clauses are the hidden methods `$get_<field>` and `$set_<field>`, linked from the field by the [1.10 attributes](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization) `accessor.get`, `accessor.set`, and `accessor.of`, so a program that imports the class from a `.nir` file uses the same accessors. See [accessors.nra](../../examples/types/accessors.nra).
+**Limits in this release.** An unmarked accessor resolves statically to the declaring class: it is not virtual and cannot be overridden, and a subclass cannot redeclare the field. An interface requires a property with bodyless clauses ([Interface properties](Polymorphism.md#interface-properties)), which a field, with or without accessors, satisfies. Accessors are allowed only on exported instance fields (`E0516`, `E0517`, `E0518`, `E0519`). A `const` or `last` field can have a getter but not a setter (`E0521`). A field named `value` cannot have a setter (`E0522`). A primitive reference field cannot have accessors (`E0523`). Calling an accessor through a nil reference traps like any instance method. A getter or setter call is an ordinary method call to the [task-safety](#task-safe-calls) analysis and the optimizer. In NeuraIR the clauses are the hidden methods `$get_<field>` and `$set_<field>`, linked from the field by the [1.10 attributes](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization) `accessor.get`, `accessor.set`, and `accessor.of`, so a program that imports the class from a `.nir` file uses the same accessors. See [accessors.nra](../../examples/types/accessors.nra).
+
+### Class hooks
+
+A class hook clause is a rule about every reference of a class: a `get` clause runs when a reference is read from storage, and a `set` clause when one is admitted to storage, a parameter or a result. It is written after the `(` of a declared class and before its first member; a `|` clause after a member's `;` stays an [accessor](#accessors) of that member.
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let Session = class (
+    | get: instance;
+    | set: {
+        if (value == nil) {
+            failure.trap("a Session reference is never nil");
+        }
+        return value;
+    };
+
+    export last user: string;
+    export let init = func(user: string) => set;
+);
+
+let Admin = class:Session (
+    | set.override: value;
+
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+```
+
+- A class has at most one `get` and one `set` clause, in either order, each ending with `;` (`E0538`, `E0215`). A clause takes no tags and no `export`.
+- Both clauses yield a reference of the class: an expression of the class's type, or a block that returns one on every path or traps (`E0542`). In a getter `instance` is the reference being read; in a setter `value` is the incoming reference and `instance` what the destination held. Both are immutable.
+- A class without a clause of a kind inherits the nearest base class's. Replacing an inherited clause is written `| get.override:` or `| set.override:` (`E0539`); `.override` with nothing to replace is `E0540`.
+- Interfaces, modules, enums and anonymous classes cannot declare clauses (`E0216`), nor can a class with `#Synchronized` methods or whose base has one (`E0541`). A clause of a class that is not `#Final` cannot return a `new` object (`E0543`), and a hook cannot use the scheduler (`E0544`).
+- A field or static field of a class type that has a `set` clause needs an initializer (`E0545`); `= nil` is one, which the setter then admits.
+
+A live object's dynamic class selects its hook. A nil keeps the class policy of the admission or getter that produced it. If an incoming nil has no policy, a setter uses the previous stored value's policy, then the declared class. A getter of a plain nil also falls back to the declared class. An empty interface or umbrella `class` binding supplies no fallback class of its own. All nils compare equal and fail a type test. A checked cast of a typed nil uses its policy to decide whether that cast is valid.
+
+The setter receives nil as its previous instance on a first initialization, parameter or result admission, or if the previous object is outside the clause's declaring class. Its result must be nil or an object of exactly the selected class. A trap preserves the previous destination. The right-hand side and the hook keep any effects they already performed. Each written argument is admitted before the next one is evaluated, and a result is admitted before the function leaves its scopes. A debugger can show `nil (policy Admin)` from raw storage.
+
+The compiler records clauses in NeuraIR 1.11 and derives events after linking. A library can therefore acquire a hooked subclass from its importer. The compiled NVR 1.8 image runs independently of either source file. [Hook event rules](../design/Hooks030.md#events) · [Runnable class hook example](../../examples/types/class-hooks.nra)
 
 ### Anonymous classes
 
@@ -496,6 +556,63 @@ The body has accessors, so it is a class of its own: `code` and `non_zero` take 
 **Names.** Diagnostics, `to_string`, and the names an image keeps for tools describe a fields-only class by its fields, as in `class(x: int32, y: int32)`, with each type spelled as diagnostics spell it. A `const` or `last` field is marked with its keyword, and a field whose type is inferred appears by its name alone. A class of its own adds where it is written, as in `class(count: int32)@counter.nra:3:12`; its runtime name is qualified by its enclosing module like any class's. `neura docs` prints the fields with the types as written and the accessors they have, as in `class(x: int, y: int)` or `class(data: string { get; set }, code { get })`.
 
 **Separate compilation.** A fields-only class is the same class in every module that writes its fields, including prebuilt NeuraIR modules compiled separately: a program can pass an object that one module created to a function of another module whose parameter writes the same fields. In NeuraIR the class is declared in a generated file of its own, named after a hash of its fields, so every module that writes those fields declares the same file and linking coalesces it ([NeuraIR format](../NirFormat.md#anonymous-classes)). A class of its own belongs to the source file where it is written. Every anonymous class carries the [`class.anonymous`](../NirFormat.md#symbol-attributes) attribute.
+
+### Records
+
+*Status: proposed in [the 0.3.0 records note](../design/Records030.md); implemented, including copy construction and eligible payload-enum fields.*
+
+A record is a nominal class that is final and deeply immutable, with a generated constructor and generated value members. It is declared by its components, written where `class` is: `let User = record (id: int64, name: string);`.
+
+```text
+record    := "record" ["implements" type ("," type)*] "(" component ("," component)* [","] ")"
+component := tag* name ":" type
+```
+
+`record` is a contextual word. It begins a record only as the first token of the initializer of a `let` or `const` declaration without a type annotation, and only when `implements`, or `(` followed by any tags and then a name and `:`, follows it; everywhere else `record` is an ordinary name, so `record()`, `record("B")` and `record < limit` keep their meaning. A call of a function named `record` whose first argument is named, written as the whole initializer of an unannotated declaration, is written `(record)(count: limit)`.
+
+Each component becomes an `export last` field, in order, and the record has exactly one constructor, `export let init = func(id: int64, name: string) => set;`, so a record is constructed like any class: `new User(7, "Ada")`, target-typed `new(7, "Ada")`, or with [named arguments](CoreLanguage.md#named-arguments) whose labels are the field names. A component takes no default, no modifier and no grouping ([E0570](../diagnostics/E0570.md)); a record needs at least one component, and its body holds components only: no methods, constructors, accessors, nested types or static members. A record is not generic and has no base class.
+
+A record behaves as a class tagged [`#Final`](Tags.md) and [`#Immutable`](#immutable-classes): extending it is [E0912](../diagnostics/E0912.md), its instances are shared between tasks, and writing either tag changes nothing. It is a reference type: `nil` is a value of every record type, `==` compares identity, `is` and `as` work as for classes, and `destroy` of a record is [E0514](../diagnostics/E0514.md), since copies share their children. A record may implement interfaces whose requirements its fields, its generated members or interface defaults satisfy.
+
+A field's type must be one a record can hold ([E0571](../diagnostics/E0571.md)): `bool`, the integer and floating-point types, `string`, a record (including the record being declared), a tuple of eligible values, or an enum whose payloads are all eligible. This includes `Optional<Node>` when `Node` is a record.
+
+Lowering generates three members, ordinary exported methods with bodies:
+
+| Member | Result |
+| --- | --- |
+| `equals(other: class) -> bool` | False when `other` is nil or not this record type; otherwise the fields compared in declaration order with the value equality of each field's type, stopping at the first unequal pair. A nil record field equals only nil. |
+| `hash_code() -> uint32` | Start with 1; for each field in declaration order, 31 times the hash plus the field's hash, wrapping. A nil record field hashes to 0. |
+| `to_string() -> string` | The qualified name, `(`, each field as `name: text` separated by `, `, `)`, such as `App.User(id: 7, name: Ada)`. A nil record field prints `nil`. |
+
+Field equality, hashing and text are those of [the standard library](Stdlib.md#52-equality-hashing-and-text): a float is equal by bit pattern with every NaN equal to every NaN. The text and hash use no identity number and no image-local name, so they are the same in every build and without the `NAME` and `SMAP` sections.
+
+<!-- example: check -->
+```neura
+let Point = record (x: int, y: int);
+let Path = record (start: Point, end: Point, label: string);
+
+let a = new Path(new Point(1, 2), new Point(3, 4), "diagonal");
+let b = new Path(new Point(1, 2), new Point(3, 4), "diagonal");
+let same = a === b;
+let identical = a == b;
+let text = a.to_string();
+```
+
+`same` is true and `identical` false. See [records.nra](../../examples/types/records.nra).
+
+#### Copy construction
+
+`new with(source) { field: value, ... }` copies a record with some fields replaced. Its type is the type of `source`, which must be a record type ([E0572](../diagnostics/E0572.md)); the form is never target-typed. Each replacement names a field of that record once ([E0305](../diagnostics/E0305.md), [E0303](../diagnostics/E0303.md)) with a value assignable to it ([E0403](../diagnostics/E0403.md)). The braces are required and may be empty: `new with(user) { }` is a record `===` to `user` and not `==` to it. `new with` always begins a copy, and `with` is an ordinary name everywhere else.
+
+The source is evaluated once. A nil source traps as a field read through nil does, before any replacement runs, even when every field is replaced. The replacements are then evaluated in written order, the fields without a replacement are read from the source, and the generated constructor receives the values in declaration order. The copy is exactly one allocation, made by the constructor; nothing is cloned, so the copy shares every child with its source.
+
+<!-- example: check -->
+```neura
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let renamed = new with(user) { name: "Grace" };
+let unchanged = new with(user) { };
+```
 
 ## Enums
 
@@ -571,14 +688,75 @@ visible only in their arm. A match expression uses expression arms with a
 common type. When no surrounding type is available, the first arm establishes
 the result type. A match statement uses a statement block in each arm.
 
-Patterns match one variant level. A pattern inside a pattern is a syntax
-error (`expected ')'`), and a guard written as `pattern if condition =>` is a
-syntax error (`expected '=>'`). To test a nested value, bind it and `match`
-again.
+An arm is `pattern if condition => result` ([design](../design/Matching030.md), implemented, proposed). The guard is a `bool` expression that sees the arm's bindings; it runs after the whole pattern has matched, and when it is false the next arm is tried, with its effects kept. A payload position, or an element of a tuple pattern `[p, q]`, holds a sub-pattern: `_`, a name, a variant pattern written with its enum, or a tuple pattern. A single name is always a binding, and a whole pattern that is a name must name a variant ([E0412](../diagnostics/E0412.md)). The subject of a `match` may be a tuple, `match ([a, b])`, whose arms are tuple patterns or `_`. Within an arm, payloads are projected, tested and bound in written order, and each arm projects for itself. A name is bound at most once in a pattern ([E0301](../diagnostics/E0301.md)). Literal, range, rest and type patterns are not patterns of 0.3.0 ([E0231](../diagnostics/E0231.md)); bind the value and test it in a guard.
+
+Coverage is computed over variants and tuples. A guarded arm covers nothing, so a match without `_` needs an unguarded arm for every value, and the error shows one value that no arm covers as a pattern ([E0410](../diagnostics/E0410.md)). An arm that the unguarded arms before it already cover is [E0491](../diagnostics/E0491.md). A match whose arms all have one level of bindings and no guard keeps the lowering and the errors of 0.2.
+
+<!-- example: check -->
+```neura
+let Light = enum (Red, Yellow, Green);
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+
+let leftmost = func(tree: Tree) -> int => match (tree) {
+    Tree.Leaf(value) => value,
+    Tree.Node(Tree.Leaf(value), _) if value >= 0 => value,
+    Tree.Node(left, _) => leftmost(left),
+};
+
+let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+    [Light.Red, _] => 1,
+    [_, Light.Red] => 2,
+    _ => 3,
+};
+```
+
+## The type any
+
+`any` is a built-in value type that holds one value of a fixed set of types together with which type it is ([design](../design/Matching030.md), implemented on the milestone branch, proposed). It holds a `bool`, each sized integer, `float16`, `bfloat16`, `float32` and `float64`, a `string`, a class or interface reference including `class`, and nil. It does not hold an array, a list, a tuple, an enum (`Optional` and `Result` included), a function value, a primitive reference or a [scope-bound](#scope-bound-types) value ([E0492](../diagnostics/E0492.md)); a class that wraps such a value can be held as a reference.
+
+A value is packed where an `any` is expected: a binding, field or parameter of type `any`, an assignment to one, a `return` from a function that returns `any`, an element of a collection of `any`, each argument of a variadic `...any`, and each result of a conditional or `match` whose expected type is `any`. `value as any` packs anywhere. Nothing else produces an `any`: inference never solves a type parameter to `any` unless an argument is one, and packing ranks below every other match in overload selection. Packing an `any` gives the same `any`, and packing keeps a scalar's bits, width and signedness, a string's text and a reference's identity.
+
+A class type test inspects the saved reference without calling its getter. A binding such as `item: Session` in `match.is` reads the reference and admits it to `item` before the guard runs. If a hook produces nil, the pattern has already matched. Using `item` in the guard or result performs its own ordinary read.
+
+The only operations on an `any` are to copy, pass, return and store it, `is`, and [`match.is`](#matchis). Arithmetic, `==`, member access, `as`, `equals`, `hash_code`, `to_string` and formatting are [E0493](../diagnostics/E0493.md): match first. An `any` is not [transferable](#transferable-types), and it is not the result of a spawned call ([E0498](../diagnostics/E0498.md)). A parameter of type `any` takes no default. No type, module, alias or type parameter is named `any` ([E0311](../diagnostics/E0311.md)); a function, field, parameter or local named `any` keeps its meaning.
+
+<!-- example: check -->
+```neura
+let count_integers = func(values: ...any) -> int {
+    let integers = 0;
+    for (let value: any in values) {
+        if (value is int64) {
+            integers += 1;
+        }
+    }
+    return integers;
+};
+
+let count = count_integers(7 as int64, "seven", 7.0, nil);
+```
+
+An `any` uses a `uint32` tag, a `uint64` for the scalar bits, a text handle and a root class reference. If a linked class can carry a hook policy, the reference also has its nil-policy word. Packing preserves text and object handles and clears the inactive words. Source and NeuraIR 1.12 modules compile to independently executable images. [Class hook representation](../design/Hooks030.md#representation)
 
 ## Scope-bound and transferable types
 
 [Tasks](CoreLanguage.md#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](Concurrency.md#5-isolation-between-tasks) specifies them with the runtime.
+
+#### Deriving a JSON codec
+
+A file or module can declare a JSON codec for an acyclic record or enum. The resulting module exports `to_json` and `from_json` for JSON trees and `encode` and `decode` for text. Each returns a `Result`. Two codecs for the same type can choose different wire names.
+
+<!-- example: check -->
+```neura
+let json = import:Std.Encoding.Json;
+let Account = record (id: uint64, label: string);
+let AccountJson = derive json.Codec<Account> {
+    field Account.label: "display_name";
+};
+```
+
+Encoding `new Account(7, "Ada")` with this codec produces `{"id":7,"display_name":"Ada"}`. Fields are read once in declaration order. A nil record is JSON null. An optional record field omits `None`; a missing member decodes to `None`. A present null can decode to `Some(nil)` when the wrapped type is a record. Other uses of `Optional` in a schema are rejected. Tuples use arrays of the declared length. An enum uses an object with a `variant` string and, for a variant with fields, a `payload` array or named object.
+
+The decoder scans for repeated known names before decoding fields in declaration order. Unknown members are ignored. Integers retain their full width and require an integer-form JSON number. Float encoding and decoding return an error for nonfinite values. Syntax errors retain the JSON parser's category and byte offset. A codec error carries a `json.codec.*` code and a message beginning with the affected path. Input text is limited to 16 MiB. [All wire and failure rules](../design/Records030.md#the-json-codec)
 
 ### Scope-bound types
 
@@ -591,6 +769,7 @@ again.
 | Be an element of an array, list, or tuple held in such a local | Be captured by a lambda |
 | | Be passed to `spawn`, or sent on a channel |
 | | Be a type argument, as in `Optional<Task<int>>` or a channel of tasks |
+| | Be converted to `class`, to an interface or to [`any`](#the-type-any), by assignment, an argument, `as`, or an argument of an untyped variadic parameter: the result would no longer be known to be scope-bound. From 0.3.0 ([design](../design/Matching030.md)); compare task handles with `==` |
 | | Be assigned to a binding declared outside the innermost enclosing scope. A parameter is not a local of the scope, so a function cannot `append` a task it received to a list it received. |
 
 Each violation is reported with the form `a value of type Task<int32> cannot leave its scope: it cannot be returned from a function`, naming the rule that applies.
@@ -670,7 +849,7 @@ Under the last rule a program cannot both use tasks and use `Std.DynamicForeign`
 
 ## Inference, conversions, equality, and absence
 
-An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. The compiler does not infer the type arguments of a generic call; `id(7)` is rejected with `expected 1 type argument(s)`, and `id<int>(7)` is accepted ([Polymorphism](Polymorphism.md)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections.md).
+An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. A call of a generic function infers the type arguments it does not write: `id(7)` is `id<int32>(7)` ([Polymorphism](Polymorphism.md#type-argument-inference)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections.md).
 
 There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers.md#conversions). Floating-point equality follows IEEE 754. String equality compares bytes. `==` and `!=` on class and interface references compare identity; `equals` is a separate method ([Umbrella class and nil](#umbrella-class-and-nil)). A fieldless enum supports `==`; an enum with payloads has no built-in equality. Basic scalar comparisons are illustrated in [core.nra](../../examples/guide/core.nra).
 

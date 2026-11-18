@@ -1,0 +1,22 @@
+// A generator's sequence is used once, as every Sequence is
+// (docs/design/Lifetime030.md, edge case 71).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let GeneratorTwice = module:program.Entry (
+    let numbers = iterator() -> int {
+        yield 1;
+        yield 2;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last values = numbers();
+        for (let value: int in values) {
+            console.print_line(value.to_string());
+        }
+        for (let value: int in values) {
+            console.print_line(value.to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,8 @@
+error[E0574]: invalid virtual accessor
+ --> $DIR/both-words.nra:4:23
+  |
+4 |         | get.virtual.override: label;
+  |                       ^^^^^^^^ a clause is '.virtual' or '.override', not both
+  |               ------- the clause is already '.virtual'
+
+For more information about this error, try `neura explain E0574`.

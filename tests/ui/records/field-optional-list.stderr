@@ -1,0 +1,9 @@
+error[E0571]: field 'cell' has type 'Optional<int32[list]>', which a record cannot hold
+ --> $DIR/field-optional-list.nra:3:23
+  |
+3 | let P = record (cell: Optional<int[list]>);
+  |                       ^^^^^^^^^^^^^^^^^^^ it holds 'int32[list]', mutable
+  |
+  = help: hold a record, a tuple or an enum of eligible types, or declare 'P' as an #Immutable class and not as a record
+
+For more information about this error, try `neura explain E0571`.
