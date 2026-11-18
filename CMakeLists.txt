@@ -622,6 +622,9 @@ if(BUILD_TESTING)
     add_test(NAME app-frozen-storage COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/frozen/storage.py" "$<TARGET_FILE:neura>")
     set_tests_properties(app-frozen-storage PROPERTIES TIMEOUT 180)
+    add_test(NAME app-ui-retained COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui/retained.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-retained PROPERTIES TIMEOUT 180)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

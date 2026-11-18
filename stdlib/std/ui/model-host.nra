@@ -89,6 +89,13 @@ export let ModelHost = module (
             scripting = new;
         };
 
+        /// @brief Forgets the recorded lines.
+        export let clear_log = func {
+            while (log.length > 0) {
+                log.remove_at(log.length - 1);
+            }
+        };
+
         /// @brief Makes the next commit fail as a host failure while applying.
         export let fail_next_commit = func {
             fail_next = true;
@@ -115,9 +122,19 @@ export let ModelHost = module (
                 log.append("open " + target + ": refused, too many roots");
                 return result.Result<uint64>.Err(error.custom("ui.roots", "too many live roots"));
             }
-            targets.append(target);
-            open_roots.append(true);
-            last handle = targets.length as uint64;
+            // A closed root's handle is reused, so mount and unmount cycles do not grow the host.
+            let index = 0;
+            while (index < targets.length && open_roots[index]) {
+                index += 1;
+            }
+            if (index == targets.length) {
+                targets.append(target);
+                open_roots.append(true);
+            } else {
+                targets[index] = target;
+                open_roots[index] = true;
+            }
+            last handle = (index + 1) as uint64;
             log.append("open " + target + ": root " + handle.to_string());
             return result.Result<uint64>.Ok(handle);
         };
