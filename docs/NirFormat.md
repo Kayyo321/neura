@@ -6,7 +6,7 @@ The file records every field of the in-memory program: symbols with their kinds,
 
 Regenerate prebuilt NeuraIR with the current SDK when moving to the ownership rules in 0.3.0. An earlier artifact may embed application or standard library bodies that retain an activation array, return a frame borrow, or construct an escaping environment implicitly. The current compiler checks those bodies during linkage and specialization. Executable NVR images retain their versioned runtime semantics.
 
-The `MakeClosure` operation's existing text field records explicit construction. An empty string denotes a bare lambda or named function value. `$bound` denotes a bare bound method, `$new_func` and `$new_bound` denote explicit ownership, and `$task_closure` denotes the compiler's task wrapper. Specialized storage analysis uses the same form as lowering and derives lexical lifetimes from the body.
+The `MakeClosure` operation's existing text field records explicit construction. An empty string denotes a bare lambda or named function value. `$bound` denotes a bare bound method, `$new_func` and `$new_bound` denote explicit ownership, `$task_closure` denotes the compiler's task wrapper, and `$iterator` denotes a bare generator expression (NeuraIR 1.14, [Revision 1.14](#revision-114-cleanup-and-generators)), whose escape with captures is `E0479`; `new iterator` is `$new_func`. Specialized storage analysis uses the same form as lowering and derives lexical lifetimes from the body.
 
 ## Encoding
 

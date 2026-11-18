@@ -1466,7 +1466,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency.md) s
 | `EventView<T>` | What an owner exports: `subscribe` only. It cannot emit and gives no access to the `Event`. `#Final`, `#NotThreadSafe`. |
 | `Subscription` | The token of one registration. `unsubscribe()` removes that registration and does nothing when called again; `active() -> bool`. Two subscriptions are equal only when they are the same object. `#Final`, `#NotThreadSafe`. |
 
-- `subscribe` keeps its handler until `unsubscribe`; collection is not unsubscription, and an event keeps its handlers alive. The same handler subscribed twice is two registrations with two tokens.
+- `subscribe` keeps its handler until `unsubscribe`; collection is not unsubscription, and an event keeps its handlers alive. A handler that captures is therefore written `new func(...)`, and a bound method `new bound(receiver.method)`; a bare capturing handler is [E0453](../diagnostics/E0453.md). The same handler subscribed twice is two registrations with two tokens.
 - `emit` delivers synchronously, in registration order, to the registrations that exist when the emission starts. A registration added or removed by a handler takes effect from the next emission, so a handler removed during an emission is still called by it. A nested `emit` uses the registrations at its own start.
 - Handlers return nothing. A trap in a handler ends the run.
 - `emit` compares nothing and suppresses nothing. An owner commits its state first and then emits the old and new values it accepted, as a tuple payload; it does not read them again through a getter.

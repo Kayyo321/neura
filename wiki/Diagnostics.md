@@ -146,6 +146,7 @@ Errors about types, values, calls, and statements.
 | [E0476](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0476.md) | yield with cleanup pending |
 | [E0477](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0477.md) | storage that cannot outlive a suspension |
 | [E0478](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0478.md) | return with a value in a generator |
+| [E0479](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0479.md) | escaping capturing generator without new |
 | [E0480](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0480.md) | conflicting inferred type arguments |
 | [E0481](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0481.md) | lambda does not fit its callable context |
 | [E0482](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0482.md) | unknown argument label |

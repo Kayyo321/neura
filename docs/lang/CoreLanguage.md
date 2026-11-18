@@ -373,10 +373,14 @@ The sequence is lazy. The first `has_next()` with nothing buffered runs the body
 
 A generator suspends at each `yield`, so the bindings in scope there live in its state. A `yield` is not inside a `scope` block and does not follow a `defer` in a block that encloses it ([E0476](../diagnostics/E0476.md)), and no array, primitive reference, or tuple or enum that holds one is in scope at a `yield`, nor is a parameter of such a type ([E0477](../diagnostics/E0477.md)); a list is the owned alternative, and an array in a block that ends before the next `yield` is accepted. A generator's body holds no `using`, since it returns no `Result` ([E0473](../diagnostics/E0473.md)); a lambda inside it may.
 
+A generator that reads outer bindings keeps them in its state, which lives as long as its sequences. Like a capturing function value, one that leaves the call that creates it, by being returned, stored, or retained, is written `new iterator(...) -> T { ... }`, which owns its captures ([E0479](../diagnostics/E0479.md)). A generator that captures nothing needs no `new`.
+
 `iterator` begins a generator only when it is followed by an optional `<...>`, a balanced `(...)`, and `->` or `{`, so `collection.iterator()`, `let iterator = ...` and a call `iterator(x)` keep their meaning.
 
 <!-- example: check -->
 ```neura
+let sequence = import:Std.Collections.Sequence;
+
 let squares = iterator(count: int) -> int {
     for (let index = 0; index < count; index++) {
         yield index * index;
@@ -389,6 +393,13 @@ let small = func() -> int {
         total = total + square;
     }
     return total;
+};
+
+let counting_from = func(base: int) -> func() -> sequence.Sequence<int> {
+    return new iterator() -> int {
+        yield base;
+        yield base + 1;
+    };
 };
 ```
 
