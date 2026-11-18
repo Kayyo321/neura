@@ -77,7 +77,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         size = int(self.headers.get('Content-Length', '0'))
-        if self.path != f'/result?{self.server.token}' or not 0 < size < 65536:
+        if self.path != f'/result?{self.server.token}' or not 0 < size < 4 * 1024 * 1024:
             self.send_error(400)
             return
         self.server.reports.put(json.loads(self.rfile.read(size)))
@@ -85,7 +85,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
 
-def run_browser(browser, work):
+def run_browser(browser, work, timeout=45):
     with ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=work)) as server:
         server.reports = Queue()
         server.token = secrets.token_hex(20)
@@ -107,7 +107,7 @@ def run_browser(browser, work):
                     process = subprocess.Popen([browser, *flags, address], start_new_session=True,
                                                stdout=output, stderr=subprocess.STDOUT)
                     try:
-                        report = server.reports.get(timeout=45)
+                        report = server.reports.get(timeout=timeout)
                     except Empty as error:
                         raise RuntimeError(log.read_text(errors='replace')[-4096:]) from error
                     finally:

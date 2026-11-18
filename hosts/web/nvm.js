@@ -95,6 +95,12 @@ const result = {
         return { bytes: encoder.encode(value) };
     },
     int64: value => ({ bits: BigInt.asUintN(64, int64(value)) }),
+    int32: value => {
+        if (!Number.isInteger(value) || value < -(2 ** 31) || value >= 2 ** 31) {
+            throw new TypeError('an int32 result must be an integer in range');
+        }
+        return { bits: BigInt.asUintN(32, BigInt(value)) };
+    },
     bytes: value => {
         if (!(value instanceof Uint8Array)) throw new TypeError('a byte list result must be a Uint8Array');
         return { bytes: value };
@@ -127,6 +133,8 @@ service('neura.console.write_line/1', 'console', ['text'], 'void', (host, [line]
     }
     return failed(written);
 });
+service('neura.console.write/1', 'consoleWrite', ['int32', 'bytes'], 'int32',
+    (host, [stream, bytes], context) => host.consoleWrite(stream, bytes, context));
 service('neura.clock.wall/1', 'clockWall', [], 'wall', (host, _, context) => host.clockWall(context));
 service('neura.clock.monotonic/1', 'clockMonotonic', [], 'int64', (host, _, context) => host.clockMonotonic(context));
 service('neura.clock.sleep/1', 'sleep', ['int64'], 'void', (host, [nanos], context) => host.sleep(nanos, context));
@@ -279,9 +287,24 @@ function delay(milliseconds, signal) {
 // The default services of a browser page. `ui` and `history` are optional
 // UiHost and HistoryHost instances (ui.mjs).
 export function browserHost({ output = globalThis.console, ui, history } = {}) {
+    // Bytes of neura.console.write wait for their LF, per stream, as the page's console takes whole lines.
+    const pending = [null, [], []];
+    const stdout = new TextDecoder('utf-8');
+    const stderr = new TextDecoder('utf-8');
     const host = {
+        // A line write finishes the partial stdout line before it, as on a terminal.
         console(line) {
-            output.log(line.endsWith('\n') ? line.slice(0, -1) : line);
+            const text = pending[1].join('') + stdout.decode() + line;
+            pending[1] = [];
+            output.log(text.endsWith('\n') ? text.slice(0, -1) : text);
+        },
+        consoleWrite(stream, bytes) {
+            if (stream !== 1 && stream !== 2) return { error: HOST_ERRORS.invalidInput };
+            const text = (stream === 1 ? stdout : stderr).decode(bytes, { stream: true });
+            const lines = (pending[stream].join('') + text).split('\n');
+            pending[stream] = [lines.pop()];
+            for (const line of lines) (stream === 1 ? output.log : output.error).call(output, line);
+            return bytes.length;
         },
         clockWall() {
             const nanos = BigInt(Math.round((performance.timeOrigin + performance.now()) * 1e6));
@@ -291,8 +314,13 @@ export function browserHost({ output = globalThis.console, ui, history } = {}) {
         async sleep(nanos, { signal } = {}) {
             if (nanos < 0n) return { error: HOST_ERRORS.invalidInput };
             if (nanos === 0n) return undefined;
-            const finished = await delay(Math.ceil(Number(nanos) / 1e6), signal);
-            return finished ? undefined : { error: HOST_ERRORS.cancelled };
+            // A timer may fire a little before the monotonic clock reaches its
+            // deadline; the sleep ends only once the clock has.
+            const deadline = monotonicNanos() + nanos;
+            for (let now = monotonicNanos(); now < deadline; now = monotonicNanos()) {
+                if (!await delay(Math.ceil(Number(deadline - now) / 1e6), signal)) return { error: HOST_ERRORS.cancelled };
+            }
+            return undefined;
         },
         entropy(count) {
             if (count < 0 || count > 1 << 20) return { error: HOST_ERRORS.invalidInput };
@@ -320,7 +348,9 @@ export class NvmExecution {
     #wake = null;
     #failure = null;
 
-    constructor(module, image, { args = [], host = {}, tier = 2, maxSteps = 0n } = {}) {
+    // `regions: true` forms tier 2 regions instead of function programs; it
+    // exists to measure the two (Apps030.md, "Execution in the browser").
+    constructor(module, image, { args = [], host = {}, tier = 2, maxSteps = 0n, regions = false } = {}) {
         if (typeof module._neura_wasm_interface !== 'function' || module._neura_wasm_interface() !== ADAPTER_INTERFACE) {
             throw new Error(`nvm.wasm does not provide browser adapter interface ${ADAPTER_INTERFACE}`);
         }
@@ -344,7 +374,8 @@ export class NvmExecution {
         }
         this.#handle = withArguments(module, args, (argv, argc) => withBytes(module, encoder.encode(granted.join('\n')),
             (grants, grantsSize) => withBytes(module, image, (data, size) =>
-                module._neura_wasm_open(data, size, argv, argc, grants, grantsSize, tier, maxSteps))));
+                module._neura_wasm_open(data, size, argv, argc, grants, grantsSize, tier | (regions ? 0x100 : 0),
+                    maxSteps))));
         if (!this.#handle) throw wasmError(module);
     }
 
@@ -500,6 +531,17 @@ export class NvmExecution {
 
     get proofPending() {
         return Boolean(this.#module._neura_wasm_has_proof(this.#liveHandle()));
+    }
+
+    // The tier statistics as `neura run --tier-stats` prints them, for measurements.
+    get tierStatistics() {
+        return this.#module.UTF8ToString(this.#module._neura_wasm_tier_stats(this.#liveHandle()));
+    }
+
+    // The function and block of the last idle proof, for measurements.
+    get lastProof() {
+        const packed = BigInt.asUintN(64, BigInt(this.#module._neura_wasm_last_proof(this.#liveHandle())));
+        return { function: Number(packed >> 32n), block: Number(packed & 0xffffffffn) };
     }
 
     proveOneIdle() {

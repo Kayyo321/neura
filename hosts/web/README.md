@@ -43,6 +43,7 @@ The members of `host` grant [the browser services](../../docs/runtime/Providers.
 | Member | Called as | Answer |
 | --- | --- | --- |
 | `console` | `console(line, context)`; the line includes its LF | `false` for a failed write, or `true` or `undefined` |
+| `consoleWrite` | `consoleWrite(stream, bytes, context)`; stream 1 is stdout and 2 stderr | The number of bytes written |
 | `clockWall` | `clockWall(context)` | `{ seconds, nanos }` with `seconds` a signed 64-bit `BigInt` and `nanos` an integer in `[0, 1000000000)` |
 | `clockMonotonic` | `clockMonotonic(context)` | A signed 64-bit `BigInt` in nanoseconds |
 | `sleep` | `sleep(nanos, context)` | `undefined` when the time has passed |
@@ -63,3 +64,7 @@ Every answer may instead be `{ error }` with a positive uint32 host error code, 
 Run `python3 tests/wasm/check-host.py --neura /path/to/neura --browser chromium --browser firefox` after building `neura_wasm`. The check builds the fixtures once, records native tier-0 output and counters, and compares the same images under Node and the selected local browsers.
 
 Run `python3 tests/apps/web/check.py --neura /path/to/neura --browser chromium --browser firefox` for the services. It round-trips the operation corpus and every operation and event kind through the encodings, runs sleeping and cancelled tasks against native output, sends the corpus through `neura.ui.commit`, checks the event queue, and runs a counter image that mounts a button, receives injected clicks and commits a new label for each.
+
+Run `python3 tests/apps/web/bundle-check.py --neura /path/to/neura` to assemble a [web bundle](../../docs/runtime/Providers.md#web-bundles) with `scripts/build-web-bundle.py` and load it from a static file host in headless Chromium: under its content-security policy, from a deep path, with `nvm.wasm` served as `application/wasm` and as `application/octet-stream`, and with a changed image, which must not start.
+
+Run `python3 tests/wasm/bench.py --neura /path/to/neura --browser chromium` to time the bench-wall programs in `nvm.wasm` against the native runner, with function programs and with regions, and to report the longest idle proof.

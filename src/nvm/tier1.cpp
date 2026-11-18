@@ -409,6 +409,7 @@ std::optional<std::chrono::steady_clock::duration> TierCache::prove_one_idle() {
         proof = proof_queue_.front();
         proof_queue_.pop_front();
         entry(proof.function, proof.block).queued = false;
+        last_idle_proof_ = {proof.function, proof.block};
     }
     const auto runs = counts_[first_entry_[proof.function] + proof.block].load(std::memory_order_relaxed);
     const auto start = std::chrono::steady_clock::now();
@@ -472,9 +473,13 @@ TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32
         // search finishes can differ between runs. That changes only which
         // blocks run lifted, never what a run does.
         const auto allowed = std::chrono::nanoseconds(runs * edges * options_.search_picoseconds / 1000);
-        deadline = std::chrono::steady_clock::now() +
-                   std::min(budget - search_spent_,
-                            std::chrono::duration_cast<std::chrono::steady_clock::duration>(allowed));
+        auto limit = std::min(budget - search_spent_,
+                              std::chrono::duration_cast<std::chrono::steady_clock::duration>(allowed));
+        if (options_.attempt_search.count() > 0) {
+            limit = std::min(limit, std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                        options_.attempt_search));
+        }
+        deadline = std::chrono::steady_clock::now() + limit;
     }
 
     // The overflow analysis may use a fixed minimum of work, and beyond it
@@ -483,8 +488,11 @@ TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32
     // block has run often enough for the lifted form to repay the proof, and
     // a run that ends sooner never pays for it. The proof found does not
     // depend on the work allowed, only whether one is found.
-    const auto work = std::max<std::uint64_t>(options_.minimum_proof_work,
-                                              runs * edges / std::max<std::uint64_t>(options_.steps_per_work, 1));
+    auto work = std::max<std::uint64_t>(options_.minimum_proof_work,
+                                        runs * edges / std::max<std::uint64_t>(options_.steps_per_work, 1));
+    // An attempt bounded below its allowance cannot be given more later.
+    const bool bounded = options_.attempt_work != 0 && work >= options_.attempt_work;
+    if (bounded) work = options_.attempt_work;
 
     // Prove the hint or the retried form, or search. Both run outside the
     // lock; other threads meanwhile run the block on tier 0.
@@ -502,6 +510,10 @@ TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32
         if (!result.block && result.rejection.find("out of time") != std::string::npos) result.exhausted = true;
     }
     time = std::chrono::steady_clock::now() - start;
+    if (bounded && result.exhausted && result.rejection == lift::exhausted_work) {
+        result.exhausted = false;
+        result.rejection = "the proof needs more work than one bounded attempt allows";
+    }
 
     const std::lock_guard lock(mutex_);
     (hint ? hint_spent_ : search_spent_) += time;

@@ -61,7 +61,8 @@ def make_fixtures(neura, wasm, work):
     (work / 'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Neura web host checks</title>'
                                      '<script type="module" src="/web-test.mjs"></script>')
     oracles = {}
-    for name, source in (('timers', ROOT / 'tests/wasm/timers.nra'), ('serialSleep', ROOT / 'tests/wasm/serial-sleep.nra')):
+    for name, source in (('timers', ROOT / 'tests/wasm/timers.nra'), ('serialSleep', ROOT / 'tests/wasm/serial-sleep.nra'),
+                         ('print', ROOT / 'tests/wasm/print.nra')):
         image = work / f'{name}.nvr'
         subprocess.run([neura, 'build', source, '-o', image], cwd=ROOT, check=True, timeout=60)
         oracles[name] = native(neura, image)
@@ -95,8 +96,10 @@ def main():
     with TemporaryDirectory(prefix='neura-web-host-') as path:
         work = Path(path)
         make_fixtures(args.neura.resolve(), args.wasm.resolve(), work)
-        report = subprocess.check_output(['node', work / 'web-test.mjs'], text=True, timeout=60)
-        summary('Node', json.loads(report))
+        node = subprocess.run(['node', work / 'web-test.mjs'], capture_output=True, text=True, timeout=60)
+        if node.returncode != 0:
+            raise ValueError(f'Node: {node.stderr}')
+        summary('Node', json.loads(node.stdout))
         for browser in args.browser:
             version = subprocess.check_output([browser, '--version'], text=True, timeout=5).strip()
             summary(version, host_check.run_browser(browser, work))

@@ -11,12 +11,14 @@ This page owns the host services and protocols of the application hosts that [th
 | Export | Arguments | Result |
 | --- | --- | --- |
 | `neura_wasm_interface` | none | `uint32` version |
-| `neura_wasm_open` | image pointer and size, argument table and count, grant text pointer and size, tier 0 to 2, step limit (`uint64`, 0 for the default) | A run handle, or 0 with the reason in `neura_wasm_error` |
+| `neura_wasm_open` | image pointer and size, argument table and count, grant text pointer and size, tier 0 to 2 (plus `0x100` to form tier 2 regions instead of function programs, for measurements only), step limit (`uint64`, 0 for the default) | A run handle, or 0 with the reason in `neura_wasm_error` |
 | `neura_wasm_advance` | run, step budget 1 to 4,096 | A pointer to the 88-byte report below |
 | `neura_wasm_respond` | run, completion pointer and size | Success; answers the request the last report named |
 | `neura_wasm_deliver` | run, sequence (`uint64`), completion pointer and size | Success; valid only after a `poll` or `waiting` report |
 | `neura_wasm_clock` | run, task clock reading in nanoseconds (`int64`) | The number of timers and deadlines that expired, or -1 |
 | `neura_wasm_has_proof`, `neura_wasm_prove_idle` | run | Whether a proof is queued; the milliseconds one idle proof took, -1 when none ran, -2 on failure |
+| `neura_wasm_last_proof` | run | The function and block of the last idle proof as `function * 2^32 + block`, for measurements |
+| `neura_wasm_tier_stats` | run | The lifting statistics of the run's cache as `neura run --tier-stats` prints them, NUL-terminated, valid until the next call; for measurements. Its step line reads zero: the browser does not collect step counters |
 | `neura_wasm_close` | run | none |
 | `neura_wasm_error` | none | The last failure as NUL-terminated UTF-8 |
 
@@ -49,6 +51,7 @@ All have a `uint32` error. The adapter key is the `host` member of `new NvmExecu
 | Service | Version | Arguments | Result | Overlaps | Key |
 | --- | --- | --- | --- | --- | --- |
 | `neura.console.write_line` | 1 | text | none | no | `console` |
+| `neura.console.write` | 1 | `int32` stream (1 stdout, 2 stderr), `uint8[list]` bytes | `int32` count | no | `consoleWrite` |
 | `neura.clock.wall` | 1 | none | `[int64 seconds, int32 nanos]` | no | `clockWall` |
 | `neura.clock.monotonic` | 1 | none | `int64` nanoseconds | no | `clockMonotonic` |
 | `neura.clock.sleep` | 1, 2 | `int64` nanoseconds | none | yes; version 2 can be cancelled | `sleep` |
@@ -66,11 +69,11 @@ All have a `uint32` error. The adapter key is the `host` member of `new NvmExecu
 The runtime answers two kinds of service itself, without reporting a request to the adapter:
 
 - `neura.process.exit` version 1 ends the run with its status, as on every host.
-- A service of the table that the embedder does not grant, and a standard service of a group a browser never grants (`neura.console.write`, `neura.console.read`, `neura.env.get`, `neura.fs.*`, `neura.net.*`, `neura.ffi.*`, `neura.http.*`, `neura.bridge.call`, `neura.sql.*`, `neura.app.*`, `neura.desktop.*`), binds and answers error 14. An image that reaches one runs and fails locally, as [Apps030](../design/Apps030.md#capability-groups) requires. A service of the second kind binds with the image's own parameter and result types; its error type must be `uint32`, because error 14 is the only value that crosses. An overlapping request among them is answered at the next scheduling point, like any other.
+- A service of the table that the embedder does not grant, and a standard service of a group a browser never grants (`neura.console.read`, `neura.env.get`, `neura.fs.*`, `neura.net.*`, `neura.ffi.*`, `neura.http.*`, `neura.bridge.call`, `neura.sql.*`, `neura.app.*`, `neura.desktop.*`), binds and answers error 14. An image that reaches one runs and fails locally, as [Apps030](../design/Apps030.md#capability-groups) requires. A service of the second kind binds with the image's own parameter and result types; its error type must be `uint32`, because error 14 is the only value that crosses. An overlapping request among them is answered at the next scheduling point, like any other.
 
 Any other import fails the open with the import's name and version. `src/wasm/entry.cpp` holds the table; `hosts/web/nvm.js` holds the argument and result conversions.
 
-`browserHost({ output, ui, history })` in `nvm.js` supplies the defaults of a page: the console writes each line to `console.log`, the wall clock is `performance.timeOrigin + performance.now()`, the monotonic clock and the task clock are `performance.now()`, both in nanoseconds, a sleep is a timer, and entropy is `crypto.getRandomValues`. A negative sleep or an entropy count outside 0 to 1 MiB answers error 4.
+`browserHost({ output, ui, history })` in `nvm.js` supplies the defaults of a page: the console writes each line to `console.log`, and `neura.console.write` keeps the bytes of each stream until their LF and writes whole lines to `console.log` (stdout) or `console.error` (stderr), the wall clock is `performance.timeOrigin + performance.now()`, the monotonic clock and the task clock are `performance.now()`, both in nanoseconds, a sleep is a timer, and entropy is `crypto.getRandomValues`. A sleep ends once the monotonic clock has reached its deadline, even when a timer fires early. A negative sleep, an entropy count outside 0 to 1 MiB, or a console stream other than 1 or 2 answers error 4. Console input, `neura.console.read`, is never granted.
 
 ## Scheduling
 
@@ -84,6 +87,10 @@ Any other import fails the open with the import's name and version. `src/wasm/en
 - A service that throws, or whose promise rejects, closes the run: it may already have had an effect, so the request is never issued again.
 
 The slice and proof rules of the [browser runtime](../design/Apps030.md#execution-in-the-browser-a2) are unchanged: at most 4,096 steps between checks of the 8 ms slice budget, and a queued proof only on an idle callback when no event is waiting.
+
+### Idle proofs
+
+A browser run proves blocks only on idle callbacks, one attempt at a time, and each attempt is bounded so that it stays a short task on the page's main thread (budget B-W7). The overflow analysis of one attempt gets at most 2^19 work units, about 8 ms of native work, and a search at most 8 ms of wall time. A block whose proof needs more work than one attempt allows stays on tier 0 for the rest of the run; a search cut short is tried again while the image's search budget of 250 ms lasts. These bounds change which blocks are lifted, never what a run does. Native hosts keep their unbounded attempts.
 
 ## UI services
 
@@ -157,6 +164,21 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 `HistoryHost` in `ui.mjs` implements the `history` group. A path is absolute (it starts with `/`), at most 8 KiB, without control characters; another path answers error 4. With `mode: "hash"`, the default, the path is kept in the fragment (`#/parts/7`), so any static file host serves the page. With `mode: "history"` it is the URL's path and query, and the host must serve `index.html` for unknown paths.
 
 `push` and `replace` change the URL without loading a page and answer the current path. `next` waits for a navigation the program did not make (back, forward, an edited fragment); navigations while nobody waits coalesce to the latest. A second waiting `next` answers 3, and a cancelled one 15.
+
+## Web bundles
+
+`scripts/build-web-bundle.py --image app.nvr --id org.example.app --out dist/web` assembles the static directory of [Projects](../design/Projects030.md#bundles) from a built image and the browser runtime. It stands in for `neura build` of a `web` target until the project tools exist, and it adds no stylesheet or asset.
+
+| File | Content |
+| --- | --- |
+| `index.html` | The content-security policy as a `meta` element, the mount element (`--mount`, default `app`), a JSON data block naming the image and `nvm.wasm` with their SHA-256, the boot module with its `integrity`, a message for browsers without WebAssembly exception handling, and a failure banner |
+| `bundle.json` | Canonical JSON (sorted keys, no whitespace): `schema` 1, `kind` `web`, `id`, `name`, `version`, `image`, `files` (path, SHA-256, byte length, media type, `initial`), `requires` (`browser_adapter` 1, `ui_host` 1), `capabilities`, `origins`, `limits` (`W-1`), `contracts`, `csp`, `routing` |
+| `boot.<sha256>.mjs`, `nvm.<sha256>.js`, `ui.<sha256>.mjs`, `dom.<sha256>.mjs`, `ui-wire.<sha256>.mjs`, `nvm.<sha256>.mjs` | The browser host, with each import renamed to the file's digest name |
+| `nvm.<sha256>.wasm`, `app.<sha256>.nvr` | The runtime and the image |
+
+The policy is `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`, and the same text is the `csp` field. The boot module fetches the image and `nvm.wasm` with their `integrity`, so a changed file stops the start. It compiles `nvm.wasm` by streaming when the host sends `application/wasm` and from bytes otherwise, runs the image with `browserHost` and a `UiHost` and `HistoryHost`, and sets `data-neura-state` on the root element to `running`, `completed`, `failed` or `unsupported`. A trap shows the failure banner with the trap's diagnostic. With `--routing history` the script writes `404.html` and says that the host must serve it for unknown paths.
+
+The script does not yet refuse an image whose imports fall outside the groups a web target may have, and it does not name module imports with `integrity`, which only the boot module carries.
 
 ## Not provided in the browser yet
 

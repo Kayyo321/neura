@@ -44,6 +44,8 @@ struct TierOptions {
         options.programs = Programs::On;
         options.tier3 = Tier3::Off;
         options.defer_proofs = true;
+        options.attempt_work = std::uint64_t{1} << 19;
+        options.attempt_search = std::chrono::milliseconds(8);
         return options;
     }
 
@@ -78,6 +80,14 @@ struct TierOptions {
     std::uint64_t search_picoseconds = 200;
     // Wall time the searches of one image may take in total.
     std::chrono::milliseconds search_budget{250};
+    // Bounds on one attempt, so that an idle proof stays a short task on a
+    // browser's main thread (Apps030.md, budget B-W7): the overflow analysis
+    // gets at most `attempt_work` units, and a search at most
+    // `attempt_search` of wall time. A block whose proof needs more work
+    // than one attempt allows is settled unlifted; a search cut short is
+    // tried again while the image's search budget lasts. Zero: unbounded.
+    std::uint64_t attempt_work = 0;
+    std::chrono::milliseconds attempt_search{0};
     // Tier 2: arrivals of the dispatcher at a lifted block, counted over
     // every run sharing the cache, before a region is formed there. While
     // blocks the region would reach are still being lifted, formation waits
@@ -315,6 +325,9 @@ public:
     // embedder calls this between slices when no host work is waiting.
     std::optional<std::chrono::steady_clock::duration> prove_one_idle();
     bool proofs_pending() const;
+    // The function and block of the last attempt prove_one_idle took, for
+    // the embedder's measurements; nvr::absent twice before the first.
+    std::pair<std::uint32_t, std::uint32_t> last_idle_proof() const { return last_idle_proof_; }
     // The settled result of a block, without lifting it.
     Resolution lookup(std::uint32_t function, std::uint32_t block) const;
 
@@ -448,6 +461,7 @@ private:
         std::uint64_t runs;
     };
     std::deque<QueuedProof> proof_queue_;
+    std::pair<std::uint32_t, std::uint32_t> last_idle_proof_{nvr::absent, nvr::absent};
     // Accepted results by (graph, lift key), and keys whose search failed.
     std::map<Key, std::shared_ptr<const lift::LoweredBlock>> accepted_;
     std::map<Key, std::string> searched_;
