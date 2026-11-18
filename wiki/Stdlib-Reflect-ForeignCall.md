@@ -32,11 +32,11 @@ The following public declarations are taken from the module source; each links t
   Adds the next argument and returns this frame.
 - **ForeignCall.CallFrame** · [`export let invoke = func -> model.Variant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L74)
   Makes the call; the result is a Variant of the result's Neura type, nil for `void`. A wrong argument count or type traps before the call.
-- **ForeignCall.CallFrame** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L91)
-- **ForeignCall** · [`export let lookup = func(name: string, on: abi.Target, returns_void: bool, result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L97)
+- **ForeignCall.CallFrame** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L89)
+- **ForeignCall** · [`export let lookup = func(name: string, on: abi.Target, returns_void: bool, result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L95)
   The native function `name` in the default lookup of the running program (the C library and the program's own native code), or None. Since 0.3.0.
-- **ForeignCall** · [`export let lookup_in = func(library: lookups.SymbolLookup, name: string, on: abi.Target, returns_void: bool, result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L103)
+- **ForeignCall** · [`export let lookup_in = func(library: lookups.SymbolLookup, name: string, on: abi.Target, returns_void: bool, result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L101)
   The native function `name` in `library`, or None. Since 0.3.0.
-- **ForeignCall** · [`export let value_layout = func(type: abi.CType, on: abi.Target) -> memory_layouts.MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L117)
+- **ForeignCall** · [`export let value_layout = func(type: abi.CType, on: abi.Target) -> memory_layouts.MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/foreign-call.nra#L115)
   The `Std.DynamicForeign` layout of a C scalar on the target. Since 0.3.0.
 <!-- END SOURCE API -->

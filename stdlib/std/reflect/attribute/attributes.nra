@@ -69,7 +69,7 @@ export let Attributes = module (
     /// @brief Whether serializers write a field at all: it is exported, a Variant can hold its value, and it is
     /// not tagged `#Skip`.
     #Since("0.3.0")
-    export let written = func(field: model.FieldInfo) -> bool => field.exported && field.dynamic && !skipped(field);
+    export let written = func(field: model.FieldInfo) -> bool => field.exported && field.dynamic && not skipped(field);
 
     let named = func(items: Attribute[list], fallback: string) -> string {
         last tag = model.find_attribute(items, "SerialName");

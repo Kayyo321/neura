@@ -55,24 +55,24 @@ export let Walk = module (
             if (asked == WalkControl.Stop) {
                 return WalkControl.Stop;
             }
-            if (asked != WalkControl.SkipChildren && !value.is_nil()) {
+            if (asked != WalkControl.SkipChildren && not value.is_nil()) {
                 last type = value.descriptor();
                 last object = type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record;
                 if (object) {
                     open.append(value);
                     for (let field in type.fields) {
-                        if (!field.exported || !field.dynamic) {
+                        if (not field.exported || not field.dynamic) {
                             continue;
                         }
-                        if (visit(path + "." + field.name, value.field(field.index), visitor, open) == WalkControl.Stop) {
+                        if (visit(path .. "." .. field.name, value.field(field.index), visitor, open) == WalkControl.Stop) {
                             return WalkControl.Stop;
                         }
                     }
                     open.remove_at(open.length - 1);
                 } else if (type.kind == kinds.TypeKind.List || type.kind == kinds.TypeKind.Tuple ||
                            type.kind == kinds.TypeKind.Enum) {
-                    for (let i = 0; i < value.length(); i++) {
-                        last at = path + "[" + i.to_string() + "]";
+                    for (let i in 0 .. value.length()) {
+                        last at = path .. "[" .. i.to_string() .. "]";
                         if (visit(at, value.element(i), visitor, open) == WalkControl.Stop) {
                             return WalkControl.Stop;
                         }
@@ -93,12 +93,12 @@ export let Walk = module (
             }
             open.append(value);
             for (let field in type.fields) {
-                if (!field.exported || !field.dynamic) {
+                if (not field.exported || not field.dynamic) {
                     continue;
                 }
                 last current = value.field(field.index);
                 last replaced = visitor.visit_field(value, field, current);
-                if (!replaced.equals(current)) {
+                if (not replaced.equals(current)) {
                     value.set_field(field.index, replaced);
                 }
                 rewrite(replaced, visitor, open);

@@ -18,7 +18,7 @@ export let TypeId = module (
         last digest = sha256.of(strings.get_bytes(identity));
         let high: uint64 = 0;
         let low: uint64 = 0;
-        for (let i = 0; i < 8; i++) {
+        for (let i in 0 .. 8) {
             high = (high << 8) | (digest[i] as uint64);
             low = (low << 8) | (digest[i + 8] as uint64);
         }
@@ -27,14 +27,14 @@ export let TypeId = module (
 
     /// @brief The fingerprint as 32 lowercase hexadecimal digits.
     #Since("0.3.0")
-    export let to_hex = func(id: TypeId) -> string => hex64(id.high) + hex64(id.low);
+    export let to_hex = func(id: TypeId) -> string => hex64(id.high) .. hex64(id.low);
 
     let hex64 = func(value: uint64) -> string {
         const Digits = "0123456789abcdef";
         let text = "";
-        for (let shift = 60; shift >= 0; shift -= 4) {
-            last digit = ((value >> (shift as uint64)) & 15) as int;
-            text = text + Digits.slice(digit, digit + 1);
+        for (let step in 0 .. 16) {
+            last digit = ((value >> ((60 - step * 4) as uint64)) & 15) as int;
+            text ..= Digits.slice(digit, digit + 1);
         }
         return text;
     };

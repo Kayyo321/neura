@@ -42,11 +42,11 @@ export let ForeignCall = module (
         export let frame = func -> CallFrame => new CallFrame(instance);
 
         export let.override to_string = func -> string {
-            let text = (returns_void ? "void" : result.to_string()) + " " + name + "(";
-            for (let i = 0; i < parameters.length; i++) {
-                text = text + (i == 0 ? "" : ", ") + parameters[i].to_string();
+            let text = (returns_void ? "void" : result.to_string()) .. " " .. name .. "(";
+            for (let i in 0 .. parameters.length) {
+                text ..= (i == 0 ? "" : ", ") .. parameters[i].to_string();
             }
-            return text + ")";
+            return text .. ")";
         };
     );
 
@@ -73,22 +73,20 @@ export let ForeignCall = module (
         /// argument count or type traps before the call.
         export let invoke = func -> model.Variant {
             if (arguments.length != symbol.parameters.length) {
-                trap_with_message("invalid argument: " + symbol.name + " takes " +
-                                  symbol.parameters.length.to_string() + " argument(s)");
+                trap_with_message("invalid argument: " .. symbol.name .. " takes " ..
+                                  symbol.parameters.length.to_string() .. " argument(s)");
             }
             last values: foreign_values.ForeignValue[list] = new;
-            for (let i = 0; i < arguments.length; i++) {
+            for (let i in 0 .. arguments.length) {
                 values.append(to_foreign(symbol.parameters[i], symbol.target, arguments[i]));
             }
             last handle = linkers.native_linker().downcall_handle(symbol.address, descriptor_of(symbol));
             last returned = handle.invoke_values(values);
-            if (symbol.returns_void) {
-                return model.wrap(nil as class);
-            }
-            return from_foreign(symbol.result, symbol.target, returned);
+            return if (symbol.returns_void) -> model.wrap(nil as class);
+            else -> from_foreign(symbol.result, symbol.target, returned);
         };
 
-        export let.override to_string = func -> string => "frame for " + symbol.to_string();
+        export let.override to_string = func -> string => "frame for " .. symbol.to_string();
     );
 
     /// @brief The native function `name` in the default lookup of the running program (the C library and the
@@ -135,10 +133,8 @@ export let ForeignCall = module (
         if (size == 2) {
             return signed ? value_layouts.Int16 : value_layouts.UInt16;
         }
-        if (size == 4) {
-            return signed ? value_layouts.Int32 : value_layouts.UInt32;
-        }
-        return signed ? value_layouts.Int64 : value_layouts.UInt64;
+        return if (size == 4) -> signed ? value_layouts.Int32 : value_layouts.UInt32;
+        else -> signed ? value_layouts.Int64 : value_layouts.UInt64;
     };
 
     let is_signed = func(type: abi.CType) -> bool =>
@@ -188,10 +184,8 @@ export let ForeignCall = module (
         if (size == 2) {
             return foreign_values.ForeignValue.UInt16(value.get<uint16>());
         }
-        if (size == 4) {
-            return foreign_values.ForeignValue.UInt32(value.get<uint32>());
-        }
-        return foreign_values.ForeignValue.UInt64(value.get<uint64>());
+        return if (size == 4) -> foreign_values.ForeignValue.UInt32(value.get<uint32>());
+        else -> foreign_values.ForeignValue.UInt64(value.get<uint64>());
     };
 
     let from_foreign = func(type: abi.CType, on: abi.Target, value: foreign_values.ForeignValue) -> model.Variant {
@@ -228,9 +222,7 @@ export let ForeignCall = module (
         if (size == 2) {
             return model.variant_of(bits as uint16);
         }
-        if (size == 4) {
-            return model.variant_of(bits as uint32);
-        }
-        return model.variant_of(bits);
+        return if (size == 4) -> model.variant_of(bits as uint32);
+        else -> model.variant_of(bits);
     };
 );

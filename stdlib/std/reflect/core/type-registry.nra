@@ -18,7 +18,7 @@ export let TypeRegistry = module (
     /// @brief The descriptor with this fingerprint, or nil.
     #Since("0.3.0")
     export let find_id = func(id: type_ids.TypeId) -> model.TypeDescriptor {
-        for (let i = 0; i < model.count(); i++) {
+        for (let i in 0 .. model.count()) {
             last item = model.descriptor_of(i);
             if (item.id === id) {
                 return item;
@@ -31,7 +31,7 @@ export let TypeRegistry = module (
     /// `find_id` tells them apart.
     #Since("0.3.0")
     export let find_name = func(qualified_name: string) -> model.TypeDescriptor {
-        for (let i = 0; i < model.count(); i++) {
+        for (let i in 0 .. model.count()) {
             last item = model.descriptor_of(i);
             if (item.qualified_name == qualified_name) {
                 return item;

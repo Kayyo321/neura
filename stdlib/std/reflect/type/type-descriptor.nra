@@ -27,7 +27,7 @@ export let TypeDescriptor = module (
     /// type.
     #Since("0.3.0")
     export let of_info = func(info: type_info.TypeInfo) -> TypeDescriptor {
-        for (let i = 0; i < model.count(); i++) {
+        for (let i in 0 .. model.count()) {
             last item = model.descriptor_of(i);
             if (item.info() === info) {
                 return item;

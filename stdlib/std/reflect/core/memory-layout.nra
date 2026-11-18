@@ -26,9 +26,7 @@ export let MemoryLayout = module (
         if (text == "reference") {
             return Form.Reference;
         }
-        if (text == "any") {
-            return Form.Any;
-        }
-        return Form.Word;
+        return if (text == "any") -> Form.Any;
+        else -> Form.Word;
     };
 );

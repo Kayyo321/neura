@@ -42,8 +42,18 @@ export let Abi = module (
 
         export let.override to_string = func -> string {
             last base = nested == nil ? scalar.to_string() : nested.to_string();
-            return name + ": " + base + (count == 1 ? "" : "[" + count.to_string() + "]");
+            return name .. ": " .. base .. (count == 1 ? "" : "[" .. count.to_string() .. "]");
         };
+
+        /// @brief The same name, scalar or nested layout text, and count.
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: CMember) {
+                return to_string() == that.to_string();
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
     );
 
     /// @brief A C struct: its members in declaration order.
@@ -79,11 +89,11 @@ export let Abi = module (
         };
 
         export let.override to_string = func -> string {
-            let text = "struct " + name + " {";
-            for (let i = 0; i < members.length; i++) {
-                text = text + (i == 0 ? " " : "; ") + members[i].to_string();
+            let text = "struct " .. name .. " {";
+            for (let i in 0 .. members.length) {
+                text ..= (i == 0 ? " " : "; ") .. members[i].to_string();
             }
-            return text + " }";
+            return text .. " }";
         };
     );
 
@@ -109,14 +119,14 @@ export let Abi = module (
                     return entry[1];
                 }
             }
-            trap_with_message("invalid argument: no member named " + name);
+            trap_with_message("invalid argument: no member named " .. name);
             return -1;
         };
 
         export let.override to_string = func -> string {
-            let text = "size " + size.to_string() + " align " + alignment.to_string();
+            let text = "size " .. size.to_string() .. " align " .. alignment.to_string();
             for (let entry in offsets) {
-                text = text + " " + entry[0] + "@" + entry[1].to_string();
+                text ..= " " .. entry[0] .. "@" .. entry[1].to_string();
             }
             return text;
         };
@@ -152,10 +162,8 @@ export let Abi = module (
             }
             return Optional<Target>.Some(new Target(triple, CallingConvention.Aapcs64, 8, 8));
         }
-        if (arch == "wasm32") {
-            return Optional<Target>.Some(new Target(triple, CallingConvention.Wasm32, 4, 4));
-        }
-        return Optional<Target>.None;
+        return if (arch == "wasm32") -> Optional<Target>.Some(new Target(triple, CallingConvention.Wasm32, 4, 4));
+        else -> Optional<Target>.None;
     };
 
     /// @brief The size of a scalar in bytes on the target.
@@ -226,12 +234,12 @@ export let Abi = module (
         last scalars: [CType, int][list] = new;
         flatten(shape, on, 0, scalars);
         if (on.convention == CallingConvention.SystemV64) {
-            if (described.size > 16 || !naturally_aligned(scalars, on)) {
+            if (described.size > 16 || not naturally_aligned(scalars, on)) {
                 result.append(ArgumentClass.Memory);
                 return result;
             }
             last words = (described.size + 7) / 8;
-            for (let word = 0; word < words; word++) {
+            for (let word in 0 .. words) {
                 let all_float = true;
                 let any_member = false;
                 for (let entry in scalars) {
@@ -275,10 +283,10 @@ export let Abi = module (
     // Every scalar of a struct with its byte offset, nested structs and arrays expanded.
     let flatten = func(shape: CStruct, on: Target, base: int, into: [CType, int][list]) {
         last described = layout(shape, on);
-        for (let i = 0; i < shape.members.length; i++) {
+        for (let i in 0 .. shape.members.length) {
             last member = shape.members[i];
             last start = base + described.offsets[i][1];
-            for (let k = 0; k < member.count; k++) {
+            for (let k in 0 .. member.count) {
                 if (member.nested == nil) {
                     into.append([member.scalar, start + k * size_of(member.scalar, on)]);
                 } else {
@@ -298,7 +306,7 @@ export let Abi = module (
     };
 
     let homogeneous_float = func(scalars: [CType, int][list]) -> bool {
-        if (scalars.length == 0 || !is_float(scalars[0][0])) {
+        if (scalars.length == 0 || not is_float(scalars[0][0])) {
             return false;
         }
         for (let entry in scalars) {
@@ -312,7 +320,7 @@ export let Abi = module (
     let round_up = func(value: int, alignment: int) -> int => (value + alignment - 1) / alignment * alignment;
 
     let before = func(text: string, separator: string) -> string {
-        for (let i = 0; i < text.byte_length; i++) {
+        for (let i in 0 .. text.byte_length) {
             if (text.slice(i, i + 1) == separator) {
                 return text.slice(0, i);
             }
@@ -324,7 +332,7 @@ export let Abi = module (
         if (part.byte_length > text.byte_length) {
             return false;
         }
-        for (let i = 0; i + part.byte_length <= text.byte_length; i++) {
+        for (let i in 0 ..= text.byte_length - part.byte_length) {
             if (text.slice(i, i + part.byte_length) == part) {
                 return true;
             }

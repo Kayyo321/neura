@@ -21,9 +21,7 @@ export let ReflectPolicy = module (
         if (text == "strip") {
             return Level.Strip;
         }
-        if (text == "layout") {
-            return Level.Layout;
-        }
-        return Level.Full;
+        return if (text == "layout") -> Level.Layout;
+        else -> Level.Full;
     };
 );

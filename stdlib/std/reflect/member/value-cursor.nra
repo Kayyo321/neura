@@ -32,7 +32,7 @@ export let ValueCursor = module (
         /// @brief A cursor one step deeper.
         export let child = func(index: int) -> ValueCursor => new ValueCursor(root, extended(path, index));
 
-        export let.override to_string = func -> string => "cursor " + path_text(path) + " at " + descriptor().name;
+        export let.override to_string = func -> string => "cursor " .. path_text(path) .. " at " .. descriptor().name;
         export let.override equals = func(other: class) -> bool {
             if (other is that: ValueCursor) {
                 return root.equals(that.root) && path_text(path) == path_text(that.path);
@@ -63,13 +63,13 @@ export let ValueCursor = module (
                 trap_with_message("reflection: a cursor at the root cannot be written");
             }
             let owner = root;
-            for (let i = 0; i < path.length - 1; i++) {
+            for (let i in 0 .. path.length - 1) {
                 owner = step_into(owner, path[i]);
             }
             owner.set_field(path[path.length - 1], replacement);
         };
 
-        export let.override to_string = func -> string => "mutable cursor " + path_text(path);
+        export let.override to_string = func -> string => "mutable cursor " .. path_text(path);
         export let.override equals = func(other: class) -> bool {
             if (other is that: ValueCursorMut) {
                 return root.equals(that.root) && path_text(path) == path_text(that.path);
@@ -85,10 +85,8 @@ export let ValueCursor = module (
 
     let step_into = func(current: model.Variant, step: int) -> model.Variant {
         last kind = current.descriptor().fields.length;
-        if (kind > 0) {
-            return current.field(step);
-        }
-        return current.element(step);
+        return if (kind > 0) -> current.field(step);
+        else -> current.element(step);
     };
 
     let extended = func(steps: int[list], step: int) -> int[list] {
@@ -103,7 +101,7 @@ export let ValueCursor = module (
     let path_text = func(steps: int[list]) -> string {
         let text = "$";
         for (let step in steps) {
-            text = text + "/" + step.to_string();
+            text ..= "/" .. step.to_string();
         }
         return text;
     };

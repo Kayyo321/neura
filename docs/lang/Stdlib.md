@@ -1486,7 +1486,7 @@ let Point = record (x: int32, y: int32);
 
 let round_trip = func(p: Point) -> Point {
     for (let field in types.of_value(p).fields) {
-        console.print_line(field.name + ": " + field.type_name());
+        console.print_line(field.name .. ": " .. field.type_name());
     }
     return bridge.decode_as<Point>(bridge.encode(variants.of(p)));
 };

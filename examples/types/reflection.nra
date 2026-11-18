@@ -28,7 +28,7 @@ let Reflection = module (
     export let describe = func(p: Point) -> string {
         let text = "";
         for (let field in types.of_value(p).fields) {
-            text = text + field.name + ": " + field.type_name() + "; ";
+            text ..= field.name .. ": " .. field.type_name() .. "; ";
         }
         return text;
     };

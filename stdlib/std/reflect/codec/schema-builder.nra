@@ -47,7 +47,7 @@ export let SchemaBuilder = module (
         proto_message(type, done, parts);
         let text = "syntax = \"proto3\";\n";
         for (let part in parts) {
-            text = text + "\n" + part;
+            text ..= "\n" .. part;
         }
         return text;
     };
@@ -59,16 +59,16 @@ export let SchemaBuilder = module (
     #Since("0.3.0")
     export let sql_table = func(type: model.TypeDescriptor, table: string) -> string {
         if (type.kind != kinds.TypeKind.Class && type.kind != kinds.TypeKind.Record) {
-            trap_with_message("invalid argument: a SQL table describes a class or record, not " + type.name);
+            trap_with_message("invalid argument: a SQL table describes a class or record, not " .. type.name);
         }
-        let text = "CREATE TABLE " + table + " (";
+        let text = "CREATE TABLE " .. table .. " (";
         let first = true;
         for (let field in type.fields) {
-            if (!attributes.written(field)) {
+            if (not attributes.written(field)) {
                 continue;
             }
             if (field.type_ordinal < 0) {
-                trap_with_message("invalid argument: field " + field.name + " of type any has no SQL column type");
+                trap_with_message("invalid argument: field " .. field.name .. " of type any has no SQL column type");
             }
             let column = model.descriptor_of(field.type_ordinal);
             let nullable = false;
@@ -76,11 +76,11 @@ export let SchemaBuilder = module (
                 column = model.descriptor_of(column.variants[1].payloads[0].type_ordinal);
                 nullable = true;
             }
-            text = text + (first ? "\n    " : ",\n    ") + attributes.serial_name(field) + " " + sql_type(column, field.name) +
-                   (nullable ? "" : " NOT NULL");
+            text ..= (first ? "\n    " : ",\n    ") .. attributes.serial_name(field) .. " " .. sql_type(column, field.name) ..
+                     (nullable ? "" : " NOT NULL");
             first = false;
         }
-        return text + "\n);";
+        return text .. "\n);";
     };
 
     let sql_type = func(type: model.TypeDescriptor, field: string) -> string {
@@ -97,7 +97,7 @@ export let SchemaBuilder = module (
             last bits = type.layout.bits;
             return bits <= 16 ? "SMALLINT" : bits == 32 && type.name == "int32" ? "INTEGER" : "BIGINT";
         }
-        trap_with_message("invalid argument: field " + field + " of type " + type.name + " has no SQL column type");
+        trap_with_message("invalid argument: field " .. field .. " of type " .. type.name .. " has no SQL column type");
         return "";
     };
 
@@ -124,9 +124,9 @@ export let SchemaBuilder = module (
     let proto_name = func(type: model.TypeDescriptor) -> string {
         last name = attributes.type_serial_name(type);
         let text = "";
-        for (let i = 0; i < name.byte_length; i++) {
+        for (let i in 0 .. name.byte_length) {
             last c = name.slice(i, i + 1);
-            text = text + (c == "." ? "_" : c);
+            text ..= (c == "." ? "_" : c);
         }
         return text;
     };
@@ -143,41 +143,41 @@ export let SchemaBuilder = module (
         if (type.kind == kinds.TypeKind.Enum && type.generic_origin != "Optional") {
             for (let variant in type.variants) {
                 if (variant.payloads.length > 0) {
-                    trap_with_message("invalid argument: field " + field + ": the enum " + type.name +
+                    trap_with_message("invalid argument: field " .. field .. ": the enum " .. type.name +
                                       " has payloads, which proto3 enums cannot hold");
                 }
             }
-            if (!contains(done, proto_name(type))) {
+            if (not contains(done, proto_name(type))) {
                 done.append(proto_name(type));
-                let text = "enum " + proto_name(type) + " {\n";
+                let text = "enum " .. proto_name(type) .. " {\n";
                 for (let variant in type.variants) {
-                    text = text + "    " + proto_name(type).to_upper_case() + "_" + variant.name.to_upper_case() + " = " +
-                           variant.index.to_string() + ";\n";
+                    text ..= "    " .. proto_name(type).to_upper_case() .. "_" .. variant.name.to_upper_case() .. " = " ..
+                           variant.index.to_string() .. ";\n";
                 }
-                parts.append(text + "}\n");
+                parts.append(text .. "}\n");
             }
             return proto_name(type);
         }
-        trap_with_message("invalid argument: field " + field + " of type " + type.name + " has no proto3 type");
+        trap_with_message("invalid argument: field " .. field .. " of type " .. type.name .. " has no proto3 type");
         return "";
     };
 
     let proto_message = func(type: model.TypeDescriptor, done: string[list], parts: string[list]) {
         if (type.kind != kinds.TypeKind.Class && type.kind != kinds.TypeKind.Record) {
-            trap_with_message("invalid argument: a proto3 message describes a class or record, not " + type.name);
+            trap_with_message("invalid argument: a proto3 message describes a class or record, not " .. type.name);
         }
         if (contains(done, proto_name(type))) {
             return;
         }
         done.append(proto_name(type));
-        let text = "message " + proto_name(type) + " {\n";
+        let text = "message " .. proto_name(type) .. " {\n";
         let number = 1;
         for (let field in type.fields) {
-            if (!attributes.written(field)) {
+            if (not attributes.written(field)) {
                 continue;
             }
             if (field.type_ordinal < 0) {
-                trap_with_message("invalid argument: field " + field.name + " of type any has no proto3 type");
+                trap_with_message("invalid argument: field " .. field.name .. " of type any has no proto3 type");
             }
             last field_type = model.descriptor_of(field.type_ordinal);
             let prefix = "";
@@ -186,17 +186,17 @@ export let SchemaBuilder = module (
                 prefix = "repeated ";
                 element = model.descriptor_of(field_type.elements[0]);
                 if (element.kind == kinds.TypeKind.List) {
-                    trap_with_message("invalid argument: field " + field.name + ": proto3 has no list of lists");
+                    trap_with_message("invalid argument: field " .. field.name .. ": proto3 has no list of lists");
                 }
             } else if (field_type.kind == kinds.TypeKind.Enum && field_type.generic_origin == "Optional") {
                 prefix = "optional ";
                 element = model.descriptor_of(field_type.variants[1].payloads[0].type_ordinal);
             }
-            text = text + "    " + prefix + proto_type(element, done, parts, field.name) + " " +
-                   attributes.serial_name(field) + " = " + number.to_string() + ";\n";
+            text ..= "    " .. prefix .. proto_type(element, done, parts, field.name) .. " " ..
+                     attributes.serial_name(field) .. " = " .. number.to_string() .. ";\n";
             number = number + 1;
         }
-        parts.append(text + "}\n");
+        parts.append(text .. "}\n");
     };
 
     let contains = func(items: string[list], wanted: string) -> bool {
@@ -216,7 +216,7 @@ export let SchemaBuilder = module (
 
     let reference = func(name: string) -> JsonValue {
         last members: [string, JsonValue][list] = new;
-        members.append(["$ref", JsonValue.Text("#/$defs/" + name)]);
+        members.append(["$ref", JsonValue.Text("#/$defs/" .. name)]);
         return JsonValue.Object(members);
     };
 
@@ -280,11 +280,11 @@ export let SchemaBuilder = module (
         }
         if (type.kind == kinds.TypeKind.Enum || type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record) {
             last name = attributes.type_serial_name(type);
-            if (!defined(definitions, name)) {
+            if (not defined(definitions, name)) {
                 // The name is reserved first, so that a type that reaches itself refers to its own definition.
                 definitions.append([name, JsonValue.Null]);
                 last body = type.kind == kinds.TypeKind.Enum ? enum_schema(type, definitions) : object_schema(type, definitions);
-                for (let i = 0; i < definitions.length; i++) {
+                for (let i in 0 .. definitions.length) {
                     if (definitions[i][0] == name) {
                         definitions[i] = [name, body];
                     }
@@ -299,7 +299,7 @@ export let SchemaBuilder = module (
         last properties: [string, JsonValue][list] = new;
         last required: JsonValue[list] = new;
         for (let field in type.fields) {
-            if (!attributes.written(field)) {
+            if (not attributes.written(field)) {
                 continue;
             }
             last wire = attributes.serial_name(field);
