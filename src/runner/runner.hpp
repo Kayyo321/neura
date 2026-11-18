@@ -4,6 +4,7 @@
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
+#include "nvm/secret_services.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -20,6 +21,8 @@ struct Host {
     nvm::StandardServices services;
     // Bound in every image; only a server-host worker passes an exchange.
     nvm::ApplicationServices application;
+    // neura.memory.lock.*, in the entropy group.
+    nvm::SecretServices secrets;
     nvm::HostRegistry registry;
 
     explicit Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange = nullptr,

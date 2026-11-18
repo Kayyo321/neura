@@ -1307,6 +1307,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     int first_status = 0;
     const auto finished = [&](std::size_t member, const neura::nvm::RunResult& result) {
         host.services.end_run();
+        host.secrets.release_all();
         if (options.stats) {
             steps.add(result.steps);
             requests.add(result.host_requests);
@@ -1564,6 +1565,7 @@ int run_tests(const Options& options) {
                               const std::string& forced_failure = {}) {
         // Each test is its own run: files and sockets it left open close now.
         host.services.end_run();
+        host.secrets.release_all();
         std::string message = forced_failure;
         if (message.empty() && result.completed && result.status != 0)
             message = "the test exited with status " + std::to_string(result.status);
@@ -1712,6 +1714,7 @@ int run_tests(const Options& options) {
                                               options.virtual_time, {}};
             for (std::uint64_t k = 1; passed(result) && k < options.schedules; ++k) {
                 host.services.end_run();
+                host.secrets.release_all();
                 neura::nvm::ExploringChooser chooser(options.schedule_seed + k);
                 result = run_test(i, &chooser, limits.task_quantum, options.virtual_time);
                 // No decision offered a choice: the test has one schedule.
@@ -2029,10 +2032,10 @@ int main(int argc, char** argv) {
     // Protocol commands own stdout. Dispatch before ordinary option/diagnostic
     // handling so no terminal notices can corrupt their transport.
     const std::string_view tooling_command(argv[1]);
+    if (tooling_command == "serve") return neura::cli::run_serve(argc, argv);
     if (tooling_command == "lsp" || tooling_command == "fmt" || tooling_command == "debug" || tooling_command == "capabilities" || tooling_command == "inspect-image") {
         try {
             std::vector<std::string> arguments;
-    if (tooling_command == "serve") return neura::cli::run_serve(argc, argv);
             for (int i = 2; i < argc; ++i) arguments.emplace_back(argv[i]);
             if (tooling_command == "lsp") return neura::tooling::run_lsp(arguments);
             if (tooling_command == "fmt") return neura::tooling::run_formatter(arguments);
