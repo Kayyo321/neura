@@ -148,21 +148,44 @@ jobs:
       # The server components that every archive links statically: OpenSSL
       # (TLS), nghttp2 (HTTP/2) and libpq (the PostgreSQL provider), built
       # from the sources packaging/server-components.lock.toml pins
-      # (docs/runtime/ServerHost.md, "Release archives"). Only the source
-      # archives are cached; the script checks each against the lock's
-      # SHA-256 before it builds, so a restored cache cannot change what is
-      # linked.
+      # (docs/runtime/ServerHost.md, "Release archives"). For a tag only the
+      # source archives are cached; the script checks each against the
+      # lock's SHA-256 before it builds, so a restored cache cannot change
+      # what is linked.
       - name: Restore the server component sources
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: server-downloads
           key: server-sources-${{ hashFiles('packaging/server-components.lock.toml') }}
 
+      # A trial started by hand may reuse the components an earlier trial
+      # built on the same runner image from the same lock and script. A tag
+      # always builds them from the verified sources.
+      - name: Restore the built server components (trials only)
+        id: server-built
+        if: ${{ github.ref_type != 'tag' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/server-components
+          key: server-built-${{ matrix.triple }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ env.CC || 'cc' }}-${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+
       - name: Build the server components
+        if: ${{ steps.server-built.outputs.cache-hit != 'true' }}
         run: |
           sh packaging/build-server-components.sh --downloads server-downloads --jobs "$JOBS" \
             "$RUNNER_TEMP/server-components" 2>&1 | tee server-components.log
-          echo "SERVER_COMPONENTS=$RUNNER_TEMP/server-components" >> "$GITHUB_ENV"
+
+      # Saved at once, not at the end of the job, so a trial whose tests
+      # fail still leaves the components for the next one.
+      - name: Save the built server components (trials only)
+        if: ${{ github.ref_type != 'tag' && steps.server-built.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/server-components
+          key: server-built-${{ matrix.triple }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ env.CC || 'cc' }}-${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+
+      - name: Locate the server components
+        run: echo "SERVER_COMPONENTS=$RUNNER_TEMP/server-components" >> "$GITHUB_ENV"
 
       - name: Configure
         run: >
