@@ -6,7 +6,7 @@ error[E1010]: effect not allowed while rendering: it reaches 'print_line', which
 ...
  9 | let greeting = html(name: string) { <p>{ shout(name) }</p> };
    |                                          ^^^^^^^^^^^ calls 'shout' while the view is built
-  ::: /home/dev/neura-a1-int/stdlib/std/io/console.nra:72:16
+  ::: $STDLIB/std/io/console.nra:72:16
    |
 72 |         match (write_line(s)) {
    |                ------------- makes the host request neura.console.write_line here
