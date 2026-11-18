@@ -1,0 +1,93 @@
+let hosts = import:Std.Net.Dns.HostsFile;
+let ips = import:Std.Net.Core.IpAddr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let naptr = import:Std.Net.Dns.NaptrLookup;
+let resolv = import:Std.Net.Dns.ResolvConf;
+let srv = import:Std.Net.Dns.SrvLookup;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Dns value classes agree.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    let name = func(text: string) -> names.DnsName => test.assert_ok<names.DnsName>(names.parse(text));
+
+    let address = func(text: string) -> ips.IpAddr => test.assert_ok<ips.IpAddr>(ips.parse(text));
+
+    export let test_dns_name = func {
+        agree(name("Example.COM"), name("example.com"));
+        differ(name("example.com"), name("example.org"));
+        test.assert_equal_string("Example.COM.", name("Example.COM").to_string());
+        test.assert_equal_string(".", names.root().to_string());
+    };
+
+    export let test_hosts_file = func {
+        last a = hosts.parse("192.0.2.1 www.example.com web\nnot-an-address host\n");
+        last b = hosts.parse("192.0.2.1 www.example.com web\nnot-an-address host\n");
+        test.assert_equal_string("HostsFile(1 entries, 1 problems)", a.to_string());
+        agree(a.entries()[0], b.entries()[0]);
+        test.assert_equal_string("192.0.2.1 www.example.com web", a.entries()[0].to_string());
+        agree(a.problems()[0], b.problems()[0]);
+        test.assert(strings.starts_with(a.problems()[0].to_string(), "line 2: "));
+    };
+
+    export let test_resolv_conf = func {
+        last a = resolv.parse("nameserver 192.0.2.1\nsearch example.com\noptions ndots:2\n");
+        last b = resolv.parse("nameserver 192.0.2.1\nsearch example.com\noptions ndots:2\n");
+        agree(a, b);
+        differ(a, resolv.parse("nameserver 192.0.2.9\nsearch example.com\noptions ndots:2\n"));
+        test.assert(a.to_string().byte_length > 0);
+        test.assert_equal_string(a.to_string(), b.to_string());
+    };
+
+    export let test_message_parts = func {
+        last o1 = new messages.EdnsOption(10, new([1, 2, 3]));
+        last o2 = new messages.EdnsOption(10, new([1, 2, 3]));
+        agree(o1, o2);
+        differ(o1, new messages.EdnsOption(10, new([1, 2, 4])));
+        test.assert_equal_string("EdnsOption(10, 3 bytes)", o1.to_string());
+        last e1 = new messages.Edns(1232, 0, 0, true, new([o1]));
+        last e2 = new messages.Edns(1232, 0, 0, true, new([o2]));
+        agree(e1, e2);
+        differ(e1, new messages.Edns(1232, 0, 0, false, new([o2])));
+        test.assert_equal_string("Edns(udp 1232, version 0, do true, 1 options)", e1.to_string());
+        last q1 = new messages.Question(name("example.com"), messages.TypeA, 1);
+        last q2 = new messages.Question(name("EXAMPLE.com"), messages.TypeA, 1);
+        agree(q1, q2);
+        differ(q1, new messages.Question(name("example.com"), messages.TypeAaaa, 1));
+        test.assert_equal_string("example.com. IN A", q1.to_string());
+        last r1 = new messages.ResourceRecord(name("example.com"), messages.TypeA, 1, 300,
+            messages.RecordData.A(v4.of(192, 0, 2, 1)));
+        last r2 = new messages.ResourceRecord(name("example.com"), messages.TypeA, 1, 300,
+            messages.RecordData.A(v4.of(192, 0, 2, 1)));
+        agree(r1, r2);
+        differ(r1, new messages.ResourceRecord(name("example.com"), messages.TypeA, 1, 301,
+            messages.RecordData.A(v4.of(192, 0, 2, 1))));
+        test.assert_equal_string("example.com. 300 IN A 192.0.2.1", r1.to_string());
+    };
+
+    export let test_srv_and_naptr = func {
+        last s1 = new srv.SrvTarget(10, 5, 5060, name("sip.example.com"));
+        last s2 = new srv.SrvTarget(10, 5, 5060, name("SIP.example.com"));
+        agree(s1, s2);
+        differ(s1, new srv.SrvTarget(10, 6, 5060, name("sip.example.com")));
+        test.assert_equal_string("10 5 5060 sip.example.com.", s1.to_string());
+        last n1 = new naptr.NaptrRule(100, 10, "s", "SIP+D2U", "", name("_sip._udp.example.com"));
+        last n2 = new naptr.NaptrRule(100, 10, "s", "SIP+D2U", "", name("_sip._udp.example.com"));
+        agree(n1, n2);
+        differ(n1, new naptr.NaptrRule(100, 20, "s", "SIP+D2U", "", name("_sip._udp.example.com")));
+        test.assert_equal_string("100 10 \"s\" \"SIP+D2U\" \"\" _sip._udp.example.com.", n1.to_string());
+    };
+);
