@@ -1,6 +1,7 @@
 /build/
 /build-*/
 /cmake-build-*/
+/.neura-vscode/
 /_site/
 CMakeUserPresets.json
 CMakeCache.txt
