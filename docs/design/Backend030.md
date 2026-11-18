@@ -26,6 +26,65 @@ export let serve = func(context: app.Context) -> result.Result<unit.Unit> {
 
 `serve` is the composition root: it constructs the repository, the service and the routes by hand, with `new`, and hands the router to the host. `parts_api_routes` is the adapter `neura contracts` generated.
 
+## Implementation status 2026-11-17
+
+*Status:* implemented by autonomous agents on the `runtime-services` branch, awaiting owner confirmation. This section records what exists, what this branch adds, and where it departs from the rules below. The rules below stay the contract; the Status column of each table is updated with the change that implements a row.
+
+Existing at the start of the branch (Codex's A4 lane): the bounded HTTP/1.1 request decoder and the buffered connection loop (`src/server/http_wire.cpp`, `http_connection.cpp`); plain TCP and TLS 1.2/1.3 transports over OpenSSL 3.5 (`http_tcp.cpp`, `http_tls.cpp`); the transactional listener set with `SIGHUP` reload (`http_listener.cpp`); the worker frame codec, `Hello` and frame-order checks (`worker_wire.cpp`); typed provider wait sources (`src/nvm/host.hpp`).
+
+Added by this branch:
+
+| Piece | Where | Status |
+| --- | --- | --- |
+| `neura-server-host`, the foreground host: listeners, optional TLS, the startup check, S-1 and S-3 admission with 503 and `Retry-After: 1`, S-2 ready workers, the S-8 deadline (504, worker killed), S-7 response limit (500), traps (500, logged), JSON log lines, `SIGTERM`/`SIGINT` drain within S-12, `SIGHUP` TLS reload | `src/server/server_host.cpp` | implemented |
+| The request worker: the same executable with `--worker`, spawned with `posix_spawn` over a socket pair on descriptor 3; it loads and verifies the image, greets, waits for one `Assign` and its body, runs the image once, and exits | `src/server/request_worker.cpp` | implemented |
+| Typed `Assign`, `Head`, `Call` and `Return` bodies and a blocking checked channel | `src/server/worker_messages.cpp` | implemented |
+| `neura.http.server.next`, `respond`, `body.read`, `body.write`, `body.close`, `neura.app.config`, `neura.app.log`; the `http_server` and `app` capability groups | `src/nvm/app_provider.cpp` | implemented |
+| `Std.App` (`Context`, `Request`, `Response`, `Handler`, `handler_of`, `run`) and the internal binding `Std.Net.Internal.HttpServer` | `stdlib/std/app.nra`, `stdlib/std/net/internal/http-server.nra` | implemented |
+| Response header fields in the connection loop; reason phrases for the common statuses | `src/server/http_connection.cpp` | implemented |
+| Error codes 16 to 22 in the provider table | `src/nvm/providers.hpp` | codes defined; the library maps them to `Other` until `IoErrorKind` gains their names |
+| The admin listener (`/livez`, `/readyz`, `/metrics`), `neura.app.metric`, `neura.app.shutdown.wait` | | not started |
+| Streamed request bodies (`open_body`) and streamed responses with backpressure | | not started: the host reads the whole body within S-6 before it assigns the request, and buffers the response within S-7 before it writes it |
+| SQL, migrations, `neura run <bundle>`, `neura dev`, `trusted_proxies`, authentication helpers | | not started |
+
+Departures, each to be confirmed by the owner:
+
+1. **Entry.** Backend030 has `Std.App` supply the image entry and call an exported `serve`. A library module cannot do that today: an inherited `main` that calls a requirement of the derived module is rejected (`E0899`), and without the project build there is no target `entry` to find `serve` by. Until `neura build --project` exists, the entry module is an ordinary `Std.Program.Entry` whose `main` is `app.run(serve)`.
+2. **No `?` and no `using`** on this branch's language baseline: `Std.App` and the examples use `match`.
+3. **Header and log fields** cross the host boundary as one flat `string[list]` of alternating names and values, because a host call cannot carry a list of tuples (`E0801`). `Std.App` presents them as `[string, string][list]`.
+4. **Configuration** reaches the worker through `Call`/`Return` frames; the worker never holds the host's configuration. Logs are written by the worker to the inherited standard error as JSON lines with the request identifier. No other `Call` operation exists yet.
+5. **`Cancel`** is not sent: at the deadline the host kills the worker with `SIGKILL` and answers 504; no grace period applies to a request past S-8. A worker whose channel ends without `Done` gets the grace period S-12 (5 s) to exit before it is killed.
+6. **The handler interface** the `Std.Net.Http` router implements is `Std.App.Handler` (below), not `http.Router` itself, so that `Std.App` does not depend on `Std.Net.Http`.
+7. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host. Native code is always denied.
+
+### Handler interface for `Std.Net.Http`
+
+`Context.serve(handler: app.Handler) -> Result<Unit>` receives the assigned request and calls the handler once.
+
+```text
+Std.App.Handler = interface ( let handle = func(request: Request) -> Result<Response>; )
+Std.App.Request: method, target, path, query (strings), headers ([string, string][list], lowercase names,
+                 arrival order), body (uint8[list], complete), client, scheme ("http" or "https"),
+                 request_id; header(name) -> Optional<string>; body_text() -> Result<string>
+Std.App.Response(status: int, headers: [string, string][list], body: uint8[list]); with_header(name, value)
+Std.App.text, html, json (status, string) -> Response; empty(status) -> Response; handler_of(func) -> Handler
+```
+
+The router implements `Handler`, converts `app.Request` to `http.Request` and `http.Response` to `app.Response`. A handler `Err` is answered with 500 and `{"error":"internal"}`, and the error message is logged with the request identifier. A startup check is answered with 204 without calling the handler. The host owns `Content-Length`, `Transfer-Encoding` and `Connection`, ignores those fields in a response, and answers 500 for a field name that is not a token or a value with a control character. `HEAD` reaches the handler as `HEAD`; the host sends the head of the handler's response without its body.
+
+### Message bodies
+
+All integers are little-endian; a *text* is a `uint32` byte count and the bytes.
+
+| Frame | Body |
+| --- | --- |
+| `Assign` | `uint32` kind (1 request, 2 startup check), text request identifier, `int64` deadline (Unix nanoseconds), text peer, text scheme, text method, text target, `uint32` field count and that many (text name, text value), `int64` body length, `uint32` lease count (0) |
+| `Head` | `uint32` status, `uint32` field count and that many (text name, text value) |
+| `Call` | `uint32` call identifier, `uint32` operation (1: configuration), text key |
+| `Return` | `uint32` call identifier, `uint32` error code (0 for success), `uint8` found, text value |
+
+The host sends `Assign`, the request body as `BodyChunk` frames of at most 64 KiB, and `BodyEnd` before the worker runs any Neura code. The worker sends `Head`, its body chunks, `BodyEnd` and `Done` as the image responds. Both sides check every frame with `ChannelSequence`.
+
 ## Layers
 
 | Rule | Status |
