@@ -64,8 +64,8 @@ export let WebSocket = module (
 
         /// @brief The three limits.
         export let.override to_string = func -> string =>
-            "WebSocketOptions(frame " + max_frame_size.to_string() + ", message " + max_message_size.to_string()
-            + ", fragment " + max_fragment_size.to_string() + ")";
+            "WebSocketOptions(frame " .. max_frame_size.to_string() .. ", message " .. max_message_size.to_string()
+            .. ", fragment " .. max_fragment_size.to_string() .. ")";
     );
 
     /// @brief 1 MiB frames, 16 MiB messages, 64 KiB fragments.
@@ -113,7 +113,7 @@ export let WebSocket = module (
         export let close = func -> Result<Unit> => close_fn();
 
         /// @brief The read size.
-        export let.override to_string = func -> string => "StreamTransport(chunk " + chunk.to_string() + ")";
+        export let.override to_string = func -> string => "StreamTransport(chunk " .. chunk.to_string() .. ")";
     );
 
     /// @brief A byte transport over a TCP stream, reading 16 KiB at a time.
@@ -194,7 +194,7 @@ export let WebSocket = module (
                             Result.Err(problem) => {
                                 // A read timeout leaves the connection open, so a caller can run the heartbeat
                                 // and read again.
-                                if (!is_timeout(problem)) {
+                                if (not is_timeout(problem)) {
                                     state = ReadyState.Closed;
                                     let _ = transport.close();
                                 }
@@ -284,7 +284,7 @@ export let WebSocket = module (
                 return Result<Unit>.Ok(Unit.Value);
             }
             last body = close_status.encode_body(code, reason)?;
-            if (!sent_close) {
+            if (not sent_close) {
                 sent_close = true;
                 state = ReadyState.Closing;
                 last written = write_frame(frames.of(frames.Close, body));
@@ -350,7 +350,7 @@ export let WebSocket = module (
                     last action = watch.poll(now);
                     match (action) {
                         heartbeat.HeartbeatAction.SendPing => {
-                            if (state == ReadyState.Open && !sent_close) {
+                            if (state == ReadyState.Open && not sent_close) {
                                 write_frame(frames.of(frames.Ping, strings.to_bytes(watch.pings.to_string())))?;
                             }
                         },
@@ -371,15 +371,13 @@ export let WebSocket = module (
                 Optional.Some(p) => p,
                 Optional.None => "none",
             };
-            return "WebSocket(" + role.to_string() + ", " + state.to_string() + ", protocol " + name + ")";
+            return "WebSocket(" .. role.to_string() .. ", " .. state.to_string() .. ", protocol " .. name .. ")";
         };
 
         /// @brief Answers a ping, notes a pong, or completes the closing handshake.
         let handle_control = func(frame: frames.Frame) -> Result<Unit> {
             if (frame.opcode == frames.Ping) {
-                if (!sent_close) {
-                    return write_frame(frames.of(frames.Pong, frame.payload));
-                }
+                return write_frame(frames.of(frames.Pong, frame.payload)) unless sent_close;
                 return Result<Unit>.Ok(Unit.Value);
             }
             if (frame.opcode == frames.Pong) {
@@ -394,7 +392,7 @@ export let WebSocket = module (
                 Result.Ok(reason) => {
                     received_close = true;
                     peer_close = Optional<close_status.CloseReason>.Some(reason);
-                    if (!sent_close) {
+                    if (not sent_close) {
                         sent_close = true;
                         // Echo the status (section 5.5.1); a frame without a status is answered without one.
                         last echo: uint8[list] = new;
@@ -413,7 +411,7 @@ export let WebSocket = module (
 
         /// @brief Sends a close frame with the failure's status if none was sent, closes, and returns the failure.
         let fail_connection = func<T>(problem: errors.Error) -> Result<T> {
-            if (!sent_close) {
+            if (not sent_close) {
                 sent_close = true;
                 last status = close_status.status_of(problem);
                 match (close_status.encode_body(status, "")) {
@@ -500,7 +498,7 @@ export let WebSocket = module (
                                     return abandon<WebSocket>(bytes, close_status.failure(
                                         close_status.MandatoryExtension,
                                         "the server agreed to extensions this connection does not implement: "
-                                        + acceptance.extensions));
+                                        .. acceptance.extensions));
                                 }
                                 return Result<WebSocket>.Ok(new WebSocket(bytes, frames.Role.Client, random, options,
                                     acceptance.protocol, range(received, end, received.length)));
@@ -570,7 +568,7 @@ export let WebSocket = module (
         while (handshake.head_end(received) < 0) {
             if (received.length > MaxHeadBytes) {
                 return Result<uint8[list]>.Err(errors.custom(handshake.ErrorCode, "the HTTP head exceeds "
-                    + MaxHeadBytes.to_string() + " bytes"));
+                    .. MaxHeadBytes.to_string() .. " bytes"));
             }
             last chunk = bytes.receive()?;
             match (chunk) {

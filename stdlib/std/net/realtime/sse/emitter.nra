@@ -40,7 +40,7 @@ export let Emitter = module (
         }
         let text = "";
         if (event_type.byte_length > 0 && event_type != sse_event.DefaultType) {
-            text = "event: " + event_type + "\n";
+            text = "event: " .. event_type .. "\n";
         }
         match (id) {
             Optional.Some(value) => {
@@ -56,14 +56,14 @@ export let Emitter = module (
                 if (millis < 0) {
                     return fail("the reconnection time is negative");
                 }
-                text = text + "retry: " + millis.to_string() + "\n";
+                text ..= "retry: " .. millis.to_string() .. "\n";
             },
             Optional.None => {},
         }
         for (let piece in split_lines(data)) {
-            text = text + "data: " + piece + "\n";
+            text ..= "data: " .. piece .. "\n";
         }
-        return Result<string>.Ok(text + "\n");
+        return Result<string>.Ok(text .. "\n");
     };
 
     /// @brief Comment lines, ignored by the parser: each line of the text after `: `.
@@ -71,7 +71,7 @@ export let Emitter = module (
     export let comment = func(text: string) -> string {
         let out = "";
         for (let piece in split_lines(text)) {
-            out = out + ": " + piece + "\n";
+            out ..= ": " .. piece .. "\n";
         }
         return out;
     };
@@ -87,7 +87,7 @@ export let Emitter = module (
         if (millis < 0) {
             return fail("the reconnection time is negative");
         }
-        return Result<string>.Ok("retry: " + millis.to_string() + "\n\n");
+        return Result<string>.Ok("retry: " .. millis.to_string() .. "\n\n");
     };
 
     /// @brief Writes events to a byte sink, such as the write method of a stream or a response body.

@@ -76,10 +76,9 @@ export let PermessageDeflate = module (
 
         /// @brief Equal when the four parameters are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is DeflateParams)) {
+            if (other is not that: DeflateParams) {
                 return false;
             }
-            last that = other as DeflateParams;
             return server_no_context_takeover == that.server_no_context_takeover
                 && client_no_context_takeover == that.client_no_context_takeover
                 && server_max_window_bits == that.server_max_window_bits
@@ -124,10 +123,10 @@ export let PermessageDeflate = module (
 
         /// @brief The four settings.
         export let.override to_string = func -> string =>
-            "ServerConfig(accept_server_window_limit " + accept_server_window_limit.to_string()
-            + ", server_no_context_takeover " + server_no_context_takeover.to_string()
-            + ", client_no_context_takeover " + client_no_context_takeover.to_string()
-            + ", client_max_window_bits " + client_max_window_bits.to_string() + ")";
+            "ServerConfig(accept_server_window_limit " .. accept_server_window_limit.to_string()
+            .. ", server_no_context_takeover " .. server_no_context_takeover.to_string()
+            .. ", client_no_context_takeover " .. client_no_context_takeover.to_string()
+            .. ", client_max_window_bits " .. client_max_window_bits.to_string() .. ")";
     );
 
     /// @brief Reads a client's offer element (RFC 7692 section 7). Fails for another extension name, an unknown
@@ -160,7 +159,7 @@ export let PermessageDeflate = module (
                     continue;
                 },
                 Result.Ok(offer) => {
-                    if (offer.server_max_window_bits > 0 && !config.accept_server_window_limit) {
+                    if (offer.server_max_window_bits > 0 && not config.accept_server_window_limit) {
                         continue;
                     }
                     let client_bits = 0;
@@ -268,13 +267,13 @@ export let PermessageDeflate = module (
 
         /// @brief The agreement and role.
         export let.override to_string = func -> string =>
-            "DeflateCodec(" + params.to_string() + ", " + role.to_string() + ")";
+            "DeflateCodec(" .. params.to_string() .. ", " .. role.to_string() .. ")";
     );
 
     /// @brief Reads an element as an offer (`offer` true) or a response.
     let read = func(element: exts.Extension, offer: bool) -> Result<DeflateParams> {
         if (element.name != ExtensionName) {
-            return fail<DeflateParams>("not a permessage-deflate element: " + element.name);
+            return fail<DeflateParams>("not a permessage-deflate element: " .. element.name);
         }
         let server_no_takeover = false;
         let client_no_takeover = false;
@@ -282,11 +281,11 @@ export let PermessageDeflate = module (
         let client_bits = 0;
         for (let param in element.params) {
             if (element.count(param.name) > 1) {
-                return fail<DeflateParams>("repeated parameter " + param.name);
+                return fail<DeflateParams>("repeated parameter " .. param.name);
             }
             if (param.name == "server_no_context_takeover" || param.name == "client_no_context_takeover") {
                 if (is_some<string>(param.value)) {
-                    return fail<DeflateParams>(param.name + " takes no value");
+                    return fail<DeflateParams>(param.name .. " takes no value");
                 }
                 if (param.name == "server_no_context_takeover") {
                     server_no_takeover = true;
@@ -299,7 +298,7 @@ export let PermessageDeflate = module (
                     return fail<DeflateParams>("server_max_window_bits needs a value from 8 to 15");
                 }
             } else if (param.name == "client_max_window_bits") {
-                if (offer && !is_some<string>(param.value)) {
+                if (offer && not is_some<string>(param.value)) {
                     client_bits = -1;
                 } else {
                     client_bits = window_bits(param.value);
@@ -308,7 +307,7 @@ export let PermessageDeflate = module (
                     }
                 }
             } else {
-                return fail<DeflateParams>("unknown parameter " + param.name);
+                return fail<DeflateParams>("unknown parameter " .. param.name);
             }
         }
         return Result<DeflateParams>.Ok(new DeflateParams(server_no_takeover, client_no_takeover, server_bits,

@@ -178,7 +178,7 @@ export let Wire = module (
         #NoDiscard
         export let read_bytes = func(count: int) -> Result<uint8[list]> {
             if (count < 0 || bytes.length - offset < count) {
-                return truncated<uint8[list]>("expected " + count.to_string() + " bytes", offset);
+                return truncated<uint8[list]>("expected " .. count.to_string() .. " bytes", offset);
             }
             last out: uint8[list] = new;
             for (let i = 0; i < count; i++) {
@@ -201,7 +201,7 @@ export let Wire = module (
 
         /// @brief The offset and length.
         export let.override to_string = func -> string =>
-            "WireReader(" + offset.to_string() + " of " + bytes.length.to_string() + ")";
+            "WireReader(" .. offset.to_string() .. " of " .. bytes.length.to_string() .. ")";
     );
 
     /// @brief The header of a unidirectional WebTransport stream for the session: 0x54 and the session ID. An
@@ -231,7 +231,7 @@ export let Wire = module (
         last start = reader.offset;
         last kind = reader.read_varint()?;
         if (kind != (bidirectional ? BidiSignal : UniStreamType)) {
-            return syntax<int64>("not a WebTransport stream: type " + kind.to_string(), start);
+            return syntax<int64>("not a WebTransport stream: type " .. kind.to_string(), start);
         }
         last at = reader.offset;
         last session = reader.read_varint()?;
@@ -268,7 +268,7 @@ export let Wire = module (
 
         /// @brief The session and payload length.
         export let.override to_string = func -> string =>
-            "Datagram(session " + session.to_string() + ", " + payload.length.to_string() + " bytes)";
+            "Datagram(session " .. session.to_string() .. ", " .. payload.length.to_string() .. " bytes)";
     );
 
     /// @brief Reads an HTTP/3 datagram. A quarter stream ID above 2^60 - 1 fails (RFC 9297 section 2.1).
@@ -298,10 +298,9 @@ export let Wire = module (
 
         /// @brief Equal when the code and message are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SessionClose)) {
+            if (other is not that: SessionClose) {
                 return false;
             }
-            last that = other as SessionClose;
             return code == that.code && message == that.message;
         };
 
@@ -309,7 +308,7 @@ export let Wire = module (
         export let.override hash_code = func -> uint32 => hashing.combine(code, strings.hash(message));
 
         /// @brief `code: message`.
-        export let.override to_string = func -> string => code.to_string() + ": " + message;
+        export let.override to_string = func -> string => code.to_string() .. ": " .. message;
     );
 
     /// @brief The WT_CLOSE_SESSION capsule (type 0x2843, length, code, message). A message over 1024 bytes
@@ -338,11 +337,11 @@ export let Wire = module (
         last reader = new WireReader(bytes);
         last kind = reader.read_varint()?;
         if (kind != CloseSessionCapsule) {
-            return syntax<SessionClose>("not a WT_CLOSE_SESSION capsule: type " + kind.to_string(), 0);
+            return syntax<SessionClose>("not a WT_CLOSE_SESSION capsule: type " .. kind.to_string(), 0);
         }
         last length = reader.read_varint()?;
         if (length < 4 || length > ((4 + MaxCloseMessageBytes) as uint64)) {
-            return syntax<SessionClose>("WT_CLOSE_SESSION length " + length.to_string() + " out of range", 0);
+            return syntax<SessionClose>("WT_CLOSE_SESSION length " .. length.to_string() .. " out of range", 0);
         }
         last code = reader.read_uint32()?;
         last text = reader.read_bytes((length as int) - 4)?;
@@ -383,7 +382,7 @@ export let Wire = module (
 
     /// @brief Traps unless the ID is a valid session ID.
     let check_session = func(session: int64) {
-        if (!is_valid_session_id(session)) {
+        if (not is_valid_session_id(session)) {
             trap_with_message("invalid argument: session id");
         }
     };

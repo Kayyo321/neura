@@ -75,10 +75,9 @@ export let CloseStatus = module (
 
         /// @brief Equal when the code and reason are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is CloseReason)) {
+            if (other is not that: CloseReason) {
                 return false;
             }
-            last that = other as CloseReason;
             return code == that.code && reason == that.reason;
         };
 
@@ -114,10 +113,9 @@ export let CloseStatus = module (
 
         /// @brief Equal when the status and message are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ProtocolFailure)) {
+            if (other is not that: ProtocolFailure) {
                 return false;
             }
-            last that = other as ProtocolFailure;
             return status == that.status && text == that.message();
         };
 
@@ -126,7 +124,7 @@ export let CloseStatus = module (
             hashing.combine(hashing.combine(17, hashing.of_int64(status as int64)), strings.hash(text));
 
         /// @brief `ws.protocol status: message`.
-        export let.override to_string = func -> string => ErrorCode + " " + status.to_string() + ": " + text;
+        export let.override to_string = func -> string => ErrorCode .. " " .. status.to_string() .. ": " .. text;
     );
 
     /// @brief A Custom error holding a `ProtocolFailure`.
@@ -146,9 +144,9 @@ export let CloseStatus = module (
     /// or the reason is longer than 123 bytes.
     #NoDiscard
     export let encode_body = func(code: int, reason: string) -> Result<uint8[list]> {
-        if (!is_valid_on_wire(code)) {
-            return Result<uint8[list]>.Err(failure(ProtocolError, "close status " + code.to_string()
-                + " may not be sent"));
+        if (not is_valid_on_wire(code)) {
+            return Result<uint8[list]>.Err(failure(ProtocolError, "close status " .. code.to_string()
+                .. " may not be sent"));
         }
         if (reason.byte_length > MaxReasonBytes) {
             return Result<uint8[list]>.Err(failure(ProtocolError, "close reason longer than 123 bytes"));
@@ -174,9 +172,7 @@ export let CloseStatus = module (
             return Result<CloseReason>.Err(failure(ProtocolError, "close body of one byte"));
         }
         last code = (body[0] as int) * 256 + (body[1] as int);
-        if (!is_valid_on_wire(code)) {
-            return Result<CloseReason>.Err(failure(ProtocolError, "invalid close status " + code.to_string()));
-        }
+        return Result<CloseReason>.Err(failure(ProtocolError, "invalid close status " .. code.to_string())) unless is_valid_on_wire(code);
         last reason_bytes: uint8[list] = new;
         for (let i = 2; i < body.length; i++) {
             reason_bytes.append(body[i]);

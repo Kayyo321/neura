@@ -85,7 +85,7 @@ export let Heartbeat = module (
 
         /// @brief The interval, timeout and state.
         export let.override to_string = func -> string =>
-            "Heartbeat(every " + interval.to_string() + ", timeout " + timeout.to_string() + ", "
-            + (dead ? "dead" : (waiting ? "awaiting pong" : "idle")) + ")";
+            "Heartbeat(every " .. interval.to_string() .. ", timeout " .. timeout.to_string() .. ", "
+            .. (dead ? "dead" : (waiting ? "awaiting pong" : "idle")) .. ")";
     );
 );

@@ -54,10 +54,9 @@ export let Session = module (
 
         /// @brief Equal when the name and value are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Field)) {
+            if (other is not that: Field) {
                 return false;
             }
-            last that = other as Field;
             return name == that.name && value == that.value;
         };
 
@@ -65,7 +64,7 @@ export let Session = module (
         export let.override hash_code = func -> uint32 => hashing.combine(strings.hash(name), strings.hash(value));
 
         /// @brief `name: value`.
-        export let.override to_string = func -> string => name + ": " + value;
+        export let.override to_string = func -> string => name .. ": " .. value;
     );
 
     /// @brief What a server learned from a valid session request.
@@ -87,7 +86,7 @@ export let Session = module (
 
         /// @brief The authority, path and origin.
         export let.override to_string = func -> string =>
-            "SessionRequest(" + authority + path + (origin.byte_length > 0 ? ", origin " + origin : "") + ")";
+            "SessionRequest(" .. authority .. path .. (origin.byte_length > 0 ? ", origin " + origin : "") .. ")";
     );
 
     /// @brief The request fields that open a session (draft section 3.2). An empty origin is left out.
@@ -115,7 +114,7 @@ export let Session = module (
         }
         last protocol = value_of(fields, ":protocol");
         if (protocol != ProtocolToken) {
-            return fail<SessionRequest>("unsupported :protocol \"" + protocol + "\"");
+            return fail<SessionRequest>("unsupported :protocol \"" .. protocol .. "\"");
         }
         if (value_of(fields, ":scheme") != "https") {
             return fail<SessionRequest>("the :scheme must be https");
@@ -152,7 +151,7 @@ export let Session = module (
         /// @brief A session with the given ID on a QUIC connection handle. An ID that is not a client-initiated
         /// bidirectional stream ID traps with "invalid argument: session id".
         export let init = func(handle: int64, id: int64, client: bool) {
-            if (!wire.is_valid_session_id(id)) {
+            if (not wire.is_valid_session_id(id)) {
                 trap_with_message("invalid argument: session id");
             }
             connection = handle;
@@ -209,7 +208,7 @@ export let Session = module (
                     Result.Ok(session) => {
                         if (session != session_id) {
                             return Result<int64>.Err(errors.custom("webtransport.stream",
-                                "the stream belongs to session " + session.to_string()));
+                                "the stream belongs to session " .. session.to_string()));
                         }
                         return Result<int64>.Ok(stream);
                     },
@@ -257,7 +256,7 @@ export let Session = module (
 
         /// @brief The session ID and role.
         export let.override to_string = func -> string =>
-            "WebTransportSession(" + session_id.to_string() + ", " + (is_client ? "client" : "server") + ")";
+            "WebTransportSession(" .. session_id.to_string() .. ", " .. (is_client ? "client" : "server") .. ")";
     );
 
     /// @brief Opens a QUIC connection to `authority`, waits for the server's settings to allow WebTransport, and

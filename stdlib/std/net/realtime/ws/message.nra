@@ -97,14 +97,12 @@ export let Message = module (
             }
             if (pending.length + frame.payload.length > max_message_size) {
                 return fail(close_status.MessageTooBig, "message exceeds the limit of "
-                    + max_message_size.to_string() + " bytes");
+                    .. max_message_size.to_string() .. " bytes");
             }
             for (let b in frame.payload) {
                 pending.append(b);
             }
-            if (!frame.fin) {
-                return Result<Optional<Message>>.Ok(Optional<Message>.None);
-            }
+            return Result<Optional<Message>>.Ok(Optional<Message>.None) unless frame.fin;
             last code = open_code;
             last data = pending;
             open_code = -1;
@@ -120,7 +118,7 @@ export let Message = module (
 
         /// @brief Whether a message is open and how many bytes it holds.
         export let.override to_string = func -> string =>
-            "MessageAssembler(" + (open_code >= 0 ? "open, " + pending.length.to_string() + " bytes" : "idle") + ")";
+            "MessageAssembler(" .. (open_code >= 0 ? "open, " + pending.length.to_string() + " bytes" : "idle") .. ")";
 
         /// @brief Drops the open message and returns the failure.
         let fail = func(status: int, message: string) -> Result<Optional<Message>> {
