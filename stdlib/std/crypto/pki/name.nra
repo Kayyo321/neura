@@ -15,7 +15,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// `equals` follows RFC 5280, section 7.1: values of the string types compare after case folding and after
 /// removing leading and trailing white space and collapsing inner runs of it to one space (the parts of LDAP
 /// StringPrep this library applies); other values compare by their encodings; the pairs of a multi-valued RDN
-/// compare as sets. `to_string` is RFC 4514 text, most specific RDN first.
+/// compare without regard to order, matching each occurrence once. `to_string` is RFC 4514 text, most specific RDN first.
 /// @see [Std.Crypto.Pki.Name](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Name)
 #Since("0.3.0")
 export let Name = module (
@@ -47,10 +47,10 @@ export let Name = module (
 
         /// @brief RFC 5280 section 7.1 comparison.
         export let matches = func(other: AttributeTypeAndValue) -> bool {
-            if (!type.equals(other.type)) {
+            if (!type.equals(other.type) || is_text != other.is_text) {
                 return false;
             }
-            if (is_text && other.is_text) {
+            if (is_text) {
                 return normalized == other.normalized;
             }
             return same_bytes(value_der, other.value_der);
@@ -134,7 +134,7 @@ export let Name = module (
         export let.override hash_code = func -> uint32 {
             let h: uint64 = 17;
             for (let rdn in rdns) {
-                // Pairs of one RDN are a set: combine them with a sum, which ignores order.
+                // A sum ignores the order of the pairs within each RDN.
                 let sum: uint64 = 0;
                 for (let pair in rdn) {
                     sum = (sum + (pair.hash_code() as uint64)) & 4294967295;
@@ -169,10 +169,15 @@ export let Name = module (
         if (a.length != b.length) {
             return false;
         }
-        for (let x in a) {
+        let matched: bool[list] = new;
+        for (let i = 0; i < b.length; i++) {
+            matched.append(false);
+        }
+        for (let pair in a) {
             let found = false;
-            for (let y in b) {
-                if (x.matches(y)) {
+            for (let i = 0; i < b.length; i++) {
+                if (!matched[i] && pair.matches(b[i])) {
+                    matched[i] = true;
                     found = true;
                     break;
                 }

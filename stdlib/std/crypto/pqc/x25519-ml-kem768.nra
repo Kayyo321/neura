@@ -256,6 +256,6 @@ export let X25519MlKem768 = module (
         /// @brief The scheme name.
         /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-X25519MlKem768)
         #Since("0.3.0")
-        export let.override to_string = func -> string => "X25519MLKEM768";
+        export let.override to_string = func -> string => "X25519MlKem768(<redacted>)";
     );
 );

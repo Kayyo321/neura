@@ -170,7 +170,7 @@ export let MlKem = module (
         export let public_key = func -> MlKemPublicKey => new(parameter_set, public_key_bytes());
 
         /// @brief A fixed placeholder, never the key.
-        export let.override to_string = func -> string => "MlKemPrivateKey(" + name(parameter_set) + ", <redacted>)";
+        export let.override to_string = func -> string => "MlKemPrivateKey(<redacted>)";
     );
 
     /// @brief An ML-KEM parameter set as a `KeyEncapsulation`. The shared secret is a 32-byte `SecretBytes`
@@ -328,6 +328,6 @@ export let MlKem = module (
             return Result<MlKemPrivateKey>.Ok(new(parameter_set, bytes));
         };
 
-        export let.override to_string = func -> string => "MlKem(" + name(parameter_set) + ")";
+        export let.override to_string = func -> string => "MlKem(<redacted>)";
     );
 );

@@ -40,7 +40,7 @@ The following public declarations are taken from the module source; each links t
 - **Csr.CertificationRequest** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/csr.nra#L114)
 - **Csr.CertificationRequest** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/csr.nra#L117)
 - **Csr.CertificationRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/csr.nra#L120)
-  "CertificationRequest(<subject>)". A challenge password is not shown.
+  A fixed placeholder for a request that may contain a challenge password.
 - **Csr** · [`export let parse = func(bytes: uint8[list]) -> Result<CertificationRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/csr.nra#L143)
   Parses a DER certification request (version v1 only). Tagged `#NoDiscard`. Since 0.3.0.
 - **Csr** · [`export let parse_pem = func(text: string) -> Result<CertificationRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/csr.nra#L204)

@@ -42,12 +42,12 @@ The following public declarations are taken from the module source; each links t
 - **Rsa.RsaPrivateKey** · [`export let bits = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L178)
   The bit length of n.
 - **Rsa.RsaPrivateKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L181)
-  A fixed placeholder with the size, never a number.
-- **Rsa** · [`export let parse_public_key = func(modulus: uint8[list], exponent: uint8[list]) -> Result<RsaPublicKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L272)
+  A fixed placeholder for the private key.
+- **Rsa** · [`export let parse_public_key = func(modulus: uint8[list], exponent: uint8[list]) -> Result<RsaPublicKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L271)
   A public key from outside the program. Unusable numbers are `Custom` code `crypto.invalid_key`; a modulus below 2048 bits under a policy that denies `Rsa1024` is `Custom` code `crypto.policy`. Tagged `#NoDiscard`. Since 0.3.0.
-- **Rsa** · [`export let parse_private_key = func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list], prime_p: uint8[list], prime_q: uint8[list], exponent_p: uint8[list], exponent_q: uint8[list], coefficient: uint8[list]) -> Result<RsaPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L290)
+- **Rsa** · [`export let parse_private_key = func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list], prime_p: uint8[list], prime_q: uint8[list], exponent_p: uint8[list], exponent_q: uint8[list], coefficient: uint8[list]) -> Result<RsaPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L289)
   A private key from outside the program: n, e, d, p, q and the optional dP, dQ, qInv (pass empty lists to compute them). Numbers that are not a consistent key are `Custom` code `crypto.invalid_key`; a modulus below 2048 bits under a policy that denies `Rsa1024` is `Custom` code `crypto.policy`. Tagged `#NoDiscard`. Since 0.3.0.
-- **Rsa** · [`export let generate_key_pair = func(bits: int) -> Result<RsaPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L524)
+- **Rsa** · [`export let generate_key_pair = func(bits: int) -> Result<RsaPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/rsa.nra#L523)
   A new key of `bits` bits (2048, 3072 or 4096; another size traps) with e = 65537, from `Entropy.os_bytes` or from the given generator (deterministic for a seeded one). Fails when the entropy source fails, or with `Custom` code `crypto.key_generation` after FIPS 186-5's bound on attempts. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

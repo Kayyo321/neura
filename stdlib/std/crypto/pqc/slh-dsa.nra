@@ -179,7 +179,7 @@ export let SlhDsa = module (
         export let public_key = func -> SlhDsaPublicKey => new(parameter_set, public_key_bytes());
 
         /// @brief A fixed placeholder, never the key.
-        export let.override to_string = func -> string => "SlhDsaPrivateKey(" + name(parameter_set) + ", <redacted>)";
+        export let.override to_string = func -> string => "SlhDsaPrivateKey(<redacted>)";
     );
 
     /// @brief slh_keygen_internal (FIPS 205, Algorithm 18) from the three n-byte seeds; another length traps.
@@ -360,7 +360,7 @@ export let SlhDsa = module (
             }
         };
 
-        export let.override to_string = func -> string => "SlhDsaSigner(" + name(key.parameter_set) + ", <redacted>)";
+        export let.override to_string = func -> string => "SlhDsaSigner(<redacted>)";
     );
 
     /// @brief Verifies SLH-DSA signatures under a public key. `verify` is pure SLH-DSA with an empty context.

@@ -31,7 +31,7 @@ export let BiscuitWire = module (
             bytes = data;
         };
 
-        export let.override to_string = func -> string => "Biscuit Wire Field";
+        export let.override to_string = func -> string => "Biscuit Wire Field(<redacted>)";
     );
 
     let Reader = class (
@@ -77,7 +77,7 @@ export let BiscuitWire = module (
             return Result<uint8[list]>.Ok(bytes);
         };
 
-        export let.override to_string = func -> string => "Biscuit Wire Reader";
+        export let.override to_string = func -> string => "Biscuit Wire Reader(<redacted>)";
     );
 
     let Message = class (
@@ -101,7 +101,7 @@ export let BiscuitWire = module (
             return invalid<Field>("missing required protobuf field");
         };
 
-        export let.override to_string = func -> string => "Biscuit Wire Message";
+        export let.override to_string = func -> string => "Biscuit Wire Message(<redacted>)";
     );
 
     let contains_tag = func(tags: int[], tag: int) -> bool {

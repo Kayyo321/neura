@@ -166,6 +166,10 @@ The following public entries need a runtime service or a binding to a service. T
 | `Pkcs11.open`, `Tpm.open`, `CloudKms.open` | Host providers for token sessions, TPM commands, or authenticated KMS communications. They must hold credentials and private keys outside the circuit, issue opaque scoped handles, and implement the versioned lookup and authenticated wrap contracts. |
 | `Nitro.request_attestation`, `SevSnp.request_report`, `Dcap.request_quote` | Nitro Secure Module, AMD guest report, or Intel SGX/TDX quote host operation. The application passes explicit challenge bytes and the provider returns the device's signed evidence. Offline verification consumes only the report, collateral, and the caller's trust and time inputs. |
 
+## Class display and equality
+
+Secret-bearing classes use fixed displays. Secret byte and key containers use identity equality. Public HPKE sealed messages and CRLite Bloom layers compare and hash their stored fields. X.509 names give each relative distinguished name multiset equality. Equal text attributes hash by normalized text and equal binary attributes hash by DER. PHC strings retain their canonical password-verifier serialization.
+
 ## Edge cases
 
 1. An `update` after a digest's output was read, and a second `finish` or `verify` of a MAC, trap. They never return a value that looks valid.

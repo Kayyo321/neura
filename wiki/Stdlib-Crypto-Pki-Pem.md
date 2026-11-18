@@ -20,7 +20,7 @@ The following public declarations are taken from the module source; each links t
 - **Pem.PemBlock** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/pem.nra#L31)
 - **Pem.PemBlock** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/pem.nra#L47)
 - **Pem.PemBlock** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/pem.nra#L56)
-  "PemBlock(<label>, <n> bytes)". A private key's bytes are never shown.
+  A fixed placeholder for a PEM block that may contain a private key.
 - **Pem** · [`export let decode_all = func(text: string) -> Result<PemBlock[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/pem.nra#L85)
   Every block in the text, in order. A BEGIN line without its END line, a mismatched label, or a line inside a block that breaks the strict grammar is a `Parse` error at the offset of the line. Tagged `#NoDiscard`. Since 0.3.0.
 - **Pem** · [`export let decode = func(text: string, label: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/pem.nra#L186)

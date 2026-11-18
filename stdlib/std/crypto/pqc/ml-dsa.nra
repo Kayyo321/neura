@@ -174,7 +174,7 @@ export let MlDsa = module (
         export let public_key = func -> MlDsaPublicKey => new(parameter_set, public_encoded);
 
         /// @brief A fixed placeholder, never the key.
-        export let.override to_string = func -> string => "MlDsaPrivateKey(" + name(parameter_set) + ", <redacted>)";
+        export let.override to_string = func -> string => "MlDsaPrivateKey(<redacted>)";
     );
 
     /// @brief ML-DSA.KeyGen_internal (FIPS 204, Algorithm 6) from the 32-byte seed xi; another length traps.
@@ -356,7 +356,7 @@ export let MlDsa = module (
             }
         };
 
-        export let.override to_string = func -> string => "MlDsaSigner(" + name(key.parameter_set) + ", <redacted>)";
+        export let.override to_string = func -> string => "MlDsaSigner(<redacted>)";
     );
 
     /// @brief Verifies ML-DSA signatures under a public key. `verify` is pure ML-DSA with an empty context.

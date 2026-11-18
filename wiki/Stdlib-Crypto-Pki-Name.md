@@ -51,11 +51,11 @@ The following public declarations are taken from the module source; each links t
 - **Name.Name** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L134)
 - **Name.Name** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L148)
   RFC 4514 text: the most specific RDN first, RDNs joined by ',' and the pairs of one RDN by '+'.
-- **Name** · [`export let parse = func(element: der.Element) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L249)
+- **Name** · [`export let parse = func(element: der.Element) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L254)
   Reads a Name (an RDNSequence) from its element. An empty RDN, a non-SET RDN or a pair that is not SEQUENCE { OBJECT IDENTIFIER, value } is a `Parse` error; a string value must be valid for its type. Tagged `#NoDiscard`. Since 0.3.0.
-- **Name** · [`export let parse_der = func(bytes: uint8[list]) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L283)
+- **Name** · [`export let parse_der = func(bytes: uint8[list]) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L288)
   Parses the DER encoding of a Name. Tagged `#NoDiscard`. Since 0.3.0.
-- **Name** · [`export let of = func(types: string[], values: string[]) -> Name`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L290)
+- **Name** · [`export let of = func(types: string[], values: string[]) -> Name`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L295)
   A name of single-valued RDNs in the order given, such as `of(["C", "O", "CN"], ["US", "Example", "host"])` with attribute types given by short name (C, O, OU, L, ST, CN, DC, UID, serialNumber, emailAddress) or dotted OID. Country and serialNumber are PrintableString, emailAddress and DC are IA5String, the others UTF8String. An unknown short name traps. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

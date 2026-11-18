@@ -93,9 +93,9 @@ let PqcApiTests = module (
 
     export let test_ml_dsa_printing = func {
         last key = ml_dsa.key_pair_from_seed(ml_dsa.ParameterSet.MlDsa87, bytes(32, 5));
-        test.assert_equal_string("MlDsaPrivateKey(ML-DSA-87, <redacted>)", key.to_string());
+        test.assert_equal_string("MlDsaPrivateKey(<redacted>)", key.to_string());
         test.assert_equal_string("MlDsaPublicKey(ML-DSA-87, 2592 bytes)", key.public_key().to_string());
-        test.assert_equal_string("MlDsaSigner(ML-DSA-87, <redacted>)", new ml_dsa.MlDsaSigner(key).to_string());
+        test.assert_equal_string("MlDsaSigner(<redacted>)", new ml_dsa.MlDsaSigner(key).to_string());
         test.assert_equal_string("MlDsaVerifier(ML-DSA-87)", new ml_dsa.MlDsaVerifier(key.public_key()).to_string());
         test.assert_equal_int32(4896, ml_dsa.private_key_length(ml_dsa.ParameterSet.MlDsa87));
         test.assert_equal_int32(4627, ml_dsa.signature_length(ml_dsa.ParameterSet.MlDsa87));
@@ -115,7 +115,7 @@ let PqcApiTests = module (
         let short = signature;
         short.remove_at(0);
         test.assert(!verifier.verify(message, short));
-        test.assert_equal_string("SlhDsaPrivateKey(SLH-DSA-SHA2-128f, <redacted>)", key.to_string());
+        test.assert_equal_string("SlhDsaPrivateKey(<redacted>)", key.to_string());
         test.assert_equal_string("SlhDsaPublicKey(SLH-DSA-SHA2-128f, 32 bytes)", key.public_key().to_string());
         test.assert_equal_string("crypto.invalid_key",
             error_code(test.assert_err(slh_dsa.parse_public_key(slh_dsa.ParameterSet.Shake256s, bytes(32, 0)))));

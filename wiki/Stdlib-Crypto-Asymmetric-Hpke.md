@@ -113,43 +113,47 @@ The following public declarations are taken from the module source; each links t
 - **Hpke.SealedMessage** · [`export last enc: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L695)
 - **Hpke.SealedMessage** · [`export last ciphertext: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L696)
 - **Hpke.SealedMessage** · [`export let init = func(encapsulated: uint8[list], sealed: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L698)
-- **Hpke.SealedMessage** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L703)
-- **Hpke** · [`export let Suite = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L709)
+- **Hpke.SealedMessage** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L706)
+  Whether both the encapsulation and ciphertext bytes match. Tagged `#NoDiscard`. Since 0.3.0.
+- **Hpke.SealedMessage** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L717)
+  A hash of both byte sequences, including their lengths. Tagged `#NoDiscard`. Since 0.3.0.
+- **Hpke.SealedMessage** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L728)
+- **Hpke** · [`export let Suite = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L734)
   An HPKE ciphersuite (KEM, KDF, AEAD). Tagged `#Final`. Since 0.3.0.
-- **Hpke.Suite** · [`export last kem: Kem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L710)
-- **Hpke.Suite** · [`export last kdf: Kdf`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L711)
-- **Hpke.Suite** · [`export last aead: Aead`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L712)
-- **Hpke.Suite** · [`export let init = func(suite_kem: Kem, suite_kdf: Kdf, suite_aead: Aead)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L716)
+- **Hpke.Suite** · [`export last kem: Kem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L735)
+- **Hpke.Suite** · [`export last kdf: Kdf`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L736)
+- **Hpke.Suite** · [`export last aead: Aead`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L737)
+- **Hpke.Suite** · [`export let init = func(suite_kem: Kem, suite_kdf: Kdf, suite_aead: Aead)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L741)
   The suite, with ephemeral keys from `Entropy.os_bytes` or from the given generator.
-- **Hpke.Suite** · [`export let key_encapsulation = func -> DhKem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L748)
+- **Hpke.Suite** · [`export let key_encapsulation = func -> DhKem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L773)
   The DHKEM of the suite. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_sender_with = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePrivateKey[list], ephemeral: HpkePrivateKey) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L786)
+- **Hpke.Suite** · [`export let setup_sender_with = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePrivateKey[list], ephemeral: HpkePrivateKey) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L811)
   SetupS of any mode with the given ephemeral key: `psk` and `psk_id` are empty in the base and auth modes, and `sender` holds the sender's key in the auth modes (and is empty otherwise). Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_sender = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePrivateKey[list]) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L807)
+- **Hpke.Suite** · [`export let setup_sender = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePrivateKey[list]) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L832)
   SetupS of any mode with a fresh ephemeral key (see `setup_sender_with`). Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_base_sender = func(public_key: HpkePublicKey, info: uint8[list]) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L821)
+- **Hpke.Suite** · [`export let setup_base_sender = func(public_key: HpkePublicKey, info: uint8[list]) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L846)
   SetupBaseS. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list]) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L826)
+- **Hpke.Suite** · [`export let setup_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list]) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L851)
   SetupPSKS. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_auth_sender = func(public_key: HpkePublicKey, info: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L831)
+- **Hpke.Suite** · [`export let setup_auth_sender = func(public_key: HpkePublicKey, info: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L856)
   SetupAuthS. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_auth_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L836)
+- **Hpke.Suite** · [`export let setup_auth_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L861)
   SetupAuthPSKS. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_receiver = func(mode: Mode, enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey[list]) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L843)
+- **Hpke.Suite** · [`export let setup_receiver = func(mode: Mode, enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey[list]) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L868)
   SetupR of any mode: `sender` holds the sender's public key in the auth modes (and is empty otherwise). A malformed `enc` or a failed Diffie-Hellman is `Custom` code `crypto.invalid_ciphertext`. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_base_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list]) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L862)
+- **Hpke.Suite** · [`export let setup_base_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list]) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L887)
   SetupBaseR. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list]) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L867)
+- **Hpke.Suite** · [`export let setup_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list]) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L892)
   SetupPSKR. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_auth_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L873)
+- **Hpke.Suite** · [`export let setup_auth_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L898)
   SetupAuthR. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let setup_auth_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L879)
+- **Hpke.Suite** · [`export let setup_auth_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L904)
   SetupAuthPSKR. Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let seal = func(public_key: HpkePublicKey, info: uint8[list], aad: uint8[list], plaintext: uint8[list]) -> Result<SealedMessage>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L885)
+- **Hpke.Suite** · [`export let seal = func(public_key: HpkePublicKey, info: uint8[list], aad: uint8[list], plaintext: uint8[list]) -> Result<SealedMessage>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L910)
   Single-shot base-mode encryption (RFC 9180, section 6.1). Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let open = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], aad: uint8[list], ciphertext: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L899)
+- **Hpke.Suite** · [`export let open = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], aad: uint8[list], ciphertext: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L924)
   Single-shot base-mode decryption (RFC 9180, section 6.1). Tagged `#NoDiscard`.
-- **Hpke.Suite** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L911)
+- **Hpke.Suite** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/hpke.nra#L936)
 <!-- END SOURCE API -->
 
 ## Shared contracts

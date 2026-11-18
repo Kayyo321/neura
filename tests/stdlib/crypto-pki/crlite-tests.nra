@@ -12,6 +12,16 @@ let.promote _ = import:Std.Core.Result;
 let CrliteTests = module (
     let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
 
+    export let test_bloom_layers_compare_by_dimensions_and_bits = func {
+        last layer = new crlite.BloomLayer(8, 2, new([37]));
+        last copy = new crlite.BloomLayer(8, 2, new([37]));
+        test.assert(layer.equals(copy) && copy.equals(layer));
+        test.assert(layer.hash_code() == copy.hash_code());
+        test.assert(!layer.equals(new crlite.BloomLayer(7, 2, new([37]))));
+        test.assert(!layer.equals(new crlite.BloomLayer(8, 3, new([37]))));
+        test.assert(!layer.equals(new crlite.BloomLayer(8, 2, new([36]))));
+    };
+
     /// @brief Checks every "key=expected" of the cell (hex keys).
     let check_all = func(cascade: crlite.FilterCascade, cell: string) -> int {
         let count = 0;

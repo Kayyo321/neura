@@ -52,8 +52,8 @@ export let Pem = module (
             return h;
         };
 
-        /// @brief "PemBlock(<label>, <n> bytes)". A private key's bytes are never shown.
-        export let.override to_string = func -> string => $"PemBlock({label}, {der.length} bytes)";
+        /// @brief A fixed placeholder for a PEM block that may contain a private key.
+        export let.override to_string = func -> string => "PemBlock(<redacted>)";
     );
 
     let fail = func<T>(offset: int, message: string) -> Result<T> =>

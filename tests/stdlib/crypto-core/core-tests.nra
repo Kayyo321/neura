@@ -80,7 +80,7 @@ let CoreTests = module (
     export let test_secret_key = func {
         let key: SymmetricKey<Marker> = new SecretKey<Marker>(new([1, 2, 3, 4]));
         test.assert_equal_int32(4, key.key_length());
-        test.assert_equal_string("SecretKey(4 bytes, <redacted>)", key.to_string());
+        test.assert_equal_string("SecretKey(<redacted>)", key.to_string());
         let same = new SecretKey<Marker>(new([1, 2, 3, 4]));
         test.assert(same.ct_equals(new SecretKey<Marker>(new([1, 2, 3, 4]))));
         key.wipe();

@@ -73,9 +73,8 @@ export let PrivateKeyInfo = module (
         /// @brief Overwrites the private key bytes.
         export let wipe = func => private_key.wipe();
 
-        /// @brief "PrivateKeyInfo(<algorithm>, <redacted>)".
-        export let.override to_string = func -> string =>
-            "PrivateKeyInfo(" + oids.name_of(algorithm.oid.dotted) + ", <redacted>)";
+        /// @brief A fixed placeholder for the private key.
+        export let.override to_string = func -> string => "PrivateKeyInfo(<redacted>)";
     );
 
     /// @brief An EncryptedPrivateKeyInfo with PBES2 parameters read out. Not secret: compared by DER.

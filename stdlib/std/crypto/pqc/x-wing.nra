@@ -254,6 +254,6 @@ export let XWing = module (
         /// @brief The scheme name.
         /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
-        export let.override to_string = func -> string => "X-Wing";
+        export let.override to_string = func -> string => "XWing(<redacted>)";
     );
 );

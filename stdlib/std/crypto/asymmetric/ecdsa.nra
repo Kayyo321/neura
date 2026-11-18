@@ -174,7 +174,7 @@ export let Ecdsa = module (
         export let public_key = func -> EcPublicKey => new(curve, public_encoded);
 
         /// @brief A fixed placeholder, never the key.
-        export let.override to_string = func -> string => "EcPrivateKey(" + name(curve) + ", <redacted>)";
+        export let.override to_string = func -> string => "EcPrivateKey(<redacted>)";
     );
 
     /// @brief Signs with RFC 6979 deterministic ECDSA; it also verifies against the matching public key.
@@ -236,7 +236,7 @@ export let Ecdsa = module (
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
             new EcdsaVerifier(key.public_key(), hash, low_s).verify(message, signature);
 
-        export let.override to_string = func -> string => "EcdsaSigner(" + name(key.curve) + ", <redacted>)";
+        export let.override to_string = func -> string => "EcdsaSigner(<redacted>)";
     );
 
     /// @brief Verifies ECDSA signatures under a public key.

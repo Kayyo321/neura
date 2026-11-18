@@ -136,7 +136,7 @@ export let Blake2b = module (
             }
         };
 
-        export let.override to_string = func -> string => "Blake2b.Hasher";
+        export let.override to_string = func -> string => "Blake2b.Hasher(<redacted>)";
     );
 
     /// @brief BLAKE2b with `length` bytes of output (1 to 64) of the bytes.

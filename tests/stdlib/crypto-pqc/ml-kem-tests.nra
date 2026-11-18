@@ -122,13 +122,13 @@ let MlKemTests = module (
         last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem768);
         last seed = decode("0000000000000000000000000000000000000000000000000000000000000000");
         last private_key = kem.key_pair_from_seed(seed, seed);
-        test.assert_equal_string("MlKemPrivateKey(ML-KEM-768, <redacted>)", private_key.to_string());
+        test.assert_equal_string("MlKemPrivateKey(<redacted>)", private_key.to_string());
         last public_key = private_key.public_key();
         test.assert_equal_string("MlKemPublicKey(ML-KEM-768, 1184 bytes)", public_key.to_string());
         last again = test.assert_ok(kem.parse_public_key(public_key.to_bytes()));
         test.assert(public_key.equals(again));
         test.assert_equal_uint64(public_key.hash_code() as uint64, again.hash_code() as uint64);
-        test.assert_equal_string("MlKem(ML-KEM-768)", kem.to_string());
+        test.assert_equal_string("MlKem(<redacted>)", kem.to_string());
         test.assert_equal_int32(1184, ml_kem.public_key_length(ml_kem.ParameterSet.MlKem768));
         test.assert_equal_int32(2400, ml_kem.private_key_length(ml_kem.ParameterSet.MlKem768));
         test.assert_equal_int32(1088, ml_kem.ciphertext_length(ml_kem.ParameterSet.MlKem768));

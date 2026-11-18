@@ -111,6 +111,6 @@ export let RsaOaep = module (
             return Result<uint8[list]>.Ok(decoded[0]);
         };
 
-        export let.override to_string = func -> string => "RsaOaep(" + hash.to_string() + ")";
+        export let.override to_string = func -> string => "RsaOaep(<redacted>)";
     );
 );

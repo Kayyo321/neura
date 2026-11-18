@@ -152,7 +152,7 @@ export let Blake3 = module (
             return out;
         };
 
-        export let.override to_string = func -> string => "Blake3.Node";
+        export let.override to_string = func -> string => "Blake3.Node(<redacted>)";
     );
 
     /// @brief A running BLAKE3 hash in one of its three modes. `finish` returns 32 bytes; `squeeze` and `read`
@@ -280,7 +280,7 @@ export let Blake3 = module (
             return out;
         };
 
-        export let.override to_string = func -> string => "BLAKE3";
+        export let.override to_string = func -> string => "BLAKE3(<redacted>)";
     );
 
     /// @brief The first `length` bytes of the BLAKE3 hash of the bytes.

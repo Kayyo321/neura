@@ -1,7 +1,9 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.Pki.Certificate;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
 let der = import:Std.Crypto.Pki.Der;
+let hashing = import:Std.Core.Hash;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
@@ -43,6 +45,23 @@ export let CrLite = module (
             hash_count = hashes;
             bits = data;
         };
+
+        /// @brief Whether the bit count, hash count and bytes match.
+        /// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
+        #[NoDiscard, Since("0.3.0")]
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is BloomLayer)) {
+                return false;
+            }
+            last that = other as BloomLayer;
+            return size == that.size && hash_count == that.hash_count && constant_time.ct_eq(bits, that.bits);
+        };
+
+        /// @brief A hash of the layer dimensions and bytes.
+        /// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
+        #[NoDiscard, Since("0.3.0")]
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(size, hash_count), der.hash_range(bits, 0, bits.length));
 
         export let.override to_string = func -> string => $"BloomLayer({size} bits, {hash_count} hashes)";
     );

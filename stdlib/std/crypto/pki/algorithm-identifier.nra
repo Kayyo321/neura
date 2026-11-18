@@ -98,7 +98,8 @@ export let AlgorithmIdentifier = module (
         };
 
         export let.override hash_code = func -> uint32 =>
-            ((hash.hash_code() as uint64 * 31 + mask_hash.hash_code() as uint64 + salt_length as uint64) & 4294967295) as uint32;
+            ((hash.hash_code() as uint64 * 31 + mask_hash.hash_code() as uint64
+                + salt_length.hash_code() as uint64) & 4294967295) as uint32;
 
         /// @brief "RsaPssParameters(<hash>, MGF1 <hash>, salt <n>)".
         export let.override to_string = func -> string =>

@@ -562,7 +562,7 @@ export let Mp = module (
         /// @brief a^-1 in Montgomery form by Fermat's little theorem, a^(m-2); m must be prime. Zero gives zero.
         export let inv = func(a: uint32[list]) -> uint32[list] => pow(a, plain_sub(m, small(2, n)));
 
-        /// @brief Text naming the bit length, never a value.
-        export let.override to_string = func -> string => "Modulus(" + bits.to_string() + " bits)";
+        /// @brief A fixed display for the modulus.
+        export let.override to_string = func -> string => "Modulus(<redacted>)";
     );
 );

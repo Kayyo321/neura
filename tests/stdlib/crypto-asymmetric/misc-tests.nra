@@ -91,7 +91,7 @@ let MiscTests = module (
         last key = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, seed(5));
         test.assert(new ecdsa.EcdsaSigner(key).verify(new([1]), new ecdsa.EcdsaSigner(key).sign(new([1]))));
         crypto_policy.set_policy(crypto_policy.Policy.Modern);
-        test.assert_equal_string("EcPrivateKey(P-256, <redacted>)", key.to_string());
+        test.assert_equal_string("EcPrivateKey(<redacted>)", key.to_string());
         test.assert_equal_string("EcPublicKey(P-256)", key.public_key().to_string());
         test.assert_equal_string("Ed25519PrivateKey(<redacted>)", new ed25519.Ed25519PrivateKey(seed(6)).to_string());
     };

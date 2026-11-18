@@ -5,6 +5,7 @@ let der = import:Std.Crypto.Pki.Der;
 let hex = import:Std.Encoding.Hex;
 let int64s = import:Std.Core.Int64;
 let name = import:Std.Crypto.Pki.Name;
+let oid = import:Std.Crypto.Pki.Oid;
 let oids = import:Std.Crypto.Pki.Oids;
 let pem = import:Std.Crypto.Pki.Pem;
 let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
@@ -20,6 +21,38 @@ let.promote _ = import:Std.Crypto.Pki.GeneralName;
 // openssl material (support/cert-vectors.nra, scripts/crypto-vectors/gen-pki.py).
 let CertificateTests = module (
     let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_name_equality_matches_each_rdn_attribute_once = func {
+        last cn = writer.oid(oid.of(oids.CommonName));
+        last lower_a = writer.sequence(new([cn, writer.utf8_string("a")]));
+        last upper_a = writer.sequence(new([cn, writer.utf8_string("A")]));
+        last lower_b = writer.sequence(new([cn, writer.utf8_string("b")]));
+        last upper_b = writer.sequence(new([cn, writer.utf8_string("B")]));
+        last repeated = test.assert_ok(name.parse_der(writer.sequence(new([writer.set(new([lower_a, upper_a]))]))));
+        last first = test.assert_ok(name.parse_der(writer.sequence(new([writer.set(new([upper_a, lower_b]))]))));
+        last second = test.assert_ok(name.parse_der(writer.sequence(new([writer.set(new([lower_a, upper_b]))]))));
+        test.assert(!repeated.equals(first) && !first.equals(repeated));
+        test.assert(!repeated.starts_with(first) && !first.starts_with(repeated));
+        test.assert(first.equals(second) && second.equals(first));
+        test.assert(first.hash_code() == second.hash_code());
+    };
+
+    export let test_attribute_values_keep_text_and_der_equality_separate = func {
+        last cn = oid.of(oids.CommonName);
+        last utf8 = new name.AttributeTypeAndValue(cn, writer.utf8_string("foo"), der.TagUtf8String, "foo", true);
+        last printable = new name.AttributeTypeAndValue(cn, writer.printable_string("FOO"), der.TagPrintableString, "FOO", true);
+        last raw = new name.AttributeTypeAndValue(cn, utf8.value_der, der.TagUtf8String, "", false);
+        test.assert(utf8.equals(printable) && utf8.hash_code() == printable.hash_code());
+        test.assert(!utf8.equals(raw) && !raw.equals(utf8));
+    };
+
+    export let test_pss_parameters_hash_negative_salt_without_trapping = func {
+        last hash = oid.of(oids.Sha256);
+        last mask = oid.of(oids.Mgf1);
+        last first = new algorithm_ids.RsaPssParameters(hash, mask, hash, -1, 1);
+        last second = new algorithm_ids.RsaPssParameters(hash, mask, hash, -1, 1);
+        test.assert(first.equals(second) && first.hash_code() == second.hash_code());
+    };
 
     let names_text = func(items: GeneralName[list]) -> string {
         let text = "";

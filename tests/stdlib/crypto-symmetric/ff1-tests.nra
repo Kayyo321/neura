@@ -42,6 +42,6 @@ let Ff1Tests = module (
         let _ = test.assert_err(cipher.encrypt_text("0123-45678", new));
         let _ = test.assert_err(cipher.encrypt_text("12345", new));
         test.assert_equal_int32(6, cipher.min_length);
-        test.assert_equal_string("Ff1(radix 10, <redacted>)", cipher.to_string());
+        test.assert_equal_string("Ff1(<redacted>)", cipher.to_string());
     };
 );

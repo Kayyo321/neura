@@ -177,9 +177,8 @@ export let Rsa = module (
         /// @brief The bit length of n.
         export let bits = func -> int => public_key.bits();
 
-        /// @brief A fixed placeholder with the size, never a number.
-        export let.override to_string = func -> string =>
-            "RsaPrivateKey(" + public_key.bits().to_string() + " bits, <redacted>)";
+        /// @brief A fixed placeholder for the private key.
+        export let.override to_string = func -> string => "RsaPrivateKey(<redacted>)";
     );
 
     /// @brief d || p || q || dP || dQ || qInv, d at k bytes and the others at ceil(k / 2) bytes.
@@ -357,7 +356,7 @@ export let Rsa = module (
             return entropy.os_bytes(count);
         };
 
-        export let.override to_string = func -> string => "ByteSource";
+        export let.override to_string = func -> string => "ByteSource(<redacted>)";
     );
 
     /// @brief Miller-Rabin (FIPS 186-5, appendix B.3.1) on odd w with `iterations` random bases.

@@ -89,7 +89,7 @@ export let Keccak = module (
             }
         };
 
-        export let.override to_string = func -> string => "Keccak.Permutation";
+        export let.override to_string = func -> string => "Keccak.Permutation(<redacted>)";
     );
 
     /// @brief A sponge: absorb, then squeeze. The first squeeze pads with the domain byte and 0x80.
@@ -194,6 +194,6 @@ export let Keccak = module (
 
         let permute = func => permutation.apply(lanes, first_round);
 
-        export let.override to_string = func -> string => "Keccak.Sponge";
+        export let.override to_string = func -> string => "Keccak.Sponge(<redacted>)";
     );
 );

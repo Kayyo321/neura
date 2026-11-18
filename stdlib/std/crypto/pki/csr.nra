@@ -57,7 +57,7 @@ export let Csr = module (
             return der.hash_range(a, 0, a.length);
         };
 
-        export let.override to_string = func -> string => $"Attribute({type.dotted}, {values.length} values)";
+        export let.override to_string = func -> string => "Attribute(<redacted>)";
     );
 
     /// @brief A parsed certification request. Equal requests have equal DER.
@@ -116,8 +116,8 @@ export let Csr = module (
 
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
 
-        /// @brief "CertificationRequest(<subject>)". A challenge password is not shown.
-        export let.override to_string = func -> string => "CertificationRequest(" + subject.to_string() + ")";
+        /// @brief A fixed placeholder for a request that may contain a challenge password.
+        export let.override to_string = func -> string => "CertificationRequest(<redacted>)";
     );
 
     let extensions_module_names = func(value: uint8[list]) -> Result<GeneralName[list]> =>

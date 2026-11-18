@@ -57,7 +57,7 @@ let RsaTests = module (
         test.assert_equal_string(hex.encode(full.expose()), hex.encode(computed.expose()));
         test.assert(full.public_key.equals(computed.public_key));
         test.assert_equal_int32(2048, full.bits());
-        test.assert_equal_string("RsaPrivateKey(2048 bits, <redacted>)", full.to_string());
+        test.assert_equal_string("RsaPrivateKey(<redacted>)", full.to_string());
         test.assert_equal_string("RsaPublicKey(2048 bits)", full.public_key.to_string());
         // A wrong d or swapped CRT numbers are inconsistent.
         test.assert_err(rsa.parse_private_key(decode(rows[1]), decode(rows[2]), decode(rows[3]), decode(rows[4]),

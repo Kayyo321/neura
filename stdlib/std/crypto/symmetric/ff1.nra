@@ -214,7 +214,7 @@ export let Ff1 = module (
             return out;
         };
 
-        export let.override to_string = func -> string => "Ff1(radix " + radix.to_string() + ", <redacted>)";
+        export let.override to_string = func -> string => "Ff1(<redacted>)";
     );
 
     let small = func(x: big.BigInteger) -> int => match (x.to_int64()) {

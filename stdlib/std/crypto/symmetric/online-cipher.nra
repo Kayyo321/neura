@@ -78,7 +78,7 @@ export let OnlineCipher = module (
         /// @brief Whether the final segment was sealed.
         export let is_ended = func -> bool => ended;
 
-        export let.override to_string = func -> string => "StreamEncryptor(" + index.to_string() + " segments)";
+        export let.override to_string = func -> string => "StreamEncryptor(<redacted>)";
     );
 
     /// @brief Opens a stream segment by segment, in order.
@@ -133,7 +133,7 @@ export let OnlineCipher = module (
             return Result<Unit>.Err(error.custom("crypto.authentication", "stream truncated or not authentic"));
         };
 
-        export let.override to_string = func -> string => "StreamDecryptor(" + index.to_string() + " segments)";
+        export let.override to_string = func -> string => "StreamDecryptor(<redacted>)";
     );
 
     /// @brief The plaintext cut into segments of `segment_length` bytes (the last may be shorter; an empty

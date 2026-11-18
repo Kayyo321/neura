@@ -283,7 +283,7 @@ export let Hpke = module (
         export let public_key = func -> HpkePublicKey => new(kem, public_encoded);
 
         /// @brief A fixed placeholder, never the key.
-        export let.override to_string = func -> string => "HpkePrivateKey(" + name(kem) + ", <redacted>)";
+        export let.override to_string = func -> string => "HpkePrivateKey(<redacted>)";
     );
 
     /// @brief The public key of private key bytes, or an empty list when they are not a private key.
@@ -563,7 +563,7 @@ export let Hpke = module (
             return new(labeled_expand(kdf, suite_id, eae_prk, "shared_secret", kem_context, n_secret(kem)));
         };
 
-        export let.override to_string = func -> string => "DhKem(" + name(kem) + ")";
+        export let.override to_string = func -> string => "DhKem(<redacted>)";
     );
 
     /// @brief The keys of a context: the AEAD key, the base nonce and the exporter secret (RFC 9180, section
@@ -698,6 +698,31 @@ export let Hpke = module (
         export let init = func(encapsulated: uint8[list], sealed: uint8[list]) {
             enc = encapsulated;
             ciphertext = sealed;
+        };
+
+        /// @brief Whether both the encapsulation and ciphertext bytes match.
+        /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
+        #[NoDiscard, Since("0.3.0")]
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SealedMessage)) {
+                return false;
+            }
+            last that = other as SealedMessage;
+            return constant_time.ct_eq(enc, that.enc) && constant_time.ct_eq(ciphertext, that.ciphertext);
+        };
+
+        /// @brief A hash of both byte sequences, including their lengths.
+        /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
+        #[NoDiscard, Since("0.3.0")]
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(enc.length as uint32, ciphertext.length as uint32);
+            for (let byte in enc) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            for (let byte in ciphertext) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            return hash;
         };
 
         export let.override to_string = func -> string =>
@@ -908,7 +933,6 @@ export let Hpke = module (
             }
         };
 
-        export let.override to_string = func -> string =>
-            "Hpke.Suite(" + name(kem) + ", " + kdf.to_string() + ", " + aead.to_string() + ")";
+        export let.override to_string = func -> string => "Hpke.Suite(<redacted>)";
     );
 );

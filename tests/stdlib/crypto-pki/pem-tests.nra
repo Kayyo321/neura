@@ -66,7 +66,8 @@ let PemTests = module (
         test.assert_equal_int32(4, blocks.length);
         test.assert_equal_string("CERTIFICATE", blocks[0].label);
         test.assert_equal_string("PRIVATE KEY", blocks[3].label);
-        test.assert_equal_string("PemBlock(PRIVATE KEY, 3 bytes)", blocks[3].to_string());
+        test.assert_equal_string("PemBlock(<redacted>)", blocks[3].to_string());
+        test.assert_equal_string("PemBlock(<redacted>)", blocks[0].to_string());
         test.assert(blocks[0].equals(new pem.PemBlock("CERTIFICATE", der_of("root"))));
         // Two certificates: `decode` wants exactly one block with the label.
         let _ = test.assert_err(pem.decode(text, "CERTIFICATE"));

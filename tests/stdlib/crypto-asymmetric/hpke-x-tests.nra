@@ -10,6 +10,16 @@ let vectors = import:HpkeVectors;
 let HpkeXTests = module (
     let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
 
+    export let test_sealed_messages_compare_by_both_byte_sequences = func {
+        last original = new hpke.SealedMessage(new([1]), new([2, 3]));
+        last copy = new hpke.SealedMessage(new([1]), new([2, 3]));
+        test.assert(original.equals(copy) && copy.equals(original));
+        test.assert(original.hash_code() == copy.hash_code());
+        test.assert(!original.equals(new hpke.SealedMessage(new([4]), new([2, 3]))));
+        test.assert(!original.equals(new hpke.SealedMessage(new([1]), new([2, 4]))));
+        test.assert(!original.equals(new hpke.SealedMessage(new([1, 2]), new([3]))));
+    };
+
     let kem_of = func(id: string) -> hpke.Kem {
         if (id == "16") {
             return hpke.Kem.DhKemP256HkdfSha256;
@@ -212,7 +222,7 @@ let HpkeXTests = module (
         last zero_key = new hpke.HpkePublicKey(kem, test.assert_ok(hex.decode("0000000000000000000000000000000000000000000000000000000000000000")));
         test.assert_err(kem_object.try_encapsulate(zero_key));
         test.assert_err(hpke.parse_public_key(hpke.Kem.DhKemP256HkdfSha256, new([4, 1, 2])));
-        test.assert_equal_string("HpkePrivateKey(DHKEM(X25519, HKDF-SHA256), <redacted>)", recipient.to_string());
+        test.assert_equal_string("HpkePrivateKey(<redacted>)", recipient.to_string());
         test.assert(recipient.public_key().equals(new hpke.HpkePublicKey(kem, recipient.public_key_bytes())));
     };
 );
