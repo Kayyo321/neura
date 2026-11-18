@@ -33,8 +33,13 @@ export let ForeignValue = module (
     #Pure
     export let as_bool = func(value: ForeignValue) -> bool {
         match (value) {
-            ForeignValue.Bool(v) => { return v; },
-            _ => { mismatch("Bool", value); return false; },
+            ForeignValue.Bool(v) => {
+                return v;
+            },
+            _ => {
+                mismatch("Bool", value);
+                return false;
+            },
         }
     };
 
@@ -46,16 +51,37 @@ export let ForeignValue = module (
     #Pure
     export let as_int64 = func(value: ForeignValue) -> int64 {
         match (value) {
-            ForeignValue.Bool(v) => { return v ? 1 : 0; },
-            ForeignValue.Int8(v) => { return v as int64; },
-            ForeignValue.UInt8(v) => { return v as int64; },
-            ForeignValue.Int16(v) => { return v as int64; },
-            ForeignValue.UInt16(v) => { return v as int64; },
-            ForeignValue.Int32(v) => { return v as int64; },
-            ForeignValue.UInt32(v) => { return v as int64; },
-            ForeignValue.Int64(v) => { return v; },
-            ForeignValue.UInt64(v) => { return v as int64; },
-            _ => { mismatch("an integer", value); return 0; },
+            ForeignValue.Bool(v) => {
+                return v ? 1 : 0;
+            },
+            ForeignValue.Int8(v) => {
+                return v as int64;
+            },
+            ForeignValue.UInt8(v) => {
+                return v as int64;
+            },
+            ForeignValue.Int16(v) => {
+                return v as int64;
+            },
+            ForeignValue.UInt16(v) => {
+                return v as int64;
+            },
+            ForeignValue.Int32(v) => {
+                return v as int64;
+            },
+            ForeignValue.UInt32(v) => {
+                return v as int64;
+            },
+            ForeignValue.Int64(v) => {
+                return v;
+            },
+            ForeignValue.UInt64(v) => {
+                return v as int64;
+            },
+            _ => {
+                mismatch("an integer", value);
+                return 0;
+            },
         }
     };
 
@@ -63,8 +89,12 @@ export let ForeignValue = module (
     #Pure
     export let as_uint64 = func(value: ForeignValue) -> uint64 {
         match (value) {
-            ForeignValue.UInt64(v) => { return v; },
-            _ => { return as_int64(value) as uint64; },
+            ForeignValue.UInt64(v) => {
+                return v;
+            },
+            _ => {
+                return as_int64(value) as uint64;
+            },
         }
     };
 
@@ -72,8 +102,13 @@ export let ForeignValue = module (
     #Pure
     export let as_float32 = func(value: ForeignValue) -> float32 {
         match (value) {
-            ForeignValue.Float32(v) => { return v; },
-            _ => { mismatch("Float32", value); return 0.0 as float32; },
+            ForeignValue.Float32(v) => {
+                return v;
+            },
+            _ => {
+                mismatch("Float32", value);
+                return 0.0 as float32;
+            },
         }
     };
 
@@ -81,18 +116,32 @@ export let ForeignValue = module (
     #Pure
     export let as_float64 = func(value: ForeignValue) -> float64 {
         match (value) {
-            ForeignValue.Float32(v) => { return v as float64; },
-            ForeignValue.Float64(v) => { return v; },
-            _ => { mismatch("a float", value); return 0.0; },
+            ForeignValue.Float32(v) => {
+                return v as float64;
+            },
+            ForeignValue.Float64(v) => {
+                return v;
+            },
+            _ => {
+                mismatch("a float", value);
+                return 0.0;
+            },
         }
     };
 
     /// @brief The segment of an Address or Struct result.
     export let as_segment = func(value: ForeignValue) -> MemorySegment {
         match (value) {
-            ForeignValue.Address(v) => { return v; },
-            ForeignValue.Struct(v) => { return v; },
-            _ => { mismatch("Address", value); return null_segment(); },
+            ForeignValue.Address(v) => {
+                return v;
+            },
+            ForeignValue.Struct(v) => {
+                return v;
+            },
+            _ => {
+                mismatch("Address", value);
+                return null_segment();
+            },
         }
     };
 

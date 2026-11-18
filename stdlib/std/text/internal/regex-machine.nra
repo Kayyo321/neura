@@ -593,8 +593,8 @@ export let RegexMachine = module (
     ///
     /// A pc already marked with this generation is skipped. The stacks are empty on entry and on return.
     let add_thread = func(insts: Inst[list], marks: int[list], generation: int, stack_pcs: int[list],
-                          stack_caps: (int[list])[list], pcs: int[list], caps_list: (int[list])[list], start_pc: int,
-                          start_caps: int[list], input: string, pos: int) {
+        stack_caps: (int[list])[list], pcs: int[list], caps_list: (int[list])[list], start_pc: int,
+        start_caps: int[list], input: string, pos: int) {
         let pc = start_pc;
         let caps = start_caps;
         do {

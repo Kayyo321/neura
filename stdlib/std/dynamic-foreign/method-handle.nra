@@ -112,7 +112,7 @@ export let MethodHandle = module (
             last layouts = signature.argument_layouts();
             if (args.length != layouts.length) {
                 trap_with_message("invalid argument: expected " + layouts.length.to_string() + " arguments, got " +
-                                  args.length.to_string());
+                    args.length.to_string());
             }
             let temporary: Arena = nil;
             last values: ForeignValue[list] = new;
@@ -149,7 +149,7 @@ export let MethodHandle = module (
             last layouts = signature.argument_layouts();
             if (values.length != layouts.length) {
                 trap_with_message("invalid argument: expected " + layouts.length.to_string() + " arguments, got " +
-                                  values.length.to_string());
+                    values.length.to_string());
             }
             last bytes: uint8[list] = new;
             for (let i = 0; i < values.length; i++) {
@@ -162,7 +162,6 @@ export let MethodHandle = module (
             };
         };
     );
-
 
     /// @brief The arguments of an array as a list.
     let listed = func(args: Argument[]) -> Argument[list] {

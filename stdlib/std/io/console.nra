@@ -268,7 +268,9 @@ export let Console = module (
                     errors.Error.Parse { kind: _, offset: _, message: _ } => {
                         failure.trap("invalid format: " + errors.message(problem));
                     },
-                    _ => { failure.trap("console write failed"); },
+                    _ => {
+                        failure.trap("console write failed");
+                    },
                 }
             },
         }

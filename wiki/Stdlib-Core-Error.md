@@ -36,7 +36,7 @@ The following public declarations are taken from the module source; each links t
 - **Error.SimpleDetail** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L54)
   Returns the stored detail message. Tagged `#Pure`.
 - **Error.SimpleDetail** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L58)
-  Two simple details are equal when their code and message are. Tagged `#Pure`.
+  Two simple details are equal when their code and message are. Reading the argument can run its class hook.
 - **Error.SimpleDetail** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L68)
   Combines the hashes of the code and message. Tagged `#Pure`.
 - **Error.SimpleDetail** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L73)
@@ -77,9 +77,9 @@ The following public declarations are taken from the module source; each links t
   The error, then each cause in order. Tagged `#Pure`, `#ThreadSafe`.
 - **Error** · [`export let equals = func(a: Error, b: Error) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L223)
   Structural equality. Custom details compare with their equals member.
-- **Error** · [`export let hash = func(e: Error) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L267)
+- **Error** · [`export let hash = func(e: Error) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L279)
   Starts from the variant's position and combines each field's hash.
-- **Error** · [`export let to_string = func(e: Error) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L280)
+- **Error** · [`export let to_string = func(e: Error) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra#L292)
   The same text as message.
 <!-- END SOURCE API -->
 

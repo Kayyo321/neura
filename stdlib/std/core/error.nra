@@ -227,7 +227,9 @@ export let Error = module (
                     Error.Io { kind: other_kind, message: other_text, path: other_path } => {
                         return kind == other_kind && text == other_text && path == other_path;
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Parse { kind, offset, message: text } => {
@@ -235,7 +237,9 @@ export let Error = module (
                     Error.Parse { kind: other_kind, offset: other_offset, message: other_text } => {
                         return kind == other_kind && offset == other_offset && text == other_text;
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Encoding { offset, message: text } => {
@@ -243,13 +247,19 @@ export let Error = module (
                     Error.Encoding { offset: other_offset, message: other_text } => {
                         return offset == other_offset && text == other_text;
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Custom(detail) => {
                 match (b) {
-                    Error.Custom(other_detail) => { return detail === other_detail; },
-                    _ => { return false; },
+                    Error.Custom(other_detail) => {
+                        return detail === other_detail;
+                    },
+                    _ => {
+                        return false;
+                    },
                 }
             },
             Error.Context { message: text, cause } => {
@@ -257,7 +267,9 @@ export let Error = module (
                     Error.Context { message: other_text, cause: other_cause } => {
                         return text == other_text && equals(cause.cause, other_cause.cause);
                     },
-                    _ => { return false; },
+                    _ => {
+                        return false;
+                    },
                 }
             },
         }

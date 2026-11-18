@@ -32,7 +32,7 @@ let price_owner = func(requests: channels.Receiver<Request>) {
                 }
             },
             _ => {
-                return;  // Closed or cancelled: stop serving.
+                return; // Closed or cancelled: stop serving.
             },
         }
     }
@@ -102,7 +102,7 @@ export let Main = module:program.Entry (
             last cake = spawn price_of(requests, "cake");
             last unknown = spawn price_of(requests, "soup");
             console.print_line("tea " + tea.join().to_string() + ", cake " + cake.join().to_string() +
-                               ", soup " + unknown.join().to_string());
+                ", soup " + unknown.join().to_string());
             requests_closer.close();
         }
 

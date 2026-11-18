@@ -106,11 +106,13 @@ export let MemorySegment = module (
         /// @brief Writes a 16-bit signed integer.
         export let set_int16 = func(offset: int64, value: int16) =>
             store(offset, native.signed_bits(value as int64), 2);
+
         /// @brief Writes a 16-bit unsigned integer.
         export let set_uint16 = func(offset: int64, value: uint16) => store(offset, value as uint64, 2);
         /// @brief Writes a 32-bit signed integer.
         export let set_int32 = func(offset: int64, value: int32) =>
             store(offset, native.signed_bits(value as int64), 4);
+
         /// @brief Writes a 32-bit unsigned integer.
         export let set_uint32 = func(offset: int64, value: uint32) => store(offset, value as uint64, 4);
         /// @brief Writes a 64-bit signed integer.
@@ -120,6 +122,7 @@ export let MemorySegment = module (
         /// @brief Writes an IEEE binary32 float.
         export let set_float32 = func(offset: int64, value: float32) =>
             store(offset, float32s.to_bits(value) as uint64, 4);
+
         /// @brief Writes an IEEE binary64 float.
         export let set_float64 = func(offset: int64, value: float64) => store(offset, float64s.to_bits(value), 8);
         /// @brief Writes the address of `value`.

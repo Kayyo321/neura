@@ -37,7 +37,9 @@ let App = module:program.Entry (
         console.print_line(desk.current.user);
         let admin: Admin = nil;
         desk.current = admin;
-        if (desk.current == nil) { console.print_line("no administrator"); }
+        if (desk.current == nil) {
+            console.print_line("no administrator");
+        }
         return program.ExitCode.Ok;
     };
 );
