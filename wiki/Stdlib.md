@@ -183,6 +183,21 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | --- | --- | --- |
 | [`Std.Reflect.Core.TypeInfo`](Stdlib-Reflect-TypeInfo) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-TypeInfo#exported-declarations) |
 | [`Std.Reflect.Type.TypeKind`](Stdlib-Reflect-TypeKind) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-TypeKind#exported-declarations) |
+| [`Std.Reflect.Core.TypeId`](Stdlib-Reflect-TypeId) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-TypeId#exported-declarations) |
+| [`Std.Reflect.Core.MemoryLayout`](Stdlib-Reflect-MemoryLayout) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-MemoryLayout#exported-declarations) |
+| [`Std.Reflect.Core.ReflectPolicy`](Stdlib-Reflect-ReflectPolicy) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-ReflectPolicy#exported-declarations) |
+| [`Std.Reflect.Core.TypeRegistry`](Stdlib-Reflect-TypeRegistry) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-TypeRegistry#exported-declarations) |
+| [`Std.Reflect.Type.TypeDescriptor`](Stdlib-Reflect-TypeDescriptor) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-TypeDescriptor#exported-declarations) |
+| [`Std.Reflect.Member.Members`](Stdlib-Reflect-Members) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Members#exported-declarations) |
+| [`Std.Reflect.Member.ValueCursor`](Stdlib-Reflect-ValueCursor) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-ValueCursor#exported-declarations) |
+| [`Std.Reflect.Attribute.Attributes`](Stdlib-Reflect-Attributes) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Attributes#exported-declarations) |
+| [`Std.Reflect.Dynamic.Variant`](Stdlib-Reflect-Variant) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Variant#exported-declarations) |
+| [`Std.Reflect.Codec.JsonBridge`](Stdlib-Reflect-JsonBridge) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-JsonBridge#exported-declarations) |
+| [`Std.Reflect.Codec.Walk`](Stdlib-Reflect-Walk) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Walk#exported-declarations) |
+| [`Std.Reflect.Codec.SchemaBuilder`](Stdlib-Reflect-SchemaBuilder) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-SchemaBuilder#exported-declarations) |
+| [`Std.Reflect.Ffi.Abi`](Stdlib-Reflect-Abi) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Abi#exported-declarations) |
+| [`Std.Reflect.Ffi.ForeignCall`](Stdlib-Reflect-ForeignCall) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-ForeignCall#exported-declarations) |
+| [`Std.Reflect.Proxy.DynamicProxy`](Stdlib-Reflect-DynamicProxy) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-DynamicProxy#exported-declarations) |
 
 ### `Std.Random`
 

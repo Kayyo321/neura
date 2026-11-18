@@ -1282,7 +1282,7 @@ Contracts deliberately kept: insertion-ordered hash collections, separate read-o
 | Area | Status | Reason |
 | --- | --- | --- |
 | Concurrent collections; threads and executors that outlive a scope; free-standing locks | Not provided | `Std.Concurrent` supplies scoped tasks, channels, worker groups, `AtomicInt64`, `Semaphore`, and `Guarded<T>` ([section 19](#19-stdconcurrent)). Build a concurrent collection on `Guarded<T>` or as an owner task. No other library class is transferable, so a collection belongs to one task. |
-| Reflection, runtime class loading, serialization of arbitrary objects | Excluded | The library needs class and interface type tests, which are available without a general reflection model. |
+| Runtime class loading | Excluded | A program's classes are fixed when it is built. Reflection over them, and serialization of arbitrary values, is `Std.Reflect` ([section 20](#20-stdreflect)). |
 | Finalizers, weak references | Excluded | Reclamation runs no code, by design. |
 | Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
 | Time zones, locales, localized formatting, collation | Not provided | They need large versioned data tables. |
@@ -1452,3 +1452,41 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency.md) s
 - `Channel.State` is the identity the three ends of one channel share. A program does not construct one.
 - Tests: `stdlib-concurrent` for `Tasks` and `WorkerGroup`; the `concurrency-*` and `backend-concurrency` entries for the rest ([Concurrency](Concurrency.md#15-verification)).
 - Task safety of the library as a whole is in [section 5.8](#58-task-safety).
+
+## 20. `Std.Reflect`
+
+*Added in 0.3.0 ([design](../design/Reflect030.md), implemented autonomously, proposed).* Reflection describes the types of the running program and works with values of them dynamically. The compiler emits a descriptor for each type of the program's *reflection universe* (the scalars, every class the program allocates, every type it reflects, and everything their members reach) only when the program uses `Std.Reflect`; a program that does not builds the image it built before. Descriptors are constants of the image, so reflection works in images without names or a source map and in images built from `.nir`, and two builds of one program are identical.
+
+| Module | Contents |
+| --- | --- |
+| `Std.Reflect.Core.TypeInfo` | The record `typeof` returns (kind, name, qualified name). |
+| `Std.Reflect.Core.TypeId` | A 128-bit fingerprint: the first 16 bytes of SHA-256 of `kind:qualified-name@declaring-file`, the same in every build. |
+| `Std.Reflect.Core.MemoryLayout` | The NVR representation of a type: value words, form, whether it is plain data, scalar bit width. |
+| `Std.Reflect.Core.ReflectPolicy` | Marker interfaces `Strip` and `Layout` that a class implements to keep less; `Full` otherwise. Two markers are E1302. |
+| `Std.Reflect.Core.TypeRegistry` | Every universe type by ordinal, `TypeId` or qualified name. |
+| `Std.Reflect.Type.TypeKind`, `Std.Reflect.Type.TypeDescriptor` | The kind of a type, and its descriptor: names, identity, layout, policy, base, interfaces, generic origin and arguments, fields (base fields first), variants with payloads, constructors, instance methods, element types and tags. `of<T>()`, `of_value(value)` (the dynamic class of a reference), `of_ordinal`, `of_info`. |
+| `Std.Reflect.Member.Members`, `Std.Reflect.Member.ValueCursor` | `FieldInfo` (flags, property accessors, tags), `VariantInfo`, `MethodInfo`, `ParamInfo`, `ConstructorInfo`, `Visibility`, `FieldFlags`; cursors that read and write a value by a path of member indexes. |
+| `Std.Reflect.Attribute.Attributes` | Tags as runtime attributes with their arguments as written; `serial_name`, `skipped` and `sensitive` read `#SerialName`, `#Skip` and `#Sensitive`. |
+| `Std.Reflect.Dynamic.Variant` | A value with its type. `of(value)`, `get<T>()` (a checked unpack), `field`, `set_field`, `length`, `element`, `variant_index`, `invoke`, and `construct` (a constructor of a class or record, a variant of an enum, a list or a tuple). Every argument is checked against its declared type: nothing is converted, and a mismatch, a `const` or `last` field, or a class whose policy keeps no layout traps. Fields with accessors are read and written through them. |
+| `Std.Reflect.Codec.JsonBridge`, `Std.Reflect.Codec.Walk`, `Std.Reflect.Codec.SchemaBuilder` | Any value to a `Std.Encoding.Json.JsonValue` and back with no generated code; a depth-first walk with visitors, cycle detection and skipping; the JSON Schema, proto3 messages and SQL table of a type. |
+| `Std.Reflect.Ffi.Abi`, `Std.Reflect.Ffi.ForeignCall` | C struct layouts and argument classes for a declared target triple (System V x86-64, AAPCS64, Windows x64, wasm32); native functions called with `Variant` arguments through `Std.DynamicForeign` (needs the native capability). |
+| `Std.Reflect.Proxy.DynamicProxy` | `create<I>(handler)`: an object implementing the interface `I` whose calls reach an `InvocationHandler`; `forward` to call a reflected object. An interface with a property, a static requirement, or a generic or variadic method is E1300. |
+
+Limits: an array lives in its region and has no dynamic value (E1301 where one is packed; array fields are skipped), and neither do scope-bound values and primitive references. Generic and variadic methods are not listed, and static functions and the root methods are not invocable. A proxy reports its dynamic type as `class`. `long double`, bit fields and packed structs have no C layout. [reflection.nra](../../examples/types/reflection.nra) uses descriptors, the JSON bridge, a field write and a proxy.
+
+<!-- example: check -->
+```neura
+let console = import:Std.Io.Console;
+let bridge = import:Std.Reflect.Codec.JsonBridge;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Point = record (x: int32, y: int32);
+
+let round_trip = func(p: Point) -> Point {
+    for (let field in types.of_value(p).fields) {
+        console.print_line(field.name + ": " + field.type_name());
+    }
+    return bridge.decode_as<Point>(bridge.encode(variants.of(p)));
+};
+```
