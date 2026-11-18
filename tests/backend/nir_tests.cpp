@@ -1387,7 +1387,9 @@ NEURA_TEST(nir, any_round_trips_as_version_1_12_and_its_unpack_needs_a_tag_test)
     auto* unpack = find_node(describe, IrOp::AnyUnpack);
     check(unpack != nullptr, "describe unpacks its subject");
     auto copy = *unpack;
-    auto discard = IrNode{IrOp::Discard, {}, copy.span};
+    IrNode discard{};
+    discard.op = IrOp::Discard;
+    discard.span = copy.span;
     discard.operands.push_back(std::move(copy));
     describe.insert(describe.begin() + 1, std::move(discard));
     expect_issue(outside, "is not inside a region selected by a test of its tag");
