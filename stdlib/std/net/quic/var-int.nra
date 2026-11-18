@@ -53,7 +53,7 @@ export let VarInt = module (
     /// @brief Appends the encoding of `value` in `length` bytes to `out` (see `encode_with_length`).
     export let append_with_length = func(out: uint8[list], value: uint64, length: int) {
         check(value);
-        if (!(length == 1 or 2 or 4 or 8) || length < encoded_length(value)) {
+        if (not (length == 1 or 2 or 4 or 8) || length < encoded_length(value)) {
             trap_with_message("invalid argument: varint length");
         }
         last prefix: uint64 = length == 1 ? 0 : length == 2 ? 1 : length == 4 ? 2 : 3;

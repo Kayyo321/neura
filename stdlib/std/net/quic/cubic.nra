@@ -181,7 +181,7 @@ export let Cubic = module (
 
         /// @brief Text such as "Cubic(window 12000, in flight 0)".
         export let.override to_string = func -> string =>
-            "Cubic(window " + cwnd.to_string() + ", in flight " + in_flight.to_string() + ")";
+            "Cubic(window " .. cwnd.to_string() .. ", in flight " .. in_flight.to_string() .. ")";
     );
 
     /// @brief K in whole milliseconds, rounded down: cbrt((w_max - cwnd_epoch) / (C * size)) seconds, with

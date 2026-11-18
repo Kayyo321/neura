@@ -100,7 +100,7 @@ export let ReplayFilter = module (
                 last word = (p / 64) as int;
                 current[word] = current[word] | ((1 as uint64) << ((p % 64) as uint64));
             }
-            return Result<bool>.Ok(!seen);
+            return Result<bool>.Ok(not seen);
         };
 
         /// @brief True when `token` may have been recorded within the window, without recording it. Err only
@@ -114,7 +114,7 @@ export let ReplayFilter = module (
 
         /// @brief Text such as "ReplayFilter(4096 bits, 4 hashes)". The seed is not shown.
         export let.override to_string = func -> string =>
-            "ReplayFilter(" + bits.to_string() + " bits, " + hashes.to_string() + " hashes)";
+            "ReplayFilter(" .. bits.to_string() .. " bits, " .. hashes.to_string() .. " hashes)";
 
         /// @brief Moves to a new generation when the window has passed.
         let rotate = func -> Result<bool> {

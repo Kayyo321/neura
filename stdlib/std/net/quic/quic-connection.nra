@@ -82,18 +82,14 @@ export let QuicConnection = module (
         /// @brief Opens a stream of this side, bidirectional or send-only.
         #NoDiscard
         export let open_stream = func(bidirectional: bool) -> Result<int64> {
-            if (!open_now) {
-                return Result<int64>.Err(bytes.closed("connection", label));
-            }
+            return Result<int64>.Err(bytes.closed("connection", label)) unless open_now;
             return id_result(quic_open_stream(id, bidirectional));
         };
 
         /// @brief Waits for the next stream the peer opens.
         #NoDiscard
         export let accept_stream = func -> Result<int64> {
-            if (!open_now) {
-                return Result<int64>.Err(bytes.closed("connection", label));
-            }
+            return Result<int64>.Err(bytes.closed("connection", label)) unless open_now;
             return id_result(quic_accept_stream(id, timeout_nanos));
         };
 
@@ -102,9 +98,7 @@ export let QuicConnection = module (
         #NoDiscard
         export let send_on = func(stream: int64, frame: uint8[list]) -> Result<Unit> {
             check_open()?;
-            if (!stream_ids.may_send(stream, client)) {
-                return Result<Unit>.Err(state_error(stream, "is receive-only for this side"));
-            }
+            return Result<Unit>.Err(state_error(stream, "is receive-only for this side")) unless stream_ids.may_send(stream, client);
             return written(quic_stream_write(id, stream, frame, false), frame.length);
         };
 
@@ -113,9 +107,7 @@ export let QuicConnection = module (
         #NoDiscard
         export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>> {
             check_open()?;
-            if (!stream_ids.may_receive(stream, client)) {
-                return Result<Optional<uint8[list]>>.Err(state_error(stream, "is send-only for this side"));
-            }
+            return Result<Optional<uint8[list]>>.Err(state_error(stream, "is send-only for this side")) unless stream_ids.may_receive(stream, client);
             return match (quic_stream_read(id, stream, 65536, timeout_nanos)) {
                 BytesOutcome.Ok(chunk) => Result<Optional<uint8[list]>>.Ok(chunk.length == 0
                     ? Optional<uint8[list]>.None : Optional<uint8[list]>.Some(chunk)),
@@ -128,9 +120,7 @@ export let QuicConnection = module (
         #NoDiscard
         export let finish_stream = func(stream: int64) -> Result<Unit> {
             check_open()?;
-            if (!stream_ids.may_send(stream, client)) {
-                return Result<Unit>.Err(state_error(stream, "is receive-only for this side"));
-            }
+            return Result<Unit>.Err(state_error(stream, "is receive-only for this side")) unless stream_ids.may_send(stream, client);
             return written(quic_stream_write(id, stream, new, true), 0);
         };
 
@@ -188,9 +178,7 @@ export let QuicConnection = module (
 
         /// @brief Closes the connection with application error 0 (CONNECTION_CLOSE). Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (quic_close(id, 0, "")) {
                 DoneOutcome.Ok => bytes.ok(),
@@ -200,13 +188,11 @@ export let QuicConnection = module (
 
         /// @brief Text such as "QuicConnection(client, h3, 192.0.2.1:443)".
         export let.override to_string = func -> string =>
-            "QuicConnection(" + (client ? "client" : "server") + ", " + alpn + ", " + label + ")";
+            "QuicConnection(" .. (client ? "client" : "server") .. ", " .. alpn .. ", " .. label .. ")";
 
         /// @brief Closed when the connection is.
         let check_open = func -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("connection", label));
-            }
+            return Result<Unit>.Err(bytes.closed("connection", label)) unless open_now;
             return bytes.ok();
         };
 
@@ -265,16 +251,14 @@ export let QuicConnection = module (
     let ticket_of = func(held: [bool, uint8[list], int64, int64, int64], server_name: string, alpn: string,
         now: instants.Instant) -> Result<Optional<SessionTicket>> {
         let [present, data, lifetime, age_add, max_early] = held;
-        if (!present) {
-            return Result<Optional<SessionTicket>>.Ok(Optional<SessionTicket>.None);
-        }
+        return Result<Optional<SessionTicket>>.Ok(Optional<SessionTicket>.None) unless present;
         last ticket = tickets.create(data, server_name, alpn, now, lifetime, age_add, max_early)?;
         return Result<Optional<SessionTicket>>.Ok(Optional<SessionTicket>.Some(ticket));
     };
 
     /// @brief A `quic.stream_state` error.
     let state_error = func(stream: int64, text: string) -> errors.Error =>
-        errors.custom("quic.stream_state", "stream " + stream.to_string() + " " + text);
+        errors.custom("quic.stream_state", "stream " .. stream.to_string() .. " " .. text);
 
     /// @brief Opens a client connection. Needed service: neura.net.quic.connect.
     /// @stub no QUIC host service in any runtime

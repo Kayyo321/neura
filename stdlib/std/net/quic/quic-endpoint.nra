@@ -54,9 +54,7 @@ export let QuicEndpoint = module (
         /// @brief Waits for the next connection and completes its handshake.
         #NoDiscard
         export let accept = func -> Result<QuicConnection> {
-            if (!open_now) {
-                return Result<QuicConnection>.Err(bytes.closed("endpoint", bound.to_string()));
-            }
+            return Result<QuicConnection>.Err(bytes.closed("endpoint", bound.to_string())) unless open_now;
             return match (quic_accept(id, support.timeout_nanos(config.tls_config.handshake_timeout))) {
                 AcceptOutcome.Ok(accepted) => connection_of(accepted, bound),
                 AcceptOutcome.Error(code) => Result<QuicConnection>.Err(
@@ -66,9 +64,7 @@ export let QuicEndpoint = module (
 
         /// @brief Closes every connection and releases the port. Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (quic_close_endpoint(id)) {
                 DoneOutcome.Ok => bytes.ok(),
@@ -77,7 +73,7 @@ export let QuicEndpoint = module (
         };
 
         /// @brief Text such as "QuicEndpoint(0.0.0.0:443)".
-        export let.override to_string = func -> string => "QuicEndpoint(" + bound.to_string() + ")";
+        export let.override to_string = func -> string => "QuicEndpoint(" .. bound.to_string() .. ")";
     );
 
     /// @brief Listens for QUIC on `address` (port 0 asks for a free port) with a server configuration. Traps

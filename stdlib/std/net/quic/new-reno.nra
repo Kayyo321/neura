@@ -108,7 +108,7 @@ export let NewReno = module (
         export let name = func -> string => "NewReno";
 
         /// @brief Text such as "NewReno(window 12000, in flight 0)".
-        export let.override to_string = func -> string => "NewReno(window " + congestion_window.to_string()
-            + ", in flight " + in_flight.to_string() + ")";
+        export let.override to_string = func -> string => "NewReno(window " .. congestion_window.to_string()
+            .. ", in flight " .. in_flight.to_string() .. ")";
     );
 );

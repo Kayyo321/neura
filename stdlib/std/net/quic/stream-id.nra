@@ -121,7 +121,7 @@ export let StreamId = module (
             last limit = bidirectional ? bidirectional_limit : unidirectional_limit;
             if (opened >= limit) {
                 return Result<int64>.Err(errors.custom("quic.stream_limit", "the peer allows "
-                    + limit.to_string() + (bidirectional ? " bidirectional" : " unidirectional") + " streams"));
+                    .. limit.to_string() .. (bidirectional ? " bidirectional" : " unidirectional") .. " streams"));
             }
             if (bidirectional) {
                 bidirectional_opened++;
@@ -138,7 +138,7 @@ export let StreamId = module (
             if (bidirectional && max_streams > bidirectional_limit) {
                 bidirectional_limit = max_streams;
             }
-            if (!bidirectional && max_streams > unidirectional_limit) {
+            if (not bidirectional && max_streams > unidirectional_limit) {
                 unidirectional_limit = max_streams;
             }
         };
@@ -149,9 +149,9 @@ export let StreamId = module (
             bidirectional ? bidirectional_opened : unidirectional_opened;
 
         /// @brief Text such as "StreamIdAllocator(client, 3/100 bidirectional, 0/3 unidirectional)".
-        export let.override to_string = func -> string => "StreamIdAllocator(" + (client ? "client" : "server") + ", "
-            + bidirectional_opened.to_string() + "/" + bidirectional_limit.to_string() + " bidirectional, "
-            + unidirectional_opened.to_string() + "/" + unidirectional_limit.to_string() + " unidirectional)";
+        export let.override to_string = func -> string => "StreamIdAllocator(" .. (client ? "client" : "server") .. ", "
+            .. bidirectional_opened.to_string() .. "/" .. bidirectional_limit.to_string() .. " bidirectional, "
+            .. unidirectional_opened.to_string() .. "/" .. unidirectional_limit.to_string() .. " unidirectional)";
     );
 
     /// @brief Tracks the streams a peer opens, applying the implicit opening of lower-numbered streams.
@@ -184,14 +184,14 @@ export let StreamId = module (
         export let receive = func(id: int64) -> Result<int64[list]> {
             if (is_client_initiated(id) == local_client) {
                 return Result<int64[list]>.Err(errors.custom("quic.stream_state",
-                    "stream " + id.to_string() + " is opened by this endpoint, not the peer"));
+                    "stream " .. id.to_string() .. " is opened by this endpoint, not the peer"));
             }
             last bidirectional = is_bidirectional(id);
             last index = index_of(id);
             last limit = bidirectional ? bidirectional_limit : unidirectional_limit;
             if (index >= limit) {
                 return Result<int64[list]>.Err(errors.custom("quic.stream_limit",
-                    "stream " + id.to_string() + " exceeds the limit of " + limit.to_string() + " streams"));
+                    "stream " .. id.to_string() .. " exceeds the limit of " .. limit.to_string() .. " streams"));
             }
             let opened: int64[list] = new;
             last count = bidirectional ? bidirectional_count : unidirectional_count;
@@ -211,8 +211,8 @@ export let StreamId = module (
         };
 
         /// @brief Text such as "PeerStreams(2 bidirectional, 0 unidirectional)".
-        export let.override to_string = func -> string => "PeerStreams(" + bidirectional_count.to_string()
-            + " bidirectional, " + unidirectional_count.to_string() + " unidirectional)";
+        export let.override to_string = func -> string => "PeerStreams(" .. bidirectional_count.to_string()
+            .. " bidirectional, " .. unidirectional_count.to_string() .. " unidirectional)";
     );
 
     /// @brief Traps unless `id` is a valid stream ID.
