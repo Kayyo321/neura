@@ -73,6 +73,9 @@ export let Arena = module (
         export let close = func {
             lifetime.close();
         };
+
+        /// @brief Names the arena.
+        export let.override to_string = func -> string => "Arena";
     );
 
     /// @brief A new arena that frees its memory when closed (Java's Arena.ofConfined).

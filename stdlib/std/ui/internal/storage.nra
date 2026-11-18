@@ -8,6 +8,9 @@ export let Storage = module (
         export let next: Slot = nil;
 
         export let init = func(index: uint32) => set;
+
+        /// @brief Names the slot and its index.
+        export let.override to_string = func -> string => "Slot(" .. index.to_string() .. ")";
     );
 
     /// @brief Preserves a slot's ordinary Neura type, including a callable's signature.
@@ -19,5 +22,8 @@ export let Storage = module (
             super.init(index);
             instance.value = value;
         };
+
+        /// @brief Names the payload and its slot index.
+        export let.override to_string = func -> string => "Payload(" .. index.to_string() .. ")";
     );
 );

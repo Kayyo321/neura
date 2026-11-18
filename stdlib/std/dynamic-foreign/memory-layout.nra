@@ -171,16 +171,15 @@ export let MemoryLayout = module (
                     return i;
                 }
             }
-            trap_with_message("invalid argument: no member " + member_name);
+            trap_with_message("invalid argument: no member " .. member_name);
         };
 
         /// @brief Layouts compare by shape, carrier, size, alignment, name, and members.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MemoryLayout)) {
+            if (other is not that: MemoryLayout) {
                 return false;
             }
-            last that = other as MemoryLayout;
             return to_string() == that.to_string() && alignment == that.alignment;
         };
 
@@ -193,12 +192,12 @@ export let MemoryLayout = module (
         export let.override to_string = func -> string {
             last text = match (kind) {
                 Shape.Value => carrier_name(value_carrier),
-                Shape.Padding => "x" + size.to_string(),
-                Shape.Sequence => count.to_string() + ":" + parts[0].to_string(),
-                Shape.Struct => "[" + joined(parts, "") + "]",
-                Shape.Union => "[" + joined(parts, "|") + "]",
+                Shape.Padding => "x" .. size.to_string(),
+                Shape.Sequence => count.to_string() .. ":" .. parts[0].to_string(),
+                Shape.Struct => "[" .. joined(parts, "") .. "]",
+                Shape.Union => "[" .. joined(parts, "|") .. "]",
             };
-            return (label == "") ? text : text + "(" + label + ")";
+            return (label == "") ? text : text .. "(" .. label .. ")";
         };
     );
 
@@ -338,7 +337,7 @@ export let MemoryLayout = module (
         for (let i = 0; i < members.length; i++) {
             for (let j = i + 1; j < members.length; j++) {
                 if (members[i].name() != "" && members[i].name() == members[j].name()) {
-                    trap_with_message("invalid argument: duplicate member name " + members[i].name());
+                    trap_with_message("invalid argument: duplicate member name " .. members[i].name());
                 }
             }
         }
