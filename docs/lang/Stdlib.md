@@ -120,7 +120,7 @@ The language has no hexadecimal integer literals, no inference of type arguments
 | `Std.Io` | `Console`, byte and text streams, buffers | [11.1](#111-stdio) |
 | `Std.Fs` | `Path`, `File`, `Fs` | [11.2](#112-stdfs) |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` | [11.3](#113-stdprogram) |
-| `Std.Net` | TCP streams and listeners; the contracts and the `Core`, `Socket`, `Dns`, `Tls`, `Quic`, `Http`, `Rpc`, `Realtime`, `Resilience` and `Mesh` packages | [11.4](#114-stdnet) |
+| `Std.Net` | TCP streams and listeners; the contracts and the `Core`, `Socket`, `Dns`, `Tls`, `Quic`, `Http`, `Rpc`, `Realtime`, `Resilience` and `Mesh` packages; HTTP requests through the host (`Std.Net.Http.Fetch`) | [11.4](#114-stdnet) |
 | `Std.App` | `run`, `Context`, `Request`, `Response`, `Handler`, `handler_of`, `Context.sql_pool`: the entry of a server image | [Server host](../runtime/ServerHost.md) |
 | `Std.Data` | `Sql`: pools, connections, transactions, cursors and rows of SQLite and PostgreSQL | [SQL](../runtime/Sql.md) |
 | `Std.Time` | `Duration`, `Instant`, `Clock`, calendar types | [12.1](#121-stdtime) |
@@ -187,6 +187,7 @@ Every interaction with the outside world is a host service with a name, a versio
 | `neura.process.exit` | 1 | status | does not return | `Process.exit` |
 | `neura.net.listen`, `local_port`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID or port | `Std.Net` |
 | `neura.net.connect`, `accept`, `read`, `write` | 1, 2 | [section 11.4](#114-stdnet) | socket ID, bytes, or count | `Std.Net` (version 2); overlap in an image with tasks |
+| `neura.http.fetch` | 1 | method, URL, headers, body, timeout, credentials ([Providers](../runtime/Providers.md#http-fetch)) | status, headers, body | `Std.Net.Http.Fetch`; overlaps in an image with tasks; served by the browser host only in 0.3.0 |
 | `neura.ffi.abi`, `arena.open`, `arena.close`, `alloc`, `library.open`, `library.default`, `library.embedded`, `symbol`, `read`, `write`, `strlen`, `call` | 1 | [NVM](../runtime/NVM.md#host-services) | layouts, IDs, addresses, bytes, or packed results | `Std.DynamicForeign` |
 
 The exact signatures are in [NVM](../runtime/NVM.md#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
@@ -1201,6 +1202,7 @@ The contract tree, the TCP stream and listener, and the packages of 0.3.0. The 0
 - `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), the field `read_timeout: Duration` (zero, the initial value, for none; an expired timeout fails with kind `TimedOut`; assigning a negative duration traps with `invalid argument: negative timeout`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
 - `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, the read-only field `local_port: int`, and `close()`. Port 0 asks the host for a free port.
 - A port outside 0 through 65,535 traps.
+- `Std.Net.Http.Fetch` (0.3.0) sends one HTTP request through the host's `neura.http.fetch` service: `request(method, url)` builds a `Request` (no headers or body, a 30-second timeout, same-origin credentials) whose `with_header`, `with_body`, `with_text`, `with_timeout` and `with_credentials` return changed copies; `send()` returns `Result<Response>`, and `get` and `post_text` are shorthands. Any status is `Ok`; `Err` means no response, and `failure_of` classifies it as a `FetchFailure` (`TooLarge`, `Busy` and `OutcomeUnknown` are custom errors, the rest I/O kinds). In 0.3.0 only the browser host serves the service ([Providers](../runtime/Providers.md#http-fetch)); a native run of an image that calls it fails to bind.
 - Service arguments: `connect` takes the host text, the port, and the timeout in nanoseconds; `listen` takes the host text and port; `accept` takes a listener ID; `read` takes a socket ID, a maximum count, and a timeout in nanoseconds (0 for none); `write` takes a socket ID and bytes; `close` takes either kind of ID.
 
 **Contracts.** One interface per module at the root of `Std.Net`:

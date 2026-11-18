@@ -50,6 +50,23 @@ Errors about the grammar.
 | [E0226](E0226.md) | default value on a parameter that takes none |
 | [E0227](E0227.md) | malformed interpolated string |
 | [E0228](E0228.md) | malformed extension declaration or extension import |
+| [E0240](E0240.md) | malformed html factory |
+| [E0241](E0241.md) | unterminated template or stylesheet |
+| [E0242](E0242.md) | mismatched or unclosed element |
+| [E0243](E0243.md) | nesting a browser would repair |
+| [E0244](E0244.md) | malformed tag |
+| [E0245](E0245.md) | malformed or repeated attribute |
+| [E0246](E0246.md) | unknown or malformed character reference |
+| [E0247](E0247.md) | malformed hole |
+| [E0248](E0248.md) | stray brace or control word in text |
+| [E0249](E0249.md) | malformed control block |
+| [E0250](E0250.md) | malformed binding directive |
+| [E0251](E0251.md) | not allowed in a template |
+| [E0252](E0252.md) | malformed css declaration |
+| [E0253](E0253.md) | malformed stylesheet |
+| [E0254](E0254.md) | malformed from clause |
+| [E0255](E0255.md) | html or css form not allowed here |
+| [E0256](E0256.md) | malformed CSS module construct |
 
 ## E03xx: Names
 
@@ -223,6 +240,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0578](E0578.md) | conformance declared by a module |
 | [E0579](E0579.md) | unknown or misplaced derivation |
 | [E0590](E0590.md) | unsupported JSON codec shape |
+| [E0580](E0580.md) | type is not deeply immutable |
+| [E0581](E0581.md) | frozen storage is exposed or changed |
 
 ## E06xx: Concurrency
 
@@ -308,6 +327,28 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0921](E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
+
+## E10xx: Applications
+
+Errors about application forms and their build limits.
+
+| Code | Error |
+| --- | --- |
+| [E1001](E1001.md) | unknown element |
+| [E1002](E1002.md) | unknown attribute, property or event |
+| [E1003](E1003.md) | modifier not valid for this event |
+| [E1004](E1004.md) | value cannot be rendered |
+| [E1005](E1005.md) | attribute or property value of the wrong type |
+| [E1006](E1006.md) | handler does not match the event |
+| [E1007](E1007.md) | URL not allowed |
+| [E1008](E1008.md) | value cannot be iterated by a template |
+| [E1009](E1009.md) | key of the wrong type |
+| [E1010](E1010.md) | effect not allowed while rendering |
+| [E1011](E1011.md) | template or stylesheet file cannot be used |
+| [E1012](E1012.md) | not a class of the CSS module |
+| [E1013](E1013.md) | stylesheet import or asset cannot be resolved |
+| [E1014](E1014.md) | invalid static document structure |
+| [E1015](E1015.md) | template or stylesheet exceeds a limit |
 
 ## Warnings
 

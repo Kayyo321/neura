@@ -1,0 +1,7 @@
+error[E1001]: unknown element
+ --> $DIR/bad-element.nra:1:22
+  |
+1 | let view = html() { <blink>Old</blink> };
+  |                      ^^^^^ this element is unavailable in templates
+
+For more information about this error, try `neura explain E1001`.

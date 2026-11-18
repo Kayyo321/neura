@@ -850,6 +850,8 @@ Attributed attributed_fixture(const Environment& environment, bool attributes = 
         }
         check(variant_default, "the linked program has an enum parameter for a variant default");
         set_attribute(s[a.sum_to], AttributeId::FunctionExtension, attribute_bool(true));
+        // An HTML factory names the string constant that holds its descriptor.
+        set_attribute(s[a.sum_to], AttributeId::UiFactory, attribute_symbol(find_symbol(p, "Attributes.SumLabel")));
     }
     if (deferred) {
         for (const auto local : {a.step, a.point_local}) {
@@ -958,6 +960,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false,
          "[t p]"},
         {AttributeId::GeneratorResume, 23, "generator.resume", on_function, false, "s"},
+        {AttributeId::UiFactory, 32, "ui.factory", on_function, false, "s"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {

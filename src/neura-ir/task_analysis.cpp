@@ -631,8 +631,12 @@ void TaskAnalysis::check() const {
     // For a function type that is not transferable, the capture that makes it
     // so: under the union rule the reason is a closure somewhere else in the
     // program, which the type alone does not show. Labelled at the capture.
-    const auto capture_note = [&](Diagnostic& error, const IrType& type) {
-        if (type.kind != TypeKind::Object || !valid(type.symbol)) return;
+    // When the captured value is itself a function value, its own capture is
+    // labelled too, so that a closure a library wraps (a command's work) is
+    // traced to the program's capture.
+    std::function<void(Diagnostic&, const IrType&, std::set<SymbolId>&)> capture_chain;
+    capture_chain = [&](Diagnostic& error, const IrType& type, std::set<SymbolId>& seen) {
+        if (type.kind != TypeKind::Object || !valid(type.symbol) || !seen.insert(type.symbol).second) return;
         std::vector<SymbolId> layouts;
         if (signature_layout(type.symbol)) {
             if (const auto found = derived_.find(type.symbol); found != derived_.end()) layouts = found->second;
@@ -645,9 +649,14 @@ void TaskAnalysis::check() const {
                 if (transferable(symbol(field).type)) continue;
                 error.label(symbol(field).span, "a function value of this type captures a value of type " +
                                                     display(symbol(field).type) + " here");
+                capture_chain(error, symbol(field).type, seen);
                 return;
             }
         }
+    };
+    const auto capture_note = [&](Diagnostic& error, const IrType& type) {
+        std::set<SymbolId> seen;
+        capture_chain(error, type, seen);
     };
     // A check that fails inside a library helper is reported where the
     // user's code calls into the library, and labels where the task starts.

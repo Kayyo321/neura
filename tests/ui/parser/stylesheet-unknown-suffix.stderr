@@ -1,0 +1,9 @@
+error[E0252]: malformed css declaration
+ --> $DIR/stylesheet-unknown-suffix.nra:1:15
+  |
+1 | const Local = css.global { };
+  |               ^^^^^^^^^^ only '.module' can follow 'css'
+  |
+  = help: write 'css { ... }' or 'css.module { ... }'
+
+For more information about this error, try `neura explain E0252`.

@@ -1,0 +1,664 @@
+let frozen = import:Std.Collections.Frozen;
+let model = import:Std.Ui.ModelHost;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let ui = import:Std.Ui;
+
+#Immutable
+let Stock = class (
+    export last name: string;
+    export last count: int32;
+
+    export let init = func(name: string, count: int32) => set;
+);
+
+let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <button type="button" on:click={on_add}>{count}</button>
+};
+
+let panel_view = html(title: string, child: ui.View) {
+    <section><h1>{title}</h1>{child}</section>
+};
+
+let pair_view = html(first: ui.View, second: ui.View) {
+    <div>{first}{second}</div>
+};
+
+let draft_view = html(draft: string) {
+    <input type="text" prop:value={draft}>
+};
+
+let names_view = html(names: frozen.FrozenList<string>) {
+    <ul>
+        @for (const name in names; key: name) {
+            <li>{name}</li>
+        }
+    </ul>
+};
+
+let page_view = html(title: string, on_next: func(ui.ClickEvent) -> void, first: ui.View, second: ui.View) {
+    <main><h1>{title}</h1><button type="button" on:click={on_next}>Next</button>{first}{second}</main>
+};
+
+let moved_row_view = html(key: string, count: int32) {
+    <span data-key={key}>{count}</span>
+};
+
+let moved_rows_view = html(indexes: frozen.FrozenList<int32>, keys: string[list], views: ui.View[list]) {
+    <ul>
+        @for (const index in indexes; key: keys[index]) {
+            <li>{views[index]}</li>
+        }
+    </ul>
+};
+
+let section_view = html(inner: ui.View) {
+    <section><div>{inner}</div></section>
+};
+
+let article_view = html(inner: ui.View) {
+    <article><div>{inner}</div></article>
+};
+
+let switching_view = html(mode: int32, a: ui.View, b: ui.View, list: ui.View) {
+    <main>{mode % 2 == 0 ? a : b}{list}</main>
+};
+
+let click = func -> ui.ClickEvent => new ui.ClickEvent(0, 0.0, 0.0, new ui.Modifiers(false, false, false, false), 1);
+
+let UiStateTests = module (
+    let mounted = func(host: model.Host, target: string, top: ui.Component) -> ui.Root =>
+        test.assert_ok<ui.Root>(ui.mount(host, target, top));
+
+    let join = func(items: string[list]) -> string {
+        let text = "";
+        for (let i = 0; i < items.length; i++) {
+            if (i > 0) {
+                text = text + "; ";
+            }
+            text = text + items[i];
+        }
+        return text;
+    };
+
+    // Case 1: an int32, an #Immutable class, a tuple of two strings.
+    export let test_state_values = func() -> void {
+        let number = new ui.State<int32>(0);
+        number.set(5);
+        test.assert_equal_int32(5, number.get());
+        let stock = new ui.State<Stock>(new Stock("bolt", 0));
+        stock.update(func(current: Stock) -> Stock => new Stock(current.name, current.count + 12));
+        test.assert_equal_int32(12, stock.get().count);
+        let pair = new ui.State<[string, string]>(["a", "b"]);
+        pair.set(["c", "d"]);
+        let [first, second] = pair.get();
+        test.assert_equal_string("cd", first + second);
+        test.assert_equal_string("State(5)", number.to_string());
+    };
+
+    // Cases 4 and 7: an equal value still notifies; subscribers in order; close twice.
+    export let test_notifications = func() -> void {
+        let trace: string[list] = new;
+        let state = new ui.State<int32>(1);
+        let first = state.subscribe(new func(value: int32) {
+            trace.append("first " + value.to_string());
+        });
+        let second = state.subscribe(new func(value: int32) {
+            trace.append("second " + value.to_string());
+        });
+        state.set(1);
+        state.set(2);
+        first.close();
+        first.close();
+        state.set(3);
+        test.assert_equal_string("first 1; second 1; first 2; second 2; second 3", join(trace));
+        test.assert_equal_int32(1, state.subscriber_count());
+        test.assert(!first.is_open());
+        second.close();
+        test.assert_equal_int32(0, state.subscriber_count());
+    };
+
+    // Case 5: a state with equal: no notification when equal.
+    export let test_equality_suppresses = func() -> void {
+        let trace: string[list] = new;
+        let state = ui.with_equality<Stock>(new Stock("bolt", 1), func(a: Stock, b: Stock) -> bool {
+            return a.name == b.name && a.count == b.count;
+        });
+        state.subscribe(new func(value: Stock) {
+            trace.append(value.count.to_string());
+        });
+        state.set(new Stock("bolt", 1));
+        state.set(new Stock("bolt", 2));
+        state.set(new Stock("bolt", 2));
+        test.assert_equal_string("2", join(trace));
+    };
+
+    // Case 3 and 6: update with a capturing plain func; a subscriber that sets the same
+    // state is queued and notified after the round.
+    export let test_update_in_subscriber_is_queued = func() -> void {
+        let trace: string[list] = new;
+        let step: int32 = 10;
+        let state = new ui.State<int32>(0);
+        state.subscribe(new func(value: int32) {
+            trace.append("a " + value.to_string());
+            if (value == 10) {
+                state.set(11);
+                trace.append("a sees " + state.get().to_string());
+            }
+        });
+        state.subscribe(new func(value: int32) {
+            trace.append("b " + value.to_string());
+        });
+        state.update(func(current: int32) -> int32 => current + step);
+        test.assert_equal_string("a 10; a sees 11; b 10; a 11; b 11", join(trace));
+    };
+
+    // Cases 8 and 10: two components sharing one state render once each in one turn, in mount
+    // order, and a handler's three updates give one render and one commit.
+    export let test_turn_renders_once = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let state = new ui.State<int32>(0);
+        let add = new func(event: ui.ClickEvent) {
+            state.update(func(value: int32) -> int32 => value + 1);
+            state.update(func(value: int32) -> int32 => value + 1);
+            state.update(func(value: int32) -> int32 => value + 1);
+        };
+        let left = ui.component<int32>(state, new func(value: int32) -> ui.View {
+            trace.append("left " + value.to_string());
+            return counter_view(value, add);
+        });
+        let right = ui.component<int32>(state, new func(value: int32) -> ui.View {
+            trace.append("right " + value.to_string());
+            return counter_view(value, add);
+        });
+        let top_state = new ui.State<string>("parts");
+        let top = ui.component<string>(top_state, new func(title: string) -> ui.View {
+            trace.append("top " + title);
+            return panel_view(title, pair_view(ui.slot(left), panel_view("right", ui.slot(right))));
+        });
+        let root = mounted(host, "#app", top);
+        test.assert_equal_string("top parts; left 0; right 0", join(trace));
+        while (trace.length > 0) {
+            trace.remove_at(0);
+        }
+        top_state.set("parts");
+        host.click(1, left, add);
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("top parts; left 3; right 3", join(trace));
+        test.assert_equal_string("open #app: root 1; commit 1 on root 1: 3 renders; commit 2 on root 1: 3 renders",
+                                 join(host.log));
+        test.assert(right.is_mounted());
+    };
+
+    // Case 9: a child embedded with ui.slot, updated alone: the parent's render is not called.
+    export let test_child_renders_alone = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let child_state = new ui.State<int32>(0);
+        let child = ui.component<int32>(child_state, new func(value: int32) -> ui.View {
+            trace.append("child " + value.to_string());
+            return counter_view(value, func(event: ui.ClickEvent) {});
+        });
+        let parent_state = new ui.State<string>("title");
+        let parent = ui.component<string>(parent_state, new func(title: string) -> ui.View {
+            trace.append("parent " + title);
+            return panel_view(title, ui.slot(child));
+        });
+        let root = mounted(host, "#app", parent);
+        let bump = new func(event: ui.ClickEvent) {
+            child_state.set(child_state.get() + 1);
+        };
+        host.click(1, child, bump);
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("parent title; child 0; child 1", join(trace));
+        test.assert_equal_int64(1, parent.render_count());
+        test.assert_equal_int64(2, child.render_count());
+        test.assert_equal_string("components 2, subscriptions 2, queued 0, turns 1, renders 3, commits 2, dropped 0, "
+                                 + "discarded 0", root.stats().to_string());
+    };
+
+    // Unmounting closes subscriptions and raises the generation; case 11: an event for a component
+    // unmounted by an earlier event of the same batch is discarded.
+    export let test_unmount_discards_events = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let child_state = new ui.State<int32>(0);
+        let child = ui.component<int32>(child_state, new func(value: int32) -> ui.View {
+            return counter_view(value, func(event: ui.ClickEvent) {});
+        });
+        let show = new ui.State<bool>(true);
+        let parent = ui.component<bool>(show, new func(visible: bool) -> ui.View {
+            if (visible) {
+                return panel_view("shown", ui.slot(child));
+            }
+            return panel_view("hidden", counter_view(0, func(event: ui.ClickEvent) {}));
+        });
+        let root = mounted(host, "#app", parent);
+        test.assert(child.is_mounted());
+        test.assert_equal_int32(1, child_state.subscriber_count());
+        host.click(1, parent, new func(event: ui.ClickEvent) {
+            show.set(false);
+        });
+        host.click(2, child, new func(event: ui.ClickEvent) {
+            trace.append("child clicked");
+        });
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("", join(trace));
+        test.assert(!child.is_mounted());
+        test.assert_equal_int32(0, child_state.subscriber_count());
+        test.assert(child.generation() == 1);
+        test.assert(root.stats().discarded == 1);
+        root.close();
+        root.close();
+        test.assert(parent.generation() == 1);
+        test.assert_equal_int32(0, show.subscriber_count());
+        test.assert_equal_string("close root 1", host.log[host.log.length - 1]);
+    };
+
+    // Case 12: pointer moves faster than turns: the handler sees the latest, and the coalesced
+    // event keeps its place.
+    export let test_coalescing = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let state = new ui.State<int32>(0);
+        let top = ui.component<int32>(state, new func(value: int32) -> ui.View =>
+            counter_view(value, func(event: ui.ClickEvent) {}));
+        let root = mounted(host, "#app", top);
+        let moved = new func(event: ui.PointerEvent) {
+            trace.append("move " + event.x.to_string());
+        };
+        host.pointer_move(1, top, moved, 1.0, 1.0);
+        host.click(2, top, new func(event: ui.ClickEvent) {
+            trace.append("click");
+        });
+        host.pointer_move(1, top, moved, 2.0, 1.0);
+        host.pointer_move(1, top, moved, 3.0, 1.0);
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("move 3.0; click", join(trace));
+    };
+
+    // Case 48: the queue limit is reached; dropped clicks are counted, InputOverflow comes before
+    // the next accepted event, the host resynchronizes, and the root keeps working.
+    export let test_overflow = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let state = new ui.State<int32>(0);
+        let top = ui.component<int32>(state, new func(value: int32) -> ui.View =>
+            counter_view(value, func(event: ui.ClickEvent) {}));
+        let root = mounted(host, "#app", top);
+        root.set_queue_limit(1024);
+        root.on_overflow(new func(event: ui.RootEvent) {
+            match (event) {
+                ui.RootEvent.InputOverflow(dropped) => {
+                    trace.append("overflow " + dropped.to_string());
+                },
+            }
+        });
+        let add = new func(event: ui.ClickEvent) {
+            state.set(state.get() + 1);
+        };
+        for (let i = 0; i < 1025; i++) {
+            host.click(1, top, add);
+        }
+        host.end_batch();
+        host.input_on_resynchronize(3, top, new func(event: ui.InputEvent) {
+            trace.append("input " + event.value);
+        }, "typed");
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            trace.append("next click");
+            state.set(state.get() + 1);
+        });
+        host.end_batch();
+        root.run();
+        test.assert_equal_int32(1, host.refused);
+        test.assert_equal_int32(1025, state.get());
+        test.assert_equal_string("overflow 1; input typed; next click", join(trace));
+        test.assert(root.stats().dropped == 1);
+        test.assert(!root.is_overloaded());
+    };
+
+    // Render failures: a refused commit goes to the handler and the loop continues; a host
+    // failure faults the root until reset.
+    export let test_render_failures = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let state = new ui.State<int32>(0);
+        let top = ui.component<int32>(state, new func(value: int32) -> ui.View =>
+            counter_view(value, func(event: ui.ClickEvent) {}));
+        let root = mounted(host, "#app", top);
+        root.on_render_failure(new func(failure: ui.RenderFailure) {
+            match (failure) {
+                ui.RenderFailure.Invalid(diagnostic) => {
+                    trace.append("invalid " + diagnostic.kind.to_string());
+                },
+                ui.RenderFailure.Fault(problem) => {
+                    trace.append("fault");
+                },
+            }
+        });
+        let add = new func(event: ui.ClickEvent) {
+            state.set(state.get() + 1);
+        };
+        host.refuse_next_commit(ui.DiagnosticKind.DuplicateKey);
+        host.click(1, top, add);
+        host.end_batch();
+        host.click(1, top, add);
+        host.end_batch();
+        root.turn();
+        root.turn();
+        test.assert_equal_string("invalid DuplicateKey", join(trace));
+        host.fail_next_commit();
+        host.click(1, top, add);
+        host.end_batch();
+        host.click(1, top, add);
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("invalid DuplicateKey; fault", join(trace));
+        test.assert(root.is_faulted());
+        test.assert(!root.turn());
+        root.reset();
+        test.assert(!root.is_faulted());
+        root.run();
+        test.assert_equal_int32(4, state.get());
+        test.assert_equal_string("reset root 1", host.log[host.log.length - 3]);
+    };
+
+    // A refused commit rolls back the turn's mounts and unmounts: the child the refused render
+    // embedded is unmounted again, the child it dropped stays mounted with its subscription, and
+    // an event queued for that child is still delivered. A committed render then swaps them.
+    export let test_refused_commit_rolls_back = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let first_state = new ui.State<int32>(1);
+        let first = ui.component<int32>(first_state, new func(value: int32) -> ui.View {
+            trace.append("first " + value.to_string());
+            return counter_view(value, func(event: ui.ClickEvent) {});
+        });
+        let second_state = new ui.State<int32>(2);
+        let second = ui.component<int32>(second_state, new func(value: int32) -> ui.View {
+            trace.append("second " + value.to_string());
+            return counter_view(value, func(event: ui.ClickEvent) {});
+        });
+        let which = new ui.State<bool>(true);
+        let parent = ui.component<bool>(which, new func(show_first: bool) -> ui.View {
+            trace.append("parent " + show_first.to_string());
+            if (show_first) {
+                return panel_view("first", ui.slot(first));
+            }
+            return panel_view("second", ui.slot(second));
+        });
+        let root = mounted(host, "#app", parent);
+        let failures: string[list] = new;
+        root.on_render_failure(new func(failure: ui.RenderFailure) {
+            match (failure) {
+                ui.RenderFailure.Invalid(diagnostic) => {
+                    failures.append("invalid");
+                },
+                ui.RenderFailure.Fault(problem) => {
+                    failures.append("fault");
+                },
+            }
+        });
+        last view_before = parent.current_view();
+        last stats_before = root.stats();
+        host.refuse_next_commit(ui.DiagnosticKind.DuplicateKey);
+        host.click(1, parent, new func(event: ui.ClickEvent) {
+            which.set(false);
+        });
+        host.click(2, first, new func(event: ui.ClickEvent) {
+            trace.append("first clicked");
+        });
+        host.end_batch();
+        root.turn();
+        test.assert_equal_string("invalid", join(failures));
+        test.assert(first.is_mounted());
+        test.assert(first.generation() == 0);
+        test.assert(!second.is_mounted());
+        test.assert(second.generation() == 1);
+        test.assert_equal_int32(0, second_state.subscriber_count());
+        test.assert_equal_int32(1, first_state.subscriber_count());
+        test.assert(parent.current_view() == view_before);
+        test.assert(root.stats().components == stats_before.components);
+        test.assert(root.stats().subscriptions == stats_before.subscriptions);
+        root.turn();
+        test.assert_equal_string("parent true; first 1; parent false; second 2; first clicked", join(trace));
+        // The parent stays clean: the next change renders it again, and that commit swaps the children.
+        which.set(true);
+        which.set(false);
+        host.click(3, parent, new func(event: ui.ClickEvent) {});
+        host.end_batch();
+        root.run();
+        test.assert(!first.is_mounted());
+        test.assert(first.generation() == 1);
+        test.assert(second.is_mounted());
+        test.assert_equal_int32(0, first_state.subscriber_count());
+        // A host failure rolls back the same way and faults the root; reset renders every component
+        // again from the current state, so the parent then embeds the first child.
+        host.fail_next_commit();
+        host.click(4, parent, new func(event: ui.ClickEvent) {
+            which.set(true);
+        });
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("invalid; fault", join(failures));
+        test.assert(second.is_mounted());
+        test.assert(!first.is_mounted());
+        root.reset();
+        test.assert(first.is_mounted());
+        test.assert(!second.is_mounted());
+        test.assert_equal_int32(0, second_state.subscriber_count());
+    };
+
+    // A second root on one target and more than U-9 roots are Err; a mounted component cannot
+    // be mounted again.
+    export let test_mount_errors = func() -> void {
+        let host = new model.Host();
+        host.set_root_limit(2);
+        let make = func() -> ui.Component => ui.component<int32>(new ui.State<int32>(0), new func(value: int32) -> ui.View =>
+            counter_view(value, func(event: ui.ClickEvent) {}));
+        let first = make();
+        let one = mounted(host, "#one", first);
+        test.assert_err<ui.Root>(ui.mount(host, "#one", make()));
+        test.assert_err<ui.Root>(ui.mount(host, "#two", first));
+        let two = mounted(host, "#two", make());
+        test.assert_err<ui.Root>(ui.mount(host, "#three", make()));
+        two.close();
+        mounted(host, "#three", make());
+    };
+
+    // B-W9 in small: mount and unmount cycles and updates leave no subscriptions behind.
+    export let test_no_retained_growth = func() -> void {
+        let host = new model.Host();
+        let state = new ui.State<int32>(0);
+        for (let cycle = 0; cycle < 200; cycle++) {
+            let top = ui.component<int32>(state, new func(value: int32) -> ui.View =>
+                counter_view(value, func(event: ui.ClickEvent) {}));
+            let root = mounted(host, "#app", top);
+            state.set(cycle);
+            root.close();
+            test.assert_equal_int32(0, state.subscriber_count());
+        }
+    };
+
+    // Subtree commits on a reconciling host: a child that renders alone changes only its own nodes, and a
+    // retained sibling writes no property; then the parent renders alone and the children keep their nodes.
+    export let test_subtree_commits = func() -> void {
+        let host = new model.Host();
+        host.reconcile_commits();
+        let count = new ui.State<int32>(0);
+        let counter = ui.component<int32>(count, new func(value: int32) -> ui.View =>
+            counter_view(value, new func(event: ui.ClickEvent) {
+                count.set(count.get() + 1);
+            }));
+        let draft = ui.component<string>(new ui.State<string>("typed"), new func(value: string) -> ui.View =>
+            draft_view(value));
+        let title = new ui.State<string>("Parts");
+        let rename = new func(event: ui.ClickEvent) {
+            title.set("Stock");
+        };
+        let page = ui.component<string>(title, new func(value: string) -> ui.View =>
+            page_view(value, rename, ui.slot(counter), ui.slot(draft)));
+        let root = mounted(host, "#app", page);
+        test.assert_equal_string("nodes 8, listeners 2, templates 3, queued 0", root.host_stats().to_string());
+        host.clear_log();
+        test.assert_equal_bool(true, host.dispatch_click(root, 2, click()));
+        root.run();
+        test.assert_equal_string("commit 2 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":7,\"value\":\"1\"}", join(host.log));
+        host.clear_log();
+        test.assert_equal_bool(true, host.dispatch_click(root, 1, click()));
+        root.run();
+        test.assert_equal_string("commit 3 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":3,\"value\":\"Stock\"}", join(host.log));
+        test.assert_equal_int64(2, page.render_count());
+        test.assert_equal_int64(2, counter.render_count());
+        test.assert_equal_int64(1, draft.render_count());
+        root.close();
+        test.assert_equal_string("nodes 0, listeners 0, templates 0, queued 0", root.host_stats().to_string());
+    };
+
+    // A refused child commit keeps the mounted tree; the next valid render of the child converges to it.
+    export let test_refused_subtree_converges = func() -> void {
+        let host = new model.Host();
+        host.reconcile_commits();
+        let failures: string[list] = new;
+        let names = new ui.State<frozen.FrozenList<string>>(frozen.of<string>("bolt", "nut"));
+        let list = ui.component<frozen.FrozenList<string>>(names, new func(value: frozen.FrozenList<string>) -> ui.View =>
+            names_view(value));
+        let script: frozen.FrozenList<string>[list] = new;
+        script.append(frozen.of<string>("gear", "gear"));
+        script.append(frozen.of<string>("nut", "gear"));
+        let advance = new func(event: ui.ClickEvent) {
+            names.set(script[0]);
+            script.remove_at(0);
+        };
+        let page = ui.component<string>(new ui.State<string>("Parts"), new func(value: string) -> ui.View =>
+            page_view(value, advance, ui.slot(list), ui.slot(ui.component<int32>(new ui.State<int32>(0),
+                new func(n: int32) -> ui.View => counter_view(n, new func(event: ui.ClickEvent) {})))));
+        let root = mounted(host, "#app", page);
+        root.on_render_failure(new func(failure: ui.RenderFailure) {
+            match (failure) {
+                ui.RenderFailure.Invalid(diagnostic) => {
+                    failures.append(diagnostic.kind.to_string() + " " + diagnostic.key);
+                },
+                ui.RenderFailure.Fault(_) => {
+                    failures.append("fault");
+                },
+            }
+        });
+        host.dispatch_click(root, 1, click());
+        root.run();
+        test.assert_equal_string("DuplicateKey gear", join(failures));
+        test.assert_equal_string("nodes 12, listeners 2, templates 3, queued 0", root.host_stats().to_string());
+        host.clear_log();
+        host.dispatch_click(root, 1, click());
+        root.run();
+        test.assert_equal_string("commit 3 on root 1: 1 render, 3 operations", host.log[0]);
+        test.assert_equal_string("nodes 12, listeners 2, templates 3, queued 0", root.host_stats().to_string());
+    };
+
+    // Retained components keep their nodes without being expanded again (Components030, "Subtree commits"): row
+    // components that do not render move when their list reverses and rotates, a row renders alone, dropped rows
+    // are removed, and a retained component whose parent switches template at the same place is planned again
+    // without reuse. The operations are those of the reconciler that expanded every view (recorded from it).
+    export let test_retained_components_move_and_switch = func() -> void {
+        let host = new model.Host();
+        host.reconcile_commits();
+        let states: ui.State<int32>[list] = new;
+        let parts: ui.Component[list] = new;
+        for (let i = 0; i < 4; i = i + 1) {
+            last state = new ui.State<int32>(0);
+            last key = "r" + i.to_string();
+            states.append(state);
+            parts.append(ui.component<int32>(state, new func(value: int32) -> ui.View => moved_row_view(key, value)));
+        }
+        let order = new ui.State<int32>(0);
+        let list = ui.component<int32>(order, new func(turn: int32) -> ui.View {
+            last indexes: int32[list] = new;
+            last keys: string[list] = new;
+            last views: ui.View[list] = new;
+            for (let i = 0; i < parts.length; i++) {
+                let at = i;
+                if (turn == 1) {
+                    at = parts.length - 1 - i;
+                } else if (turn == 2) {
+                    at = (i + 1) % parts.length;
+                }
+                if (turn == 3 && at % 3 == 0) {
+                    continue;
+                }
+                indexes.append(indexes.length as int32);
+                keys.append("r" + at.to_string());
+                views.append(ui.slot(parts[at]));
+            }
+            return moved_rows_view(frozen.copy_of_list<int32>(indexes), keys, views);
+        });
+        let mode = new ui.State<int32>(0);
+        let inner = ui.component<int32>(states[0], new func(value: int32) -> ui.View => moved_row_view("inner", value));
+        let shell = ui.component<int32>(mode, new func(value: int32) -> ui.View =>
+            switching_view(value, section_view(ui.slot(inner)), article_view(ui.slot(inner)), ui.slot(list)));
+        let root = mounted(host, "#app", shell);
+        host.clear_log();
+        let step = func(change: func() -> void) {
+            host.click(1, shell, new func(event: ui.ClickEvent) {
+                change();
+            });
+            host.end_batch();
+            root.turn();
+        };
+        for (let t = 1; t <= 3; t = t + 1) {
+            last turn = t;
+            step(new func() {
+                order.set(turn);
+            });
+            step(new func() {
+                states[turn].update(func(value: int32) -> int32 => value + 1);
+            });
+        }
+        step(new func() {
+            mode.set(1);
+        });
+        step(new func() {
+            states[2].update(func(value: int32) -> int32 => value + 1);
+        });
+        step(new func() {
+            mode.set(2);
+        });
+        test.assert_equal_string("commit 2 on root 1: 1 render, 3 operations; "
+                                 + "  {\"op\":\"move\",\"id\":16,\"parent\":6,\"before\":7}; "
+                                 + "  {\"op\":\"move\",\"id\":13,\"parent\":6,\"before\":7}; "
+                                 + "  {\"op\":\"move\",\"id\":10,\"parent\":6,\"before\":7}; "
+                                 + "commit 3 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":12,\"value\":\"1\"}; "
+                                 + "commit 4 on root 1: 1 render, 2 operations; "
+                                 + "  {\"op\":\"move\",\"id\":10,\"parent\":6,\"before\":16}; "
+                                 + "  {\"op\":\"move\",\"id\":13,\"parent\":6,\"before\":16}; "
+                                 + "commit 5 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":15,\"value\":\"1\"}; "
+                                 + "commit 6 on root 1: 1 render, 2 operations; "
+                                 + "  {\"op\":\"remove\",\"id\":16}; "
+                                 + "  {\"op\":\"remove\",\"id\":7}; "
+                                 + "commit 7 on root 1: 1 render, 6 operations; "
+                                 + "  {\"op\":\"remove\",\"id\":2}; "
+                                 + "  {\"op\":\"element\",\"id\":19,\"parent\":1,\"before\":6,\"name\":\"article\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":20,\"parent\":19,\"before\":null,\"name\":\"div\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":21,\"parent\":20,\"before\":null,\"name\":\"span\",\"svg\":false}; "
+                                 + "  {\"op\":\"text\",\"id\":22,\"parent\":21,\"before\":null,\"value\":\"0\"}; "
+                                 + "  {\"op\":\"attribute\",\"id\":21,\"name\":\"data-key\",\"value\":\"inner\"}; "
+                                 + "commit 8 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":15,\"value\":\"2\"}; "
+                                 + "commit 9 on root 1: 1 render, 6 operations; "
+                                 + "  {\"op\":\"remove\",\"id\":19}; "
+                                 + "  {\"op\":\"element\",\"id\":23,\"parent\":1,\"before\":6,\"name\":\"section\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":24,\"parent\":23,\"before\":null,\"name\":\"div\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":25,\"parent\":24,\"before\":null,\"name\":\"span\",\"svg\":false}; "
+                                 + "  {\"op\":\"text\",\"id\":26,\"parent\":25,\"before\":null,\"value\":\"0\"}; "
+                                 + "  {\"op\":\"attribute\",\"id\":25,\"name\":\"data-key\",\"value\":\"inner\"}", join(host.log));
+        root.close();
+    };
+);

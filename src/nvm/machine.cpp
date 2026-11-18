@@ -1,6 +1,6 @@
 #include "machine.hpp"
 
-#include "driver.hpp"
+#include "addressable.hpp"
 #include "graph_device.hpp"
 #include "heap.hpp"
 #include "run_support.hpp"
@@ -9,7 +9,10 @@
 #include "tier2.hpp"
 #include "tier3.hpp"
 
+#ifndef NEURA_WASM_RUNTIME
+#include "driver.hpp"
 #include "jit/tier3_native.hpp"
+#endif
 #include "lift/evaluate.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -328,7 +331,7 @@ std::optional<std::size_t> evaluate_loaded_outputs(const nvr::Graph& graph, std:
 } // namespace
 
 std::optional<std::size_t> evaluate_graph(const nvr::Graph& graph, std::vector<std::int64_t>& wires) {
-    wires.resize(std::size_t{graph.input_lanes} + graph.nodes.size());
+    wires.resize(detail::add_elements(graph.input_lanes, graph.nodes.size(), wires.max_size()));
     return evaluate_nodes(graph, wires);
 }
 
@@ -387,7 +390,9 @@ public:
     }
 
     ~State() {
+#ifndef NEURA_WASM_RUNTIME
         stop_parallel_workers();
+#endif
         stop_tracking_heap();
         // A shadow's tier steps are not the run's (NEURA_TIER_CHECK=2).
         if (tier_ && !shadow_role_) {
@@ -403,6 +408,9 @@ public:
     void setup_tier() {
         // Setting up an execution is part of loading for --tier-stats.
         time_as(TierTimes::Category::Load);
+#ifdef NEURA_WASM_RUNTIME
+        limits_.parallel_workers = 1;
+#endif
         if (limits_.graph_device || std::min(limits_.tier, tier_ceiling()) < 1) {
             limits_.tier_cache = nullptr;
             return;
@@ -419,10 +427,13 @@ public:
         // Regions and programs skip prepare_step, so a block observer (which
         // sees every step) runs below tier 2.
         tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2 && !limits_.block_observer;
+        programs_ = tier_->programs();
+#ifdef NEURA_WASM_RUNTIME
+        if (tier2_ && limits_.jit == jit::Mode::On) throw std::invalid_argument("the browser runtime has no native code");
+#else
         // Tier 3 runs function programs: it is on when the cache turns
         // them native (docs/runtime/NVM.md, "Execution tiers").
         tier3_ = tier2_ && tier_->native_enabled();
-        programs_ = tier_->programs();
         // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
         // compilation"). --jit=on fails here, before the run starts, when
         // the platform cannot run it.
@@ -454,6 +465,7 @@ public:
             }
             tier_->note_native(tier3_native_, off);
         }
+#endif
     }
 
     // --tier-stats: the wall time from here on belongs to `category`. The
@@ -482,7 +494,11 @@ public:
         }
     }
 
-    Event advance() {
+    Event advance()
+#ifdef NEURA_WASM_RUNTIME
+    try
+#endif
+    {
         // A run with a shadow (NEURA_TIER_CHECK=2) runs this loop with its
         // sync points in shadowed_advance.
         if (shadow_) return shadowed_advance();
@@ -508,6 +524,48 @@ public:
             }
         }
     }
+#ifdef NEURA_WASM_RUNTIME
+    catch (const std::bad_alloc&) {
+        try {
+            fault(TrapKind::HeapLimit, "the wasm memory allocator could not grow");
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+#endif
+
+#ifdef NEURA_WASM_RUNTIME
+    std::optional<Event> advance_slice(std::uint64_t budget) try {
+        if (budget == 0) throw std::invalid_argument("a slice needs a positive step budget");
+        if (finished_) return *finished_;
+        if (pending_) throw std::logic_error("advance_slice() called while a host request is pending");
+        serve_dump_request();
+        const auto initial_steps = steps_;
+        while (steps_ - initial_steps < budget) {
+            if (tier2_) {
+                run_regions(budget - (steps_ - initial_steps));
+                if (finished_) {
+                    time_as(TierTimes::Category::Other);
+                    return *finished_;
+                }
+                if (steps_ - initial_steps >= budget) break;
+            }
+            if (auto event = step(wires_)) {
+                const bool ended = event->kind == Event::Kind::Completed || event->kind == Event::Kind::Trapped;
+                time_as(ended ? TierTimes::Category::Other : TierTimes::Category::Host);
+                return event;
+            }
+        }
+        time_as(TierTimes::Category::Host);
+        return std::nullopt;
+    } catch (const std::bad_alloc&) {
+        try {
+            fault(TrapKind::HeapLimit, "the wasm memory allocator could not grow");
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+#endif
 
     std::optional<Event> begin_step(GraphStep& step) {
         if (auto event = begin_active_step<false>()) return event;
@@ -765,16 +823,19 @@ private:
         // Pushes a frame of `slot_count` slots whose first slots hold the
         // arguments. The other slots are zero and uninitialized.
         void push(std::uint32_t function, std::size_t slot_count, std::span<const std::uint64_t> arguments,
-                  std::uint32_t return_slot, std::uint32_t return_block) {
+                  std::uint32_t return_slot, std::uint32_t return_block,
+                  std::size_t frame_limit = detail::addressable_bytes / sizeof(FrameHeader)) {
             const auto base = record_.slot_size;
-            reserve(record_.size + 1, base + slot_count);
+            const auto frames = detail::add_elements(record_.size, 1, frame_limit);
+            const auto slots = detail::add_elements(base, slot_count, max_slots);
+            reserve(frames, slots, frame_limit);
             headers_[record_.size] = FrameHeader{function, 0, return_slot, return_block, base, false, nullptr};
             std::fill_n(slots_.get() + base, slot_count, std::uint64_t{0});
             std::fill_n(initialized_.get() + base, slot_count, std::uint8_t{0});
             std::ranges::copy(arguments, slots_.get() + base);
             std::fill_n(initialized_.get() + base, arguments.size(), std::uint8_t{1});
-            ++record_.size;
-            record_.slot_size = base + slot_count;
+            record_.size = frames;
+            record_.slot_size = slots;
         }
 
         void pop_back() {
@@ -805,10 +866,12 @@ private:
         std::vector<HookEvent> hooks;
 
     private:
+        static constexpr std::size_t max_slots = detail::addressable_bytes / sizeof(std::uint64_t);
+
         // Room for `frames` headers and `slots` slots, keeping what is there.
-        void reserve(std::size_t frames, std::size_t slots) {
+        void reserve(std::size_t frames, std::size_t slots, std::size_t frame_limit) {
             if (frames > record_.capacity) {
-                const auto capacity = std::max<std::size_t>({frames, 2 * record_.capacity, 16});
+                const auto capacity = detail::grow_capacity(record_.capacity, frames, 16, frame_limit);
                 auto grown = std::make_unique<FrameHeader[]>(capacity);
                 std::copy_n(headers_.get(), record_.size, grown.get());
                 headers_ = std::move(grown);
@@ -816,7 +879,7 @@ private:
                 record_.capacity = capacity;
             }
             if (slots > record_.slot_capacity) {
-                const auto capacity = std::max<std::size_t>({slots, 2 * record_.slot_capacity, 256});
+                const auto capacity = detail::grow_capacity(record_.slot_capacity, slots, 256, max_slots);
                 auto grown_slots = std::make_unique_for_overwrite<std::uint64_t[]>(capacity);
                 auto grown_flags = std::make_unique_for_overwrite<std::uint8_t[]>(capacity);
                 std::copy_n(slots_.get(), record_.slot_size, grown_slots.get());
@@ -835,7 +898,9 @@ private:
         tier3::FrameRecord record_;
     };
 
-    static_assert(std::is_standard_layout_v<FrameHeader> && sizeof(FrameHeader) == tier3::frame_offsets::header_bytes);
+    static_assert(std::is_standard_layout_v<FrameHeader>);
+#ifndef NEURA_WASM_RUNTIME
+    static_assert(sizeof(FrameHeader) == tier3::frame_offsets::header_bytes);
     static_assert(offsetof(FrameHeader, function) == tier3::frame_offsets::function &&
                   offsetof(FrameHeader, block) == tier3::frame_offsets::block &&
                   offsetof(FrameHeader, return_slot) == tier3::frame_offsets::return_slot &&
@@ -844,6 +909,7 @@ private:
                   offsetof(FrameHeader, boundary) == tier3::frame_offsets::boundary &&
                   offsetof(FrameHeader, called_from) == tier3::frame_offsets::called_from);
     static_assert(sizeof(std::size_t) == 8);
+#endif
 
     enum class TaskState {
         Running, Runnable, Joining, LeavingScope, Finished,
@@ -1039,6 +1105,7 @@ private:
         // Items started since the last time none was outstanding: one map.
         std::uint64_t batch = 0;
         std::shared_ptr<const GlobalsSnapshot> globals;
+#ifndef NEURA_WASM_RUNTIME
         // Worker threads take the lowest unstarted item. Everything below
         // is guarded by the mutex.
         std::mutex mutex;
@@ -1046,6 +1113,7 @@ private:
         std::deque<ParallelItem*> unstarted;
         std::vector<std::thread> workers;
         bool stopping = false;
+#endif
     };
 
     // An armed deadline: a scope's, or a timer some task waits for.
@@ -1153,9 +1221,13 @@ private:
     }
 
     void check_device() const {
+#ifdef NEURA_WASM_RUNTIME
+        if (limits_.graph_device) throw std::invalid_argument("the browser runtime has no graph device");
+#else
         if (limits_.graph_device && &limits_.graph_device->image() != &image_) {
             throw std::invalid_argument("graph device was created for another image");
         }
+#endif
     }
 
     void stop_tracking_heap() {
@@ -1276,12 +1348,20 @@ private:
         }
     }
 
-    void add_stack_cells(std::uint64_t cells, std::string_view action) {
+    void ensure_stack_cells(std::uint64_t cells, std::string_view action) const {
         if (cells > limits_.max_stack_cells || live_stack_cells_ > limits_.max_stack_cells - cells) {
             fault(TrapKind::StackLimit, std::string(action) + std::to_string(cells) + " cells");
         }
+    }
+
+    void record_stack_cells(std::uint64_t cells) {
         live_stack_cells_ += cells;
         peak_stack_cells_ = std::max(peak_stack_cells_, live_stack_cells_);
+    }
+
+    void add_stack_cells(std::uint64_t cells, std::string_view action) {
+        ensure_stack_cells(cells, action);
+        record_stack_cells(cells);
     }
 
     void remove_stack_cells(std::uint64_t cells) { live_stack_cells_ -= cells; }
@@ -1350,8 +1430,8 @@ private:
     }
 
     void adopt(std::vector<std::uint64_t>& handles, std::uint64_t handle) {
-        heap_.set_region(heap_.find(handle));
         handles.push_back(handle);
+        heap_.set_region(heap_.find(handle));
     }
 
     // Calls `visit(handle)` for each reference an entry holds.
@@ -1813,11 +1893,22 @@ private:
 
     void make_frame(FrameStack& frames, std::uint32_t function, std::span<const std::uint64_t> arguments,
                     std::uint32_t return_slot, std::uint32_t return_block) const {
-        frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block);
+        constexpr auto addressable_frames = detail::addressable_bytes / sizeof(FrameHeader);
+#ifdef NEURA_WASM_RUNTIME
+        try {
+            frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block,
+                        std::min<std::size_t>(addressable_frames, limits_.max_frames));
+        } catch (const std::bad_alloc&) {
+            fault(TrapKind::StackLimit, "frame arena exceeds addressable storage");
+        }
+#else
+        frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block,
+                    addressable_frames);
+#endif
     }
 
     std::uint64_t frame_cells(std::uint32_t function) const {
-        return 1 + image_.functions[function].frame_types.size();
+        return 1 + std::uint64_t{image_.functions[function].frame_types.size()};
     }
 
     std::vector<std::uint64_t> argument_roots(std::uint32_t function,
@@ -2580,6 +2671,7 @@ private:
         }
     }
 
+#ifndef NEURA_WASM_RUNTIME
     void start_parallel_workers() {
         if (limits_.parallel_workers <= 1 || !parallel_->workers.empty()) return;
         for (std::uint32_t i = 0; i < limits_.parallel_workers; ++i) {
@@ -2612,6 +2704,7 @@ private:
         for (auto& worker : parallel_->workers) worker.join();
         parallel_->workers.clear();
     }
+#endif
 
     std::uint64_t start_parallel_item(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
         const auto max_steps = static_cast<std::int64_t>(arguments[1]);
@@ -2629,7 +2722,9 @@ private:
         const std::vector<std::uint64_t> roots{arguments[0]};
         ensure_heap_cells(item->charged_cells, "parallel item of ", roots);
         {
+#ifndef NEURA_WASM_RUNTIME
             const std::lock_guard lock(parallel_->mutex);
+#endif
             // The items of one map see the globals as they were when its
             // first item started.
             if (parallel_->items.empty() || !parallel_->globals) {
@@ -2639,12 +2734,16 @@ private:
             item->globals = parallel_->globals;
             item->id = parallel_->next_id++;
             item->index = parallel_->batch++;
+#ifndef NEURA_WASM_RUNTIME
             parallel_->unstarted.push_back(item.get());
+#endif
             parallel_->items.push_back(std::move(item));
         }
         add_live_cells(parallel_->items.back()->charged_cells);
+#ifndef NEURA_WASM_RUNTIME
         start_parallel_workers();
         parallel_->changed.notify_one();
+#endif
         return parallel_->items.back()->id;
     }
 
@@ -2655,28 +2754,38 @@ private:
     std::uint64_t finish_parallel_item(std::uint64_t id, std::uint32_t slot_type,
                                        std::span<const std::uint64_t> roots) {
         if (!parallel_) fault(TrapKind::InvalidTaskOperation, "no such parallel item");
+#ifndef NEURA_WASM_RUNTIME
         std::unique_lock lock(parallel_->mutex);
+#endif
         const auto found = std::ranges::find(parallel_->items, id, [](const auto& item) { return item->id; });
         if (found == parallel_->items.end()) fault(TrapKind::InvalidTaskOperation, "no such parallel item");
+#ifndef NEURA_WASM_RUNTIME
         auto& item = **found;
         if (parallel_->workers.empty()) {
+#endif
             // The reference executor: items run one after another, in order,
             // on this thread.
             for (auto& earlier : parallel_->items) {
                 if (!earlier->done) {
                     earlier->started = true;
+#ifndef NEURA_WASM_RUNTIME
                     std::erase(parallel_->unstarted, earlier.get());
+#endif
                     run_item(image_, limits_, *earlier, shadow_ != nullptr);
                     earlier->done = true;
                 }
                 if (earlier->id == id) break;
             }
+#ifndef NEURA_WASM_RUNTIME
         } else {
             parallel_->changed.wait(lock, [&] { return item.done; });
         }
+#endif
         const auto finished = std::move(*found);
         parallel_->items.erase(found);
+#ifndef NEURA_WASM_RUNTIME
         lock.unlock();
+#endif
         remove_live_cells(finished->charged_cells);
         if (finished->trapped) {
             auto trap = finished->trap;
@@ -3256,9 +3365,11 @@ private:
         const tier2::Region* region = nullptr;
         // For a function program (region->program): the entry at this block.
         std::uint32_t program_entry = 0;
+#ifndef NEURA_WASM_RUNTIME
         // Its native code (src/jit), or null, for `native_region`.
         const tier2::Region* native_region = nullptr;
         const jit::Program* native = nullptr;
+#endif
         // --tier-stats: steps of the region entered here, and regions that
         // deoptimized at or left to this block.
         std::uint64_t region_steps = 0;
@@ -3519,7 +3630,9 @@ private:
 
 #include "tier1_steps.inc"
 #include "tier2_steps.inc"
+#ifndef NEURA_WASM_RUNTIME
 #include "tier3_steps.inc"
+#endif
 #include "tier_shadow.inc"
 
     std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
@@ -3943,9 +4056,10 @@ private:
             if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
             const auto fields = image_.layouts[exit.immediate].fields.size();
             const auto cells = Heap::object_cells(fields);
-            add_stack_cells(cells, "region allocation of ");
+            ensure_stack_cells(cells, "region allocation of ");
             const auto handle = heap_.create_object(exit.immediate, fields);
             adopt(handles, handle);
+            record_stack_cells(cells);
             return handle;
         }
         case nvr::StateOp::RegionCollection:
@@ -3964,19 +4078,20 @@ private:
                 if (count > Heap::max_elements() / stride || count == std::numeric_limits<std::uint64_t>::max())
                     fault(TrapKind::HeapLimit, "collection length exceeds storage limits");
                 cells = count * stride + 1;
-                add_stack_cells(cells, "region allocation of ");
+                ensure_stack_cells(cells, "region allocation of ");
                 handle = fields ? heap_.create_repeated(kind, exit.immediate, static_cast<std::size_t>(count),
                                                         std::span<const std::uint64_t>(args).subspan(2, stride))
                                 : heap_.create_filled(kind, exit.immediate, width, static_cast<std::size_t>(count), args[2]);
             } else {
                 cells = words + 1;
-                add_stack_cells(cells, "region allocation of ");
+                ensure_stack_cells(cells, "region allocation of ");
                 auto item = Heap::Builder::collection(kind, exit.immediate, width);
                 item.reserve(words);
                 for (std::size_t i = 1; i < args.size(); ++i) item.push(args[i]);
                 handle = heap_.create(std::move(item));
             }
             adopt(handles, handle);
+            record_stack_cells(cells);
             return handle;
         }
         case nvr::StateOp::MoveToRegion:
@@ -4077,9 +4192,10 @@ private:
                 // and no collection.
                 const auto* fields = components_of(types[0].type);
                 const auto cells = fields ? fields->size() : 1;
-                add_stack_cells(cells, "growth by ");
+                ensure_stack_cells(cells, "growth by ");
                 if (fields) heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
                 else heap_.append(item, args[1]);
+                record_stack_cells(cells);
                 return 0;
             }
             if (const auto* fields = components_of(types[0].type)) {
@@ -4317,9 +4433,24 @@ private:
         std::array<Cell, max_kernel_params> cells{};
         std::array<std::uint64_t, max_kernel_params> results{};
         std::array<void*, max_kernel_params> pointers{};
+        // The C ABI can pad between a pointer and a uint64_t, as on wasm32.
+        // The view declarations all use the same pointer/length layout.
         const auto view = [](Cell& cell, const void* data, std::uint64_t length) {
-            std::memcpy(cell.bytes, &data, sizeof data);
-            std::memcpy(cell.bytes + sizeof data, &length, sizeof length);
+            const neura_bytes record{static_cast<const std::uint8_t*>(data), length};
+            std::memcpy(cell.bytes, &record, sizeof record);
+        };
+        constexpr auto output_offset = alignof(neura_out_bytes);
+        constexpr auto state_offset = alignof(neura_state);
+        static_assert(sizeof(neura_bytes) <= sizeof(Cell));
+        static_assert(output_offset >= sizeof(void*) && output_offset + sizeof(neura_out_bytes) <= sizeof(Cell));
+        static_assert(state_offset >= sizeof(void*) && state_offset + sizeof(neura_state) <= sizeof(Cell));
+        static_assert(sizeof(neura_out_bytes) == sizeof(neura_out_text) &&
+                      alignof(neura_out_bytes) == alignof(neura_out_text) &&
+                      offsetof(neura_out_bytes, len) == offsetof(neura_out_text, len) &&
+                      offsetof(neura_out_bytes, cap) == offsetof(neura_out_text, cap));
+        const auto buffer_bytes = [](std::uint64_t count, std::size_t width = 1) {
+            if (count > detail::addressable_bytes) throw std::bad_array_new_length();
+            return detail::allocation_bytes(static_cast<std::size_t>(count), width);
         };
         const auto pack = [&](std::size_t p, Heap::Ref item, Kind element) {
             auto& buffer = kernel_buffers_[p];
@@ -4329,7 +4460,7 @@ private:
                 buffer.assign(bytes.begin(), bytes.end());
                 return;
             }
-            buffer.resize(heap_.length(item) * width);
+            buffer.resize(detail::allocation_bytes(heap_.length(item), width));
             heap_.copy_out(item, buffer.data(), static_cast<ElementWidth>(width));
         };
         for (std::size_t p = 0; p < count; ++p) {
@@ -4363,26 +4494,19 @@ private:
                 pack(p, item, element);
                 auto& buffer = kernel_buffers_[p];
                 if (kind == Kind::State) {
-                    const auto length = static_cast<std::uint64_t>(buffer.size());
-                    view(cell, buffer.data(), length);
+                    const neura_state record{buffer.data(), buffer.size()};
+                    void* state = cell.bytes + state_offset;
+                    std::memcpy(state, &record, sizeof record);
+                    std::memcpy(cell.bytes, &state, sizeof state);
                 } else {
                     view(cell, buffer.data(), buffer.size() / element_bytes(element));
-                }
-                if (kind == Kind::State) {
-                    // neura_state holds a writable pointer, as neura_mut_T does.
-                    auto* data = buffer.data();
-                    const auto length = static_cast<std::uint64_t>(buffer.size());
-                    std::memcpy(cell.bytes + 16, &data, sizeof data);
-                    std::memcpy(cell.bytes + 16 + sizeof data, &length, sizeof length);
-                    void* state = cell.bytes + 16;
-                    std::memcpy(cell.bytes, &state, sizeof state);
                 }
                 break;
             }
             case Role::Scratch: {
                 const auto element = kernels::element_kind(kind);
                 auto& buffer = kernel_buffers_[p];
-                buffer.assign(static_cast<std::size_t>(sizes[p]) * element_bytes(element), 0);
+                buffer.assign(buffer_bytes(sizes[p], element_bytes(element)), 0);
                 view(cell, buffer.data(), sizes[p]);
                 break;
             }
@@ -4390,14 +4514,10 @@ private:
             case Role::ErrorOffset:
                 if (kind == Kind::OutText || kind == Kind::OutBytes) {
                     auto& buffer = kernel_buffers_[p];
-                    buffer.assign(static_cast<std::size_t>(sizes[p]), 0);
-                    auto* data = buffer.data();
-                    const std::uint64_t zero = 0;
-                    const std::uint64_t capacity = sizes[p];
-                    std::memcpy(cell.bytes + 8, &data, sizeof data);
-                    std::memcpy(cell.bytes + 8 + sizeof data, &zero, sizeof zero);
-                    std::memcpy(cell.bytes + 16 + sizeof data, &capacity, sizeof capacity);
-                    void* out = cell.bytes + 8;
+                    buffer.assign(buffer_bytes(sizes[p]), 0);
+                    const neura_out_bytes record{buffer.data(), 0, sizes[p]};
+                    void* out = cell.bytes + output_offset;
+                    std::memcpy(out, &record, sizeof record);
                     std::memcpy(cell.bytes, &out, sizeof out);
                 } else {
                     void* result = &results[p];
@@ -4419,14 +4539,14 @@ private:
             if (status != NEURA_NEED_CAPACITY || attempt == 1 || binding.value_param == kernels::Binding::none) break;
             auto& cell = cells[binding.value_param];
             neura_out_bytes out{};
-            std::memcpy(&out, cell.bytes + 8, sizeof out);
+            std::memcpy(&out, cell.bytes + output_offset, sizeof out);
             if (out.len <= out.cap) break;
             auto& buffer = kernel_buffers_[binding.value_param];
-            buffer.assign(static_cast<std::size_t>(out.len), 0);
+            buffer.assign(buffer_bytes(out.len), 0);
             out.data = buffer.data();
             out.cap = out.len;
             out.len = 0;
-            std::memcpy(cell.bytes + 8, &out, sizeof out);
+            std::memcpy(cell.bytes + output_offset, &out, sizeof out);
         }
         const bool error = status >= NEURA_ERR_INVALID_START_BYTE && status < NEURA_TRAP_OFFSET_OUT_OF_RANGE;
         if (status != NEURA_OK && !(error && binding.result == kernels::ResultShape::Outcome)) {
@@ -4461,7 +4581,7 @@ private:
                 return value_bits() & mask(kernels::scalar_width(kind));
             }
             neura_out_bytes out{};
-            std::memcpy(&out, cells[binding.value_param].bytes + 8, sizeof out);
+            std::memcpy(&out, cells[binding.value_param].bytes + output_offset, sizeof out);
             const auto length = empty ? 0 : static_cast<std::size_t>(std::min(out.len, out.cap));
             if (kind == Kind::OutText) {
                 const std::string_view bytes(reinterpret_cast<const char*>(out.data), length);
@@ -4594,12 +4714,15 @@ private:
     std::vector<std::vector<std::uint64_t>> program_images_;
     std::vector<const tier2::Region*> function_programs_;
     RegionCounts region_counts_;
+#ifndef NEURA_WASM_RUNTIME
     // Tier 3 (tier3_steps.inc): whether function programs run as native
     // programs, the context they run in, and the events for --tier-stats.
     bool tier3_ = false;
+#endif
     // Whether blocks form function programs: the cache's setting, less the
     // programs only a default tier 3 asked for when it is off for this run.
     bool programs_ = false;
+#ifndef NEURA_WASM_RUNTIME
     // Whether they run their machine code (else the IR interpreter), and
     // the values a deoptimization stub stores, by SSA value.
     bool tier3_native_ = false;
@@ -4618,6 +4741,7 @@ private:
     bool jit_ = false;
     jit::Context jit_context_;
     std::exception_ptr region_exception_;
+#endif
     // NEURA_TIER_CHECK=1: the heap and global writes of state operations,
     // in order, while a region and its tier-1 replay run.
     std::vector<HeapWrite>* heap_log_ = nullptr;
@@ -5053,6 +5177,9 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 }
 
 Event Execution::advance() { return state_->advance(); }
+#ifdef NEURA_WASM_RUNTIME
+std::optional<Event> Execution::advance_slice(std::uint64_t budget) { return state_->advance_slice(budget); }
+#endif
 std::string Execution::dump_tasks(TaskDumpFormat format) const { return state_->dump_tasks(format); }
 DebugPosition Execution::debug_position() const { return state_->debug_position(); }
 DebugSnapshot Execution::debug_snapshot() const { return state_->debug_snapshot(); }
@@ -5062,11 +5189,13 @@ std::vector<DebugValue> Execution::debug_children(std::uint32_t type, std::uint6
 }
 
 std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
+#ifndef NEURA_WASM_RUNTIME
 std::vector<Execution::Tier3Frame> Execution::tier3_frames() const { return state_->tier3_frames(); }
 Execution::Tier3Ending Execution::tier3_run(const tier3::Program& program, std::uint32_t entry) {
     return state_->tier3_run(program, entry);
 }
 std::vector<std::uint64_t> Execution::heap_snapshot() const { return state_->heap_snapshot(); }
+#endif
 std::uint64_t Execution::tick() const { return state_->tick(); }
 std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }
 std::uint64_t Execution::peak_pending_requests() const { return state_->peak_pending_requests(); }
@@ -5124,6 +5253,7 @@ std::uint64_t Execution::peak_stack_cells() const { return state_->peak_stack_ce
 std::vector<Execution::HeapEntryWidth> Execution::heap_entry_widths() const { return state_->heap_entry_widths(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 
+#ifndef NEURA_WASM_RUNTIME
 std::int64_t SteadyTaskClock::now() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -5162,5 +5292,6 @@ RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const
     const auto last = drive(execution, bindings, *clock, hooks);
     return detail::finished_result(execution, last, requests);
 }
+#endif
 
 } // namespace neura::nvm

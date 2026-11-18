@@ -1,0 +1,7 @@
+error[E0253]: malformed stylesheet
+ --> $DIR/stylesheet-structure.nra:1:40
+  |
+1 | const Local = css { .row { color: red; ] } };
+  |                                        ^ this closing delimiter does not match a stylesheet opener
+
+For more information about this error, try `neura explain E0253`.

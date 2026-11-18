@@ -1,0 +1,161 @@
+let frozen = import:Std.Collections.Frozen;
+let model_random = import:ModelRandom;
+let test = import:Std.Test;
+
+#Immutable
+let Stock = class (
+    export last name: string;
+    export last count: int32;
+
+    export let init = func(name: string, count: int32) => set;
+
+    export let.override equals = func(other: class) -> bool {
+        if (!(other is Stock)) {
+            return false;
+        }
+        last that = other as Stock;
+        return name == that.name && count == that.count;
+    };
+
+    export let.override hash_code = func -> uint32 => name.hash_code() ^ (count as uint32);
+
+    export let.override to_string = func -> string => name + ":" + count.to_string();
+);
+
+let FrozenTests = module (
+    let same = func(expected: int64[list], actual: frozen.FrozenList<int64>) {
+        test.assert_equal_int32(expected.length, actual.length());
+        for (let i = 0; i < expected.length; i++) {
+            test.assert_equal_int64(expected[i], actual.get(i));
+        }
+        test.assert_equal_string(expected.to_string(), actual.to_string());
+    };
+
+    // Case 16: an empty array, a list, and of().
+    export let test_constructors = func() -> void {
+        test.assert(frozen.copy_of<int64>([]).is_empty());
+        let source: int64[list] = new([3, 1, 4]);
+        let copied = frozen.copy_of_list<int64>(source);
+        source.append(5);
+        source[0] = 9;
+        test.assert_equal_string("[3, 1, 4]", copied.to_string());
+        test.assert_equal_string("[a, b]", frozen.of<string>("a", "b").to_string());
+        test.assert(frozen.empty<string>().is_empty());
+    };
+
+    // No mutation of the source array is visible through the copy.
+    export let test_array_source_alias = func() -> void {
+        let source: string[] = ["bolt", "nut"];
+        let parts = frozen.copy_of<string>(source);
+        source[0] = "gear";
+        test.assert_equal_string("bolt", parts.get(0));
+        let copy = parts.to_list();
+        copy[1] = "washer";
+        copy.append("pin");
+        test.assert_equal_string("[bolt, nut]", parts.to_string());
+    };
+
+    // Case 18: appended on a shared list leaves the original unchanged.
+    export let test_derived_lists_are_new = func() -> void {
+        let base = frozen.of<int64>(1, 2, 3);
+        let shared = base;
+        let longer = shared.appended(4);
+        let changed = base.replaced(0, 7);
+        let shorter = base.removed(1);
+        let joined = base.concat(longer);
+        let part = joined.slice(2, 5);
+        test.assert_equal_string("[1, 2, 3]", base.to_string());
+        test.assert_equal_string("[1, 2, 3, 4]", longer.to_string());
+        test.assert_equal_string("[7, 2, 3]", changed.to_string());
+        test.assert_equal_string("[1, 3]", shorter.to_string());
+        test.assert_equal_string("[1, 2, 3, 1, 2, 3, 4]", joined.to_string());
+        test.assert_equal_string("[3, 1, 2]", part.to_string());
+        test.assert(!(longer == base));
+    };
+
+    export let test_reads = func() -> void {
+        let items = frozen.of<int64>(5, 6, 5);
+        test.assert_equal_int64(5, test.assert_some<int64>(items.first_or_none()));
+        test.assert_equal_int64(5, test.assert_some<int64>(items.last_or_none()));
+        test.assert_none<int64>(frozen.empty<int64>().first_or_none());
+        test.assert_none<int64>(frozen.empty<int64>().last_or_none());
+        test.assert(items.contains(6));
+        test.assert(!items.contains(7));
+        test.assert_equal_int32(0, items.index_of(5));
+        test.assert_equal_int32(-1, items.index_of(8));
+        let total: int64 = 0;
+        for (let value: int64 in items) {
+            total += value;
+        }
+        test.assert_equal_int64(16, total);
+        items.for_each(func(value: int64) {
+            test.assert(value >= 5);
+        });
+    };
+
+    // Equality and hashing by value; == stays identity.
+    export let test_value_equality = func() -> void {
+        let a = frozen.of<Stock>(new Stock("bolt", 3), new Stock("nut", 4));
+        let b = frozen.of<Stock>(new Stock("bolt", 3), new Stock("nut", 4));
+        let c = frozen.of<Stock>(new Stock("bolt", 3));
+        test.assert(a.equals(b));
+        test.assert(!a.equals(c));
+        test.assert(!(a == b));
+        test.assert(a.hash_code() == b.hash_code());
+        test.assert(a.contains(new Stock("nut", 4)));
+        test.assert_equal_string("[bolt:3, nut:4]", a.to_string());
+    };
+
+    // Case 17: nested lists.
+    export let test_nested = func() -> void {
+        let grid = frozen.of<frozen.FrozenList<int64>>(frozen.of<int64>(1, 2), frozen.empty<int64>());
+        test.assert_equal_string("[[1, 2], []]", grid.to_string());
+        test.assert_equal_int64(2, grid.get(0).get(1));
+        test.assert(grid.equals(frozen.of<frozen.FrozenList<int64>>(frozen.of<int64>(1, 2), frozen.empty<int64>())));
+    };
+
+    // Model-based: random operations on a FrozenList and a list agree, and
+    // every earlier version keeps its contents.
+    export let test_model = func() -> void {
+        let random = model_random.seeded(20261117);
+        let model: int64[list] = new;
+        let current = frozen.empty<int64>();
+        let versions: frozen.FrozenList<int64>[list] = new;
+        let snapshots: string[list] = new;
+        for (let step = 0; step < 300; step++) {
+            last choice = random.below(5);
+            last value = random.below(1000) as int64;
+            if (choice == 0 || model.length == 0) {
+                model.append(value);
+                current = current.appended(value);
+            } else if (choice == 1) {
+                last index = random.below(model.length);
+                model[index] = value;
+                current = current.replaced(index, value);
+            } else if (choice == 2) {
+                last index = random.below(model.length);
+                model.remove_at(index);
+                current = current.removed(index);
+            } else if (choice == 3) {
+                last start = random.below(model.length + 1);
+                last end = start + random.below(model.length - start + 1);
+                last part: int64[list] = new;
+                for (let i = start; i < end; i++) {
+                    part.append(model[i]);
+                }
+                same(part, current.slice(start, end));
+            } else {
+                last other = frozen.of<int64>(value, value + 1);
+                model.append(value);
+                model.append(value + 1);
+                current = current.concat(other);
+            }
+            same(model, current);
+            versions.append(current);
+            snapshots.append(model.to_string());
+        }
+        for (let i = 0; i < versions.length; i++) {
+            test.assert_equal_string(snapshots[i], versions[i].to_string());
+        }
+    };
+);

@@ -15,6 +15,7 @@ The [standard library specification](Stdlib-Design) gives the shared contracts. 
 | [`Std.Collections.BitSet`](Stdlib-Collections-BitSet) | [Contracts](Stdlib-Collections-BitSet#detailed-contracts) | [Declarations](Stdlib-Collections-BitSet#exported-declarations) |
 | [`Std.Collections.Collection`](Stdlib-Collections-Collection) | [Contracts](Stdlib-Collections-Collection#detailed-contracts) | [Declarations](Stdlib-Collections-Collection#exported-declarations) |
 | [`Std.Collections.Deque`](Stdlib-Collections-Deque) | [Contracts](Stdlib-Collections-Deque#detailed-contracts) | [Declarations](Stdlib-Collections-Deque#exported-declarations) |
+| [`Std.Collections.Frozen`](Stdlib-Collections-Frozen) | [Contracts](Stdlib-Collections-Frozen#detailed-contracts) | [Declarations](Stdlib-Collections-Frozen#exported-declarations) |
 | [`Std.Collections.HashMap`](Stdlib-Collections-HashMap) | [Contracts](Stdlib-Collections-HashMap#detailed-contracts) | [Declarations](Stdlib-Collections-HashMap#exported-declarations) |
 | [`Std.Collections.HashSet`](Stdlib-Collections-HashSet) | [Contracts](Stdlib-Collections-HashSet#detailed-contracts) | [Declarations](Stdlib-Collections-HashSet#exported-declarations) |
 | [`Std.Collections.ImmutableList`](Stdlib-Collections-ImmutableList) | [Contracts](Stdlib-Collections-ImmutableList#detailed-contracts) | [Declarations](Stdlib-Collections-ImmutableList#exported-declarations) |
@@ -379,6 +380,7 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | [`Std.Net.Socket.UnixListener`](Stdlib-Net-Socket-UnixListener) | [Contracts](Stdlib-Net-Socket-UnixListener#detailed-contracts) | [Declarations](Stdlib-Net-Socket-UnixListener#exported-declarations) |
 | [`Std.Net.Socket.UnixStream`](Stdlib-Net-Socket-UnixStream) | [Contracts](Stdlib-Net-Socket-UnixStream#detailed-contracts) | [Declarations](Stdlib-Net-Socket-UnixStream#exported-declarations) |
 | [`Std.Net.TcpListener`](Stdlib-Net-TcpListener) | [Contracts](Stdlib-Net-TcpListener#detailed-contracts) | [Declarations](Stdlib-Net-TcpListener#exported-declarations) |
+| [`Std.Net.Http.Fetch`](Stdlib-Net-Http-Fetch) | [Contracts](Stdlib-Net-Http-Fetch#api-and-shared-contracts) | [Declarations](Stdlib-Net-Http-Fetch#exported-declarations) |
 | [`Std.Net.TcpStream`](Stdlib-Net-TcpStream) | [Contracts](Stdlib-Net-TcpStream#detailed-contracts) | [Declarations](Stdlib-Net-TcpStream#exported-declarations) |
 | [`Std.Net.Tls.Acme`](Stdlib-Net-Tls-Acme) | [Contracts](Stdlib-Net-Tls-Acme#detailed-contracts) | [Declarations](Stdlib-Net-Tls-Acme#exported-declarations) |
 | [`Std.Net.Tls.DynamicCertResolver`](Stdlib-Net-Tls-DynamicCertResolver) | [Contracts](Stdlib-Net-Tls-DynamicCertResolver#detailed-contracts) | [Declarations](Stdlib-Net-Tls-DynamicCertResolver#exported-declarations) |
@@ -445,6 +447,23 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | [`Std.Time.Stopwatch`](Stdlib-Time-Stopwatch) | [Contracts](Stdlib-Time-Stopwatch#detailed-contracts) | [Declarations](Stdlib-Time-Stopwatch#exported-declarations) |
 | [`Std.Time.SystemClock`](Stdlib-Time-SystemClock) | [Contracts](Stdlib-Time-SystemClock#detailed-contracts) | [Declarations](Stdlib-Time-SystemClock#exported-declarations) |
 | [`Std.Time.ZoneOffset`](Stdlib-Time-ZoneOffset) | [Contracts](Stdlib-Time-ZoneOffset#detailed-contracts) | [Declarations](Stdlib-Time-ZoneOffset#exported-declarations) |
+
+### `Std.Ui`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Ui`](Stdlib-Ui) | [Contracts](Stdlib-Ui#detailed-contracts) | [Declarations](Stdlib-Ui#exported-declarations) |
+| [`Std.Ui.Commands`](Stdlib-Ui-Commands) | [Contracts](Stdlib-Ui-Commands#detailed-contracts) | [Declarations](Stdlib-Ui-Commands#exported-declarations) |
+| [`Std.Ui.Controls`](Stdlib-Ui-Controls) | [Contracts](Stdlib-Ui-Controls#detailed-contracts) | [Declarations](Stdlib-Ui-Controls#exported-declarations) |
+| [`Std.Ui.Forms`](Stdlib-Ui-Forms) | [Contracts](Stdlib-Ui-Forms#detailed-contracts) | [Declarations](Stdlib-Ui-Forms#exported-declarations) |
+| [`Std.Ui.ModelHost`](Stdlib-Ui-ModelHost) | [Contracts](Stdlib-Ui-ModelHost#detailed-contracts) | [Declarations](Stdlib-Ui-ModelHost#exported-declarations) |
+| [`Std.Ui.Routing`](Stdlib-Ui-Routing) | [Contracts](Stdlib-Ui-Routing#detailed-contracts) | [Declarations](Stdlib-Ui-Routing#exported-declarations) |
+
+### `Std.Web`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Web`](Stdlib-Web) | [Contracts](Stdlib-Web#detailed-contracts) | [Declarations](Stdlib-Web#exported-declarations) |
 
 ## Specification sections
 

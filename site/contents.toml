@@ -40,6 +40,10 @@ plate = "type-tree"
 pages = [
   { source = "docs/lang/Overview.md", label = "Overview" },
   { source = "docs/lang/CoreLanguage.md", label = "Core language" },
+  { source = "docs/apps/Html.md", label = "HTML factories" },
+  { source = "docs/apps/Components.md", label = "State and components" },
+  { source = "docs/apps/Css.md", label = "Stylesheets" },
+  { source = "docs/apps/WebApp.md", label = "Your first web app" },
   { source = "docs/lang/Numbers.md", label = "Numbers" },
   { source = "docs/lang/Types.md", label = "Types" },
   { source = "docs/lang/Modules.md", label = "Modules and imports" },
@@ -107,6 +111,8 @@ pages = [
   { source = "docs/runtime/ServerHost.md", label = "Server host" },
   { source = "docs/runtime/Sql.md", label = "SQL" },
   { source = "docs/runtime/Kernels.md", label = "Kernels" },
+  { source = "docs/runtime/Providers.md", label = "Application host providers" },
+  { source = "hosts/web/README.md", label = "Browser host" },
   { source = "docs/Benchmarks.md", label = "Wall-clock benchmarks" },
 ]
 

@@ -1,0 +1,7 @@
+error[E0246]: malformed or unknown character reference
+ --> $DIR/template-bare-ampersand.nra:1:29
+  |
+1 | let view = html() { <p>Fish & chips</p> };
+  |                             ^ write a known reference with its ';', or use '&amp;' for a literal ampersand
+
+For more information about this error, try `neura explain E0246`.

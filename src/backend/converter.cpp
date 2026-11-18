@@ -16,6 +16,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/containment.hpp"
+#include "neura-ir/initialization_order.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
@@ -1234,66 +1235,7 @@ void Converter::order_initialization() {
     // other module or file initializer and every top-level statement runs
     // before the entry function: files that a file imports run first, ties in
     // the order the files were given, and each file runs in source order.
-    std::vector<SymbolId> files;
-    std::map<SymbolId, std::set<SymbolId>> imports;
-    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
-        const auto& item = program_.symbols[id];
-        if (item.kind == SymbolKind::File) {
-            files.push_back(id);
-        } else if (item.kind == SymbolKind::Import && item.type.symbol != no_symbol) {
-            const auto from = file_of(id);
-            const auto to = file_of(item.type.symbol);
-            if (from != no_symbol && to != no_symbol && from != to) {
-                imports[from].insert(to);
-            }
-        }
-    }
-    // Files that import each other, directly or through other files, form a
-    // cycle. A cycle runs once every file it imports from outside the cycle
-    // has run, and its files run in the given order. Without cycles this is
-    // the plain dependency order with ties in the given order.
-    std::map<SymbolId, std::set<SymbolId>> reachable;
-    for (const auto file : files) {
-        auto& seen = reachable[file];
-        std::vector<SymbolId> pending(imports[file].begin(), imports[file].end());
-        while (!pending.empty()) {
-            const auto next = pending.back();
-            pending.pop_back();
-            if (seen.insert(next).second) {
-                pending.insert(pending.end(), imports[next].begin(), imports[next].end());
-            }
-        }
-    }
-    const auto same_cycle = [&](SymbolId a, SymbolId b) {
-        return a == b || (reachable[a].contains(b) && reachable[b].contains(a));
-    };
-    std::vector<SymbolId> order;
-    std::set<SymbolId> placed;
-    while (order.size() < files.size()) {
-        bool progressed = false;
-        for (const auto file : files) {
-            if (placed.contains(file)) continue;
-            std::vector<SymbolId> cycle;
-            for (const auto member : files) {
-                if (!placed.contains(member) && same_cycle(file, member)) cycle.push_back(member);
-            }
-            const bool ready = std::ranges::all_of(cycle, [&](SymbolId member) {
-                return std::ranges::all_of(imports[member], [&](SymbolId dependency) {
-                    return placed.contains(dependency) || same_cycle(file, dependency);
-                });
-            });
-            if (!ready) continue;
-            for (const auto member : cycle) {
-                placed.insert(member);
-                order.push_back(member);
-            }
-            progressed = true;
-            break;
-        }
-        if (!progressed) {
-            throw std::logic_error("file initialization order has no ready file");
-        }
-    }
+    const auto order = file_initialization_order(program_);
     std::vector<Startup> reference_boxes;
     std::vector<Startup> reference_values;
     for (const auto file : order) {
@@ -3714,8 +3656,9 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         if (type.kind != TypeKind::Float) return word;
         const auto format = float_of(type);
         const auto first_exponent = word.begin() + format.fraction_bits;
-        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}),
-                                             circuit.any({word.begin(), first_exponent}));
+        // Fraction first, then exponent: the order of src/lift/proof.cpp.
+        const auto fraction = circuit.any({word.begin(), first_exponent});
+        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}), fraction);
         const auto canonical = constant_word(format.canonical_nan(), format.width());
         for (std::size_t bit = 0; bit < word.size(); ++bit) {
             word[bit] = circuit.choose(nan, canonical[bit], word[bit]);
@@ -4482,7 +4425,10 @@ void FunctionCompiler::append_text_bytes(const Operand& buffer, const Operand& s
     const auto head = new_block();
     jump(head);
     begin(head, span);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto next = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, next);
@@ -4616,7 +4562,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
         if (equality) {
             const auto other = state(nvr::StateOp::ReadLength, 0, {slot_operand(right)}, count, span);
-            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), lanes(other))});
+            const auto other_lanes = lanes(other);
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), other_lanes)});
             require_equal(described(std::move(same), binary_form("==", boolean, length, other)));
         }
         const auto position = new_slot(count);
@@ -4626,7 +4573,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto done = new_block();
         jump(head);
         begin(head, span);
-        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+        const auto limit = lanes(length);
+        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
         branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), next, done);
         begin(next, span);
         if (!equality && !hashing) {
@@ -4779,7 +4727,8 @@ void FunctionCompiler::compile_unbox_collection() {
     const auto done = new_block();
     jump(head);
     begin(head, span);
-    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+    const auto limit = lanes(length);
+    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
     branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), body, done);
     begin(body, span);
     const auto handle = state(nvr::StateOp::ReadElement, 0, {slot_operand(input), slot_operand(position)}, boxed, span);
@@ -4820,7 +4769,10 @@ void FunctionCompiler::compile_hash_text() {
     const auto head = new_block();
     jump(head);
     begin(head, none);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto done = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, done);

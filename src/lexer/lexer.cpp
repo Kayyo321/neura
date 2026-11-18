@@ -1,4 +1,5 @@
 #include "lexer.hpp"
+#include "island.hpp"
 
 #include <algorithm>
 #include <array>
@@ -43,7 +44,8 @@ struct Skipped {};
 
 class Lexer {
 public:
-    Lexer(std::string_view source, const std::string& file) : source_(source), file_(file) {}
+    Lexer(std::string_view source, const std::string& file, bool template_neura = false)
+        : source_(source), file_(file), template_neura_(template_neura) {}
 
     std::vector<Token> run(std::vector<Diagnostic>* diagnostics = nullptr) {
         if (source_.starts_with("\xEF\xBB\xBF")) {
@@ -60,7 +62,21 @@ public:
                 comment();
                 continue;
             }
+            if (template_neura_ && c == '/' && peek(1) == '*') {
+                const auto close = source_.find("*/", offset_ + 2);
+                const auto end = close == std::string_view::npos ? source_.size() : close + 2;
+                while (offset_ < end) advance_text();
+                documentation_.reset();
+                continue;
+            }
             const Span start = location();
+            if (c == '{') {
+                if (const auto body = island::start(tokens)) {
+                    tokens.push_back(scan_island(start, *body, diagnostics != nullptr));
+                    documentation_.reset();
+                    continue;
+                }
+            }
             TokenKind kind;
             try {
                 kind = scan(start);
@@ -105,6 +121,24 @@ private:
     }
 
     Span location() const { return {file_, line_, column_, offset_, 0}; }
+
+    Token scan_island(Span span, island::Start body, bool recovering) {
+        const auto begin = span.offset + 1;
+        const auto close = island::close(source_, begin, body.kind);
+        auto end = close.value_or(source_.size());
+        if (!close) {
+            auto opening = span;
+            opening.length = 1;
+            report(Diagnostic(opening, "unterminated template or stylesheet").with_code("E0241")
+                .label("this body has no closing '}'"));
+            if (!recovering) throw combined();
+            end = island::recover(source_, span.offset, body.declaration);
+        }
+        const auto limit = end + (close ? 1 : 0);
+        while (offset_ < limit) advance_text();
+        span.length = limit - span.offset;
+        return {body.kind, std::string(source_.substr(begin, end - begin)), std::move(span)};
+    }
 
     // The first error, carrying the others (Tooling.md, Diagnostics).
     Diagnostic combined() const {
@@ -638,6 +672,7 @@ private:
 
     std::string_view source_;
     const std::string& file_;
+    bool template_neura_;
     std::size_t offset_{};
     std::size_t line_{1};
     std::size_t column_{1};
@@ -656,6 +691,10 @@ bool is_identifier(std::string_view spelling) {
 
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
+}
+
+std::vector<Token> lex_template_neura(std::string_view source, const std::string& file) {
+    return Lexer(source, file, true).run();
 }
 
 std::vector<Token> lex_recovering(std::string_view source, const std::string& file,

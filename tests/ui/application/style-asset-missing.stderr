@@ -1,0 +1,7 @@
+error[E1013]: stylesheet import or asset cannot be resolved
+ --> $DIR/style-asset-missing.nra:1:39
+  |
+1 | const Page = css { body { background: url(./missing.png); } };
+  |                                       ^^^^^^^^^^^^^^^^^^ no file exists at this path
+
+For more information about this error, try `neura explain E1013`.

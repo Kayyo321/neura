@@ -1,0 +1,65 @@
+// The 1,000-row keyed list of budget B-W5 as one `Std.Ui.Controls.list` component, measured in a browser by
+// tests/apps/web/bench-web.py: a click on a row's button changes that row, and the whole list renders again.
+let console = import:Std.Io.Console;
+let controls = import:Std.Ui.Controls;
+let error = import:Std.Core.Error;
+let frozen = import:Std.Collections.Frozen;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+#Immutable
+let Row = class (
+    export last key: string;
+    export last count: int32;
+
+    export let init = func(key: string, count: int32) => set;
+
+    export let.override to_string = func -> string => key + " " + count.to_string();
+
+    export let.override equals = func(other: class) -> bool =>
+        other is Row && (other as Row).key == key && (other as Row).count == count;
+
+    export let.override hash_code = func -> uint32 => (key + " " + count.to_string()).hash_code();
+);
+
+let row_view = html(key: string, count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <span>{key}</span> <button type="button" data-key={key} on:click={on_add}>{count}</button>
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last initial: Row[list] = new;
+        for (let i = 0; i < 1000; i++) {
+            initial.append(new Row("r" + i.to_string(), 0));
+        }
+        last rows = new ui.State<frozen.FrozenList<Row>>(frozen.copy_of_list<Row>(initial));
+        last listing = controls.list<Row>(rows, new func(row: Row) -> string => row.key, new func(row: Row) -> ui.View {
+            last key = row.key;
+            return row_view(row.key, row.count, new func(event: ui.ClickEvent) {
+                rows.update(func(all: frozen.FrozenList<Row>) -> frozen.FrozenList<Row> {
+                    for (let i = 0; i < all.length(); i++) {
+                        if (all.get(i).key == key) {
+                            return all.replaced(i, new Row(key, all.get(i).count + 1));
+                        }
+                    }
+                    return all;
+                });
+            });
+        });
+        let status = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", listing, tasks)) {
+                result.Result.Ok(root) => {
+                    root.run();
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    status = program.ExitCode.Failure;
+                },
+            }
+        }
+        return status;
+    };
+);

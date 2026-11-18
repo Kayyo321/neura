@@ -1,0 +1,2 @@
+let ui = import:Std.Ui;
+let view = html(receive: func(ui.InputEvent) -> void) { <input on:input.prevent_default={receive}> };

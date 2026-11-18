@@ -1,0 +1,7 @@
+schema = 1
+
+[toolchains.emscripten]
+source = "https://github.com/emscripten-core/emsdk.git"
+version = "7.0.0"
+sdk_revision = "1693ce7359fc9694f198694f902a2cc061239b86"
+compiler_revision = "777e6e5db7b4990bcaeb1b9998ed642cc84e6629"

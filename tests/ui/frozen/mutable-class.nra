@@ -1,0 +1,8 @@
+// A FrozenList of a class with a let field (E0580; Components030 case 25).
+let frozen = import:Std.Collections.Frozen;
+
+let Tally = class (
+    export let count: int32 = 0;
+);
+
+let tallies = frozen.empty<Tally>();

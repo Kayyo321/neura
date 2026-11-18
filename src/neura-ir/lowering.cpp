@@ -9,6 +9,7 @@
 #include "float.hpp"
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
+#include "initialization_order.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
 #include "integer.hpp"
@@ -16,6 +17,7 @@
 #include "lifetime.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
+#include "frozen.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 #include "reference_initialization.hpp"
@@ -24,7 +26,10 @@
 #include "event_guard.hpp"
 #include "static_initialization.hpp"
 #include "tags.hpp"
+#include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
+#include "tooling/json.hpp"
+#include "util/sha256.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
 
@@ -35,6 +40,7 @@
 #include <functional>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
@@ -254,6 +260,8 @@ private:
     };
 
     IrProgram program_;
+    // Every type argument written in this compilation, for E0580 (frozen.hpp).
+    std::vector<WrittenTypeArgument> written_type_arguments_;
     std::vector<Entry> entries_;
     std::vector<SymbolId> file_ids_;
     Names linked_files_;
@@ -266,6 +274,23 @@ private:
     std::map<std::pair<std::string, std::string>, SymbolId> linked_modules_;
     std::map<const Statement*, GlobalDestructure> destructures_;
     std::set<std::pair<SymbolId, SymbolId>> wrapper_imports_;
+    std::map<SymbolId, std::vector<IrNode>> template_constants_;
+    // Stylesheet forms (Html030.md, Stylesheets): the scoped names of each
+    // css.module constant, and every stylesheet constant with the bundle
+    // path of its file, to order the links once lowering is done.
+    struct StyleModuleNames {
+        std::map<std::string, std::string, std::less<>> classes;
+        std::map<std::string, std::string, std::less<>> keyframes;
+    };
+    std::map<SymbolId, StyleModuleNames> style_modules_;
+    std::map<const Expr*, SymbolId> stylesheet_constants_;
+    struct StylesheetLink {
+        SymbolId constant;
+        std::size_t offset;
+        std::string path;
+    };
+    std::vector<StylesheetLink> stylesheet_links_;
+    std::deque<Declaration> named_html_;
     const std::vector<ParsedFile>* files_ = nullptr;
     SymbolId root_class_ = no_symbol;
     // Trusted library functions bound to a scheduler operation, by name.
@@ -375,6 +400,13 @@ private:
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
     IrNode lambda(const Declaration& declaration, Context& context, const IrType* expected = nullptr);
+    class UiLowering;
+    IrNode html_factory(const Expr& expr, Context& context);
+    IrNode stylesheet(const Expr& expr, Context& context);
+    std::optional<IrNode> style_module_name(const Expr& expr, Context& context);
+    void order_stylesheets();
+    std::vector<IrNode> html_body(SymbolId id, const Expr& expression, Context& context);
+    IrType html_view_type(const Span& span, const Context& context);
     IrNode bind_function(IrNode callee, Context& context, bool owned = false);
     std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
@@ -937,6 +969,28 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
     return id;
 }
 
+Declaration named_factory(const Declaration& binding, const Expr& expression, bool primary) {
+    Declaration factory{};
+    factory.kind = DeclKind::Function;
+    factory.name = binding.name;
+    factory.name_span = primary ? binding.name_span : std::optional<Span>{expression.span};
+    factory.span = primary ? binding.span : expression.span;
+    factory.type = TypeSyntax{expression.span, "[html View]", {}, {}};
+    factory.parameters = expression.html_factory->parameters;
+    factory.initializer = expression;
+    factory.constant = binding.constant;
+    factory.exported = binding.exported;
+    factory.override_member = binding.override_member;
+    factory.static_member = binding.static_member;
+    factory.has_body = true;
+    if (primary) {
+        factory.tags = binding.tags;
+        for (const auto& alternative : expression.html_factory->overloads)
+            factory.overloads.push_back(named_factory(binding, alternative, false));
+    }
+    return factory;
+}
+
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
     if (accessor_override_syntax(decl) && symbol(owner).kind == SymbolKind::Class)
         return declare_accessor_override(decl, owner);
@@ -952,6 +1006,11 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
             throw Diagnostic(decl.span, "'_' requires a value initializer and does not declare a member")
                 .with_code("E0310");
         return no_symbol;
+    }
+    if (decl.kind == DeclKind::Binding && !decl.last && !decl.type && decl.accessors.empty() &&
+        decl.initializer && decl.initializer->html_factory && !decl.initializer->html_factory->retained) {
+        named_html_.push_back(named_factory(decl, *decl.initializer, true));
+        return declare(named_html_.back(), owner, kind);
     }
     switch (decl.kind) {
     case DeclKind::Module: kind = SymbolKind::Module; break;
@@ -1346,6 +1405,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         if (scope_bound(actual))
             throw Diagnostic(args[i].span, "a value of type " + describe(actual) +
                                            " cannot leave its scope: it cannot be a type argument").with_code("E0605");
+        written_type_arguments_.push_back({params[i], actual, args[i].span});
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -1366,6 +1426,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
 }
 
 IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
+    if (syntax.name == "[html View]") return html_view_type(syntax.span, context);
     IrType result;
     if (syntax.name == "[tuple]") {
         result = {TypeKind::Tuple, {}, no_symbol, {}};
@@ -1852,6 +1913,8 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
 void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     auto ctx = context(symbol(id).owner);
     ctx.initializer = id;
+    if (decl.initializer && decl.initializer->kind == ExprKind::Stylesheet)
+        stylesheet_constants_[&*decl.initializer] = id;
     if (decl.initializer && decl.initializer->kind == ExprKind::Import) {
         if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation").with_code("E0704");
         auto target = resolve_import(*decl.initializer);
@@ -2812,6 +2875,7 @@ IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected
     const auto& callee_expr = expr.operands.front();
     if (callee_expr.kind == ExprKind::OptionalMember) return optional_access(callee_expr, &expr, context);
     if (auto result = primitive_call(expr, context)) return std::move(*result);
+    if (auto result = style_module_name(expr, context)) return std::move(*result);
     if (auto result = conformance_call(expr, context)) return std::move(*result);
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
     // say what the form requires (Concurrency.md section 4.4).
@@ -3552,8 +3616,14 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
     return result;
 }
 
+#include "lowering_ui.inc"
+
 IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     switch (expr.kind) {
+    case ExprKind::HtmlFactory:
+        return html_factory(expr, context);
+    case ExprKind::Stylesheet:
+        return stylesheet(expr, context);
     case ExprKind::TypeApplication: {
         auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
@@ -5229,7 +5299,9 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
         check_definite_assignment(declaration, id);
-        auto instructions = declaration.generator ? generator_factory(declaration, ctx, id) : body(declaration.body, ctx);
+        auto instructions = declaration.generator ? generator_factory(declaration, ctx, id)
+            : declaration.initializer && declaration.initializer->html_factory
+            ? html_body(id, *declaration.initializer, ctx) : body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
             throw missing_return(declaration.span, id, declaration);
         program_.bodies.push_back({id, std::move(instructions)});
@@ -5516,6 +5588,17 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // write.
     for (std::size_t i = 0; i < pending_anonymous_.size(); ++i) lower_declaration(pending_anonymous_[i]);
     lower_pending_twins();
+    order_stylesheets();
+    for (auto& [file, constants] : template_constants_) {
+        const auto body = std::ranges::find(program_.bodies, file, &IrBody::owner);
+        if (body == program_.bodies.end()) {
+            program_.bodies.push_back({file, std::move(constants)});
+        } else {
+            constants.insert(constants.end(), std::make_move_iterator(body->instructions.begin()),
+                             std::make_move_iterator(body->instructions.end()));
+            body->instructions = std::move(constants);
+        }
+    }
     finish_tags(program_, linked_symbols, warning_mark, [&](SymbolId id) -> std::optional<TagDeclarationSpans> {
         if (id >= entries_.size() || !entries_[id].declaration) return std::nullopt;
         const auto& decl = *entries_[id].declaration;
@@ -5534,6 +5617,10 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // function of a prebuilt module is pure only when it is marked #Pure,
     // because its tag is part of its interface.
     declare_checked_tags(program_, linked_symbols, [&](SymbolId id) { return name_span(id); });
+    // Deeply immutable application data (Components030.md): #Frozen storage
+    // and the type arguments of #Frozen classes.
+    check_frozen_storage(program_, linked_symbols, linked_bodies, [&](SymbolId id) { return name_span(id); });
+    check_frozen_arguments(program_, written_type_arguments_);
     std::set<SymbolId> artifact_files;
     for (SymbolId id = 0; id < linked_symbols; ++id) {
         const auto& item = symbol(id);
@@ -5541,12 +5628,14 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             artifact_files.insert(id);
         }
     }
-    check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    const auto prebuilt = [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); };
+    check_pure_tags(program_, prebuilt);
     // A `using` resource does not escape its block (Lifetime030.md), judged
     // with the retention summaries of the linked program.
-    check_scoped_resources(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    check_scoped_resources(program_, prebuilt);
     // No event is emitted under a monitor guard (Lifetime030.md, Events).
     check_event_guards(program_);
+    check_render_factories(program_, prebuilt);
     return std::move(program_);
 }
 

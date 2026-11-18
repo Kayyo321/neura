@@ -149,6 +149,7 @@ A call that omits a nil default records `$default_nil` as the text of the genera
 | 21 | `static.implements` | function | yes | `[s y]` | A static function that implements a [static requirement](lang/Polymorphism.md#static-interface-requirements): the requirement, and the class or primitive whose declaration lists the conformance |
 | 22 | `generated` | function, class, module | no | `[t p]` | A symbol a generator produced: the generator, `record`, `property.adapter` or `derive:json.codec`, and the span of the declaration that caused it |
 | 23 | `generator.resume` | function | no | `s` | The `$resume` method of a generator's state class: the field that holds its resume index ([Revision 1.14](#revision-114-cleanup-and-generators)). Only such a function contains `yield` operations. |
+| 32 | `ui.factory` | function | no | `s` | The string constant containing the canonical descriptor of an HTML factory. The function reads the constant as ordinary data |
 
 Identifier 0 is reserved, and identifiers are never reused. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
 

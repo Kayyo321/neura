@@ -6,6 +6,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/nominal.hpp"
 #include "neura-ir/tags.hpp"
+#include "parser/html_template.hpp"
 
 #include <algorithm>
 #include <array>
@@ -200,6 +201,24 @@ std::string signature(const Declaration &d) {
         text += d.name;
         if (d.type)
             text += ": " + syntax_type(*d.type);
+        // A factory or stylesheet (Html030.md): its kind and parameters, never its body.
+        if (!d.type && d.initializer && d.initializer->html_factory) {
+            const auto &factory = *d.initializer->html_factory;
+            text += factory.retained ? " = new html(" : " = html(";
+            for (std::size_t i = 0; i < factory.parameters.size(); ++i) {
+                if (i)
+                    text += ", ";
+                text += factory.parameters[i].name + ": " + syntax_type(factory.parameters[i].type);
+            }
+            text += ") -> ui.View";
+            if (const auto *path = std::get_if<Token>(&factory.source))
+                text += " from " + path->text;
+        } else if (!d.type && d.initializer && d.initializer->stylesheet) {
+            const auto &sheet = *d.initializer->stylesheet;
+            text += sheet.module ? " = css.module" : " = css";
+            if (sheet.source.kind != TokenKind::CssIsland)
+                text += " from " + sheet.source.text;
+        }
     }
     if (!d.accessors.empty()) {
         text += " { ";

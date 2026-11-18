@@ -1,0 +1,1 @@
+let view = html() { <div href="/items"></div> };

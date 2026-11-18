@@ -78,6 +78,8 @@ struct Declaration;
 struct MatchArm;
 struct SelectArm;
 struct Statement;
+struct HtmlFactorySyntax;
+struct StylesheetSyntax;
 
 struct Expr {
     enum class Kind {
@@ -89,7 +91,7 @@ struct Expr {
         Lambda, Nil, TypeTest, TypeApplication,
         // `spawn call` (Concurrency.md section 4.4): the call is operand 0.
         // The span starts at the contextual keyword, which is five bytes long.
-        Spawn,
+        Spawn, HtmlFactory, Stylesheet,
         // `$"text {hole:spec}"` (docs/design/Calls030.md): the operands are
         // the hole expressions in written order, nested width and precision
         // holes included, and `interpolation` describes them.
@@ -141,6 +143,8 @@ struct Expr {
     std::vector<Span> label_spans{};
     std::shared_ptr<const struct InterpolationSyntax> interpolation{};
     std::optional<Span> operator_span{};
+    std::shared_ptr<HtmlFactorySyntax> html_factory{};
+    std::shared_ptr<StylesheetSyntax> stylesheet{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the

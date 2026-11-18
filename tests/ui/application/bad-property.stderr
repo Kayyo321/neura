@@ -1,0 +1,7 @@
+error[E1002]: unknown attribute, property or event
+ --> $DIR/bad-property.nra:1:28
+  |
+1 | let view = html() { <input prop:scrollTop={0}> };
+  |                            ^^^^^^^^^^^^^^ 'scrollTop' cannot bind this element
+
+For more information about this error, try `neura explain E1002`.

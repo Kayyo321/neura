@@ -1,0 +1,120 @@
+// A page whose command waits, for tests/apps/web/app-check.py: a counter, a slow load run by Std.Ui.Commands and a
+// router with two pages. The page's journey (tasks-test.mjs) starts the load and, while it runs, clicks the counter,
+// follows a link and goes back with the browser's history; each must render at once. Then the load completes, a
+// second load is cancelled, and back and forward work again with no command in flight. Each render of the status
+// and each page the router shows is printed, so the journey can check the order of turns.
+let commands = import:Std.Ui.Commands;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let routing = import:Std.Ui.Routing;
+let system_clock = import:Std.Time.SystemClock;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+let shell_view = html(count: int32, on_add: func(ui.ClickEvent) -> void, status: ui.View, home: ui.Url,
+                      go_home: func(ui.ClickEvent) -> void, other: ui.Url, go_other: func(ui.ClickEvent) -> void,
+                      page: ui.View) {
+    <nav>
+        <a id="home" href={home} on:click.prevent_default={go_home}>Home</a>
+        <a id="other" href={other} on:click.prevent_default={go_other}>Other</a>
+    </nav>
+    <p><span id="count">{count}</span> <button type="button" id="add" on:click={on_add}>Add one</button></p>
+    {status}
+    <main>{page}</main>
+};
+
+let status_view = html(text: string, on_load: func(ui.ClickEvent) -> void, on_cancel: func(ui.ClickEvent) -> void) {
+    <p id="status" role="status">{text}</p>
+    <button type="button" id="load" on:click={on_load}>Load</button>
+    <button type="button" id="cancel" on:click={on_cancel}>Cancel</button>
+};
+
+let page_view = html(title: string) {
+    <h1>{title}</h1>
+};
+
+// The command's input: how long the load waits. A class of its own gives the work a function type no other closure
+// of the program shares (docs/apps/Components.md, "Commands").
+#Immutable
+let Delay = class (
+    export last millis: int64;
+
+    export let init = func(millis: int64) => set;
+
+    export let.override to_string = func -> string => "Delay(" + millis.to_string() + ")";
+
+    export let.override equals = func(other: class) -> bool => other is Delay && (other as Delay).millis == millis;
+
+    export let.override hash_code = func -> uint32 => millis.hash_code();
+);
+
+// Task-safe work: waits on the page's clock, then answers 42. A cancelled wait ends it early.
+let slow_load = func(delay: Delay) -> result.Result<int32> {
+    match (system_clock.create().sleep(durations.of_millis(delay.millis))) {
+        result.Result.Ok(_) => {
+            return result.Result<int32>.Ok(42);
+        },
+        result.Result.Err(problem) => {
+            return result.Result<int32>.Err(problem);
+        },
+    }
+};
+
+let describe = func(state: commands.CommandState<int32>) -> string => match (state) {
+    commands.CommandState.Idle => "Not loaded",
+    commands.CommandState.Running => "Loading",
+    commands.CommandState.Succeeded(value) => "Loaded " + value.to_string(),
+    commands.CommandState.Failed(problem) => "Failed: " + error.message(error.from_portable(problem)),
+    commands.CommandState.Cancelled => "Cancelled",
+};
+
+let page = func(title: string) -> ui.Component =>
+    ui.component<string>(new ui.State<string>(title), new func(text: string) -> ui.View {
+        console.print_line("page " + text);
+        return page_view(text);
+    });
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let load = new commands.Command<Delay, int32>(slow_load);
+        let on_load = new func(event: ui.ClickEvent) {
+            load.run(new Delay(4000));
+        };
+        let on_cancel = new func(event: ui.ClickEvent) {
+            load.cancel();
+        };
+        let status = ui.component<commands.CommandState<int32>>(load.state,
+            new func(state: commands.CommandState<int32>) -> ui.View {
+                console.print_line("status " + describe(state));
+                return status_view(describe(state), on_load, on_cancel);
+            });
+        load.bind(status);
+        let router = new routing.Router();
+        router.add("/", new func(params: routing.Params) -> ui.Component => page("Home"));
+        router.add("/other", new func(params: routing.Params) -> ui.Component => page("Other"));
+        router.otherwise(new func(path: string) -> ui.Component => page("Not found"));
+        let count = new ui.State<int32>(0);
+        let on_add = new func(event: ui.ClickEvent) {
+            count.update(func(value: int32) -> int32 => value + 1);
+        };
+        let shell = ui.component<int32>(count, new func(value: int32) -> ui.View =>
+            shell_view(value, on_add, ui.slot(status), router.link("/"), router.on_link("/"), router.link("/other"),
+                       router.on_link("/other"), ui.slot(router.component())));
+        let exit = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", shell, tasks)) {
+                result.Result.Ok(root) => {
+                    commands.run(root);
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    exit = program.ExitCode.Failure;
+                },
+            }
+        }
+        return exit;
+    };
+);

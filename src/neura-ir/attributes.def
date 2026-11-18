@@ -97,3 +97,5 @@ NEURA_ATTRIBUTE(Generated, 22, "generated", on_function | on_class | symbol_kind
 // Lifetime030.md, Generators): the field that holds its resume index. Only
 // such a function may contain Yield.
 NEURA_ATTRIBUTE(GeneratorResume, 23, "generator.resume", on_function, false, "s")
+// Template provenance. Identifiers 12-31 are reserved by the other 0.3 lanes.
+NEURA_ATTRIBUTE(UiFactory, 32, "ui.factory", on_function, false, "s")

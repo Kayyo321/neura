@@ -1,0 +1,171 @@
+// A page for tests/apps/web/app-check.py that exercises what the other journeys do not: the mount errors of
+// `neura.ui.root.open` (no element, an element inside another root, more than U-9 roots), every event kind
+// beyond click, input and submit, the input-overflow record, and `Root.reset`. Each mount error, event and
+// overflow is printed as one line; events-test.mjs drives the page and checks the lines and the DOM.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+const EventStyles = css {
+    #scroller { height: 40px; overflow: auto; }
+    #scroller div { height: 400px; }
+    #pad { width: 100px; height: 100px; }
+};
+
+let flags = func(modifiers: ui.Modifiers) -> string =>
+    (modifiers.alt ? "alt " : "") + (modifiers.ctrl ? "ctrl " : "") + (modifiers.meta ? "meta " : "")
+    + (modifiers.shift ? "shift " : "");
+
+let pointer_kind = func(kind: ui.PointerKind) -> string => match (kind) {
+    ui.PointerKind.Mouse => "mouse",
+    ui.PointerKind.Pen => "pen",
+    ui.PointerKind.Touch => "touch",
+    ui.PointerKind.Other => "other",
+};
+
+let say = func(line: string) {
+    console.print_line(line);
+};
+
+let events_view = html(count: int32, on_flood: func(ui.ClickEvent) -> void, on_reset: func(ui.ClickEvent) -> void,
+                       on_double: func(ui.ClickEvent) -> void, on_change: func(ui.ChangeEvent) -> void,
+                       on_key_down: func(ui.KeyEvent) -> void, on_key_up: func(ui.KeyEvent) -> void,
+                       on_focus: func(ui.FocusEvent) -> void, on_blur: func(ui.FocusEvent) -> void,
+                       on_pointer_down: func(ui.PointerEvent) -> void, on_pointer_up: func(ui.PointerEvent) -> void,
+                       on_pointer_move: func(ui.PointerEvent) -> void, on_scroll: func(ui.ScrollEvent) -> void,
+                       on_toggle: func(ui.ToggleEvent) -> void, on_close: func(ui.CloseEvent) -> void) {
+    <main>
+        <p><span id="count">{count}</span> <button type="button" id="flood" on:click={on_flood}>Add one</button></p>
+        <button type="button" id="reset" on:click={on_reset}>Reset</button>
+        <button type="button" id="double" on:dblclick={on_double}>Twice</button>
+        <input type="checkbox" id="check" on:change={on_change}>
+        <input type="text" id="keys" on:keydown={on_key_down} on:keyup={on_key_up} on:focus={on_focus} on:blur={on_blur}>
+        <div id="pad" on:pointerdown={on_pointer_down} on:pointerup={on_pointer_up} on:pointermove={on_pointer_move}></div>
+        <div id="scroller" on:scroll={on_scroll}><div>Tall</div></div>
+        <details id="more" on:toggle={on_toggle}><summary>More</summary><p>Details</p></details>
+        <dialog id="dialog" on:close={on_close}><p>Dialog</p></dialog>
+        <div id="nested"></div>
+    </main>
+};
+
+let empty_view = html(text: string) {
+    <p>{text}</p>
+};
+
+let spare = func(name: string) -> ui.Component =>
+    ui.component<string>(new ui.State<string>(name), new func(text: string) -> ui.View => empty_view(text));
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last count = new ui.State<int32>(0);
+        last held: ui.Root[list] = new;
+        last on_flood = new func(event: ui.ClickEvent) {
+            count.update(func(value: int32) -> int32 => value + 1);
+        };
+        last on_reset = new func(event: ui.ClickEvent) {
+            say("reset");
+            held[0].reset();
+        };
+        last on_double = new func(event: ui.ClickEvent) {
+            say("dblclick detail " + event.detail.to_string() + " button " + event.button.to_string());
+        };
+        last on_change = new func(event: ui.ChangeEvent) {
+            say("change checked " + event.checked.to_string() + " value " + event.value);
+        };
+        last on_key_down = new func(event: ui.KeyEvent) {
+            say("keydown " + event.key + " " + event.code + " " + flags(event.modifiers) + "repeat "
+                + event.repeat.to_string());
+        };
+        last on_key_up = new func(event: ui.KeyEvent) {
+            say("keyup " + event.key + " " + event.code + " " + flags(event.modifiers) + "repeat "
+                + event.repeat.to_string());
+        };
+        last on_focus = new func(event: ui.FocusEvent) {
+            say("focus");
+        };
+        last on_blur = new func(event: ui.FocusEvent) {
+            say("blur");
+        };
+        last on_pointer_down = new func(event: ui.PointerEvent) {
+            say("pointerdown " + event.x.to_string() + "," + event.y.to_string() + " button " + event.button.to_string()
+                + " " + pointer_kind(event.kind) + " " + flags(event.modifiers));
+        };
+        last on_pointer_up = new func(event: ui.PointerEvent) {
+            say("pointerup " + event.x.to_string() + "," + event.y.to_string() + " button " + event.button.to_string()
+                + " " + pointer_kind(event.kind));
+        };
+        last on_pointer_move = new func(event: ui.PointerEvent) {
+            say("pointermove " + event.x.to_string() + "," + event.y.to_string() + " " + pointer_kind(event.kind));
+        };
+        last on_scroll = new func(event: ui.ScrollEvent) {
+            say("scroll top " + event.top.to_string() + " left " + event.left.to_string());
+        };
+        last on_toggle = new func(event: ui.ToggleEvent) {
+            say("toggle open " + event.open.to_string());
+        };
+        last on_close = new func(event: ui.CloseEvent) {
+            say("close " + event.return_value);
+        };
+        last page = ui.component<int32>(count, new func(value: int32) -> ui.View =>
+            events_view(value, on_flood, on_reset, on_double, on_change, on_key_down, on_key_up, on_focus, on_blur,
+                        on_pointer_down, on_pointer_up, on_pointer_move, on_scroll, on_toggle, on_close));
+        let status = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#missing", spare("missing"), tasks)) {
+                result.Result.Ok(_) => {
+                    say("missing: mounted");
+                },
+                result.Result.Err(problem) => {
+                    say("missing: " + error.message(problem));
+                },
+            }
+            match (web.mount("#app", page, tasks)) {
+                result.Result.Ok(root) => {
+                    held.append(root);
+                    root.on_overflow(new func(event: ui.RootEvent) {
+                        match (event) {
+                            ui.RootEvent.InputOverflow(dropped) => {
+                                say("overflow " + dropped.to_string());
+                            },
+                        }
+                    });
+                    match (web.mount("#nested", spare("nested"), tasks)) {
+                        result.Result.Ok(_) => {
+                            say("nested: mounted");
+                        },
+                        result.Result.Err(problem) => {
+                            say("nested: " + error.message(problem));
+                        },
+                    }
+                    // The page holds #spare-1 to #spare-16: with the application's root, the fifteenth spare root
+                    // reaches U-9 (16 roots), and the sixteenth is refused.
+                    last spares: ui.Root[list] = new;
+                    for (let i = 1; i <= 16; i++) {
+                        match (web.mount("#spare-" + i.to_string(), spare("spare " + i.to_string()), tasks)) {
+                            result.Result.Ok(opened) => {
+                                spares.append(opened);
+                            },
+                            result.Result.Err(problem) => {
+                                say("spare " + i.to_string() + ": " + error.message(problem));
+                            },
+                        }
+                    }
+                    say("spares opened " + spares.length.to_string());
+                    for (let opened in spares) {
+                        opened.close();
+                    }
+                    say("ready");
+                    root.run();
+                },
+                result.Result.Err(problem) => {
+                    say("mount failed: " + error.message(problem));
+                    status = program.ExitCode.Failure;
+                },
+            }
+        }
+        return status;
+    };
+);

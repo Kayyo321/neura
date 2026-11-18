@@ -1,0 +1,10 @@
+error[E1010]: effect not allowed while rendering: the template calls a function value
+ --> $DIR/render-effect-function-value.nra:2:71
+  |
+2 | ...total = html(format: func(int) -> string, count: int) { <output>{ format(count) }</output> };
+  |                                                                      ^^^^^^^^^^^^^
+  |
+  = note: a template may allocate and read, but it may not write what it did not create, assign a binding, make a host request, start or wait for tasks, or call a function value
+  = help: do it in a handler or a command, and pass the result to the factory
+
+For more information about this error, try `neura explain E1010`.

@@ -1,0 +1,100 @@
+// A small portfolio site: a router with a deep link and a parameter, and a contact form with
+// validation. It runs on the model host, which scripts the visitor's clicks and typing and records
+// what the root asks of it; a browser host shows the same components in a page.
+let console = import:Std.Io.Console;
+let controls = import:Std.Ui.Controls;
+let forms = import:Std.Ui.Forms;
+let model = import:Std.Ui.ModelHost;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let routing = import:Std.Ui.Routing;
+let ui = import:Std.Ui;
+
+let shell_view = html(home: ui.Url, go_home: func(ui.ClickEvent) -> void, contact: ui.Url,
+                      go_contact: func(ui.ClickEvent) -> void, page: ui.View) {
+    <header>
+        <nav>
+            <a href={home} on:click.prevent_default={go_home}>Home</a>
+            <a href={contact} on:click.prevent_default={go_contact}>Contact</a>
+        </nav>
+    </header>
+    <main>{page}</main>
+};
+
+let text_view = html(title: string, body: string) {
+    <article><h1>{title}</h1><p>{body}</p></article>
+};
+
+let contact_view = html(name: ui.View, email: ui.View, message: ui.View, send: ui.View, sent: int32) {
+    <h1>Contact</h1>
+    {name}{email}{message}{send}
+    @if (sent > 0) {
+        <p role="status">Thank you, your message is on its way.</p>
+    }
+};
+
+let page = func(title: string, body: string) -> ui.Component =>
+    ui.component<string>(new ui.State<string>(body), new func(text: string) -> ui.View => text_view(title, text));
+
+let contact_page = func(form: forms.Form, name: forms.Field<string>, email: forms.Field<string>,
+                        message: forms.Field<string>, send: func() -> void) -> ui.Component {
+    last name_input = controls.text_input<string>(name, "text");
+    last email_input = controls.text_input<string>(email, "email");
+    last message_input = controls.text_area<string>(message);
+    return controls.form(form, send, new func(state: forms.FormState) -> ui.View =>
+        contact_view(ui.slot(name_input), ui.slot(email_input), ui.slot(message_input),
+                     controls.submit_button("Send"), state.submitted));
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let outbox: string[list] = new;
+        let name = new forms.Field<string>("name", "Name", "", forms.required_text("Please enter your name"));
+        let email = new forms.Field<string>("email", "E-mail", "", forms.email("Please enter an e-mail address"));
+        let message = new forms.Field<string>("message", "Message", "", forms.required_text("Please write a message"));
+        let form = new forms.Form();
+        form.add(name);
+        form.add(email);
+        form.add(message);
+        let send = new func() {
+            outbox.append(name.draft() + " <" + email.draft() + ">: " + message.draft());
+        };
+        let router = new routing.Router();
+        router.add("/", new func(params: routing.Params) -> ui.Component => page("Hello", "I build things."));
+        router.add("/projects/{slug}", new func(params: routing.Params) -> ui.Component =>
+            page("Project", "This is " + params.get("slug") + "."));
+        router.add("/contact", new func(params: routing.Params) -> ui.Component =>
+            contact_page(form, name, email, message, send));
+        router.otherwise(new func(path: string) -> ui.Component => page("Not found", "Nothing lives at " + path + "."));
+        let site = ui.component<bool>(new ui.State<bool>(true), new func(unused: bool) -> ui.View =>
+            shell_view(router.link("/"), router.on_link("/"), router.link("/contact"), router.on_link("/contact"),
+                       ui.slot(router.component())));
+
+        // The visitor opens a deep link, goes to the contact page, sends an empty form, fills it in,
+        // and sends it again.
+        let host = new model.Host();
+        host.start_at("/projects/neura");
+        let root = result.expect<ui.Root>(ui.mount(host, "#app", site), "mount");
+        console.print_line("at " + router.location.get().to_string());
+        host.click(1, site, router.on_link("/contact"));
+        host.end_batch();
+        root.run();
+        let contact = router.current_page();
+        host.submit(2, contact, form.on_submit(send));
+        host.end_batch();
+        host.input(3, contact, name.on_input(), "Ada");
+        host.input(4, contact, email.on_input(), "ada@example.com");
+        host.input(5, contact, message.on_input(), "Hello!");
+        host.submit(2, contact, form.on_submit(send));
+        host.end_batch();
+        root.run();
+        console.print_line("at " + router.location.get().to_string());
+        for (let line: string in host.log) {
+            console.print_line(line);
+        }
+        for (let line: string in outbox) {
+            console.print_line("sent " + line);
+        }
+        return program.ExitCode.Ok;
+    };
+);

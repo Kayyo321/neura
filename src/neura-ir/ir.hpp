@@ -313,6 +313,15 @@ struct DerivedCodec {
     std::vector<std::pair<std::string, std::string>> schema_imports{};
 };
 
+// A file a build writes beside the image (Html030.md, Lowering and
+// artifacts): a stylesheet or an asset, by its path relative to the
+// directory that holds index.html.
+struct IrBundleFile {
+    std::string path;
+    std::string sha256;
+    std::string contents;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -334,6 +343,11 @@ struct IrProgram {
     // part of a .nir file.
     bool hooks_elaborated = false;
     std::vector<DerivedCodec> derived_codecs{};
+    // Stylesheets and assets of the program's stylesheet forms and templates,
+    // each once, and the stylesheets index.html links, in cascade order. Not
+    // part of a .nir file: a build from source writes them.
+    std::vector<IrBundleFile> bundle_files{};
+    std::vector<std::string> stylesheet_links{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

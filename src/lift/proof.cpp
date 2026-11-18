@@ -221,8 +221,9 @@ private:
         if (is_floating(type)) {
             const auto format = float_of(type);
             const auto first_exponent = word.begin() + format.fraction_bits;
-            const auto nan = circuit_.logical_and(circuit_.all({first_exponent, word.end() - 1}),
-                                                  circuit_.any({word.begin(), first_exponent}));
+            // Fraction first, then exponent: the order of src/backend/converter.cpp.
+            const auto fraction = circuit_.any({word.begin(), first_exponent});
+            const auto nan = circuit_.logical_and(circuit_.all({first_exponent, word.end() - 1}), fraction);
             const auto canonical = backend::constant_word(format.canonical_nan(), format.width());
             for (std::size_t bit = 0; bit < word.size(); ++bit) {
                 word[bit] = circuit_.choose(nan, canonical[bit], word[bit]);

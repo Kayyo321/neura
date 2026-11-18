@@ -1,0 +1,7 @@
+error[E1013]: stylesheet import or asset cannot be resolved
+ --> $DIR/style-asset-outside-root.nra:1:50
+  |
+1 | const Page = css { .hero { background-image: url("../hero.png"); } };
+  |                                                  ^^^^^^^^^^^^^ this path leaves the source root $DIR/
+
+For more information about this error, try `neura explain E1013`.

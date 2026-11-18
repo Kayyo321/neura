@@ -1,0 +1,8 @@
+error[E0249]: malformed template control block
+ --> $DIR/template-key-required.nra:1:21
+  |
+1 | let view = html() { @for (let part in parts) { } };
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^ write '@for (let item in items; key: expression)'
+  |                                            - expected ';'
+
+For more information about this error, try `neura explain E0249`.

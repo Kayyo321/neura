@@ -1,0 +1,1 @@
+let logo = html() { <img src="./logo.png" alt="Logo"> };

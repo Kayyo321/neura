@@ -1,0 +1,7 @@
+error[E1005]: attribute or property value of the wrong type
+ --> $DIR/bad-numeric-attribute.nra:1:65
+  |
+1 | ... = html(ratio: float64) { <table><tbody><tr><td colspan={ratio}></td></tr></tbody></table> };
+  |                                                            ^^^^^^^ expected string, Optional<string> or integer, got float64
+
+For more information about this error, try `neura explain E1005`.

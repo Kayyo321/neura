@@ -1,0 +1,9 @@
+error[E1011]: template or stylesheet file cannot be used
+ --> $DIR/external-missing.nra:1:24
+  |
+1 | let view = html() from "./missing.html";
+  |                        ^^^^^^^^^^^^^^^^ no template file exists at this path
+  |
+  = note: allowed source root: $DIR/
+
+For more information about this error, try `neura explain E1011`.
