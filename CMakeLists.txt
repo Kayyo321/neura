@@ -85,6 +85,20 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR (CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE))
     add_compile_options(-fno-semantic-interposition -ftls-model=initial-exec)
 endif()
+# The server host and its tests use std::jthread and std::stop_token, which
+# the libc++ of Xcode 16 still marks experimental. -fexperimental-library
+# enables them there and links libc++'s static libc++experimental.a, so the
+# tools need no other system library.
+if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS "-std=c++20")
+    check_cxx_source_compiles("#include <thread>\nint main() { std::jthread t([] {}); return 0; }" NEURA_HAS_JTHREAD)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT NEURA_HAS_JTHREAD)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fexperimental-library>)
+        add_link_options($<$<LINK_LANGUAGE:CXX>:-fexperimental-library>)
+    endif()
+endif()
 
 function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
