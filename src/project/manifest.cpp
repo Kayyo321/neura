@@ -131,13 +131,13 @@ ProjectIdentity read_identity(const TomlTable& table) {
     keys(table, {"name", "id", "version", "language"});
     ProjectIdentity info{as_text(required(table, "name")), as_text(required(table, "id")),
                          as_text(required(table, "version")), as_text(required(table, "language"))};
-    if (info.name.value.empty() || !std::ranges::all_of(info.name.value, name_char)) {
+    if (!valid_project_name(info.name.value)) {
         malformed(info.name.span, "project name needs lowercase letters, digits and hyphens");
     }
-    if (info.id.value.find('.') == std::string::npos || !dns_name(info.id.value, true)) {
+    if (!valid_project_id(info.id.value)) {
         malformed(info.id.span, "expected a lowercase reverse-domain project identifier");
     }
-    if (!version_core(info.version.value)) malformed(info.version.span, "expected a project version of the form MAJOR.MINOR.PATCH");
+    if (!valid_project_version(info.version.value)) malformed(info.version.span, "expected a project version of the form MAJOR.MINOR.PATCH");
     if (info.language.value != "0.3") {
         throw Diagnostic(info.language.span, "unsupported project language version; this SDK supports \"0.3\"").with_code("E1021");
     }
@@ -254,48 +254,44 @@ bool origin_host(std::string_view host) {
     return dns_name(host, false);
 }
 
-Located<Origin> origin(Text input) {
-    const auto invalid = [&] {
-        malformed(input.span, "expected an absolute origin with a scheme, host and optional port");
-    };
-    const std::string_view raw = input.value;
+std::optional<Origin> origin_parts(std::string_view raw) {
     const auto boundary = raw.find("://");
-    if (boundary == std::string_view::npos) invalid();
+    if (boundary == std::string_view::npos) return std::nullopt;
     const auto scheme = raw.substr(0, boundary);
     if (scheme.empty() || !letter(scheme.front()) || !std::ranges::all_of(scheme, [](char c) {
             return alnum(c) || c == '+' || c == '-' || c == '.';
-        })) invalid();
+        })) return std::nullopt;
 
     auto authority = raw.substr(boundary + 3);
     std::string_view host;
     if (authority.starts_with('[')) {
         const auto close = authority.find(']');
-        if (close == std::string_view::npos || !ipv6(authority.substr(1, close - 1))) invalid();
+        if (close == std::string_view::npos || !ipv6(authority.substr(1, close - 1))) return std::nullopt;
         host = authority.substr(0, close + 1);
         authority.remove_prefix(close + 1);
     } else {
         host = authority.substr(0, authority.find(':'));
-        if (!origin_host(host)) invalid();
+        if (!origin_host(host)) return std::nullopt;
         authority.remove_prefix(host.size());
     }
 
     std::optional<std::uint16_t> port;
     if (!authority.empty()) {
-        if (!authority.starts_with(':')) invalid();
+        if (!authority.starts_with(':')) return std::nullopt;
         const auto number = unsigned_number(authority.substr(1), 65535);
-        if (!number) invalid();
+        if (!number) return std::nullopt;
         port = static_cast<std::uint16_t>(*number);
     }
-    // String views refer to the original spelling, so copy the components
-    // before moving it into the typed value.
-    Origin parsed{{}, std::string(scheme), std::string(host), port};
-    parsed.text = std::move(input.value);
-    return {std::move(parsed), std::move(input.span)};
+    return Origin{std::string(raw), std::string(scheme), std::string(host), port};
 }
 
 std::vector<Located<Origin>> origin_list(const TomlTable& table, std::string_view key) {
     std::vector<Located<Origin>> result;
-    for (auto& value : texts(table, key)) result.push_back(origin(std::move(value)));
+    for (auto& value : texts(table, key)) {
+        auto parsed = parse_origin(value.value);
+        if (!parsed) malformed(value.span, "expected an absolute origin with a scheme, host and optional port");
+        result.push_back({std::move(*parsed), std::move(value.span)});
+    }
     return result;
 }
 
@@ -318,19 +314,20 @@ bool capability_allowed(Capability value, TargetKind kind) {
     }
 }
 
+constexpr std::pair<std::string_view, Capability> capability_names[] = {
+    {"ui", Capability::Ui}, {"http_client", Capability::HttpClient}, {"bridge", Capability::Bridge},
+    {"http_server", Capability::HttpServer}, {"sql", Capability::Sql}, {"app", Capability::App},
+    {"desktop", Capability::Desktop}, {"fs", Capability::Fs}, {"net", Capability::Net}, {"env", Capability::Env},
+};
+
 std::vector<Located<Capability>> read_capabilities(const TomlEntry& entry, TargetKind kind) {
-    constexpr std::pair<std::string_view, Capability> names[] = {
-        {"ui", Capability::Ui}, {"http_client", Capability::HttpClient}, {"bridge", Capability::Bridge},
-        {"http_server", Capability::HttpServer}, {"sql", Capability::Sql}, {"app", Capability::App},
-        {"desktop", Capability::Desktop}, {"fs", Capability::Fs}, {"net", Capability::Net}, {"env", Capability::Env},
-    };
     std::vector<Located<Capability>> result;
     for (auto& item : as_texts(entry)) {
-        const auto found = std::ranges::find(names, item.value, &std::pair<std::string_view, Capability>::first);
-        if (found == std::end(names) || !capability_allowed(found->second, kind)) {
+        const auto capability = target_capability(kind, item.value);
+        if (!capability) {
             malformed(item.span, "capability '" + item.value + "' cannot be listed for this target kind");
         }
-        result.push_back({found->second, std::move(item.span)});
+        result.push_back({*capability, std::move(item.span)});
     }
     return result;
 }
@@ -562,6 +559,35 @@ void check_desktop_targets(const Named<Target>& targets) {
 }
 
 } // namespace
+
+bool valid_project_name(std::string_view name) {
+    return !name.empty() && std::ranges::all_of(name, name_char);
+}
+
+bool valid_project_id(std::string_view id) {
+    return id.find('.') != std::string_view::npos && dns_name(id, true);
+}
+
+bool valid_project_version(std::string_view version) { return version_core(version); }
+
+std::optional<Origin> parse_origin(std::string_view text) { return origin_parts(text); }
+
+std::optional<Capability> target_capability(TargetKind kind, std::string_view name) {
+    const auto found = std::ranges::find(capability_names, name, &std::pair<std::string_view, Capability>::first);
+    if (found == std::end(capability_names) || !capability_allowed(found->second, kind)) return std::nullopt;
+    return found->second;
+}
+
+std::string_view capability_name(Capability capability) {
+    const auto found = std::ranges::find(capability_names, capability, &std::pair<std::string_view, Capability>::second);
+    return found == std::end(capability_names) ? std::string_view{} : found->first;
+}
+
+std::optional<LimitBounds> target_limit_bounds(TargetKind kind, std::string_view name) {
+    const auto found = std::ranges::find(limit_rules, name, &LimitRule::name);
+    if (found == std::end(limit_rules) || !limit_allowed(name, kind)) return std::nullopt;
+    return LimitBounds{found->maximum, found->second};
+}
 
 Manifest parse_manifest(std::string_view bytes, std::string_view file) {
     const auto doc = parse_toml(bytes, file);

@@ -479,6 +479,7 @@ add_library(neura_project STATIC EXCLUDE_FROM_ALL
     src/project/manifest.cpp
     src/project/lock.cpp
     src/project/resolve.cpp
+    src/project/bundle.cpp
 )
 target_include_directories(neura_project PUBLIC src)
 target_link_libraries(neura_project PRIVATE neura_hash)
@@ -506,6 +507,11 @@ if(BUILD_TESTING)
     target_link_libraries(neura_project_resolve_tests PRIVATE neura_project)
     neura_target_defaults(neura_project_resolve_tests)
     add_test(NAME project-resolve COMMAND neura_project_resolve_tests)
+
+    add_executable(neura_project_bundle_tests tests/project/bundle_tests.cpp)
+    target_link_libraries(neura_project_bundle_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_bundle_tests)
+    add_test(NAME project-bundle COMMAND neura_project_bundle_tests)
 
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)

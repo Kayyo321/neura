@@ -52,6 +52,11 @@ enum class Capability { Ui, HttpClient, Bridge, HttpServer, Sql, App, Desktop, F
 using Limit = Located<std::uint32_t>;
 using LimitOverride = std::variant<Limit, std::array<Limit, 2>>;
 
+struct LimitBounds {
+    std::uint32_t first;
+    std::uint32_t second; // Zero for a single bound.
+};
+
 struct Origin {
     std::string text;
     std::string scheme;
@@ -130,5 +135,14 @@ struct Manifest {
 // Parse and validate the file-local project model. Paths retain their spelling.
 // The caller resolves paths and verifies the filesystem and installed components.
 Manifest parse_manifest(std::string_view bytes, std::string_view file);
+
+// Rules shared by the project manifest and the resolved bundle metadata.
+bool valid_project_name(std::string_view name);
+bool valid_project_id(std::string_view id);
+bool valid_project_version(std::string_view version);
+std::optional<Origin> parse_origin(std::string_view text);
+std::optional<Capability> target_capability(TargetKind kind, std::string_view name);
+std::string_view capability_name(Capability capability);
+std::optional<LimitBounds> target_limit_bounds(TargetKind kind, std::string_view name);
 
 } // namespace neura::project
