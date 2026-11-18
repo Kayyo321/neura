@@ -1,0 +1,219 @@
+let breakers = import:Std.Net.Resilience.CircuitBreaker;
+let breaker_filters = import:Std.Net.Resilience.CircuitBreakerFilter;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Sliding-window circuit breakers over a fixed clock. Expected states follow the rule stated in
+// Std.Net.Resilience.CircuitBreaker: open when calls >= minimum and failures * 100 >= threshold * calls.
+let CircuitBreakerTests = module (
+    let acquire = func(breaker: breakers.CircuitBreaker) -> bool => test.assert_ok<bool>(breaker.try_acquire());
+
+    let succeed = func(breaker: breakers.CircuitBreaker) {
+        test.assert(acquire(breaker));
+        test.assert_ok<unit.Unit>(breaker.record_success());
+    };
+
+    let fail = func(breaker: breakers.CircuitBreaker) {
+        test.assert(acquire(breaker));
+        test.assert_ok<unit.Unit>(breaker.record_failure());
+    };
+
+    let is_state = func(breaker: breakers.CircuitBreaker, expected: breakers.CircuitState) -> bool =>
+        breaker.state() == expected;
+
+    export let test_count_window_needs_minimum_calls = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        // Window of 5 calls, 50 percent threshold, at least 4 calls, 10 s open, 2 trials.
+        last breaker = breakers.count_based(5, 50, 4, durations.of_seconds(10), 2, clock);
+        fail(breaker);
+        fail(breaker);
+        fail(breaker);
+        // 3 failures of 3 calls: rate 100 percent but below the minimum of 4 calls.
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        succeed(breaker);
+        // 4 calls, 3 failures: 300 >= 200, so the breaker opens on the fourth report.
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        test.assert(!acquire(breaker));
+    };
+
+    export let test_count_window_slides = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        // Window of 4, threshold 50 percent, minimum 4.
+        last breaker = breakers.count_based(4, 50, 4, durations.of_seconds(1), 1, clock);
+        fail(breaker);
+        succeed(breaker);
+        succeed(breaker);
+        succeed(breaker);
+        // [F S S S]: 1 of 4 = 25 percent.
+        test.assert_equal<int>(4, test.assert_ok<int>(breaker.window_calls()));
+        test.assert_equal<int>(1, test.assert_ok<int>(breaker.window_failures()));
+        succeed(breaker);
+        // The failure slid out: [S S S S].
+        test.assert_equal<int>(0, test.assert_ok<int>(breaker.window_failures()));
+        fail(breaker);
+        // [S S S F]: 25 percent.
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        fail(breaker);
+        // [S S F F]: 2 * 100 >= 50 * 4, opens.
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+    };
+
+    export let test_open_half_open_closed = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.count_based(2, 50, 2, durations.of_seconds(10), 2, clock);
+        fail(breaker);
+        fail(breaker);
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        clock.advance(durations.of_millis(9999));
+        test.assert(!acquire(breaker));
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        clock.advance(durations.of_millis(1));
+        // Exactly the open duration later: HalfOpen with 2 trials.
+        test.assert(acquire(breaker));
+        test.assert(is_state(breaker, breakers.CircuitState.HalfOpen));
+        test.assert(acquire(breaker));
+        test.assert(!acquire(breaker));
+        test.assert_ok<unit.Unit>(breaker.record_success());
+        test.assert(is_state(breaker, breakers.CircuitState.HalfOpen));
+        test.assert_ok<unit.Unit>(breaker.record_success());
+        // 0 failures of 2 trials: closed with an empty window.
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        test.assert_equal<int>(0, test.assert_ok<int>(breaker.window_calls()));
+    };
+
+    export let test_half_open_failure_reopens = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.count_based(2, 50, 2, durations.of_seconds(5), 2, clock);
+        fail(breaker);
+        fail(breaker);
+        clock.advance(durations.of_seconds(5));
+        test.assert(acquire(breaker));
+        test.assert(acquire(breaker));
+        test.assert_ok<unit.Unit>(breaker.record_success());
+        test.assert_ok<unit.Unit>(breaker.record_failure());
+        // 1 failure of 2 trials: 100 >= 100, open again from now.
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        clock.advance(durations.of_millis(4999));
+        test.assert(!acquire(breaker));
+        clock.advance(durations.of_millis(1));
+        test.assert(acquire(breaker));
+    };
+
+    export let test_reports_while_open_are_ignored = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.count_based(2, 100, 2, durations.of_seconds(1), 1, clock);
+        test.assert(acquire(breaker));
+        test.assert(acquire(breaker));
+        test.assert(acquire(breaker));
+        test.assert_ok<unit.Unit>(breaker.record_failure());
+        test.assert_ok<unit.Unit>(breaker.record_failure());
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        // The third call was admitted before the breaker opened; its report changes nothing.
+        test.assert_ok<unit.Unit>(breaker.record_success());
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+    };
+
+    export let test_time_window_expires_buckets = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        // 3 buckets of 1 s, threshold 50 percent, minimum 3 calls.
+        last breaker = breakers.time_based(3, durations.of_seconds(1), 50, 3, durations.of_seconds(30), 1, clock);
+        fail(breaker); // bucket 0
+        clock.advance(durations.of_seconds(1));
+        succeed(breaker); // bucket 1
+        clock.advance(durations.of_seconds(1));
+        succeed(breaker); // bucket 2
+        // 1 of 3 = 33 percent: closed.
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        test.assert_equal<int>(3, test.assert_ok<int>(breaker.window_calls()));
+        clock.advance(durations.of_seconds(1));
+        // Bucket 3 begins: bucket 0 and its failure leave the window.
+        test.assert_equal<int>(2, test.assert_ok<int>(breaker.window_calls()));
+        test.assert_equal<int>(0, test.assert_ok<int>(breaker.window_failures()));
+        fail(breaker); // bucket 3
+        // Buckets 1..3: 1 failure of 3.
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        fail(breaker); // bucket 3
+        // 2 failures of 4: 200 >= 200, opens.
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+    };
+
+    export let test_time_window_long_gap_clears_everything = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.time_based(2, durations.of_millis(500), 50, 1, durations.of_seconds(1), 1, clock);
+        succeed(breaker);
+        succeed(breaker);
+        clock.advance(durations.of_seconds(60));
+        test.assert_equal<int>(0, test.assert_ok<int>(breaker.window_calls()));
+        fail(breaker);
+        // A single failure, minimum 1: 100 percent opens.
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+    };
+
+    export let test_reset = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.count_based(1, 100, 1, durations.of_seconds(1), 1, clock);
+        fail(breaker);
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        breaker.reset();
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        test.assert_equal_string("CircuitBreaker(Closed)", breaker.to_string());
+    };
+
+    let ok_echo = func(request: string) -> result.Result<string> => result.Result<string>.Ok(request);
+
+    let refuse = func(request: string) -> result.Result<string> =>
+        result.Result<string>.Err(errors.custom("backend.down", request));
+
+    let busy = func(request: string) -> result.Result<string> =>
+        result.Result<string>.Err(errors.custom("backend.busy", request));
+
+    let is_down = func(outcome: result.Result<string>) -> bool => match (outcome) {
+        result.Result.Ok(value) => false,
+        result.Result.Err(e) => code_of(e) == "backend.down",
+    };
+
+    let code_of = func(e: errors.Error) -> string => match (e) {
+        errors.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_filter_fails_fast_when_open = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.count_based(2, 50, 2, durations.of_seconds(10), 1, clock);
+        last guard = breaker_filters.of<string, string>(breaker);
+        last failing = filters.bind<string, string, string, string>(guard, services.of<string, string>(refuse));
+        test.assert_err<string>(failing.call("x"));
+        test.assert_err<string>(failing.call("x"));
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+        last rejected = test.assert_err<string>(failing.call("x"));
+        test.assert_equal_string(breaker_filters.OpenCode, code_of(rejected));
+        test.assert_equal_string("circuit breaker is open", errors.message(rejected));
+        // After the open duration one trial reaches a healthy service and closes the breaker.
+        clock.advance(durations.of_seconds(10));
+        last healthy = filters.bind<string, string, string, string>(guard, services.of<string, string>(ok_echo));
+        test.assert_equal_string("y", test.assert_ok<string>(healthy.call("y")));
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        test.assert_equal_string("CircuitBreakerFilter(CircuitBreaker(Closed))", guard.to_string());
+    };
+
+    export let test_filter_classifier = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last breaker = breakers.count_based(2, 50, 1, durations.of_seconds(10), 1, clock);
+        last guard = breaker_filters.classified<string, string>(breaker, is_down);
+        // "backend.busy" is not a failure for this classifier.
+        last busy_service = filters.bind<string, string, string, string>(guard, services.of<string, string>(busy));
+        test.assert_err<string>(busy_service.call("x"));
+        test.assert(is_state(breaker, breakers.CircuitState.Closed));
+        last down_service = filters.bind<string, string, string, string>(guard, services.of<string, string>(refuse));
+        test.assert_err<string>(down_service.call("x"));
+        // [S F]: 1 of 2 = 50 percent, minimum 1: opens.
+        test.assert(is_state(breaker, breakers.CircuitState.Open));
+    };
+);

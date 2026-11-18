@@ -1,0 +1,91 @@
+let backoffs = import:Std.Net.Resilience.Backoff;
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Net.Filter;
+let.promote _ = import:Std.Core.Result;
+let budgets = import:Std.Net.Resilience.RetryBudget;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief A filter that retries a request while the result matches a retry predicate, with exponential backoff
+/// and a retry budget.
+///
+/// Each request deposits once in the budget and calls the service. While fewer than `max_attempts` calls were made
+/// and `should_retry(result)` is true, the filter withdraws one retry from the budget (stopping when it is refused),
+/// sleeps `backoff.delay(n)` through the injected clock for retry `n`, and calls the service again. It returns the
+/// last result. The default predicate retries every `Err`; a caller retrying non-idempotent requests supplies a
+/// narrower one. A clock failure during the sleep is returned as the request's error.
+/// @see [Std.Net.Resilience.RetryFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-RetryFilter)
+#Since("0.3.0")
+export let RetryFilter = module (
+    /// @brief Retries the next service with backoff under a budget.
+    #[Final, NotThreadSafe]
+    export let RetryFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief The most calls per request, the first included.
+        last max_attempts: int;
+        /// @brief Whether a result should be retried.
+        last should_retry: func(Result<Resp>) -> bool;
+        /// @brief The delays between calls.
+        last backoff: backoffs.Backoff;
+        /// @brief The budget retries draw from.
+        last budget: budgets.RetryBudget;
+        /// @brief The clock the filter sleeps on.
+        last clock: Clock;
+        /// @brief Retries made over the filter's life.
+        let retried: int64 = 0;
+        /// @brief Retries the budget refused over the filter's life.
+        let refused: int64 = 0;
+
+        /// @brief A retry filter. `attempts` must be at least 1, else the constructor traps with "invalid argument:
+        /// max_attempts".
+        export let init = func(attempts: int, retry_if: func(Result<Resp>) -> bool, delays: backoffs.Backoff,
+                limit: budgets.RetryBudget, source: Clock) {
+            if (attempts < 1) {
+                trap_with_message("invalid argument: max_attempts");
+            }
+            max_attempts = attempts;
+            should_retry = retry_if;
+            backoff = delays;
+            budget = limit;
+            clock = source;
+        };
+
+        /// @brief Calls `next` and retries as described for the module.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            budget.deposit();
+            let outcome = next.call(request);
+            for (let attempt = 1; attempt < max_attempts && should_retry(outcome); attempt++) {
+                if (!budget.try_withdraw()) {
+                    refused++;
+                    return outcome;
+                }
+                clock.sleep(backoff.delay(attempt))?;
+                retried++;
+                outcome = next.call(request);
+            }
+            return outcome;
+        };
+
+        /// @brief The retries made so far.
+        export let retries = func -> int64 => retried;
+
+        /// @brief The retries the budget refused so far.
+        export let budget_refusals = func -> int64 => refused;
+
+        /// @brief Text such as "RetryFilter(3 attempts)".
+        export let.override to_string = func -> string => "RetryFilter(" + max_attempts.to_string() + " attempts)";
+    );
+
+    /// @brief A filter that retries every `Err`.
+    #NoDiscard
+    export let on_error = func<Req, Resp>(max_attempts: int, backoff: backoffs.Backoff, budget: budgets.RetryBudget,
+        clock: Clock) -> RetryFilter<Req, Resp> =>
+        new RetryFilter<Req, Resp>(max_attempts, func(outcome: Result<Resp>) -> bool => match (outcome) {
+            Result.Ok(value) => false,
+            Result.Err(e) => true,
+        }, backoff, budget, clock);
+
+    /// @brief A filter that retries the results `should_retry` returns true for.
+    #NoDiscard
+    export let when = func<Req, Resp>(max_attempts: int, should_retry: func(Result<Resp>) -> bool,
+        backoff: backoffs.Backoff, budget: budgets.RetryBudget, clock: Clock) -> RetryFilter<Req, Resp> =>
+        new RetryFilter<Req, Resp>(max_attempts, should_retry, backoff, budget, clock);
+);

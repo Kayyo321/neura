@@ -1,0 +1,23 @@
+let durations = import:Std.Time.Duration;
+
+/// @brief The contract of an adaptive concurrency limit: an estimate of how many requests may be in flight, updated
+/// from latency samples.
+///
+/// By Little's Law the mean number of requests in flight equals the arrival rate times the mean latency (`L = λW`).
+/// A service's capacity is the in-flight count at which its latency starts to grow above the latency without load
+/// (`rtt_noload`): past that point extra requests only queue. An adaptive limit compares each sampled round-trip
+/// time with `rtt_noload` and moves the limit toward that point, so a filter that rejects requests above the limit
+/// sheds load as soon as downstream latency rises. `VegasLimit` and `GradientLimit` implement it, after the limits
+/// of the same names in Netflix's concurrency-limits library.
+/// @see [Std.Net.Resilience.AdaptiveLimit](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-AdaptiveLimit)
+#Since("0.3.0")
+export let AdaptiveLimit = module (
+    /// @brief An adaptive concurrency limit.
+    export let AdaptiveLimit = interface (
+        /// @brief The current limit: the most requests that may be in flight, at least 1.
+        let limit = func -> int;
+        /// @brief Updates the limit with one completed request: its round-trip time, the requests in flight when it
+        /// started (itself included), and whether it was dropped (timed out or rejected downstream).
+        let on_sample = func(rtt: durations.Duration, in_flight: int, dropped: bool);
+    );
+);

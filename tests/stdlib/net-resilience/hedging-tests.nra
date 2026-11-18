@@ -1,0 +1,199 @@
+// test-options: --virtual-time
+let atomics = import:Std.Concurrent.AtomicInt64;
+let budgets = import:Std.Net.Resilience.RetryBudget;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let hedging = import:Std.Net.Resilience.HedgingFilter;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let spawnables = import:Std.Net.Resilience.SpawnableService;
+let system_clock = import:Std.Time.SystemClock;
+let test = import:Std.Test;
+let timers = import:Std.Concurrent.Timer;
+let windows = import:Std.Net.Resilience.LatencyWindow;
+
+// Latency windows and concurrent request hedging. The hedging tests run under virtual time (each test's clock
+// starts at zero and jumps to the next timer when every task waits), so latencies and the winner are exact.
+let HedgingTests = module (
+    let ms = func(n: int64) -> durations.Duration => durations.of_millis(n);
+
+    export let test_latency_window_percentiles = func {
+        last window = windows.of(20);
+        test.assert_none<durations.Duration>(window.percentile(95));
+        // 20, 19, ..., 1 ms: nearest rank ceil(p * 20 / 100).
+        for (let i: int64 = 20; i >= 1; i--) {
+            window.record(ms(i));
+        }
+        test.assert_equal<int64>(19000000, test.assert_some<durations.Duration>(window.percentile(95)).to_nanos());
+        test.assert_equal<int64>(20000000, test.assert_some<durations.Duration>(window.percentile(99)).to_nanos());
+        test.assert_equal<int64>(10000000, test.assert_some<durations.Duration>(window.percentile(50)).to_nanos());
+        test.assert_equal<int64>(1000000, test.assert_some<durations.Duration>(window.percentile(1)).to_nanos());
+        // The window slides: replacing the oldest (20 ms) and next (19 ms) with 100 ms samples.
+        window.record(ms(100));
+        window.record(ms(100));
+        test.assert_equal<int>(20, window.size());
+        test.assert_equal<int64>(100000000, test.assert_some<durations.Duration>(window.percentile(95)).to_nanos());
+        test.assert_equal<int64>(18000000, test.assert_some<durations.Duration>(window.percentile(90)).to_nanos());
+        test.assert_equal_string("LatencyWindow(20 of 20 samples)", window.to_string());
+        window.clear();
+        test.assert_equal<int>(0, window.size());
+    };
+
+    // Waits `millis` on a timer; false when the wait was cancelled.
+    let pause = func(millis: int64) -> bool => match (timers.after(durations.of_millis(millis))) {
+        result.Result.Ok(timer) => timer.wait() == timers.TimerOutcome.Fired,
+        result.Result.Err(e) => false,
+    };
+
+    // A backend whose call number `slow_call` takes `slow` ms and every other call `fast` ms. Calls are counted in an
+    // atomic, a transferable handle, so the closure can run in a task.
+    let backend = func(calls: atomics.AtomicInt64, slow_call: int64, slow: int64, fast: int64)
+            -> func(string) -> result.Result<string> =>
+        new func(request: string) -> result.Result<string> {
+            last n = calls.add(1);
+            last finished = pause(n == slow_call ? slow : fast);
+            return result.Result<string>.Ok((finished ? "done " : "cancelled ") + n.to_string());
+        };
+
+    let fails_fast = func(request: string) -> result.Result<string> {
+        pause(5);
+        return result.Result<string>.Err(errors.custom("replica.down", request));
+    };
+
+    let elapsed = func -> int64 => test.assert_ok<durations.Duration>(system_clock.create().monotonic()).to_nanos();
+
+    let bound = func(filter: hedging.HedgingFilter<string, string>, body: func(string) -> result.Result<string>)
+        -> services.Service<string, string> =>
+        filters.bind<string, string, string, string>(filter, spawnables.of<string, string>(body));
+
+    export let test_no_hedge_before_min_samples = func {
+        last calls = atomics.create(0);
+        last filter = hedging.of<string, string>(10, 95, 3, budgets.unlimited(), system_clock.create());
+        last service = bound(filter, backend(calls, 0, 0, 50));
+        test.assert_equal_string("done 1", test.assert_ok<string>(service.call("a")));
+        test.assert_equal_string("done 2", test.assert_ok<string>(service.call("b")));
+        test.assert_none<durations.Duration>(filter.hedge_delay());
+        test.assert_equal<int64>(0, filter.hedges());
+        test.assert_equal<int64>(100000000, elapsed());
+        test.assert_equal<int>(2, filter.latencies().size());
+    };
+
+    export let test_backup_wins_and_primary_is_cancelled = func {
+        last calls = atomics.create(0);
+        // p95 of the last 10 latencies once 5 are known; call 6 is slow (200 ms), the rest take 10 ms.
+        last filter = hedging.of<string, string>(10, 95, 5, budgets.unlimited(), system_clock.create());
+        last service = bound(filter, backend(calls, 6, 200, 10));
+        for (let i = 0; i < 5; i++) {
+            test.assert_ok<string>(service.call("warm"));
+        }
+        test.assert_equal<int64>(10000000, test.assert_some<durations.Duration>(filter.hedge_delay()).to_nanos());
+        // The primary (call 6) is slow; at 10 ms the backup (call 7) starts and answers at 20 ms.
+        test.assert_equal_string("done 7", test.assert_ok<string>(service.call("x")));
+        test.assert_equal<int64>(1, filter.hedges());
+        test.assert_equal<int64>(1, filter.backup_wins());
+        // The cancelled primary stopped at once: 5 * 10 ms + 20 ms in all, not 250 ms.
+        test.assert_equal<int64>(70000000, elapsed());
+        test.assert_equal<int64>(7, calls.load());
+        test.assert_equal_string("HedgingFilter(p95, 1 hedges)", filter.to_string());
+    };
+
+    export let test_primary_answers_before_the_delay = func {
+        last calls = atomics.create(0);
+        last filter = hedging.of<string, string>(10, 99, 2, budgets.unlimited(), system_clock.create());
+        // Calls 1 and 2 take 30 ms (slow_call 0 never matches, fast = 30), setting the delay to 30 ms.
+        last warm = bound(filter, backend(calls, 0, 0, 30));
+        test.assert_ok<string>(warm.call("a"));
+        test.assert_ok<string>(warm.call("b"));
+        // Now each call takes 10 ms, below the 30 ms delay: no backup.
+        last quick = bound(filter, backend(calls, 0, 0, 10));
+        test.assert_equal_string("done 3", test.assert_ok<string>(quick.call("c")));
+        test.assert_equal<int64>(0, filter.hedges());
+        test.assert_equal<int64>(70000000, elapsed());
+    };
+
+    export let test_budget_refuses_the_backup = func {
+        last calls = atomics.create(0);
+        // A budget that never has a whole retry: the slow primary is awaited.
+        last filter = hedging.of<string, string>(10, 95, 1, budgets.of(0, 0, 0), system_clock.create());
+        last service = bound(filter, backend(calls, 2, 200, 10));
+        test.assert_ok<string>(service.call("warm"));
+        test.assert_equal_string("done 2", test.assert_ok<string>(service.call("x")));
+        test.assert_equal<int64>(0, filter.hedges());
+        test.assert_equal<int64>(210000000, elapsed());
+    };
+
+    export let test_failed_backup_falls_back_to_primary = func {
+        last calls = atomics.create(0);
+        last filter = hedging.with_replica<string, string>(10, 95, 1, budgets.unlimited(), system_clock.create(),
+            fails_fast);
+        last service = bound(filter, backend(calls, 2, 50, 10));
+        test.assert_ok<string>(service.call("warm"));
+        // Delay 10 ms; the replica fails at 15 ms; the primary answers at 50 ms and wins.
+        test.assert_equal_string("done 2", test.assert_ok<string>(service.call("x")));
+        test.assert_equal<int64>(1, filter.hedges());
+        test.assert_equal<int64>(0, filter.backup_wins());
+        test.assert_equal<int64>(60000000, elapsed());
+        // The latency recorded for the hedged request is 50 ms.
+        last slowest = test.assert_some<durations.Duration>(filter.latencies().percentile(100));
+        test.assert_equal<int64>(50000000, slowest.to_nanos());
+    };
+
+    // A primary whose call `failing_call` fails after `slow` ms; other calls answer after `fast` ms.
+    let failing = func(calls: atomics.AtomicInt64, failing_call: int64, slow: int64, fast: int64)
+            -> func(string) -> result.Result<string> =>
+        new func(request: string) -> result.Result<string> {
+            last n = calls.add(1);
+            if (n == failing_call) {
+                pause(slow);
+                return result.Result<string>.Err(errors.custom("primary.down", request));
+            }
+            pause(fast);
+            return result.Result<string>.Ok("primary " + n.to_string());
+        };
+
+    let replica_answers = func(request: string) -> result.Result<string> {
+        pause(20);
+        return result.Result<string>.Ok("replica " + request);
+    };
+
+    export let test_failed_primary_falls_back_to_backup = func {
+        last calls = atomics.create(0);
+        last filter = hedging.with_replica<string, string>(10, 95, 1, budgets.unlimited(), system_clock.create(),
+            replica_answers);
+        last service = bound(filter, failing(calls, 2, 15, 10));
+        test.assert_equal_string("primary 1", test.assert_ok<string>(service.call("warm")));
+        // Delay 10 ms; the primary fails at 15 ms; the replica, started at 10 ms, answers at 30 ms and wins.
+        test.assert_equal_string("replica x", test.assert_ok<string>(service.call("x")));
+        test.assert_equal<int64>(1, filter.hedges());
+        test.assert_equal<int64>(1, filter.backup_wins());
+        test.assert_equal<int64>(40000000, elapsed());
+    };
+
+    export let test_zero_percentile_does_not_hedge = func {
+        // A backend that never waits gives zero latencies, so the hedge delay stays None.
+        last filter = hedging.of<string, string>(10, 95, 2, budgets.unlimited(), system_clock.create());
+        last service = bound(filter, plain);
+        for (let i = 0; i < 4; i++) {
+            test.assert_ok<string>(service.call("now"));
+        }
+        test.assert_equal<int>(4, filter.latencies().size());
+        test.assert_none<durations.Duration>(filter.hedge_delay());
+        test.assert_equal<int64>(0, filter.hedges());
+    };
+
+    let plain = func(request: string) -> result.Result<string> => result.Result<string>.Ok(request);
+
+    export let test_needs_a_spawnable_service = func {
+        last filter = hedging.of<string, string>(10, 95, 1, budgets.unlimited(), system_clock.create());
+        last service = filters.bind<string, string, string, string>(filter, services.of<string, string>(plain));
+        last e = test.assert_err<string>(service.call("x"));
+        last code = match (e) {
+            errors.Error.Custom(detail) => detail.code(),
+            _ => "",
+        };
+        test.assert_equal_string(hedging.UnsupportedCode, code);
+        // A spawnable service still answers when called directly, in the calling task.
+        test.assert_equal_string("y", test.assert_ok<string>(spawnables.of<string, string>(plain).call("y")));
+    };
+);

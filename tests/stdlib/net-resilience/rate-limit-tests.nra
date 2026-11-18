@@ -1,0 +1,198 @@
+let buckets = import:Std.Net.Resilience.TokenBucket;
+let bucket_limiters = import:Std.Net.Resilience.TokenBucketLimiter;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let fixed_clock = import:Std.Time.FixedClock;
+let gcra = import:Std.Net.Resilience.GcraLimiter;
+let instant = import:Std.Time.Instant;
+let limiters = import:Std.Net.Resilience.RateLimiter;
+let memory_stores = import:Std.Net.Resilience.InMemoryRateStore;
+let optional = import:Std.Core.Optional;
+let rate_filters = import:Std.Net.Resilience.RateLimitFilter;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let stores = import:Std.Net.Resilience.RateStore;
+let test = import:Std.Test;
+
+// Token-bucket and GCRA limiters over a fixed clock. Every expected decision is computed by hand from the
+// definitions in the module documentation (token-period units for the bucket; TAT, T, and tau for GCRA).
+let RateLimitTests = module (
+    let decision = func(allowed: bool, remaining: int, retry_millis: int64, reset_millis: int64)
+            -> limiters.RateDecision =>
+        new limiters.RateDecision(allowed, remaining, durations.of_millis(retry_millis),
+            durations.of_millis(reset_millis));
+
+    let expect = func(expected: limiters.RateDecision, actual: result.Result<limiters.RateDecision>) {
+        last got = test.assert_ok<limiters.RateDecision>(actual);
+        test.assert_equal_string(expected.to_string(), got.to_string());
+        test.assert(expected.equals(got));
+        test.assert_equal<uint32>(expected.hash_code(), got.hash_code());
+    };
+
+    let code_of = func(e: errors.Error) -> string => match (e) {
+        errors.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_token_bucket_takes_and_refills = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        // 3 tokens, 1 token per 100 ms: one token is 10^8 units and the bucket earns 1 unit per nanosecond.
+        last bucket = buckets.create(3, 1, durations.of_millis(100), clock);
+        expect(decision(true, 2, 0, 100), bucket.try_acquire(1));
+        expect(decision(true, 0, 0, 300), bucket.try_acquire(2));
+        expect(decision(false, 0, 100, 300), bucket.try_acquire(1));
+        clock.advance(durations.of_millis(50));
+        // Half a token: 50 ms to the next one, 250 ms to full.
+        expect(decision(false, 0, 50, 250), bucket.try_acquire(1));
+        clock.advance(durations.of_millis(50));
+        expect(decision(true, 0, 0, 300), bucket.try_acquire(1));
+        clock.advance(durations.of_hours(1));
+        // The level is capped at the capacity.
+        test.assert_equal<int>(3, test.assert_ok<int>(bucket.available()));
+        test.assert_equal_string("TokenBucket(capacity 3)", bucket.to_string());
+    };
+
+    export let test_token_bucket_rounds_waits_up = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        // 1 token, 3 tokens per second: one token is 10^9 units, earned at 3 units per nanosecond.
+        last bucket = buckets.create(1, 3, durations.of_seconds(1), clock);
+        test.assert(test.assert_ok<limiters.RateDecision>(bucket.try_acquire(1)).allowed);
+        last denied = test.assert_ok<limiters.RateDecision>(bucket.try_acquire(1));
+        // ceil(10^9 / 3) = 333333334 ns.
+        test.assert_equal<int64>(333333334, denied.retry_after.to_nanos());
+        clock.advance(durations.of_nanos(333333333));
+        test.assert(!test.assert_ok<limiters.RateDecision>(bucket.try_acquire(1)).allowed);
+        clock.advance(durations.of_nanos(1));
+        test.assert(test.assert_ok<limiters.RateDecision>(bucket.try_acquire(1)).allowed);
+    };
+
+    export let test_keyed_token_buckets = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last limiter = new bucket_limiters.TokenBucketLimiter(2, 1, durations.of_seconds(1), clock);
+        test.assert(test.assert_ok<limiters.RateDecision>(limiter.try_acquire("a", 2)).allowed);
+        test.assert(!test.assert_ok<limiters.RateDecision>(limiter.try_acquire("a", 1)).allowed);
+        test.assert(test.assert_ok<limiters.RateDecision>(limiter.try_acquire("b", 1)).allowed);
+        test.assert_equal<int>(2, limiter.size());
+        test.assert(limiter.forget("a"));
+        test.assert(test.assert_ok<limiters.RateDecision>(limiter.try_acquire("a", 2)).allowed);
+        test.assert_equal_string("TokenBucketLimiter(capacity 2, 2 keys)", limiter.to_string());
+    };
+
+    export let test_gcra_burst_then_interval = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        // 10 per second: T = 100 ms; burst 3: tau = 200 ms.
+        last limiter = gcra.in_memory(10, durations.of_seconds(1), 3, clock);
+        test.assert_equal<int64>(100000000, limiter.emission_interval().to_nanos());
+        test.assert_equal<int64>(200000000, limiter.burst_tolerance().to_nanos());
+        expect(decision(true, 2, 0, 100), limiter.try_acquire("k", 1));
+        expect(decision(true, 1, 0, 200), limiter.try_acquire("k", 1));
+        expect(decision(true, 0, 0, 300), limiter.try_acquire("k", 1));
+        // TAT = t + 300 ms: new_tat = t + 400 ms, allow_at = t + 100 ms.
+        expect(decision(false, 0, 100, 300), limiter.try_acquire("k", 1));
+        clock.advance(durations.of_millis(40));
+        expect(decision(false, 0, 60, 260), limiter.try_acquire("k", 1));
+        clock.advance(durations.of_millis(60));
+        expect(decision(true, 0, 0, 300), limiter.try_acquire("k", 1));
+        // Another key is independent.
+        expect(decision(true, 2, 0, 100), limiter.try_acquire("other", 1));
+        // After a long idle period the TAT is in the past and the full burst is back.
+        clock.advance(durations.of_seconds(10));
+        expect(decision(true, 0, 0, 300), limiter.try_acquire("k", 3));
+        test.assert_equal_string("GcraLimiter(interval PT0.1S, burst 3)", limiter.to_string());
+    };
+
+    export let test_gcra_multiple_permits = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        last limiter = gcra.in_memory(4, durations.of_seconds(1), 4, clock);
+        // T = 250 ms, limit T * burst = 1 s.
+        expect(decision(true, 1, 0, 750), limiter.try_acquire("k", 3));
+        // new_tat = t + 1250 ms, allow_at = t + 250 ms.
+        expect(decision(false, 0, 250, 750), limiter.try_acquire("k", 2));
+        expect(decision(true, 0, 0, 1000), limiter.try_acquire("k", 1));
+    };
+
+    export let test_gcra_shared_store = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        last store = memory_stores.create();
+        // Two limiters (two processes) share one store and therefore one limit per key.
+        last first = gcra.distributed(10, durations.of_seconds(1), 2, store, clock);
+        last second = gcra.distributed(10, durations.of_seconds(1), 2, store, clock);
+        test.assert(test.assert_ok<limiters.RateDecision>(first.try_acquire("tenant", 1)).allowed);
+        test.assert(test.assert_ok<limiters.RateDecision>(second.try_acquire("tenant", 1)).allowed);
+        test.assert(!test.assert_ok<limiters.RateDecision>(first.try_acquire("tenant", 1)).allowed);
+        test.assert(!test.assert_ok<limiters.RateDecision>(second.try_acquire("tenant", 1)).allowed);
+        test.assert_equal<int>(1, store.size());
+        // The TAT is t + 200 ms; at t + 300 ms it has expired.
+        test.assert_equal<int>(0, store.remove_expired(1700000000000000000 + 100000000));
+        test.assert_equal<int>(1, store.remove_expired(1700000000000000000 + 200000000));
+    };
+
+    // A store whose first `losses` compare-and-sets fail, as when another process wins the race.
+    let Contended = class implements stores.RateStore (
+        last inner: memory_stores.InMemoryRateStore = memory_stores.create();
+        let losses: int;
+        export let attempts: int = 0;
+
+        export let init = func(count: int) {
+            losses = count;
+        };
+
+        export let get = func(key: string) -> result.Result<optional.Optional<int64>> => inner.get(key);
+
+        export let compare_and_set = func(key: string, expected: optional.Optional<int64>, value: int64,
+                ttl: durations.Duration) -> result.Result<bool> {
+            attempts++;
+            if (losses > 0) {
+                losses--;
+                return result.Result<bool>.Ok(false);
+            }
+            return inner.compare_and_set(key, expected, value, ttl);
+        };
+
+        export let.override to_string = func -> string => "Contended";
+    );
+
+    export let test_gcra_retries_lost_races = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        last store = new Contended(3);
+        last limiter = gcra.distributed(10, durations.of_seconds(1), 1, store, clock);
+        test.assert(test.assert_ok<limiters.RateDecision>(limiter.try_acquire("k", 1)).allowed);
+        test.assert_equal<int>(4, store.attempts);
+        last hopeless = new Contended(100);
+        last failing = gcra.distributed(10, durations.of_seconds(1), 1, hopeless, clock);
+        last e = test.assert_err<limiters.RateDecision>(failing.try_acquire("k", 1));
+        test.assert_equal_string(gcra.ContentionCode, code_of(e));
+        test.assert_equal<int>(8, hopeless.attempts);
+    };
+
+    let echo = func(request: string) -> result.Result<string> => result.Result<string>.Ok("ok " + request);
+
+    // The key of a request "<client>/<path>" is the client.
+    let client_of = func(request: string) -> string {
+        for (let i = 0; i < request.byte_length; i++) {
+            if (request.byte_at(i) == 47) {
+                return request.slice(0, i);
+            }
+        }
+        return request;
+    };
+
+    export let test_rate_limit_filter_per_key = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+        last limiter = gcra.in_memory(10, durations.of_seconds(1), 2, clock);
+        last limit = rate_filters.of<string, string>(limiter, client_of);
+        test.assert_none<limiters.RateDecision>(limit.last_decision());
+        last service = filters.bind<string, string, string, string>(limit, services.of<string, string>(echo));
+        test.assert_equal_string("ok 10.0.0.1/a", test.assert_ok<string>(service.call("10.0.0.1/a")));
+        test.assert_equal_string("ok 10.0.0.1/b", test.assert_ok<string>(service.call("10.0.0.1/b")));
+        last denied = test.assert_err<string>(service.call("10.0.0.1/c"));
+        test.assert_equal_string(rate_filters.LimitedCode, code_of(denied));
+        test.assert_equal_string("rate limit exceeded; retry after PT0.1S", errors.message(denied));
+        test.assert(!test.assert_some<limiters.RateDecision>(limit.last_decision()).allowed);
+        // Another client has its own allowance.
+        test.assert_equal_string("ok 10.0.0.2/a", test.assert_ok<string>(service.call("10.0.0.2/a")));
+        clock.advance(durations.of_millis(100));
+        test.assert_equal_string("ok 10.0.0.1/d", test.assert_ok<string>(service.call("10.0.0.1/d")));
+    };
+);
