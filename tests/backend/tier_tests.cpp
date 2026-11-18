@@ -6,9 +6,11 @@
 
 #include "lift/hints.hpp"
 #include "nvm/fleet.hpp"
+#include "nvm/graph_device.hpp"
 #include "nvm/tier1.hpp"
 
 #include <algorithm>
+#include <limits>
 
 namespace neura::testing {
 namespace {
@@ -222,6 +224,77 @@ NEURA_TEST(tier, fleets_and_parallel_items_use_tier_1) {
         check_same_capture(run_captured(parallel, limits), expected,
                            "parallel map with " + std::to_string(workers) + " workers");
         check(shared.statistics().steps.lifted > 0 || nvm::tier_ceiling() == 0, "parallel items ran lifted blocks");
+    }
+}
+
+namespace {
+
+// Declines every job. After `calls_until_done` calls it also says that it
+// will decline every later job, as AutoDevice does once it is Rejected.
+class DecliningDevice final : public nvm::GraphDevice {
+public:
+    DecliningDevice(const nvr::Image& image, std::uint64_t calls_until_done)
+        : image_(image), calls_until_done_(calls_until_done) {}
+    const nvr::Image& image() const override { return image_; }
+    std::size_t batch_hint() const override { return std::numeric_limits<std::size_t>::max(); }
+    nvm::GraphDeviceStatistics statistics() const override { return {}; }
+    void evaluate(std::span<nvm::GraphJob> jobs) override {
+        ++calls;
+        for (auto& job : jobs) job.evaluated = false;
+    }
+    bool declines_every_job() const override { return calls >= calls_until_done_; }
+
+    std::uint64_t calls = 0;
+
+private:
+    const nvr::Image& image_;
+    std::uint64_t calls_until_done_;
+};
+
+} // namespace
+
+// While a fleet offers its members' graphs to a device, the members step by
+// reference. Once the device declines every job (auto mode gave up on it),
+// the fleet stops offering and the members run at their tiers, with the same
+// results (docs/lang/GpuExecution.md, section 10.5). The checks count device
+// calls and lifted steps, not time.
+NEURA_TEST(tier, a_fleet_runs_at_its_tiers_once_its_device_declines_every_job) {
+    const auto image = computation(environment);
+    const std::vector<std::vector<std::string>> arguments{{}, {"one"}, {"two", "three"}, {"four"}};
+    std::vector<Captured> reference;
+    for (const auto& member : arguments) reference.push_back(run_captured(image, tier_limits(0), std::nullopt, member));
+    for (const auto window : {1U, 4'096U}) {
+        for (const auto calls_until_done : {std::uint64_t{0}, std::uint64_t{3}, std::numeric_limits<std::uint64_t>::max()}) {
+            const auto label = "window " + std::to_string(window) + ", device done after " +
+                               (calls_until_done == std::numeric_limits<std::uint64_t>::max()
+                                    ? std::string("no call")
+                                    : std::to_string(calls_until_done) + " calls");
+            nvm::TierCache cache(image, eager());
+            DecliningDevice device(image, calls_until_done);
+            nvm::Fleet fleet(image, {tier_limits(1, &cache), &device, window});
+            for (const auto& member : arguments) fleet.add(image.entry, member);
+            CapturingConsole console;
+            nvm::HostRegistry registry;
+            registry.add(console);
+            std::string expected_output;
+            std::size_t members = 0;
+            nvm::run_fleet(fleet, nvm::bind(image, registry), [&](std::size_t member, const nvm::RunResult& result) {
+                check_equal(member, members, label + " completion order");
+                check_same_run(result, reference[member].result, label + " member " + std::to_string(member));
+                expected_output += reference[member].output;
+                ++members;
+            });
+            check_equal(members, arguments.size(), label + " members");
+            check_equal(console.output(), expected_output, label + " console output");
+            const auto lifted = cache.statistics().steps.lifted;
+            if (calls_until_done == std::numeric_limits<std::uint64_t>::max()) {
+                check(device.calls > 3, label + ": the fleet kept offering jobs to a device in use");
+                check_equal(lifted, std::uint64_t{0}, label + ": members step by reference while a device is in use");
+            } else {
+                check_equal(device.calls, calls_until_done, label + ": no job is offered once the device declines all");
+                check(lifted > 0 || nvm::tier_ceiling() == 0, label + ": members ran lifted blocks after the device");
+            }
+        }
     }
 }
 

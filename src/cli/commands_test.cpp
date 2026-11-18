@@ -297,7 +297,7 @@ int run_tests(const Options& options) {
                                       options.save_schedule
                                   ? false
                                   : gpu.device() != nullptr;
-    const auto tiers = tier_cache(image, limits, fleet_device ? gpu.device() : nullptr);
+    const auto tiers = tier_cache(image, limits);
     // Without a device the tests run one after another on one timeline.
     if (fleet_device || !neura::runner::times_runs(limits)) times.reset();
     if (times) limits.tier_times = &*times;

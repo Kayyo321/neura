@@ -414,6 +414,10 @@ public:
     // leaves eligibility to the wrapper's static analysis of the image.
     virtual std::span<const GraphShape> graph_shapes() const { return {}; }
     virtual std::string_view failure_reason() const { return {}; }
+    // True once the device declines every job it will ever be given: it has
+    // failed, or a wrapper has stopped using it for the rest of the process.
+    // A fleet then stops forming device rounds (section 10.5).
+    virtual bool declines_every_job() const { return !failure_reason().empty(); }
 
 private:
     friend class Fleet;
@@ -430,6 +434,8 @@ private:
 ```
 
 `graph_shapes()` returns one shape per graph in image order when supplied. It includes current table admission and escape demotion. An empty span means the wrapper uses the image's static shapes. A nonempty `failure_reason()` indicates a failed device and retires it from automatic placement. The view belongs to the device.
+
+`declines_every_job()` is a promise about the future: once it returns true, every later `evaluate` declines every job, and it keeps returning true. By default it is true when `failure_reason()` is nonempty, since a failed device is never retried (section 9.5). `AutoDevice` returns true in its Rejected state, whether rejected at construction, by the gate, by the verdict, by retirement, or by a failure (section 11.4), and `VerifyingDevice` forwards it. A fleet uses it to stop offering jobs (section 10.5). False is always a correct answer; it only costs the fleet its tiers.
 
 The private prepared hook is called only by a fleet. The materializer may be called once, synchronously, with a nonempty strictly increasing subset of valid job indices. Returning true declines any job that was never materialized. Returning false requires that no jobs were materialized, and the caller takes the eager path. The callback and any views it supplies are valid only during the call. An empty result from the callback means the fleet could not allocate the round's jobs (section 9.5): the device must evaluate none of them and must not count them as its own failure.
 
@@ -620,10 +626,10 @@ The **head** is the lowest-numbered member that is not Reported.
 
 1. If the head is Finished, mark it Reported and return its final event with its result.
 2. If the head is Parked, mark it Awaiting and return its stored `HostRequest`.
-3. Compute the width `w`: `options.window`, and when a device is set, the smaller of that and `max(1, device->batch_hint())`.
+3. If a device is set and `device->declines_every_job()` is true, drop the device: from this round on the fleet runs as if it had been created without one. Then compute the width `w`: `options.window`, and when a device is set, the smaller of that and `max(1, device->batch_hint())`.
 4. Form the **span**: starting at the head and going up by index, the first `w` members that are not Finished. For each Waiting member of the span, in index order, start it (construct its `Execution`) if the memory rule of section 10.7 allows; the first Waiting member that may not start ends the span there.
 5. Run one **round** over the Runnable members of the span, in index order:
-   1. With no device, use the private reference step path. It charges the step, reads inputs into shared scratch, and evaluates and finishes the step. Settle any resulting event.
+   1. With no device, use the member's own step path, at the tiers its limits allow (`limits.tier` and `limits.tier_cache`, as for `nvm::run`; [execution tiers](NVM#execution-tiers)). It charges the step, reads inputs into shared scratch, and evaluates and finishes the step. Settle any resulting event.
    2. With a device, use the private prepare path. It charges the step and checks every input read. If it returns an event, settle the member with it. If the graph has no nodes, evaluate it by reference and settle the step. Otherwise remember the member and graph index.
    3. If any jobs were remembered, offer their graph indices in member order to the private prepared hook. If the hook handles the batch, size the output arena and pack binary inputs only for its selected indices. If the hook declines the batch, size the arena and materialize every remembered job, then call `device->evaluate` once in member order. An ordinary device or the verifier takes this eager path.
    4. For each remembered member in index order, finish the step with its device output if evaluated. Otherwise pack its inputs directly into shared reference scratch, evaluate by reference, and finish the step or report the first overflow with `fail_step`. Settle any resulting event.
@@ -631,7 +637,9 @@ The **head** is the lowest-numbered member that is not Reported.
 
 The private prepare path checks the same reads and step limit as `begin_step`. Frames cannot change between the checks and packing. The shared reference scratch and the output arena are temporary. Finishing the step consumes the same lanes or overflow in the same member order as the eager procedure.
 
-With no device and no waiting members, the fleet can group rounds. It advances the head by reference to its next event, then advances each other Runnable member for that many rounds or until its first event, whichever comes first. Each grouped step uses the same reference evaluation and checks. Because members share no mutable execution state and there is no intervening admission or host response, the group preserves the resulting member states, observable event order, and round count.
+With no device and no waiting members, the fleet can group rounds. It advances the head to its next event, then advances each other Runnable member for that many rounds or until its first event, whichever comes first. A round is one block, and a tier 2 region's blocks count one each, so the members stay in step at any tier. Each grouped step uses the same evaluation and checks as step 5.1.
+
+**Dropping the device.** The check of step 3 runs between rounds, when no member has a begun step. A member's state does not record which evaluator computed its earlier steps, so a member that stepped by reference while the device was set continues at its tiers from its next step, with the same results, step counts, and events (sections 5.1 and 10.6). This is how a fleet stops paying for a device that auto mode has given up on: while a device is set, every member steps by reference, without tiers 1 and 2 or native code; once it is dropped they run at their tiers. While members are still waiting to start (more members than `window`, or the memory rule of section 10.7), each round steps every started member by one block through step 5.1, at tier 1 without tier 2 regions; once every member has started, grouped rounds run regions and native code as `--gpu=off` does. A fleet whose members share one `TierCache` (the CLI passes one) compiles each region once for all of them. Because members share no mutable execution state and there is no intervening admission or host response, the group preserves the resulting member states, observable event order, and round count.
 
 **Settle** a member with the optional event of its step: nothing leaves it Runnable; a `HostRequest` makes it Parked and stores the event; `Completed` or `Trapped` makes it Finished, copies its result out of the `Execution`, and destroys the `Execution`.
 
@@ -683,7 +691,7 @@ In `off`, `run_tests` in `src/cli/main.cpp` runs the tests one at a time: for te
 
 Because a test's console writes are host requests, they are issued only while that test is the head, after the previous test's line has been printed. The byte stream on standard output, the files and sockets each test sees, the summary line, and the exit status are those of the serial runner. A test that writes early simply parks until it is the head.
 
-When no device is in use, `auto` and `always` run the tests one at a time, as `off` does. So do `--schedules` above 1, `--virtual-time`, `--save-schedule`, and `--schedule` (section 14.3).
+When no device is in use, `auto` and `always` run the tests one at a time, as `off` does. When the fleet drops its device (section 10.5), the tests already started go on in the fleet at their tiers, and the rest start in it the same way; output and results are those of the serial runner either way. So do `--schedules` above 1, `--virtual-time`, `--save-schedule`, and `--schedule` (section 14.3).
 
 ### 10.11 `neura run --each`
 
@@ -733,7 +741,7 @@ Without a line number: `<lists>: no argument lists` when the file produces no me
 
 ### 10.12 The cost of a fleet whose jobs stay on the CPU
 
-A round whose jobs are all declined does the same work per step as a single execution, through the same `begin_step`, `evaluate_outputs`, and `finish_step`. What it adds is the job list and moving between members' state. The cost is small but not zero, and nothing relies on it being zero: section 4 measures it, and auto mode stops forming rounds, by returning a `batch_hint` of 1, once it has rejected or retired the device (section 11.10).
+A round whose jobs are all declined does the same work per step as a single execution, through the same `begin_step`, `evaluate_outputs`, and `finish_step`. What it adds is the job list and moving between members' state. The cost is small but not zero, and nothing relies on it being zero: section 4 measures it. The larger cost of a device round is that its members step by reference, without tiers 1 and 2 or native code. Once auto mode has rejected or retired the device, `declines_every_job()` is true and the fleet drops it (section 10.5), and once every member has started, the rest of the run steps at the same tiers as the `off` run. Before that, rounds step one block per member at tier 1 without regions (section 10.5); that phase has not been timed against `off`. What remains is the reference stepping before that point: at most the steps it takes the gate to reach `open_budget` or `give_up_work` (section 11.5), or a retirement window (section 11.10).
 
 ## 11. Auto mode
 
@@ -810,7 +818,7 @@ public:
 | --- | --- | --- |
 | Gated | Declines every job and does the accounting of section 11.5. | `max_jobs` |
 | Active | Places the call's jobs (section 11.8). | `max_jobs` |
-| Rejected | Declines every job. Does no accounting. A retired device (section 11.10) is Rejected. The state lasts for the rest of the process. | 1 |
+| Rejected | Declines every job. Does no accounting. A retired device (section 11.10) is Rejected. The state lasts for the rest of the process, and `declines_every_job()` is true, so a fleet drops the device (section 10.5). | 1 |
 
 A job that `AutoDevice` declines by its own choice is counted in `declined_placement`. The other counters are the inner device's.
 
@@ -941,7 +949,7 @@ Retirement is a rejection, not a failure: the device is not marked failed, `fail
 A forced device (`--gpu=always`) pays setup and dispatch costs for every eligible graph even when the CPU would be faster; auto mode estimates those costs before opening a device and again before selecting jobs. From the [design measurements](#48-design-measurements):
 
 - **`neura run`.** No compiled graph measured passes the prospect test with `max_jobs = 1`: the best case, the 499-neuron graph, would need about 10 microseconds on the optimistic device against a nominal 2.2 on the CPU. No device is opened and the run costs what `--no-gpu` costs.
-- **`neura test` with few tests.** A fleet forms when the image has a graph that passes the prospect test at the test count: from about seven tests for an image with a wide, shallow graph like the 499-neuron one, and from about thirty for the other graphs measured. The gate then opens a device only if enough tests are at profitable graphs in the same rounds; otherwise the workload is rejected after `give_up_work` and the rest runs one test at a time.
+- **`neura test` with few tests.** A fleet forms when the image has a graph that passes the prospect test at the test count: from about seven tests for an image with a wide, shallow graph like the 499-neuron one, and from about thirty for the other graphs measured. The gate then opens a device only if enough tests are at profitable graphs in the same rounds; otherwise the workload is rejected after `give_up_work`, the fleet drops the device, and the rest runs at the tests' tiers as under `off`. For example, a file of 17 tests that each check every code point of one Unicode plane, measured once per mode on a Linux x86-64 development machine, took 22.4 seconds under `auto` (`gpu: auto, not used (the workload cannot gain)`) against 20.8 seconds under `off`; the difference is the reference stepping before the gate gave up. Before fleets dropped such a device, the same file was reported to take over five minutes; a shortened variant of it (2,048 code points per plane) took 61.5 seconds under `auto` before and 2.8 seconds after, against 0.97 seconds under `off`.
 - **`neura run --each` with thousands of argument lists.** This is the fleet case below whenever the program computes before it prints.
 - **Fleets of hundreds or thousands of members on a discrete GPU.** The gate opens within tens of rounds, the verdict keeps the device, and placement sends the rounds' jobs to it for as long as it gains. A workload whose jobs are mostly cheap, like the 65,536 Collatz lists of section 4.5, retires the device after the first window in which it took under a tenth of the jobs, and the rest of the run is the CPU run.
 - **An integrated or software GPU.** The verdict rejects it for the graphs measured, apart from the wide, shallow case above.

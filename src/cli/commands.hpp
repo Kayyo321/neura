@@ -28,8 +28,7 @@ namespace neura::cli {
 // Shared by the commands that read images (commands_run.cpp).
 bool has_image_magic(std::span<const std::uint8_t> bytes);
 neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count = nullptr);
-std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image, neura::nvm::RunLimits& limits,
-                                                  const neura::nvm::GraphDevice* device);
+std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image, neura::nvm::RunLimits& limits);
 std::optional<neura::nvm::TierTimes> tier_times(const neura::nvm::RunLimits& limits,
                                                 std::optional<std::chrono::steady_clock::time_point> started,
                                                 bool device);
