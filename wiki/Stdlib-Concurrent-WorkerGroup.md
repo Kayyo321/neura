@@ -33,7 +33,9 @@ The following public declarations are taken from the module source; each links t
   Queues the job if there is room. Never waits, so a service that must shed load counts Full.
 - **WorkerGroup.WorkerGroup** · [`export let close_and_drain = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L56)
   Closes the queue and returns once every queued job has been processed and every worker has stopped. Later submissions report Closed. Call it from one task; on this handle a second call returns at once. If the calling task is cancelled while it waits, it returns early and with_workers waits for the workers instead.
-- **WorkerGroup** · [`export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> void, body: func(WorkerGroup<T>) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L82)
+- **WorkerGroup.WorkerGroup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L76)
+  Names the group and its worker count.
+- **WorkerGroup** · [`export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> void, body: func(WorkerGroup<T>) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/worker-group.nra#L85)
   Starts `workers` tasks that take jobs from a queue of `capacity` jobs and run `work` on each; runs `body` with the group; then closes the queue, lets the workers finish every queued job, and returns once they have stopped. A worker also stops when its scope is cancelled, leaving queued jobs unprocessed; the jobs it was running finish first. T must be transferable and `work` task-safe, with transferable captures, as for any spawn. Fewer than one worker or a negative capacity traps with `invalid argument: workers` or `invalid argument: capacity`.
 <!-- END SOURCE API -->
 

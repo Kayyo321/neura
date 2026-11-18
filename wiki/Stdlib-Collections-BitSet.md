@@ -19,61 +19,61 @@ The following public declarations are taken from the module source; each links t
 
 - **BitSet** · [`export let BitSet = class implements MutableSet<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L59)
   A mutable set of non-negative integers that iterates in ascending order. Negative element arguments trap with `invalid argument: negative element`. Tagged `#NotThreadSafe`.
-- **BitSet.BitSet** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L98)
+- **BitSet.BitSet** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L95)
   Returns the number of distinct elements. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L102)
+- **BitSet.BitSet** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L99)
   Returns true when there are no distinct elements. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let contains = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L106)
+- **BitSet.BitSet** · [`export let contains = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L103)
   Tests the bit representing `value`. A negative value traps with `invalid argument: negative element`. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let add = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L117)
+- **BitSet.BitSet** · [`export let add = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L111)
   Adds the value and returns false if it was already present. Appends zero words as needed.
-- **BitSet.BitSet** · [`export let add_all = func(items: int[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L132)
+- **BitSet.BitSet** · [`export let add_all = func(items: int[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L126)
   Adds the members of `items`, ignoring duplicates. A negative item traps with `invalid argument: negative element`.
-- **BitSet.BitSet** · [`export let remove = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L142)
+- **BitSet.BitSet** · [`export let remove = func(value: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L136)
   Removes the value and returns false if it was absent.
-- **BitSet.BitSet** · [`export let flip = func(value: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L156)
+- **BitSet.BitSet** · [`export let flip = func(value: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L150)
   Adds the value when absent and removes it when present.
-- **BitSet.BitSet** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L171)
+- **BitSet.BitSet** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L165)
   Removes all members and releases the stored words.
-- **BitSet.BitSet** · [`export let next_set = func(from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L180)
+- **BitSet.BitSet** · [`export let next_set = func(from: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L174)
   The least member at or after `from`, or -1. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let to_list = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L187)
+- **BitSet.BitSet** · [`export let to_list = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L181)
   A new built-in list of the members in ascending order. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let iterator = func -> iterators.Iterator<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L202)
+- **BitSet.BitSet** · [`export let iterator = func -> iterators.Iterator<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L196)
   Returns a fail-fast iterator over the members in ascending order. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let for_each = func(action: func(int) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L205)
+- **BitSet.BitSet** · [`export let for_each = func(action: func(int) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L199)
   Ascending. The action must not change the set structurally.
-- **BitSet.BitSet** · [`export let remove_if = func(drop: func(int) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L218)
+- **BitSet.BitSet** · [`export let remove_if = func(drop: func(int) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L212)
   Calls `drop` once per member in ascending order and removes the matches. The predicate leaves the set structure unchanged. The number of removed members.
-- **BitSet.BitSet** · [`export let retain_if = func(keep: func(int) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L223)
+- **BitSet.BitSet** · [`export let retain_if = func(keep: func(int) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L217)
   Calls `keep` once per member in ascending order, removing rejected members. The predicate leaves the set structure unchanged. The number of removed members.
-- **BitSet.BitSet** · [`export let is_subset_of = func(other: BitSet) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L246)
+- **BitSet.BitSet** · [`export let is_subset_of = func(other: BitSet) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L240)
   Reports whether every member is also present in `other`. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let is_disjoint_from = func(other: BitSet) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L259)
+- **BitSet.BitSet** · [`export let is_disjoint_from = func(other: BitSet) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L253)
   Reports whether the two sets have no members in common. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let union_with = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L271)
+- **BitSet.BitSet** · [`export let union_with = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L265)
   In place: adds the other's members.
-- **BitSet.BitSet** · [`export let intersect_with = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L287)
+- **BitSet.BitSet** · [`export let intersect_with = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L281)
   In place: keeps only members the other also has.
-- **BitSet.BitSet** · [`export let subtract = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L301)
+- **BitSet.BitSet** · [`export let subtract = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L295)
   In place: removes the other's members.
-- **BitSet.BitSet** · [`export let symmetric_difference_with = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L315)
+- **BitSet.BitSet** · [`export let symmetric_difference_with = func(other: BitSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L309)
   In place: keeps the members in exactly one of the two sets.
-- **BitSet.BitSet** · [`export let union = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L345)
+- **BitSet.BitSet** · [`export let union = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L339)
   A new set of the members of either set. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let intersection = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L353)
+- **BitSet.BitSet** · [`export let intersection = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L347)
   A new set of the members of both sets. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let difference = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L361)
+- **BitSet.BitSet** · [`export let difference = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L355)
   A new set of this set's members that the other lacks. Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L369)
+- **BitSet.BitSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L363)
   Tests for another BitSet with the same members, ignoring trailing zero words. Reading the argument can run its class hook.
-- **BitSet.BitSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L393)
+- **BitSet.BitSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L386)
   The wrapping sum of the members' hashes (each member's own value). Tagged `#Pure`.
-- **BitSet.BitSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L403)
+- **BitSet.BitSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L396)
   `{a, b, c}` in ascending order. Tagged `#Pure`.
-- **BitSet** · [`export let create = func -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L465)
+- **BitSet** · [`export let create = func -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L461)
   Creates an empty set. Tagged `#Pure`, `#ThreadSafe`.
-- **BitSet** · [`export let of = func(items: int[list]) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L469)
+- **BitSet** · [`export let of = func(items: int[list]) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L465)
   A set of the values in `items`. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

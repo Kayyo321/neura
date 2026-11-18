@@ -49,9 +49,9 @@ The following public declarations are taken from the module source; each links t
   Traps with "invalid state: heap order" when an element is Less than its parent.
 - **PriorityQueue.PriorityQueue** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L212)
   Formats elements as `[a, b, c]` in heap order. The queue prints "(this collection)" where its own text reaches it again.
-- **PriorityQueue** · [`export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L265)
+- **PriorityQueue** · [`export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L269)
   Creates an empty queue using the total order defined by `c`.
-- **PriorityQueue** · [`export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L271)
+- **PriorityQueue** · [`export let from_list = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/priority-queue.nra#L275)
   Copies and heapifies `items` in linear time using the total order defined by `c`.
 <!-- END SOURCE API -->
 

@@ -27,6 +27,8 @@ The following public declarations are taken from the module source; each links t
   The libraries already loaded into the process, including the C library (Java's Linker.defaultLookup).
 - **Linker.Linker** · [`export let canonical_layout = func(name: string) -> Optional<MemoryLayout>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L62)
   The layout of a C type on the runner's platform (Java's Linker.canonicalLayouts): "bool", "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t", or "wchar_t". None for any other name.
-- **Linker** · [`export let native_linker = func -> Linker`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L110)
+- **Linker.Linker** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L98)
+  Names the linker.
+- **Linker** · [`export let native_linker = func -> Linker`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/linker.nra#L113)
   The linker for the runner's platform C ABI.
 <!-- END SOURCE API -->

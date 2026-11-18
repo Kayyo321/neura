@@ -51,26 +51,26 @@ The following public declarations are taken from the module source; each links t
   The offset of element `index` of a sequence. Traps outside 0 through element_count() - 1. Tagged `#Pure`.
 - **MemoryLayout.MemoryLayout** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L179)
   Layouts compare by shape, carrier, size, alignment, name, and members. Reading the argument can run its class hook.
-- **MemoryLayout.MemoryLayout** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L189)
+- **MemoryLayout.MemoryLayout** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L188)
   Hashes the text form. Tagged `#Pure`.
-- **MemoryLayout.MemoryLayout** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L193)
+- **MemoryLayout.MemoryLayout** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L192)
   A compact form such as `i32`, `[i32(x)i32(y)](point)`, or `4:i8`. Tagged `#Pure`.
-- **MemoryLayout** · [`export let carrier_name = func(carrier: Carrier) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L219)
+- **MemoryLayout** · [`export let carrier_name = func(carrier: Carrier) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L218)
   The short name of a carrier. Tagged `#Pure`.
-- **MemoryLayout** · [`export let carrier_size = func(carrier: Carrier) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L236)
+- **MemoryLayout** · [`export let carrier_size = func(carrier: Carrier) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L235)
   The fixed size of a carrier; an address has the runner's pointer size, 8 here. Tagged `#Pure`.
-- **MemoryLayout** · [`export let value = func(carrier: Carrier) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L253)
+- **MemoryLayout** · [`export let value = func(carrier: Carrier) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L252)
   A scalar layout with its natural size and alignment. Tagged `#Pure`.
-- **MemoryLayout** · [`export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L260)
+- **MemoryLayout** · [`export let value_sized = func(carrier: Carrier, size: int64, alignment: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L259)
   A scalar layout with an explicit size and alignment, for C types whose size the runner reports. Tagged `#Pure`.
-- **MemoryLayout** · [`export let padding_layout = func(bytes: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L269)
+- **MemoryLayout** · [`export let padding_layout = func(bytes: int64) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L268)
   `bytes` bytes of padding with alignment 1. Tagged `#Pure`.
-- **MemoryLayout** · [`export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L278)
+- **MemoryLayout** · [`export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L277)
   A struct with C's natural layout: each member at the next offset aligned for it, the size rounded up to the largest member alignment. Traps when two members share a nonempty name.
-- **MemoryLayout** · [`export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L299)
+- **MemoryLayout** · [`export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L298)
   A union: every member at offset 0, the size the largest member's rounded up to the largest alignment.
-- **MemoryLayout** · [`export let sequence_layout = func(elements: int64, element: MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L320)
+- **MemoryLayout** · [`export let sequence_layout = func(elements: int64, element: MemoryLayout) -> MemoryLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L319)
   `elements` consecutive copies of `element`, a C array.
-- **MemoryLayout** · [`export let align_up = func(offset: int64, alignment: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L333)
+- **MemoryLayout** · [`export let align_up = func(offset: int64, alignment: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L332)
   `offset` rounded up to a multiple of `alignment`. Tagged `#Pure`.
 <!-- END SOURCE API -->

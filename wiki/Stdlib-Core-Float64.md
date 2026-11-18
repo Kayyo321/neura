@@ -45,45 +45,45 @@ The following public declarations are taken from the module source; each links t
   The magnitude of `magnitude` with the sign bit of `sign`. Tagged `#Pure`, `#ThreadSafe`.
 - **Float64** · [`export let min = func(a: float64, b: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L60)
   NaN (canonical) if either operand is NaN; -0.0 is less than 0.0. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let max = func(a: float64, b: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L78)
+- **Float64** · [`export let max = func(a: float64, b: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L75)
   Returns the greater value, propagating NaN and preferring positive zero over negative zero. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let clamp = func(v: float64, low: float64, high: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L97)
+- **Float64** · [`export let clamp = func(v: float64, low: float64, high: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L91)
   max(v, low), then min with high, so a NaN `v` gives NaN. Traps when either bound is NaN or `low` exceeds `high` (-0.0 is below 0.0). Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let floor = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L110)
+- **Float64** · [`export let floor = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L104)
   Rounding to an integral value. All keep the sign of zero (ceil(-0.5) is -0.0); infinities are unchanged and a NaN becomes the canonical NaN. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let ceil = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L114)
+- **Float64** · [`export let ceil = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L108)
   Rounds toward positive infinity, retaining the sign of zero. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let trunc = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L118)
+- **Float64** · [`export let trunc = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L112)
   Rounds toward zero, retaining the sign of zero. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let round = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L122)
+- **Float64** · [`export let round = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L116)
   Halves round away from zero. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let round_even = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L126)
+- **Float64** · [`export let round_even = func(v: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L120)
   Halves round to the even neighbour. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let to_bits = func(v: float64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L130)
+- **Float64** · [`export let to_bits = func(v: float64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L124)
   Returns the raw bit pattern as an unsigned integer. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let from_bits = func(bits: uint64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L134)
+- **Float64** · [`export let from_bits = func(bits: uint64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L128)
   Interprets an unsigned integer as a raw floating-point bit pattern. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let total_compare = func(a: float64, b: float64) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L139)
+- **Float64** · [`export let total_compare = func(a: float64, b: float64) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L133)
   The total order of section 5.3: -Infinity, negative values, -0.0, 0.0, positive values, Infinity, then every NaN (all NaNs equal). Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let equals = func(a: float64, b: float64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L169)
+- **Float64** · [`export let equals = func(a: float64, b: float64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L157)
   Same bit pattern, except that every NaN equals every NaN; 0.0 and -0.0 differ (section 5.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let hash = func(v: float64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L173)
+- **Float64** · [`export let hash = func(v: float64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L161)
   Returns the primitive hash consistent with canonical-NaN and signed-zero equality. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let to_string = func(v: float64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L177)
+- **Float64** · [`export let to_string = func(v: float64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L165)
   The shortest text that parses back to the same value (section 7.5). Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let to_fixed = func(v: float64, digits: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L182)
+- **Float64** · [`export let to_fixed = func(v: float64, digits: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L170)
   Exactly `digits` fraction digits (0 through 100; no point for 0), correctly rounded, ties to even. Other digit counts trap. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let to_exponential = func(v: float64, digits: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L188)
+- **Float64** · [`export let to_exponential = func(v: float64, digits: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L176)
   `d.ddd` with `digits` fraction digits (0 through 100), `e`, and the decimal exponent; correctly rounded, ties to even. Tagged `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let parse = func(text: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L194)
+- **Float64** · [`export let parse = func(text: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L182)
   The grammar of section 7.5, converted exactly and rounded once, ties to even. Too large becomes an infinity and too small a signed zero. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Float64** · [`export let zero = func() -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L206)
+- **Float64** · [`export let zero = func() -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L194)
   The additive identity, 0.0 (Std.Core.Arithmetic.Additive). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
-- **Float64** · [`export let add = func(left: float64, right: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L210)
+- **Float64** · [`export let add = func(left: float64, right: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L198)
   The sum `left + right`, rounded as the type's arithmetic specifies. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
-- **Float64** · [`export let one = func() -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L214)
+- **Float64** · [`export let one = func() -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L202)
   The multiplicative identity, 1.0 (Std.Core.Arithmetic.Multiplicative). Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
-- **Float64** · [`export let multiply = func(left: float64, right: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L218)
+- **Float64** · [`export let multiply = func(left: float64, right: float64) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/float64.nra#L206)
   The product `left * right`, rounded as the type's arithmetic specifies. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
 <!-- END SOURCE API -->
 

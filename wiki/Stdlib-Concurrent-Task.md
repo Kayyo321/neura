@@ -25,6 +25,8 @@ The following public declarations are taken from the module source; each links t
   Waits until the task has finished and returns its result. Joining again returns the same value. A join is never cancelled.
 - **Task.Task** · [`export let is_finished = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L20)
   Whether the task has finished. Never waits.
+- **Task.Task** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/task.nra#L31)
+  Names the task and its identifier.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

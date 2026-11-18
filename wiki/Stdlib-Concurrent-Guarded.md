@@ -25,7 +25,9 @@ The following public declarations are taken from the module source; each links t
   A guard that owns the state. Use create, which builds the state inside the guard.
 - **Guarded.Guarded** · [`export let with = func<U>(body: func(T) -> U) -> U`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L17)
   Runs `body` with exclusive access to the state and returns its result. A second task that calls with waits until the first returns. The body's captures and its result are transferable, so no reference to the state escapes. Calling with on a guard the task already holds traps.
-- **Guarded** · [`export let create = func<T>(initializer: func() -> T) -> Guarded<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L28)
+- **Guarded.Guarded** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L26)
+  Names the guard; the state is not shown, since reading it needs the guard.
+- **Guarded** · [`export let create = func<T>(initializer: func() -> T) -> Guarded<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/guarded.nra#L31)
   A guard around the state that `initializer` builds. The initializer's captures are transferable, so the state it builds is reachable only through the guard.
 <!-- END SOURCE API -->
 
