@@ -344,6 +344,81 @@ let CharacterTests = module (
         test.assert(optional.equals(character.from_text("e" + character.to_string(769)), Optional<C>.None));
     };
 
+    // The get_name and code_point_of results below were printed by OpenJDK 17.0.21's Character.getName and
+    // codePointOf (tests/stdlib/character/generators/JavaNames.java and the probes recorded in Stdlib.md
+    // section 8.5), except the code points Unicode 13.0 did not assign, which follow the same rule; the
+    // unicode_name results are those of DerivedName.txt 17.0.0, which ICU 77 and Python 3.13's unicodedata
+    // agree with where they have the code point. names-tests.nra covers every code point.
+    let name = func(code_point: uint32) -> string => optional.value_or(character.get_name(code_point), "<none>");
+    let unicode = func(code_point: uint32) -> string =>
+        optional.value_or(character.unicode_name(code_point), "<none>");
+    let found = func(text: string) -> uint32 => optional.value_or(character.try_code_point_of(text), 4294967295);
+
+    export let test_get_name = func() -> void {
+        test.assert(name(0) == "NULL" && name(10) == "LINE FEED (LF)" && name(7) == "BEL");
+        test.assert(name(128) == "PADDING CHARACTER" && name(132) == "LATIN 1 SUPPLEMENT 84");
+        test.assert(name(65) == "LATIN CAPITAL LETTER A" && name(65279) == "ZERO WIDTH NO-BREAK SPACE");
+        test.assert(name(128512) == "GRINNING FACE" && name(128276) == "BELL");
+        test.assert(name(44032) == "HANGUL SYLLABLES AC00" && name(55203) == "HANGUL SYLLABLES D7A3");
+        test.assert(name(19968) == "CJK UNIFIED IDEOGRAPHS 4E00" && name(63744) == "CJK COMPATIBILITY IDEOGRAPH-F900");
+        test.assert(name(94208) == "TANGUT 17000" && name(101662) == "TANGUT SUPPLEMENT 18D1E");
+        test.assert(name(110960) == "NUSHU CHARACTER-1B170" && name(78944) == "EGYPTIAN HIEROGLYPH-13460");
+        test.assert(name(55296) == "HIGH SURROGATES D800" && name(57344) == "PRIVATE USE AREA E000");
+        test.assert(name(1114109) == "SUPPLEMENTARY PRIVATE USE AREA B 10FFFD");
+        test.assert(name(888) == "<none>" && name(65535) == "<none>" && name(65534) == "<none>");
+        test.assert(name(1114111) == "<none>" && name(1114112) == "<none>" && name(4294967295) == "<none>");
+    };
+
+    export let test_unicode_name = func() -> void {
+        test.assert(unicode(65) == "LATIN CAPITAL LETTER A" && unicode(128512) == "GRINNING FACE");
+        test.assert(unicode(44032) == "HANGUL SYLLABLE GA" && unicode(44033) == "HANGUL SYLLABLE GAG");
+        test.assert(unicode(55203) == "HANGUL SYLLABLE HIH");
+        test.assert(unicode(19968) == "CJK UNIFIED IDEOGRAPH-4E00" && unicode(13312) == "CJK UNIFIED IDEOGRAPH-3400");
+        test.assert(unicode(131072) == "CJK UNIFIED IDEOGRAPH-20000");
+        test.assert(unicode(94208) == "TANGUT IDEOGRAPH-17000" && unicode(101632) == "TANGUT IDEOGRAPH-18D00");
+        test.assert(unicode(101120) == "KHITAN SMALL SCRIPT CHARACTER-18B00");
+        test.assert(unicode(63744) == "CJK COMPATIBILITY IDEOGRAPH-F900");
+        test.assert(unicode(0) == "<none>" && unicode(132) == "<none>" && unicode(55296) == "<none>");
+        test.assert(unicode(57344) == "<none>" && unicode(888) == "<none>" && unicode(1114112) == "<none>");
+    };
+
+    export let test_code_point_of = func() -> void {
+        test.assert(character.code_point_of("LATIN CAPITAL LETTER A") == 65);
+        test.assert(found("null") == 0 && found("\tnull\n") == 0 && found(" latin small letter a ") == 97);
+        test.assert(found("line feed (lf)") == 10 && found("BEL") == 7 && found("BELL") == 128276);
+        test.assert(found("PADDING CHARACTER") == 128 && found("latin 1 supplement 84") == 132);
+        test.assert(found("zero width no-break space") == 65279 && found("Grinning Face") == 128512);
+        test.assert(found("CJK UNIFIED IDEOGRAPHS 4E00") == 19968 && found("cjk unified ideographs 4e00") == 19968);
+        test.assert(found("HANGUL SYLLABLES AC00") == 44032 && found("tangut 17000") == 94208);
+        test.assert(found("PRIVATE USE AREA E000 ") == 57344 && found("private use area e000") == 57344);
+        // A dotless i and a long s uppercase to I and S under the root rules, as in Java.
+        test.assert(found("lat" + character.to_string(305) + "n small letter a") == 97);
+        test.assert(found(character.to_string(383) + "pace") == 32);
+        test.assert(found("cro" + character.to_string(223) + " mark") == 10060);
+        test.assert(found(character.to_string(64257) + "gure dash") == 8210);
+        test.assert(found("LATIN CAPITAL LETTER " + character.to_string(201)) == 4294967295);
+        // The Unicode names, which Java's codePointOf does not accept for these code points.
+        test.assert(found("CJK UNIFIED IDEOGRAPH-4E00") == 19968 && found("hangul syllable ga") == 44032);
+        test.assert(found("HANGUL SYLLABLE GAG") == 44033 && found("HANGUL SYLLABLE A") == 50500);
+        test.assert(found("TANGUT IDEOGRAPH-18D00") == 101632 && found("TANGUT IDEOGRAPH-17000") == 94208);
+        test.assert(found("CJK COMPATIBILITY IDEOGRAPH-F900") == 63744);
+    };
+
+    export let test_code_point_of_rejects = func() -> void {
+        last rejected: string[] = [
+            "", "  ", "LATIN 1 SUPPLEMENT 80", "BASIC LATIN 0", "HANGUL SYLLABLES 0AC00", "HANGUL SYLLABLES AC0",
+            "PRIVATE USE AREA 0E000", "PRIVATE USE AREA  E000", "CJK UNIFIED IDEOGRAPHS +4E00",
+            "CJK UNIFIED IDEOGRAPHS 3400", "CJK UNIFIED IDEOGRAPH-04E00", "CJK UNIFIED IDEOGRAPH-4E0",
+            "BASIC LATIN 378", "GREEK AND COPTIC 378", "LINE FEED", "LF", "BYTE ORDER MARK", "latin_small_letter_a",
+            "LATIN  SMALL LETTER A", "LATIN SMALL LETTER", "HANGUL SYLLABLE", "HANGUL SYLLABLE GAX",
+            "TANGUT IDEOGRAPH SUPPLEMENT-18D00", "TANGUT IDEOGRAPH-18D1F", "NONCHARACTER-FFFF", "TANGUT 18D00"
+        ];
+        for (let text in rejected) {
+            test.assert_with(optional.equals(character.try_code_point_of(text), Optional<uint32>.None),
+                "accepted " + text);
+        }
+    };
+
     export let test_hash_set_of_characters = func() -> void {
         last set = hash_set.create<C>();
         test.assert(set.add(character.of(65)) && !set.add(new C(65)) && set.add(character.of(66)));

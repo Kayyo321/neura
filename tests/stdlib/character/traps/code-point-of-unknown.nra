@@ -1,0 +1,13 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: not a Unicode character name
+// No character has this name.
+let character = import:Std.Core.Character;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(character.code_point_of("LATIN CAPITAL LETTER NOT A NAME").to_string());
+        return program.ExitCode.Ok;
+    };
+);
