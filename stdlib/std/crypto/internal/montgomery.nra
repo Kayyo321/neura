@@ -1,0 +1,83 @@
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The X25519 and X448 functions of RFC 7748 over the Montgomery ladder. Internal: the public classes are
+/// Std.Crypto.Asymmetric.X25519 and X448.
+///
+/// The ladder runs the same steps for every scalar and swaps with masks, as RFC 7748, section 5 describes; it
+/// is branch-free in source, and the runtime does not guarantee constant time. The prime fields come from
+/// scripts/crypto-vectors/gen-asymmetric-constants.py.
+#Since("0.3.0")
+export let Montgomery = module (
+    /// @brief The field of curve25519, p = 2^255 - 19.
+    export let field25519 = func -> mp.Modulus =>
+        new(mp.from_hex("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed", 8));
+
+    /// @brief The field of curve448, p = 2^448 - 2^224 - 1.
+    export let field448 = func -> mp.Modulus => new(mp.from_hex(
+        "fffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        14));
+
+    /// @brief X25519(k, u) of RFC 7748, section 5: both 32 bytes; the scalar is clamped and the top bit of u is
+    /// ignored, and a u at or above p is reduced. Other lengths trap.
+    export let x25519 = func(scalar: uint8[list], u: uint8[list]) -> uint8[list] {
+        if (scalar.length != 32 || u.length != 32) {
+            trap_with_message("invalid argument: X25519 scalar and u-coordinate must be 32 bytes");
+        }
+        let k = words.copy(scalar);
+        k[0] = k[0] & 248;
+        k[31] = (k[31] & 127) | 64;
+        let point = words.copy(u);
+        point[31] = point[31] & 127;
+        return ladder(field25519(), 121665, k, point, 255, 32);
+    };
+
+    /// @brief X448(k, u) of RFC 7748, section 5: both 56 bytes; the scalar is clamped and a u at or above p is
+    /// reduced. Other lengths trap.
+    export let x448 = func(scalar: uint8[list], u: uint8[list]) -> uint8[list] {
+        if (scalar.length != 56 || u.length != 56) {
+            trap_with_message("invalid argument: X448 scalar and u-coordinate must be 56 bytes");
+        }
+        let k = words.copy(scalar);
+        k[0] = k[0] & 252;
+        k[55] = k[55] | 128;
+        return ladder(field448(), 39081, k, u, 448, 56);
+    };
+
+    /// @brief The ladder of RFC 7748, section 5, over `bits` scalar bits, with a24 = (A - 2) / 4 (the RFC's
+    /// formula z_2 = E (AA + a24 E)).
+    let ladder = func(f: mp.Modulus, a24_value: uint32, k: uint8[list], u: uint8[list], bits: int, length: int)
+        -> uint8[list] {
+        last n = f.n;
+        last x1 = f.to_mont(mp.from_bytes_le(u, n));
+        last a24 = f.to_mont(mp.small(a24_value, n));
+        let x2 = mp.copy(f.one);
+        let z2 = mp.zeros(n);
+        let x3 = mp.copy(x1);
+        let z3 = mp.copy(f.one);
+        let swap: uint32 = 0;
+        for (let t = bits - 1; t >= 0; t--) {
+            last k_t = ((k[t / 8] >> (t % 8)) & 1) as uint32;
+            swap = swap ^ k_t;
+            mp.cswap(swap, x2, x3);
+            mp.cswap(swap, z2, z3);
+            swap = k_t;
+            last a = f.add(x2, z2);
+            last aa = f.sqr(a);
+            last b = f.sub(x2, z2);
+            last bb = f.sqr(b);
+            last e = f.sub(aa, bb);
+            last c = f.add(x3, z3);
+            last d = f.sub(x3, z3);
+            last da = f.mul(d, a);
+            last cb = f.mul(c, b);
+            x3 = f.sqr(f.add(da, cb));
+            z3 = f.mul(x1, f.sqr(f.sub(da, cb)));
+            x2 = f.mul(aa, bb);
+            z2 = f.mul(e, f.add(aa, f.mul(a24, e)));
+        }
+        mp.cswap(swap, x2, x3);
+        mp.cswap(swap, z2, z3);
+        return mp.to_bytes_le(f.from_mont(f.mul(x2, f.inv(z2))), length);
+    };
+);

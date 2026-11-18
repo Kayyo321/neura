@@ -86,7 +86,7 @@ export let AesSiv = module (
             }
             last iv = words.slice(sealed, 0, 16);
             let plaintext = ctr(iv, words.slice(sealed, 16, sealed.length));
-            if (!constant_time.ct_eq(s2v(items, plaintext), iv)) {
+            if (not constant_time.ct_eq(s2v(items, plaintext), iv)) {
                 words.wipe(plaintext);
                 return aead.failure();
             }
@@ -106,7 +106,7 @@ export let AesSiv = module (
             if (plaintext.length >= 16) {
                 t = words.copy(plaintext);
                 last at = plaintext.length - 16;
-                for (let i = 0; i < 16; i++) {
+                for (let i in 0 .. 16) {
                     t[at + i] = t[at + i] ^ d[i];
                 }
             } else {
@@ -132,7 +132,7 @@ export let AesSiv = module (
                     out.append(bytes[start + i] ^ stream[i]);
                 }
                 let carry: uint32 = 1;
-                for (let i = 15; i >= 0; i--) {
+                for (let i in 15 ..= 0 : -1) {
                     last sum = (counter[i] as uint32) + carry;
                     counter[i] = (sum & 255) as uint8;
                     carry = sum >> 8;

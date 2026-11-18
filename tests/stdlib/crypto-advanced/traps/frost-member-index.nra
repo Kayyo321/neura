@@ -1,0 +1,16 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy --max-steps 1500000000
+// stderr: explicit program failure \(trap reason 3\): invalid argument: FROST member index is out of range
+let frost = import:Std.Crypto.Advanced.Frost;
+let cases = import:FrostTestCases;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let vectors = import:FrostVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = cases.trusted_group().member_at(3);
+        return program.ExitCode.Ok;
+    };
+);

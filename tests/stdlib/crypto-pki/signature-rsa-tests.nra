@@ -1,0 +1,22 @@
+// test-options: --gpu=off --max-steps 20000000000
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let cases = import:SignatureTestCases;
+let vectors = import:SignatureVectors;
+
+let SignatureRsaTests = module (
+    export let test_rsa_pkcs1 = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["rsa-sha224", "rsa-sha256", "rsa-sha384", "rsa-sha512", "rsa-sha3-224", "rsa-sha3-256",
+            "rsa-sha3-384", "rsa-sha3-512", "rsa3072-sha256", "rsa-sha1"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+    };
+
+    export let test_rsa_pss = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["pss-sha256-32", "pss-sha384-48", "pss-sha512-64", "pss-sha256-0", "pss-sha256-mgf384",
+            "pss-sha1-20", "psskey-sha256-32", "psskey-sha256-40", "psskeyopen-sha384-48"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+    };
+);

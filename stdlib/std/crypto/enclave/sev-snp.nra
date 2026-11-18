@@ -1,0 +1,265 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let certs = import:Std.Crypto.Pki.Certificate;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let der = import:Std.Crypto.Pki.Der;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let error = import:Std.Core.Error;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let paths = import:Std.Crypto.Pki.PathValidation;
+let time = import:Std.Time.Instant;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Verifies AMD SEV-SNP version 2 reports signed by a Milan VCEK at an explicit time.
+/// The caller provisions the trusted AMD root, the expected challenge data and launch measurement,
+/// and the minimum reported TCB. Supply current, independently authenticated revocation information
+/// when deciding whether to trust a live peer.
+/// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+#Since("0.3.0")
+export let SevSnp = module (
+    const ReportLength = 1184;
+    const SignedLength = 672;
+    const SignatureEnd = 816;
+    const VcekOid = "1.3.6.1.4.1.3704.1.";
+
+    /// @brief A structurally valid SEV-SNP report with its signed bytes retained. Verify it before trusting any field.
+    /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+    #[Final, Since("0.3.0")]
+    export let Report = class (
+        last encoded: uint8[list];
+
+        /// @brief Copies a structurally valid report. For untrusted bytes, call parse.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #Since("0.3.0")
+        export let init = func(bytes: uint8[list]) {
+            last problem = format_problem(bytes);
+            if (problem != "") {
+                trap_with_message("invalid argument: " .. problem);
+            }
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief All bytes of this report, including its signature structure.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #[NoDiscard, Since("0.3.0")]
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        /// @brief The signed 64-byte report data.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #[NoDiscard, Since("0.3.0")]
+        export let report_data = func -> uint8[list] => words.slice(encoded, 80, 144);
+
+        /// @brief The signed 48-byte launch measurement.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #[NoDiscard, Since("0.3.0")]
+        export let measurement = func -> uint8[list] => words.slice(encoded, 144, 192);
+
+        /// @brief The reported TCB field. Milan orders its SPLs as bootloader, TEE, four reserved bytes, SNP, microcode.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #[NoDiscard, Since("0.3.0")]
+        export let reported_tcb = func -> uint64 => words.load64_le(encoded, 384);
+
+        /// @brief The reported guest VM privilege level.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #[NoDiscard, Since("0.3.0")]
+        export let vmpl = func -> uint32 => words.load32_le(encoded, 48);
+
+        /// @brief Whether the signed policy allows debugging.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #[NoDiscard, Since("0.3.0")]
+        export let debug_allowed = func -> bool => (words.load64_le(encoded, 8) & 524288) != 0;
+
+        /// @brief Equality by complete report bytes.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool =>
+            other is Report && constant_time.ct_eq(encoded, (other as Report).encoded);
+
+        /// @brief Hash of the complete report bytes.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 => der.hash_range(encoded, 0, ReportLength);
+
+        /// @brief Displays the report type without displaying chip identification or challenge bytes.
+        /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "SevSnp.Report(v2)";
+    );
+
+    let fail = func<T>(reason: string) -> Result<T> =>
+        Result<T>.Err(error.custom("crypto.sev_snp", reason));
+
+    let is_zero = func(bytes: uint8[list], start: int, end: int) -> bool {
+        for (let i = start; i < end; i++) {
+            if (bytes[i] != 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let format_problem = func(bytes: uint8[list]) -> string {
+        if (bytes.length != ReportLength) {
+            return "the report must be exactly 1184 bytes";
+        }
+        if (words.load32_le(bytes, 0) != 2) {
+            return "only version 2 reports are supported";
+        }
+        if (words.load32_le(bytes, 52) != 1 || (words.load32_le(bytes, 72) & ~1) != 0) {
+            return "the report must use ECDSA-P384-SHA384 with an unmasked legacy VCEK";
+        }
+        last guest_policy = words.load64_le(bytes, 8);
+        if ((guest_policy & 131072) == 0 || (guest_policy >> 26) != 0) {
+            return "invalid reserved bits in the guest policy";
+        }
+        if (words.load32_le(bytes, 48) > 3 || not is_zero(bytes, 76, 80) || not is_zero(bytes, 392, 416)
+            || bytes[491] != 0 || bytes[495] != 0 || not is_zero(bytes, 504, SignedLength)
+            || not is_zero(bytes, 720, 744) || not is_zero(bytes, 792, 816)
+            || not is_zero(bytes, SignatureEnd, ReportLength)) {
+            return "invalid privilege level or nonzero reserved or signature padding bytes";
+        }
+        return "";
+    };
+
+    /// @brief Parses an untrusted version 2 report and checks its fixed layout and signature padding.
+    /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(bytes: uint8[list]) -> Result<Report> {
+        last problem = format_problem(bytes);
+        if (problem != "") {
+            return fail<Report>(problem);
+        }
+        return Result<Report>.Ok(new Report(bytes));
+    };
+
+    let extension_data = func(certificate: certs.Certificate, oid: string) -> Result<uint8[list]> {
+        return match (certificate.extension(oid)) {
+            Optional.Some(extension) => Result<uint8[list]>.Ok(extension.value),
+            Optional.None => fail<uint8[list]>("required VCEK extension is missing"),
+        };
+    };
+
+    let integer_extension = func(certificate: certs.Certificate, oid: string) -> Result<int64> =>
+        (der.parse(extension_data(certificate, oid)?)?).small_integer(255);
+
+    let chip_id = func(certificate: certs.Certificate) -> Result<uint8[list]> {
+        last bytes = extension_data(certificate, VcekOid .. "4")?;
+        // AMD's Milan KDS issued both a raw HWID extension and a DER OCTET STRING form.
+        if (bytes.length == 64) {
+            return Result<uint8[list]>.Ok(bytes);
+        }
+        return (der.parse(bytes)?).octet_string();
+    };
+
+    let spl_at = func(tcb: uint64, offset: int) -> int64 => ((tcb >> (offset * 8)) & 255) as int64;
+
+    let min_tcb_met = func(report: uint64, minimum: uint64) -> bool =>
+        spl_at(report, 0) >= spl_at(minimum, 0) && spl_at(report, 1) >= spl_at(minimum, 1)
+        && spl_at(report, 6) >= spl_at(minimum, 6) && spl_at(report, 7) >= spl_at(minimum, 7);
+
+    let has_vcek_binding = func(certificate: certs.Certificate, report: uint8[list]) -> Result<bool> {
+        last version = integer_extension(certificate, VcekOid .. "1")?;
+        last product = der.parse(extension_data(certificate, VcekOid .. "2")?)?;
+        if (version != 0 || not product.is_universal(22)) {
+            return Result<bool>.Ok(false);
+        }
+        last name = product.text()?;
+        if (name.byte_length <= 6 || name.slice(0, 6) != "Milan-") {
+            return Result<bool>.Ok(false);
+        }
+        last tcb = words.load64_le(report, 384);
+        if (not is_zero(report, 386, 390)
+            || (integer_extension(certificate, VcekOid .. "3.1")?) != spl_at(tcb, 0)
+            || (integer_extension(certificate, VcekOid .. "3.2")?) != spl_at(tcb, 1)
+            || (integer_extension(certificate, VcekOid .. "3.3")?) != spl_at(tcb, 6)
+            || (integer_extension(certificate, VcekOid .. "3.8")?) != spl_at(tcb, 7)) {
+            return Result<bool>.Ok(false);
+        }
+        return Result<bool>.Ok(constant_time.ct_eq(chip_id(certificate)?, words.slice(report, 416, 480)));
+    };
+
+    let raw_signature = func(report: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i in 0 .. 48) {
+            out.append(report[719 - i]);
+        }
+        for (let i in 0 .. 48) {
+            out.append(report[791 - i]);
+        }
+        return out;
+    };
+
+    /// @brief Verifies the Milan ARK/ASK/VCEK chain, the VCEK chip and TCB binding, and the report signature.
+    /// Checks VMPL 0, the 64-byte expected report data, the 48-byte expected measurement, and a componentwise
+    /// minimum Milan TCB. Debug policy is denied by default. Supply the certificate DER and provision the trusted ARK independently of the report.
+    /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(bytes: uint8[list], vcek_der, ask_der, trusted_ark_der: uint8[list],
+        at: time.Instant, expected_data, expected_measurement: uint8[list],
+        minimum_tcb: uint64, allow_debug: bool = false) -> Result<Report> {
+        if (expected_data.length != 64 || expected_measurement.length != 48 || not valid_minimum(minimum_tcb)) {
+            trap_with_message("invalid argument: expected report data, measurement, or Milan TCB has the wrong format");
+        }
+        if (is_zero(expected_data, 0, 64)) {
+            trap_with_message("invalid argument: expected report data must bind a challenge or transcript");
+        }
+        last parsed = parse(bytes)?;
+        last report = parsed.to_bytes();
+        if (parsed.vmpl() != 0 || (words.load64_le(report, 8) & 262144) != 0 || (not allow_debug && parsed.debug_allowed())
+            || not min_tcb_met(parsed.reported_tcb(), minimum_tcb)
+            || not constant_time.ct_eq(expected_data, parsed.report_data())
+            || not constant_time.ct_eq(expected_measurement, parsed.measurement())) {
+            return fail<Report>("the report does not meet the expected claims or guest policy");
+        }
+        last vcek = certs.parse(vcek_der)?;
+        last ask = parse_milan_ca(ask_der)?;
+        last trusted_ark = parse_milan_ca(trusted_ark_der)?;
+        if (vcek.is_ca() || vcek.public_key.key_algorithm != keys.KeyAlgorithm.Ec
+            || vcek.public_key.parameter_set != "P-384") {
+            return fail<Report>("the VCEK must be a P-384 end-entity certificate");
+        }
+        match (vcek.key_usage) {
+            Optional.Some(usage) => {
+                if (not usage.has(extensions.DigitalSignature)) {
+                    return fail<Report>("the VCEK key usage does not allow digital signatures");
+                }
+            },
+            Optional.None => {},
+        }
+        let validation = new paths.ValidationOptions(at);
+        // Historical VCEKs omit RFC 5280 profile metadata such as AuthorityKeyIdentifier.
+        validation.strict_profile = false;
+        last validated = paths.validate(vcek, new([ask]), new([trusted_ark]), validation)?;
+        if (validated.chain.length != 3 || not validated.chain[1].equals(ask)) {
+            return fail<Report>("the VCEK is not chained through the provisioned ASK");
+        }
+        if (not (has_vcek_binding(vcek, report)?)) {
+            return fail<Report>("the VCEK does not match this report's chip, product and reported TCB");
+        }
+        last public_key = ecdsa.parse_public_key(ecdsa.Curve.P384, vcek.public_key.key)?;
+        last verifier = new ecdsa.EcdsaVerifier(public_key, Algorithm.Sha384);
+        if (not verifier.verify_raw(words.slice(report, 0, SignedLength), raw_signature(report))) {
+            return fail<Report>("the VCEK report signature is invalid");
+        }
+        return Result<Report>.Ok(parsed);
+    };
+
+    let valid_minimum = func(tcb: uint64) -> bool => (tcb & 281474976645120) == 0;
+
+    /// @brief Parses an AMD Milan ASK or ARK, accepting the historical one-bit keyUsage padding.
+    /// Verification uses the original signed bytes. Authenticate the ARK independently before use.
+    /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_milan_ca = func(bytes: uint8[list]) -> Result<certs.Certificate> =>
+        certs.parse_amd_milan_ca(bytes);
+
+    /// @brief Requests a fresh report from an AMD SEV-SNP guest device.
+    /// @stub the runtime has no SEV-SNP guest report host service
+    /// @see [Std.Crypto.Enclave.SevSnp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-SevSnp)
+    #[NoDiscard, Since("0.3.0")]
+    export let request_report = func(report_data: uint8[list]) -> Result<uint8[list]> {
+        trap_with_message("unsupported: Std.Crypto.Enclave.SevSnp.request_report is not implemented in Neura 0.3.0 (the runtime has no SEV-SNP guest report host service)");
+    };
+);

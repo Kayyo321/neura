@@ -1,0 +1,68 @@
+/// @brief The ASN.1 BIT STRING value (Stdlib.md section 21.10).
+/// @see [Std.Crypto.Pki.BitString](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-BitString)
+#Since("0.3.0")
+export let BitString = module (
+    /// @brief A bit string: whole bytes, of which the last `unused_bits` low-order bits are not part of the
+    /// value and are zero. Bit 0 is the most significant bit of the first byte, as ASN.1 numbers named bits.
+    #[Final, Since("0.3.0")]
+    export let BitString = class (
+        /// @brief The bytes. Do not change the list.
+        export last bytes: uint8[list];
+        /// @brief The number of unused bits in the last byte, 0 to 7 (0 for an empty string).
+        export last unused_bits: int;
+
+        /// @brief A copy of the bytes with the count of unused bits. An unused count outside 0 to 7, a nonzero
+        /// count on an empty string, or a set unused bit traps with "invalid argument: BIT STRING ...".
+        export let init = func(value: uint8[list], unused: int) {
+            if (unused < 0 || unused > 7 || (value.length == 0 && unused != 0)) {
+                trap_with_message("invalid argument: BIT STRING unused bit count");
+            }
+            if (value.length > 0 && (value[value.length - 1] & ((1 << unused) - 1) as uint8) != 0) {
+                trap_with_message("invalid argument: BIT STRING unused bits must be zero");
+            }
+            let copy: uint8[list] = new;
+            for (let b in value) {
+                copy.append(b);
+            }
+            bytes = copy;
+            unused_bits = unused;
+        };
+
+        /// @brief The number of bits in the value.
+        export let bit_length = func -> int => bytes.length * 8 - unused_bits;
+
+        /// @brief Whether bit `index` is set; a bit past the end reads as unset.
+        export let bit = func(index: int) -> bool {
+            if (index < 0 || index >= bit_length()) {
+                return false;
+            }
+            return (bytes[index / 8] & ((128 >> (index % 8)) as uint8)) != 0;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: BitString) {
+                return false;
+            }
+            if (that.unused_bits != unused_bits || that.bytes.length != bytes.length) {
+                return false;
+            }
+            for (let i = 0; i < bytes.length; i++) {
+                if (bytes[i] != that.bytes[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = (unused_bits as uint32) + 17;
+            for (let b in bytes) {
+                h = ((((h as uint64) * 31) + (b as uint64)) & 4294967295) as uint32;
+            }
+            return h;
+        };
+
+        /// @brief "BitString(<bits> bits)".
+        export let.override to_string = func -> string => "BitString(" .. bit_length().to_string() .. " bits)";
+    );
+);

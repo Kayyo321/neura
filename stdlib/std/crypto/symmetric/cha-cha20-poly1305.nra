@@ -89,7 +89,7 @@ export let ChaCha20Poly1305 = module (
             return aead.failure();
         }
         last body = words.slice(sealed, 0, sealed.length - 16);
-        if (!constant_time.ct_eq(tag_of(key, nonce, body, data), words.slice(sealed, sealed.length - 16, sealed.length))) {
+        if (not constant_time.ct_eq(tag_of(key, nonce, body, data), words.slice(sealed, sealed.length - 16, sealed.length))) {
             return aead.failure();
         }
         return Result<uint8[list]>.Ok(chacha.xor_stream(key, 1, nonce, body));

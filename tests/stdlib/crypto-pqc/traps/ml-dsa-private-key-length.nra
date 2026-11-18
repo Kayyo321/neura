@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: ML-DSA-44 private key must be 2560 bytes
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new ml_dsa.MlDsaPrivateKey(ml_dsa.ParameterSet.MlDsa44, new([1]));
+        return program.ExitCode.Ok;
+    };
+);

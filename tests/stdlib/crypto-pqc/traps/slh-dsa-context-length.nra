@@ -1,0 +1,20 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: an SLH-DSA context string is at most 255 bytes
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 16; i++) {
+            seed.append(i as uint8);
+        }
+        let context: uint8[list] = new;
+        for (let i = 0; i < 256; i++) {
+            context.append(0);
+        }
+        let key = slh_dsa.key_pair_from_seed(slh_dsa.ParameterSet.Sha2_128f, seed, seed, seed);
+        let _ = new slh_dsa.SlhDsaSigner(key).sign_deterministic(new([1]), context);
+        return program.ExitCode.Ok;
+    };
+);

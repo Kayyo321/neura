@@ -69,7 +69,7 @@ export let AesGcmSiv = module (
             last encryption = new aes.Cipher(keys[1]);
             last tag = words.slice(sealed, sealed.length - 16, sealed.length);
             let plaintext = ctr(encryption, tag, words.slice(sealed, 0, sealed.length - 16));
-            if (!constant_time.ct_eq(tag_of(keys[0], encryption, nonce, plaintext, associated_data), tag)) {
+            if (not constant_time.ct_eq(tag_of(keys[0], encryption, nonce, plaintext, associated_data), tag)) {
                 words.wipe(plaintext);
                 return aead.failure();
             }
@@ -82,12 +82,12 @@ export let AesGcmSiv = module (
             let auth: uint8[list] = new;
             let enc: uint8[list] = new;
             last blocks = key_length == 16 ? 4 : 6;
-            for (let i = 0; i < blocks; i++) {
+            for (let i in 0 .. blocks) {
                 let input: uint8[list] = new;
                 words.append32_le(input, i as uint32);
                 words.append_all(input, nonce);
                 last out = key_generator.encrypt(input, 0);
-                for (let k = 0; k < 8; k++) {
+                for (let k in 0 .. 8) {
                     if (i < 2) {
                         auth.append(out[k]);
                     } else {
@@ -108,7 +108,7 @@ export let AesGcmSiv = module (
             words.append64_le(lengths, (plaintext.length as uint64) * 8);
             polyval.block(lengths, 0);
             let s = polyval.digest();
-            for (let i = 0; i < 12; i++) {
+            for (let i in 0 .. 12) {
                 s[i] = s[i] ^ nonce[i];
             }
             s[15] = s[15] & 127;

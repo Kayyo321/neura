@@ -7,6 +7,7 @@ let aes = import:Std.Crypto.Internal.Aes;
 let big = import:Std.Math.BigInteger;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let hex = import:Std.Encoding.Hex;
+let strings = import:Std.Text.Strings;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief FF1 format-preserving encryption of NIST SP 800-38G (Rev. 1) over AES (Stdlib.md section 21.7).
@@ -93,7 +94,7 @@ export let Ff1 = module (
             }
             if (numerals.length < min_length) {
                 return Result<string>.Err(Error.Encoding {
-                    offset: text.byte_length, message: "text shorter than the FF1 minimum of " + min_length.to_string()
+                    offset: text.byte_length, message: "text shorter than the FF1 minimum of " .. min_length.to_string()
                 });
             }
             let out = "";
@@ -107,7 +108,7 @@ export let Ff1 = module (
         let run = func(numerals: int[list], tweak: uint8[list], forward: bool) -> int[list] {
             last n = numerals.length;
             if (n < min_length) {
-                trap_with_message("invalid argument: FF1 input shorter than " + min_length.to_string() + " numerals");
+                trap_with_message("invalid argument: FF1 input shorter than " .. min_length.to_string() .. " numerals");
             }
             for (let x in numerals) {
                 if (x < 0 || x >= radix) {
@@ -139,12 +140,12 @@ export let Ff1 = module (
             words.append32_be(p, n as uint32);
             words.append32_be(p, tweak.length as uint32);
             last zeros = ((-(tweak.length + byte_count + 1)) % 16 + 16) % 16;
-            for (let step = 0; step < 10; step++) {
+            for (let step in 0 .. 10) {
                 last i = forward ? step : 9 - step;
                 // Encryption feeds B into the round function; decryption feeds A.
                 last fed = forward ? b : a;
                 let q = words.copy(tweak);
-                for (let k = 0; k < zeros; k++) {
+                for (let k in 0 .. zeros) {
                     q.append(0);
                 }
                 q.append(i as uint8);
@@ -214,7 +215,7 @@ export let Ff1 = module (
             return out;
         };
 
-        export let.override to_string = func -> string => "Ff1(radix " + radix.to_string() + ", <redacted>)";
+        export let.override to_string = func -> string => "Ff1(<redacted>)";
     );
 
     let small = func(x: big.BigInteger) -> int => match (x.to_int64()) {
@@ -229,7 +230,7 @@ export let Ff1 = module (
         while (end > 0) {
             let limb: uint32 = 0;
             last start = end >= 4 ? end - 4 : 0;
-            for (let i = start; i < end; i++) {
+            for (let i in start .. end) {
                 limb = (limb << 8) | (bytes[i] as uint32);
             }
             limbs.append(limb);
@@ -241,8 +242,9 @@ export let Ff1 = module (
     /// @brief [x]^s: the value as exactly s big-endian bytes (it is below 256^s).
     let bytes_of = func(x: big.BigInteger, s: int) -> uint8[list] {
         let text = x.to_string_radix(16);
-        while (text.byte_length < 2 * s) {
-            text = "0" + text;
+        last hex_width = 2 * s;
+        if (text.byte_length < hex_width) {
+            text = strings.repeat("0", hex_width - text.byte_length) .. text;
         }
         return match (hex.decode(text)) {
             Result.Ok(bytes) => bytes,

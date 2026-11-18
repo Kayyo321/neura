@@ -1,0 +1,15 @@
+let common = import:Std.Crypto.Internal.WeierstrassHashToCurve;
+let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+
+/// @brief RFC 9380 P256_XMD:SHA-256_SSWU_RO_. Internal.
+#Since("0.3.0")
+export let P256HashToCurve = module (
+    /// @brief Hash to P-256 using sections 5.2 and 8.2 and Appendix F.2 of RFC 9380.
+    export let hash_to_point = func(curve: weierstrass.Curve, message: uint8[list], dst: uint8[list])
+        -> weierstrass.Point {
+        if (curve.id != weierstrass.CurveId.P256) {
+            trap_with_message("invalid argument: P-256 hash-to-curve needs the P-256 group");
+        }
+        return common.hash_to_point(curve, message, dst);
+    };
+);

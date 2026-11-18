@@ -1,0 +1,65 @@
+// test-options: --gpu=off --max-steps 20000000000
+let algorithm_ids = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let cases = import:SignatureTestCases;
+let policy = import:Std.Crypto.Core.CryptoPolicy;
+let signature = import:Std.Crypto.Pki.SignatureVerifier;
+let test = import:Std.Test;
+let vectors = import:SignatureVectors;
+
+let SignatureRejectionTests = module (
+    export let test_classical_signatures_with_flipped_bits = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["rsa-sha256", "pss-sha256-32", "p256-sha256"]) {
+            cases.reject_flipped(cases.read(vectors.certificates, name), verifier, name);
+        }
+    };
+
+    export let test_key_algorithm_and_parameter_set_mismatches = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last rsa = cases.read(vectors.certificates, "rsa-sha256");
+        last ec = cases.read(vectors.certificates, "p256-sha256");
+        last ml_dsa_44 = cases.read(vectors.certificates, "mldsa44");
+        last ml_dsa_65 = cases.read(vectors.certificates, "mldsa65");
+        test.assert(verifier.verify_signature(rsa.signature_algorithm, ec.public_key, rsa.tbs_bytes, rsa.signature)
+            == signature.SignatureCheck.Invalid);
+        test.assert(verifier.verify_signature(ec.signature_algorithm, rsa.public_key, ec.tbs_bytes, ec.signature)
+            == signature.SignatureCheck.Invalid);
+        test.assert(verifier.verify_signature(ml_dsa_44.signature_algorithm, ml_dsa_65.public_key, ml_dsa_44.tbs_bytes,
+            ml_dsa_44.signature) == signature.SignatureCheck.Invalid);
+    };
+
+    export let test_pss_parameter_mismatches = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last pss = cases.read(vectors.certificates, "pss-sha256-32");
+        last zero_salt = cases.read(vectors.certificates, "pss-sha256-0");
+        last different_mgf = cases.read(vectors.certificates, "pss-sha256-mgf384");
+        last constrained = cases.read(vectors.certificates, "psskey-sha256-32");
+        // Same RSA key and digest; replacing the declared salt length invalidates the signature.
+        test.assert(verifier.verify_signature(zero_salt.signature_algorithm, pss.public_key, pss.tbs_bytes,
+            pss.signature) == signature.SignatureCheck.Invalid);
+        test.assert(verifier.verify_signature(different_mgf.signature_algorithm, pss.public_key, pss.tbs_bytes,
+            pss.signature) == signature.SignatureCheck.Invalid);
+        // The declared salt length also falls below the SPKI's minimum.
+        test.assert(verifier.verify_signature(zero_salt.signature_algorithm, constrained.public_key,
+            constrained.tbs_bytes, constrained.signature) == signature.SignatureCheck.Invalid);
+    };
+
+    export let test_policy_denied_curve = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last cert = cases.read(vectors.certificates, "secp256k1-sha256");
+        last before = policy.policy();
+        policy.set_policy(policy.Policy.Fips140_3);
+        last result = verifier.verify_signature(cert.signature_algorithm, cert.public_key, cert.tbs_bytes, cert.signature);
+        policy.set_policy(before);
+        test.assert(result == signature.SignatureCheck.UnsupportedAlgorithm);
+    };
+
+    export let test_unknown_signature_algorithm = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last cert = cases.read(vectors.certificates, "ed25519");
+        last unknown = algorithm_ids.without_parameters("1.3.6.1.4.1.32473.1");
+        test.assert(verifier.verify_signature(unknown, cert.public_key, cert.tbs_bytes, cert.signature)
+            == signature.SignatureCheck.UnsupportedAlgorithm);
+    };
+);

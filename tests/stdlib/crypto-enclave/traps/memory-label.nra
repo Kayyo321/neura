@@ -1,0 +1,16 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy
+// stderr: explicit program failure \(trap reason 3\): invalid argument: a key label needs 1 to 255 UTF-8 bytes
+let.promote _ = import:Std.Crypto.Algorithm;
+let envelope = import:Std.Crypto.Enclave.Envelope;
+let memory = import:Std.Crypto.Enclave.MemoryKeyStore;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last store = new memory.MemoryKeyStore();
+        let _ = store.generate_key(Algorithm.Aes512Siv, "");
+        return program.ExitCode.Ok;
+    };
+);

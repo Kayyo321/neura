@@ -109,7 +109,7 @@ export let Aes = module (
                 round_keys.append(round_keys[q + 2] ^ t2);
                 round_keys.append(round_keys[q + 3] ^ t3);
             }
-            for (let i = 0; i < 16; i++) {
+            for (let i in 0 .. 16) {
                 work.append(0);
             }
         };

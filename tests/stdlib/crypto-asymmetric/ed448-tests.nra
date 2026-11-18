@@ -1,0 +1,57 @@
+// test-options: --gpu=off --max-steps 20000000000
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:EcxVectors;
+
+// Ed448 and Ed448ph against RFC 8032 section 7 and cryptography, and strict verification against
+// Wycheproof (support/ecx-vectors.nra, scripts/crypto-vectors/gen-asymmetric-ecx.py).
+let Ed448Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_rfc8032_and_cryptography = func {
+        last rows = vectors.eddsa;
+        let seen = 0;
+        for (let i = 0; i < rows.length; i += 6) {
+            if (rows[i] == "ed448" || rows[i] == "ed448ph") {
+                last key = new ed448.Ed448PrivateKey(decode(rows[i + 1]));
+                test.assert_equal_string(rows[i + 2], hex.encode(key.public_key_bytes()));
+                last signer = new ed448.Ed448Signer(key);
+                last verifier = new ed448.Ed448Verifier(key.public_key());
+                last message = decode(rows[i + 3]);
+                last context = decode(rows[i + 4]);
+                last expected = decode(rows[i + 5]);
+                last signature: uint8[list];
+                if (rows[i] == "ed448") {
+                    signature = signer.sign_with_context(message, context);
+                    test.assert(verifier.verify_with_context(message, expected, context));
+                    if (context.length == 0) {
+                        test.assert_equal_string(rows[i + 5], hex.encode(signer.sign(message)));
+                        test.assert(verifier.verify(message, expected));
+                    } else {
+                        test.assert(!verifier.verify(message, expected));
+                    }
+                } else {
+                    signature = signer.sign_prehashed(message, context);
+                    test.assert(verifier.verify_prehashed(message, expected, context));
+                    test.assert(!verifier.verify_with_context(message, expected, context));
+                }
+                test.assert_equal_string(rows[i + 5], hex.encode(signature));
+                seen++;
+            }
+        }
+        test.assert_equal_int32(16, seen);
+    };
+
+    export let test_wycheproof_strict = func {
+        last rows = vectors.ed448_wycheproof;
+        for (let i = 0; i < rows.length; i += 6) {
+            last verifier = new ed448.Ed448Verifier(new ed448.Ed448PublicKey(decode(rows[i + 1])));
+            last verdict = verifier.verify(decode(rows[i + 2]), decode(rows[i + 3]));
+            if (verdict != (rows[i + 4] == "1")) {
+                test.fail("Wycheproof tcId " + rows[i] + " (" + rows[i + 5] + ")");
+            }
+        }
+        test.assert_equal_int32(87 * 6, rows.length);
+    };
+);

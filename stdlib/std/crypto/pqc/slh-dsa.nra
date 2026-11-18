@@ -1,0 +1,417 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let core = import:Std.Crypto.Internal.SlhDsaCore;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let prehash = import:Std.Crypto.Internal.PqcPrehash;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief SLH-DSA, the stateless hash-based signature scheme of FIPS 205, in its twelve parameter sets
+/// (Stdlib.md section 21.9).
+///
+/// `SlhDsaSigner` implements `Signer` and `SlhDsaVerifier` implements `Verifier`. Signing is hedged by
+/// default: the n-byte `addrnd` comes from a `ChaCha20Drbg` given to the signer, or else from
+/// `Entropy.os_bytes`; `sign_deterministic` uses PK.seed, as FIPS 205 specifies for the deterministic variant.
+/// Pure SLH-DSA takes a context string of at most 255 bytes, and HashSLH-DSA signs a digest under the object
+/// identifier of the hash. The "s" sets give small signatures and sign slowly; the "f" sets sign fast. Every
+/// set is security category 1, 3 or 5 by its n of 16, 24 or 32 bytes.
+/// @see [Std.Crypto.Pqc.SlhDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-SlhDsa)
+#Since("0.3.0")
+export let SlhDsa = module (
+    /// @brief The parameter sets of FIPS 205, section 11.
+    #Since("0.3.0")
+    export let ParameterSet = enum (
+        Sha2_128s, Sha2_128f, Sha2_192s, Sha2_192f, Sha2_256s, Sha2_256f,
+        Shake128s, Shake128f, Shake192s, Shake192f, Shake256s, Shake256f
+    );
+
+    let uses_shake = func(set: ParameterSet) -> bool => match (set) {
+        ParameterSet.Shake128s => true,
+        ParameterSet.Shake128f => true,
+        ParameterSet.Shake192s => true,
+        ParameterSet.Shake192f => true,
+        ParameterSet.Shake256s => true,
+        ParameterSet.Shake256f => true,
+        _ => false,
+    };
+
+    /// @brief n, the security parameter in bytes: 16, 24 or 32.
+    #[NoDiscard, Since("0.3.0")]
+    export let security_bytes = func(set: ParameterSet) -> int => match (set) {
+        ParameterSet.Sha2_128s => 16,
+        ParameterSet.Sha2_128f => 16,
+        ParameterSet.Shake128s => 16,
+        ParameterSet.Shake128f => 16,
+        ParameterSet.Sha2_192s => 24,
+        ParameterSet.Sha2_192f => 24,
+        ParameterSet.Shake192s => 24,
+        ParameterSet.Shake192f => 24,
+        _ => 32,
+    };
+
+    let is_small = func(set: ParameterSet) -> bool => match (set) {
+        ParameterSet.Sha2_128s => true,
+        ParameterSet.Sha2_192s => true,
+        ParameterSet.Sha2_256s => true,
+        ParameterSet.Shake128s => true,
+        ParameterSet.Shake192s => true,
+        ParameterSet.Shake256s => true,
+        _ => false,
+    };
+
+    /// @brief The standard's name of the parameter set, such as "SLH-DSA-SHAKE-128f".
+    #[NoDiscard, Since("0.3.0")]
+    export let name = func(set: ParameterSet) -> string {
+        last family = uses_shake(set) ? "SHAKE" : "SHA2";
+        last variant = is_small(set) ? "s" : "f";
+        return "SLH-DSA-" .. family .. "-" .. (security_bytes(set) * 8).to_string() .. variant;
+    };
+
+    /// @brief The public-key length in bytes, 2n.
+    #[NoDiscard, Since("0.3.0")]
+    export let public_key_length = func(set: ParameterSet) -> int => 2 * security_bytes(set);
+
+    /// @brief The private-key length in bytes, 4n.
+    #[NoDiscard, Since("0.3.0")]
+    export let private_key_length = func(set: ParameterSet) -> int => 4 * security_bytes(set);
+
+    /// @brief The signature length in bytes: from 7856 (SLH-DSA-*-128s) to 49856 (SLH-DSA-*-256f).
+    #[NoDiscard, Since("0.3.0")]
+    export let signature_length = func(set: ParameterSet) -> int => engine_of(set).sig_length();
+
+    let engine_of = func(set: ParameterSet) -> core.Engine => new(uses_shake(set), security_bytes(set), is_small(set));
+
+    let invalid_key = func<T>(text: string) -> Result<T> => Result<T>.Err(error.custom("crypto.invalid_key", text));
+
+    /// @brief An SLH-DSA public key (PK.seed || PK.root). Equal keys have equal bytes.
+    #[Final, Since("0.3.0")]
+    export let SlhDsaPublicKey = class (
+        /// @brief The parameter set.
+        export last parameter_set: ParameterSet;
+        last encoded: uint8[list];
+
+        /// @brief Copies the encoded key; a wrong length traps with `invalid argument` (use
+        /// `SlhDsa.parse_public_key` for keys from outside the program).
+        export let init = func(set: ParameterSet, bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.SlhDsa);
+            if (bytes.length != public_key_length(set)) {
+                trap_with_message("invalid argument: " .. name(set) .. " public key must be "
+                    .. public_key_length(set).to_string() .. " bytes");
+            }
+            parameter_set = set;
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the encoded key.
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not key: SlhDsaPublicKey) {
+                return false;
+            }
+            if (key.parameter_set != parameter_set) {
+                return false;
+            }
+            last bytes = key.to_bytes();
+            for (let i = 0; i < encoded.length; i++) {
+                if (bytes[i] != encoded[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = hashing.combine(23, (parameter_set as int) as uint32);
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string =>
+            "SlhDsaPublicKey(" .. name(parameter_set) .. ", " .. encoded.length.to_string() .. " bytes)";
+    );
+
+    /// @brief An SLH-DSA private key (SK.seed || SK.prf || PK.seed || PK.root) in secret memory. `to_string`
+    /// never prints it.
+    #[Final, Since("0.3.0")]
+    export let SlhDsaPrivateKey = class implements PrivateKey<SlhDsaSigner> (
+        /// @brief The parameter set.
+        export last parameter_set: ParameterSet;
+        last material: SecretBytes;
+
+        /// @brief Copies the encoded key; a wrong length traps with `invalid argument`. PK.root is taken as
+        /// given: recomputing it costs as much as key generation (use `SlhDsa.key_pair_from_seed` to derive it).
+        export let init = func(set: ParameterSet, bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.SlhDsa);
+            if (bytes.length != private_key_length(set)) {
+                trap_with_message("invalid argument: " .. name(set) .. " private key must be "
+                    .. private_key_length(set).to_string() .. " bytes");
+            }
+            parameter_set = set;
+            material = new(bytes);
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+
+        /// @brief PK.seed || PK.root, the second half of the key.
+        export let public_key_bytes = func -> uint8[list] {
+            last n = security_bytes(parameter_set);
+            return words.slice(material.expose(), 2 * n, 4 * n);
+        };
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> SlhDsaPublicKey => new(parameter_set, public_key_bytes());
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "SlhDsaPrivateKey(<redacted>)";
+    );
+
+    /// @brief slh_keygen_internal (FIPS 205, Algorithm 18) from the three n-byte seeds; another length traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let key_pair_from_seed = func(set: ParameterSet, sk_seed: uint8[list], sk_prf: uint8[list], pk_seed: uint8[list])
+        -> SlhDsaPrivateKey {
+        crypto_policy.require(Algorithm.SlhDsa);
+        last n = security_bytes(set);
+        if (sk_seed.length != n || sk_prf.length != n || pk_seed.length != n) {
+            trap_with_message("invalid argument: " .. name(set) .. " seeds must be " .. n.to_string() .. " bytes each");
+        }
+        let sk = words.concat(sk_seed, sk_prf);
+        words.append_all(sk, pk_seed);
+        words.append_all(sk, engine_of(set).keygen_root(sk_seed, pk_seed));
+        last key = new SlhDsaPrivateKey(set, sk);
+        words.wipe(sk);
+        return key;
+    };
+
+    /// @brief slh_keygen (FIPS 205, Algorithm 21) with 3n bytes from `Entropy.os_bytes`, or from the given
+    /// generator. Fails when the entropy source fails.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func(set: ParameterSet) -> Result<SlhDsaPrivateKey> {
+        last n = security_bytes(set);
+        match (entropy.os_bytes(3 * n)) {
+            Result.Ok(seeds) => {
+                last key = key_pair_from_seed(set, words.slice(seeds, 0, n), words.slice(seeds, n, 2 * n),
+                    words.slice(seeds, 2 * n, 3 * n));
+                words.wipe(seeds);
+                return Result<SlhDsaPrivateKey>.Ok(key);
+            },
+            Result.Err(e) => {
+                return Result<SlhDsaPrivateKey>.Err(e);
+            },
+        }
+    } or func(set: ParameterSet, random: drbg.ChaCha20Drbg) -> Result<SlhDsaPrivateKey> {
+        last n = security_bytes(set);
+        let seeds = random.fill(3 * n);
+        last key = key_pair_from_seed(set, words.slice(seeds, 0, n), words.slice(seeds, n, 2 * n),
+            words.slice(seeds, 2 * n, 3 * n));
+        words.wipe(seeds);
+        return Result<SlhDsaPrivateKey>.Ok(key);
+    };
+
+    /// @brief A public key from outside the program. A wrong length is `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<SlhDsaPublicKey> {
+        if (bytes.length != public_key_length(set)) {
+            return invalid_key<SlhDsaPublicKey>(name(set) .. " public key must be " .. public_key_length(set).to_string() .. " bytes");
+        }
+        return Result<SlhDsaPublicKey>.Ok(new(set, bytes));
+    };
+
+    /// @brief A private key from outside the program. A wrong length is `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_private_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<SlhDsaPrivateKey> {
+        if (bytes.length != private_key_length(set)) {
+            return invalid_key<SlhDsaPrivateKey>(name(set) .. " private key must be " .. private_key_length(set).to_string() .. " bytes");
+        }
+        return Result<SlhDsaPrivateKey>.Ok(new(set, bytes));
+    };
+
+    /// @brief Signs with an SLH-DSA private key. `sign` is hedged pure SLH-DSA with an empty context.
+    #[Final, Since("0.3.0")]
+    export let SlhDsaSigner = class implements Signer<SlhDsaPrivateKey, uint8[list]> (
+        last key: SlhDsaPrivateKey;
+        last engine: core.Engine;
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        /// @brief A signer over the key, with `addrnd` from `Entropy.os_bytes` or from the given generator.
+        export let init = func(private_key: SlhDsaPrivateKey) {
+            crypto_policy.require(Algorithm.SlhDsa);
+            key = private_key;
+            engine = engine_of(private_key.parameter_set);
+        } or func(private_key: SlhDsaPrivateKey, random: drbg.ChaCha20Drbg) {
+            crypto_policy.require(Algorithm.SlhDsa);
+            key = private_key;
+            engine = engine_of(private_key.parameter_set);
+            generator = random;
+            has_generator = true;
+        };
+
+        /// @brief `SlhDsa`.
+        export let algorithm = func -> Algorithm => Algorithm.SlhDsa;
+
+        let check = func(context: uint8[list], addrnd: uint8[list]) {
+            if (context.length > 255) {
+                trap_with_message("invalid argument: an SLH-DSA context string is at most 255 bytes");
+            }
+            if (addrnd.length != engine.n) {
+                trap_with_message("invalid argument: SLH-DSA addrnd must be " .. engine.n.to_string() .. " bytes");
+            }
+        };
+
+        let random_addrnd = func -> Result<uint8[list]> {
+            if (has_generator) {
+                return Result<uint8[list]>.Ok(generator.fill(engine.n));
+            }
+            return entropy.os_bytes(engine.n);
+        };
+
+        /// @brief slh_sign_internal (FIPS 205, Algorithm 19) over a formatted message M' with the given n-byte
+        /// addrnd (PK.seed for the deterministic variant).
+        #NoDiscard
+        export let sign_internal = func(message_prime: uint8[list], addrnd: uint8[list]) -> uint8[list] {
+            check(new, addrnd);
+            return engine.sign(message_prime, key.expose(), addrnd);
+        };
+
+        /// @brief slh_sign (FIPS 205, Algorithm 22) with the context string and the given n-byte addrnd.
+        #NoDiscard
+        export let sign_with = func(message: uint8[list], context: uint8[list], addrnd: uint8[list]) -> uint8[list] {
+            check(context, addrnd);
+            return engine.sign(prehash.formatted(0, context, message), key.expose(), addrnd);
+        };
+
+        /// @brief The deterministic variant of slh_sign: addrnd is PK.seed.
+        #NoDiscard
+        export let sign_deterministic = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
+            last n = engine.n;
+            return sign_with(message, context, words.slice(key.expose(), 2 * n, 3 * n));
+        };
+
+        /// @brief hash_slh_sign (FIPS 205, Algorithm 23) with the pre-hash function `hash` (one of the SHA-2,
+        /// SHA-3 and SHAKE algorithms of Std.Crypto.Hash) and the given n-byte addrnd.
+        #NoDiscard
+        export let sign_prehash_with = func(message: uint8[list], context: uint8[list], hash: Algorithm,
+            addrnd: uint8[list]) -> uint8[list] {
+            check(context, addrnd);
+            return engine.sign(prehash.formatted(1, context, prehash.digest_info(hash, message)), key.expose(), addrnd);
+        };
+
+        /// @brief The deterministic variant of hash_slh_sign.
+        #NoDiscard
+        export let sign_prehash_deterministic = func(message: uint8[list], context: uint8[list], hash: Algorithm)
+            -> uint8[list] {
+            last n = engine.n;
+            return sign_prehash_with(message, context, hash, words.slice(key.expose(), 2 * n, 3 * n));
+        };
+
+        /// @brief Hedged slh_sign with the context string. Fails when the entropy source fails.
+        #NoDiscard
+        export let try_sign = func(message: uint8[list], context: uint8[list]) -> Result<uint8[list]> {
+            match (random_addrnd()) {
+                Result.Ok(addrnd) => {
+                    return Result<uint8[list]>.Ok(sign_with(message, context, addrnd));
+                },
+                Result.Err(e) => {
+                    return Result<uint8[list]>.Err(e);
+                },
+            }
+        };
+
+        /// @brief Hedged hash_slh_sign. Fails when the entropy source fails.
+        #NoDiscard
+        export let try_sign_prehash = func(message: uint8[list], context: uint8[list], hash: Algorithm) -> Result<uint8[list]> {
+            match (random_addrnd()) {
+                Result.Ok(addrnd) => {
+                    return Result<uint8[list]>.Ok(sign_prehash_with(message, context, hash, addrnd));
+                },
+                Result.Err(e) => {
+                    return Result<uint8[list]>.Err(e);
+                },
+            }
+        };
+
+        /// @brief Hedged pure SLH-DSA with an empty context. Traps with `unavailable: ...` when the entropy
+        /// source fails; `try_sign` returns that failure instead.
+        export let sign = func(message: uint8[list]) -> uint8[list] {
+            match (try_sign(message, new)) {
+                Result.Ok(signature) => {
+                    return signature;
+                },
+                Result.Err(e) => {
+                    trap_with_message("unavailable: SLH-DSA signing needs entropy: " .. e.to_string());
+                },
+            }
+        };
+
+        export let.override to_string = func -> string => "SlhDsaSigner(<redacted>)";
+    );
+
+    /// @brief Verifies SLH-DSA signatures under a public key. `verify` is pure SLH-DSA with an empty context.
+    /// A signature of the wrong length, a context longer than 255 bytes, or a failed check gives false.
+    #[Final, Since("0.3.0")]
+    export let SlhDsaVerifier = class implements Verifier<SlhDsaPublicKey, uint8[list]> (
+        last key: SlhDsaPublicKey;
+        last engine: core.Engine;
+
+        /// @brief A verifier for the public key.
+        export let init = func(public_key: SlhDsaPublicKey) {
+            crypto_policy.require(Algorithm.SlhDsa);
+            key = public_key;
+            engine = engine_of(public_key.parameter_set);
+        };
+
+        /// @brief `SlhDsa`.
+        export let algorithm = func -> Algorithm => Algorithm.SlhDsa;
+
+        export let public_key = func -> SlhDsaPublicKey => key;
+
+        /// @brief slh_verify_internal (FIPS 205, Algorithm 20) over a formatted message M'.
+        #NoDiscard
+        export let verify_internal = func(message_prime: uint8[list], signature: uint8[list]) -> bool {
+            if (signature.length != engine.sig_length()) {
+                return false;
+            }
+            return engine.verify(message_prime, signature, key.to_bytes());
+        };
+
+        /// @brief slh_verify (FIPS 205, Algorithm 24) with the context string.
+        #NoDiscard
+        export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list]) -> bool {
+            if (context.length > 255) {
+                return false;
+            }
+            return verify_internal(prehash.formatted(0, context, message), signature);
+        };
+
+        /// @brief hash_slh_verify (FIPS 205, Algorithm 25) with the pre-hash function `hash`.
+        #NoDiscard
+        export let verify_prehash = func(message: uint8[list], signature: uint8[list], context: uint8[list],
+            hash: Algorithm) -> bool {
+            if (context.length > 255) {
+                return false;
+            }
+            return verify_internal(prehash.formatted(1, context, prehash.digest_info(hash, message)), signature);
+        };
+
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_with_context(message, signature, new);
+
+        export let.override to_string = func -> string => "SlhDsaVerifier(" .. name(key.parameter_set) .. ")";
+    );
+);

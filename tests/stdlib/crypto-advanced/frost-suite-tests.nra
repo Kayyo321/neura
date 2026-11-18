@@ -1,0 +1,130 @@
+// test-options: --gpu=off --max-steps 10000000000 --deny-entropy
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let frost = import:Std.Crypto.Advanced.Frost;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:FrostSuiteVectors;
+
+let FrostSuiteTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let roster = func(suite: frost.Suite, data: string[]) -> frost.SigningGroup {
+        let members: frost.Member[list] = new;
+        for (let i = 6; i < 15; i += 3) {
+            members.append(test.assert_ok(frost.parse_member(suite, bytes(data[i] + data[i + 2]))));
+        }
+        return test.assert_ok(frost.signing_group(suite, bytes(data[2]), 2, members));
+    };
+
+    let check_transcript = func(suite: frost.Suite, data: string[]) {
+        last group = roster(suite, data);
+        last dealer = test.assert_ok(frost.deal_with_coefficients(suite, new([bytes(data[0]), bytes(data[1])]), 3));
+        test.assert(group.suite == suite);
+        test.assert(group.equals(dealer.signing_group()));
+        test.assert(group.hash_code() == dealer.signing_group().hash_code());
+        for (let i = 0; i < 3; i++) {
+            test.assert_equal_string(data[6 + i * 3], hex.encode(frost.identifier(suite, (i + 1) as uint32)));
+            test.assert_equal_string(data[7 + i * 3], hex.encode(dealer.share_at(i).export_share()));
+            test.assert_equal_string(data[8 + i * 3], hex.encode(dealer.share_at(i).verification_share().public_key()));
+        }
+
+        last one = test.assert_ok(frost.signing_share(group, bytes(data[6]), bytes(data[7])));
+        last three = test.assert_ok(frost.signing_share(group, bytes(data[12]), bytes(data[13])));
+        last first = test.assert_ok(one.commit_with_randomness(bytes(data[15])));
+        last third = test.assert_ok(three.commit_with_randomness(bytes(data[18])));
+        last first_commitment = test.assert_ok(frost.parse_commitment(suite, bytes(data[16])));
+        last third_commitment = test.assert_ok(frost.parse_commitment(suite, bytes(data[19])));
+        test.assert(first_commitment.suite == suite && third_commitment.suite == suite);
+        test.assert(first.commitment().equals(first_commitment) && third.commitment().equals(third_commitment));
+        last message = bytes(data[3]);
+        last round = test.assert_ok(frost.start_round(group, message, new([first_commitment, third_commitment])));
+        test.assert_equal_string(data[4], hex.encode(round.group_commitment()));
+
+        last first_sig = test.assert_ok(one.sign_share(first, round, message));
+        last third_sig = test.assert_ok(three.sign_share(third, round, message));
+        last first_expected = test.assert_ok(frost.parse_signature_share(suite, bytes(data[6]), bytes(data[17])));
+        last third_expected = test.assert_ok(frost.parse_signature_share(suite, bytes(data[12]), bytes(data[20])));
+        test.assert(first_sig.suite == suite && third_sig.suite == suite);
+        test.assert(first_sig.equals(first_expected) && third_sig.equals(third_expected));
+        test.assert(first.is_used() && third.is_used());
+        let _ = test.assert_err(one.sign_share(first, round, message));
+        test.assert(round.verify_share(first_expected) && round.verify_share(third_expected));
+        last signature = test.assert_ok(round.aggregate(new([third_sig, first_sig])));
+        test.assert_equal_string(data[5], hex.encode(signature));
+        test.assert(group.verify(message, signature));
+        test.assert(frost.verify_signature(suite, bytes(data[2]), message, signature));
+        test.assert(!frost.verify_signature(suite, bytes(data[2]), new([0]), signature));
+        test.assert(!group.verify(message, bytes(data[25])));
+        test.assert(!group.verify(message, bytes(data[26])));
+
+        last malformed = bytes(data[24]);
+        let _ = test.assert_err(frost.parse_signature_share(suite, bytes(data[6]), malformed));
+        for (let i = 21; i < 24; i++) {
+            let _ = test.assert_err(frost.parse_member(suite, bytes(data[6] + data[i])));
+            test.assert(!frost.verify_signature(suite, bytes(data[i]), message, signature));
+            test.assert(!group.verify(message, bytes(data[i] + data[17])));
+        }
+        one.wipe();
+        three.wipe();
+        dealer.wipe();
+    };
+
+    export let test_ed25519_appendix_e1 = func {
+        last data = vectors.suite_1;
+        check_transcript(frost.Suite.Ed25519Sha512, data);
+        last verifier = new ed25519.Ed25519Verifier(new ed25519.Ed25519PublicKey(bytes(data[2])));
+        test.assert(verifier.verify(bytes(data[3]), bytes(data[5])));
+    };
+
+    export let test_ed448_appendix_e2 = func {
+        last data = vectors.suite_2;
+        check_transcript(frost.Suite.Ed448Shake256, data);
+        last verifier = new ed448.Ed448Verifier(new ed448.Ed448PublicKey(bytes(data[2])));
+        test.assert(verifier.verify(bytes(data[3]), bytes(data[5])));
+    };
+
+    export let test_p256_appendix_e4 = func => check_transcript(frost.Suite.P256Sha256, vectors.suite_4);
+    export let test_secp256k1_appendix_e5 = func => check_transcript(frost.Suite.Secp256k1Sha256, vectors.suite_5);
+
+    export let test_named_suites_and_cross_suite_rejection = func {
+        last nist = frost.Suite.P256Sha256;
+        last koblitz = frost.Suite.Secp256k1Sha256;
+        last n = vectors.suite_4;
+        last k = vectors.suite_5;
+        last pg = roster(nist, n);
+        last kg = roster(koblitz, k);
+        last nm = bytes(n[3]);
+        let _ = test.assert_err(frost.signing_group(nist, bytes(n[2]), 2, new([pg.member_at(0), kg.member_at(2)])));
+        last n1 = test.assert_ok(frost.parse_commitment(nist, bytes(n[16])));
+        last n3 = test.assert_ok(frost.parse_commitment(nist, bytes(n[19])));
+        last k3 = test.assert_ok(frost.parse_commitment(koblitz, bytes(k[19])));
+        let _ = test.assert_err(frost.start_round(pg, nm, new([n1, k3])));
+        last round = test.assert_ok(frost.start_round(pg, nm, new([n1, n3])));
+        last wrong_tag = test.assert_ok(frost.parse_signature_share(koblitz, bytes(n[6]), bytes(n[17])));
+        last right_tag = test.assert_ok(frost.parse_signature_share(nist, bytes(n[6]), bytes(n[17])));
+        last right_third = test.assert_ok(frost.parse_signature_share(nist, bytes(n[12]), bytes(n[20])));
+        test.assert(!wrong_tag.equals(right_tag));
+        test.assert(!round.verify_share(wrong_tag) && round.verify_share(right_tag));
+        let _ = test.assert_err(round.aggregate(new([wrong_tag, right_third])));
+        test.assert(!frost.verify_signature(koblitz, bytes(n[2]), nm, bytes(n[5])));
+        test.assert(!frost.verify_signature(bytes(n[2]), nm, bytes(n[5])));
+    };
+
+    export let test_explicit_suite_rng_inputs = func {
+        last suite = frost.Suite.Ed448Shake256;
+        let _ = test.assert_err(frost.deal(suite, 2, 3));
+        last generator = new drbg.ChaCha20Drbg(bytes(vectors.suite_1[0]));
+        last dealer = test.assert_ok(frost.deal_with_drbg(suite, 2, 3, generator));
+        test.assert(dealer.signing_group().suite == suite);
+        test.assert_equal_int32(57, dealer.share_at(0).export_share().length);
+        last signer = dealer.share_at(0);
+        let _ = test.assert_err(signer.commit());
+        last nonce = test.assert_ok(signer.commit_with_drbg(generator));
+        test.assert(nonce.commitment().suite == suite);
+        test.assert_equal_int32(171, nonce.commitment().to_bytes().length);
+        nonce.wipe();
+        dealer.wipe();
+    };
+);

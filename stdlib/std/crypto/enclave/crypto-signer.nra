@@ -1,0 +1,59 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.KeyStoreProvider;
+let.promote _ = import:Std.Crypto.Signer;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+
+/// @brief A Signer backed by an opaque key handle and the provider that owns it.
+/// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+#Since("0.3.0")
+export let CryptoSigner = module (
+    /// @brief Adapts a provider and a handle to the standard Signer contract.
+    /// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+    #[Final, Since("0.3.0")]
+    export let CryptoSigner = class<Handle> implements Signer<Handle, uint8[list]> (
+        last store: KeyStoreProvider<Handle>;
+        last key: Handle;
+        last scheme: Algorithm;
+
+        /// @brief Binds a handle to the provider and algorithm that issued it.
+        /// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+        #Since("0.3.0")
+        export let init = func(provider: KeyStoreProvider<Handle>, handle: Handle, selected: Algorithm) {
+            crypto_policy.require(selected);
+            store = provider;
+            key = handle;
+            scheme = selected;
+        };
+
+        /// @brief The algorithm of the provisioned key.
+        /// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+        #Since("0.3.0")
+        export let algorithm = func -> Algorithm => scheme;
+
+        /// @brief Signs through the provider and returns any provider error.
+        /// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+        #[NoDiscard, Since("0.3.0")]
+        export let try_sign = func(message: uint8[list]) -> Result<uint8[list]> => store.sign(key, message);
+
+        /// @brief Signs through the provider. A provider failure traps. Call try_sign to handle it.
+        /// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign = func(message: uint8[list]) -> uint8[list] {
+            match (try_sign(message)) {
+                Result.Ok(signature) => {
+                    return signature;
+                },
+                Result.Err(_) => {
+                    trap_with_message("unavailable: the key provider did not sign");
+                },
+            }
+            trap_with_message("unreachable: key provider signature outcome");
+        };
+
+        /// @brief Redacts the key handle.
+        /// @see [Std.Crypto.Enclave.CryptoSigner](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CryptoSigner)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "CryptoSigner(<redacted>)";
+    );
+);

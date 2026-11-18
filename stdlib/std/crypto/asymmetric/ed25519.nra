@@ -1,0 +1,319 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let edwards = import:Std.Crypto.Internal.Edwards25519;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let mp = import:Std.Crypto.Internal.Mp;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Ed25519, Ed25519ctx and Ed25519ph signatures of RFC 8032, section 5.1 (Stdlib.md section 21.8).
+///
+/// Signing is deterministic, as RFC 8032 defines it. Verification is strict: it rejects a signature whose S is
+/// not below L, a public key or R that is not the canonical encoding of a curve point (y at or above p, or x
+/// zero with the sign bit set), and a public key or R of small order (8 P = 0). It then checks the
+/// cofactorless equation [S]B = R + [k]A by computing [S]B - [k]A and comparing its encoding with R's bytes.
+/// These are the rules of libsodium's `crypto_sign_verify_detached`, so both accept the same signatures. The
+/// scalar multiplications are branch-free in source; the runtime does not guarantee constant time.
+/// @see [Std.Crypto.Asymmetric.Ed25519](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ed25519)
+#Since("0.3.0")
+export let Ed25519 = module (
+    /// @brief An Ed25519 public key: the 32-byte encoding of A. Equal keys have equal bytes. The point is
+    /// checked when a signature is verified.
+    #[Final, Since("0.3.0")]
+    export let Ed25519PublicKey = class (
+        last encoded: uint8[list];
+
+        /// @brief Copies the 32 bytes; another length traps (use `parse_public_key` for outside input).
+        export let init = func(bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.Ed25519);
+            if (bytes.length != 32) {
+                trap_with_message("invalid argument: Ed25519 public key must be 32 bytes");
+            }
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the 32 bytes.
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Ed25519PublicKey) {
+                return false;
+            }
+            return constant_time.ct_eq(encoded, that.to_bytes());
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = 2551;
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string => "Ed25519PublicKey(32 bytes)";
+    );
+
+    /// @brief An Ed25519 private key: the 32-byte seed of RFC 8032 in secret memory, with its public key.
+    /// `to_string` never prints it.
+    #[Final, Since("0.3.0")]
+    export let Ed25519PrivateKey = class implements PrivateKey<Ed25519Signer> (
+        last material: SecretBytes;
+        last public_encoded: uint8[list];
+
+        /// @brief Copies the 32-byte seed and computes the public key; another length traps.
+        export let init = func(seed: uint8[list]) {
+            crypto_policy.require(Algorithm.Ed25519);
+            if (seed.length != 32) {
+                trap_with_message("invalid argument: Ed25519 private key must be 32 bytes");
+            }
+            material = new(seed);
+            last group = new edwards.Group();
+            let expanded = sha2.sha512(seed);
+            public_encoded = group.encode(group.multiply_base(clamp(expanded)));
+            words.wipe(expanded);
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+        export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> Ed25519PublicKey => new(public_encoded);
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "Ed25519PrivateKey(<redacted>)";
+    );
+
+    /// @brief Signs with an Ed25519 private key; it also verifies against the matching public key.
+    #[Final, Since("0.3.0")]
+    export let Ed25519Signer = class implements Signer<Ed25519PrivateKey, uint8[list]>,
+        Verifier<Ed25519PublicKey, uint8[list]> (
+        last key: Ed25519PrivateKey;
+
+        /// @brief A signer over the key.
+        export let init = func(private_key: Ed25519PrivateKey) {
+            crypto_policy.require(Algorithm.Ed25519);
+            key = private_key;
+        };
+
+        /// @brief `Algorithm.Ed25519`.
+        export let algorithm = func -> Algorithm => Algorithm.Ed25519;
+
+        /// @brief The public key.
+        export let public_key = func -> Ed25519PublicKey => key.public_key();
+
+        /// @brief The 64-byte Ed25519 signature R || S of the message (RFC 8032, section 5.1.6).
+        export let sign = func(message: uint8[list]) -> uint8[list] => sign_core(key, new, message);
+
+        /// @brief The Ed25519ctx signature under a context of 1 to 255 bytes; another length traps.
+        #NoDiscard
+        export let sign_with_context = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
+            check_context(context, false);
+            return sign_core(key, dom2(0, context), message);
+        };
+
+        /// @brief The Ed25519ph signature: the message is hashed with SHA-512 first. The context has at most 255
+        /// bytes; another length traps.
+        #NoDiscard
+        export let sign_prehashed = func(message: uint8[list], context: uint8[list]) -> uint8[list] {
+            check_context(context, true);
+            return sign_core(key, dom2(1, context), sha2.sha512(message));
+        };
+
+        /// @brief Strict Ed25519 verification against the matching public key (see the module).
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_core(public_key_bytes(), new, message, signature);
+
+        let public_key_bytes = func -> uint8[list] => key.public_key_bytes();
+
+        export let.override to_string = func -> string => "Ed25519Signer(<redacted>)";
+    );
+
+    /// @brief Verifies Ed25519, Ed25519ctx and Ed25519ph signatures under a public key, strictly (see the
+    /// module).
+    #[Final, Since("0.3.0")]
+    export let Ed25519Verifier = class implements Verifier<Ed25519PublicKey, uint8[list]> (
+        last key: Ed25519PublicKey;
+
+        /// @brief A verifier for the key.
+        export let init = func(public_key: Ed25519PublicKey) {
+            crypto_policy.require(Algorithm.Ed25519);
+            key = public_key;
+        };
+
+        /// @brief `Algorithm.Ed25519`.
+        export let algorithm = func -> Algorithm => Algorithm.Ed25519;
+
+        /// @brief The public key.
+        export let public_key = func -> Ed25519PublicKey => key;
+
+        /// @brief Whether the 64-byte signature is a valid Ed25519 signature of the message. Any other length is
+        /// false.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_core(key.to_bytes(), new, message, signature);
+
+        /// @brief Whether the signature is a valid Ed25519ctx signature under the context (1 to 255 bytes;
+        /// another length traps).
+        #NoDiscard
+        export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list])
+            -> bool {
+            check_context(context, false);
+            return verify_core(key.to_bytes(), dom2(0, context), message, signature);
+        };
+
+        /// @brief Whether the signature is a valid Ed25519ph signature (context of at most 255 bytes).
+        #NoDiscard
+        export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list])
+            -> bool {
+            check_context(context, true);
+            return verify_core(key.to_bytes(), dom2(1, context), sha2.sha512(message), signature);
+        };
+
+        export let.override to_string = func -> string => "Ed25519Verifier";
+    );
+
+    /// @brief Traps unless the context fits: 1 to 255 bytes for Ed25519ctx, 0 to 255 for Ed25519ph.
+    let check_context = func(context: uint8[list], prehashed: bool) {
+        if (context.length > 255 || (not prehashed && context.length == 0)) {
+            trap_with_message("invalid argument: Ed25519 context must be " .. (prehashed ? "0" : "1") .. " to 255 bytes");
+        }
+    };
+
+    /// @brief dom2(phflag, context) of RFC 8032, section 5.1.
+    let dom2 = func(phflag: uint8, context: uint8[list]) -> uint8[list] {
+        let out = words.utf8("SigEd25519 no Ed25519 collisions");
+        out.append(phflag);
+        out.append(context.length as uint8);
+        words.append_all(out, context);
+        return out;
+    };
+
+    /// @brief The clamped secret scalar s of the first half of SHA-512(seed), as 8 limbs.
+    let clamp = func(expanded: uint8[list]) -> uint32[list] {
+        let half = words.slice(expanded, 0, 32);
+        half[0] = half[0] & 248;
+        half[31] = (half[31] & 127) | 64;
+        last s = mp.from_bytes_le(half, 8);
+        words.wipe(half);
+        return s;
+    };
+
+    /// @brief SHA-512 of the concatenated parts.
+    let hash = func(parts: uint8[list][list]) -> uint8[list] {
+        let digest = new sha2.Sha512();
+        for (let part in parts) {
+            digest.update(part);
+        }
+        return digest.finish();
+    };
+
+    /// @brief RFC 8032, section 5.1.6 with the given dom2 prefix (empty for pure Ed25519).
+    let sign_core = func(key: Ed25519PrivateKey, dom: uint8[list], message: uint8[list]) -> uint8[list] {
+        last group = new edwards.Group();
+        let expanded = sha2.sha512(key.expose());
+        let s = clamp(expanded);
+        let prefix = words.slice(expanded, 32, 64);
+        last public_bytes = key.public_key_bytes();
+        let r = group.scalar_reduce(hash(new([dom, prefix, message])));
+        last r_bytes = group.encode(group.multiply_base(r));
+        last k = group.scalar_reduce(hash(new([dom, r_bytes, public_bytes, message])));
+        let signature = words.copy(r_bytes);
+        words.append_all(signature, group.scalar_bytes(group.scalar_mul_add(s, k, r)));
+        words.wipe(expanded);
+        words.wipe(prefix);
+        for (let i in 0 .. 8) {
+            s[i] = 0;
+            r[i] = 0;
+        }
+        return signature;
+    };
+
+    /// @brief Strict verification (see the module) with the given dom2 prefix.
+    let verify_core = func(public_bytes: uint8[list], dom: uint8[list], message: uint8[list], signature: uint8[list])
+        -> bool {
+        if (signature.length != 64) {
+            return false;
+        }
+        last group = new edwards.Group();
+        last r_bytes = words.slice(signature, 0, 32);
+        last a = group.decode(public_bytes);
+        last r = group.decode(r_bytes);
+        last s = group.scalar_canonical(words.slice(signature, 32, 64));
+        match (a) {
+            Optional.None => {
+                return false;
+            },
+            Optional.Some(point_a) => {
+                match (r) {
+                    Optional.None => {
+                        return false;
+                    },
+                    Optional.Some(point_r) => {
+                        match (s) {
+                            Optional.None => {
+                                return false;
+                            },
+                            Optional.Some(scalar_s) => {
+                                if (group.is_small_order(point_a) || group.is_small_order(point_r)) {
+                                    return false;
+                                }
+                                last k = group.scalar_reduce(hash(new([dom, r_bytes, public_bytes, message])));
+                                last check = group.multiply_two(scalar_s, group.base(), k, group.negate(point_a));
+                                return constant_time.ct_eq(group.encode(check), r_bytes);
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief A new private key from a 32-byte seed of `Entropy.os_bytes`, or from the given generator. Fails
+    /// when the entropy source fails.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func -> Result<Ed25519PrivateKey> {
+        match (entropy.os_bytes(32)) {
+            Result.Ok(seed) => {
+                last key = new Ed25519PrivateKey(seed);
+                words.wipe(seed);
+                return Result<Ed25519PrivateKey>.Ok(key);
+            },
+            Result.Err(e) => {
+                return Result<Ed25519PrivateKey>.Err(e);
+            },
+        }
+    } or func(random: drbg.ChaCha20Drbg) -> Result<Ed25519PrivateKey> {
+        let seed = random.fill(32);
+        last key = new Ed25519PrivateKey(seed);
+        words.wipe(seed);
+        return Result<Ed25519PrivateKey>.Ok(key);
+    };
+
+    /// @brief A public key from outside the program. A wrong length, or bytes that are not the canonical
+    /// encoding of a point, is `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(bytes: uint8[list]) -> Result<Ed25519PublicKey> {
+        if (bytes.length != 32) {
+            return Result<Ed25519PublicKey>.Err(error.custom("crypto.invalid_key", "Ed25519 public key must be 32 bytes"));
+        }
+        return match (new edwards.Group().decode(bytes)) {
+            Optional.None => Result<Ed25519PublicKey>.Err(error.custom("crypto.invalid_key", "Ed25519 public key is not a curve point")),
+            Optional.Some(_) => Result<Ed25519PublicKey>.Ok(new Ed25519PublicKey(bytes)),
+        };
+    };
+);

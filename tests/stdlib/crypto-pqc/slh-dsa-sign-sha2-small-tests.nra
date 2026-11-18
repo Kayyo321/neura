@@ -1,0 +1,137 @@
+// test-options: --gpu=off --max-steps 40000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let digest = import:Std.Digest.Sha256;
+let hex = import:Std.Encoding.Hex;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let test = import:Std.Test;
+let vectors = import:SlhDsaVectors;
+
+// SLH-DSA against NIST's ACVP test sets SLH-DSA-keyGen-FIPS205, SLH-DSA-sigGen-FIPS205 and
+// SLH-DSA-sigVer-FIPS205 (support/, scripts/crypto-vectors/gen-pqc-slh-dsa.py).
+let SlhDsaSignSha2SmallTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let set_of = func(name: string) -> slh_dsa.ParameterSet {
+        if (name == "SHA2-128s") {
+            return slh_dsa.ParameterSet.Sha2_128s;
+        }
+        if (name == "SHA2-128f") {
+            return slh_dsa.ParameterSet.Sha2_128f;
+        }
+        if (name == "SHA2-192s") {
+            return slh_dsa.ParameterSet.Sha2_192s;
+        }
+        if (name == "SHA2-192f") {
+            return slh_dsa.ParameterSet.Sha2_192f;
+        }
+        if (name == "SHA2-256s") {
+            return slh_dsa.ParameterSet.Sha2_256s;
+        }
+        if (name == "SHA2-256f") {
+            return slh_dsa.ParameterSet.Sha2_256f;
+        }
+        if (name == "SHAKE-128s") {
+            return slh_dsa.ParameterSet.Shake128s;
+        }
+        if (name == "SHAKE-128f") {
+            return slh_dsa.ParameterSet.Shake128f;
+        }
+        if (name == "SHAKE-192s") {
+            return slh_dsa.ParameterSet.Shake192s;
+        }
+        if (name == "SHAKE-192f") {
+            return slh_dsa.ParameterSet.Shake192f;
+        }
+        if (name == "SHAKE-256s") {
+            return slh_dsa.ParameterSet.Shake256s;
+        }
+        return slh_dsa.ParameterSet.Shake256f;
+    };
+
+    let hash_of = func(name: string) -> Algorithm {
+        if (name == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (name == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (name == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        if (name == "Sha512") {
+            return Algorithm.Sha512;
+        }
+        if (name == "Sha512_256") {
+            return Algorithm.Sha512_256;
+        }
+        if (name == "Sha3_224") {
+            return Algorithm.Sha3_224;
+        }
+        if (name == "Sha3_256") {
+            return Algorithm.Sha3_256;
+        }
+        if (name == "Sha3_384") {
+            return Algorithm.Sha3_384;
+        }
+        if (name == "Sha3_512") {
+            return Algorithm.Sha3_512;
+        }
+        if (name == "Shake128") {
+            return Algorithm.Shake128;
+        }
+        return Algorithm.Shake256;
+    };
+
+    /// @brief Signs each row as its interface says, compares the length and SHA-256 of the signature with the
+    /// ACVP signature's, and verifies the signature.
+    let sign_rows = func(rows: string[]) {
+        for (let i = 0; i < rows.length; i += 10) {
+            last set = set_of(rows[i]);
+            last signer = new slh_dsa.SlhDsaSigner(test.assert_ok(slh_dsa.parse_private_key(set, decode(rows[i + 6]))));
+            last verifier = new slh_dsa.SlhDsaVerifier(test.assert_ok(slh_dsa.parse_public_key(set, decode(rows[i + 7]))));
+            last kind = rows[i + 1];
+            last message = decode(rows[i + 4]);
+            last context = decode(rows[i + 3]);
+            last deterministic = rows[i + 5] == "-";
+            last signature: uint8[list];
+            last valid: bool;
+            if (kind == "pure") {
+                if (deterministic) {
+                    signature = signer.sign_deterministic(message, context);
+                } else {
+                    signature = signer.sign_with(message, context, decode(rows[i + 5]));
+                }
+                valid = verifier.verify_with_context(message, signature, context);
+            } else if (kind == "prehash") {
+                last hash = hash_of(rows[i + 2]);
+                if (deterministic) {
+                    signature = signer.sign_prehash_deterministic(message, context, hash);
+                } else {
+                    signature = signer.sign_prehash_with(message, context, hash, decode(rows[i + 5]));
+                }
+                valid = verifier.verify_prehash(message, signature, context, hash);
+            } else {
+                if (deterministic) {
+                    last pk = decode(rows[i + 7]);
+                    let pk_seed: uint8[list] = new;
+                    for (let j = 0; j < pk.length / 2; j++) {
+                        pk_seed.append(pk[j]);
+                    }
+                    signature = signer.sign_internal(message, pk_seed);
+                } else {
+                    signature = signer.sign_internal(message, decode(rows[i + 5]));
+                }
+                valid = verifier.verify_internal(message, signature);
+            }
+            test.assert_equal_string(rows[i + 8], signature.length.to_string());
+            test.assert_equal_string(rows[i + 9], hex.encode(digest.of(signature)));
+            test.assert(valid);
+        }
+    };
+
+    export let test_signing_sha2_small_sets = func {
+        sign_rows(vectors.sign_sha2_small);
+        test.assert_equal_int32(60, vectors.sign_sha2_small.length);
+    };
+);

@@ -1,0 +1,13 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy
+// stderr: explicit program failure \(trap reason 3\): invalid argument: a macaroon needs a nonempty root key
+let macaroon = import:Std.Crypto.Token.Macaroon;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = macaroon.create(new, new, new([1]));
+        return program.ExitCode.Ok;
+    };
+);

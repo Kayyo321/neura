@@ -40,7 +40,7 @@ export let Poly1305 = module (
             r2 = ((words.load32_le(key, 6) as uint64) >> 4) & 67092735;
             r3 = ((words.load32_le(key, 9) as uint64) >> 6) & 66076671;
             r4 = ((words.load32_le(key, 12) as uint64) >> 8) & 1048575;
-            for (let i = 16; i < 32; i++) {
+            for (let i in 16 .. 32) {
                 pad.append(key[i]);
             }
         };

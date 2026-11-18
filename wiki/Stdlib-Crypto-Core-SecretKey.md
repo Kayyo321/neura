@@ -29,7 +29,7 @@ The following public declarations are taken from the module source; each links t
 - **SecretKey.SecretKey** · [`export let ct_equals = func(other: SecretKey<Alg>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret-key.nra#L28)
   Whether `other` holds the same key bytes, compared without a data-dependent branch. Tagged `#NoDiscard`.
 - **SecretKey.SecretKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret-key.nra#L31)
-  A fixed placeholder with the length, never the key.
+  A fixed redacted placeholder.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

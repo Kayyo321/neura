@@ -23,17 +23,17 @@ export let ChaCha20 = module (
     /// @brief The initial state: constants, the 32-byte key, then four words from `tail` (16 bytes).
     let initial = func(key: uint8[list], tail: uint8[list]) -> uint32[list] {
         let s: uint32[list] = new([1634760805, 857760878, 2036477234, 1797285236]);
-        for (let i = 0; i < 8; i++) {
+        for (let i in 0 .. 8) {
             s.append(words.load32_le(key, 4 * i));
         }
-        for (let i = 0; i < 4; i++) {
+        for (let i in 0 .. 4) {
             s.append(words.load32_le(tail, 4 * i));
         }
         return s;
     };
 
     let rounds = func(s: uint32[list]) {
-        for (let i = 0; i < 10; i++) {
+        for (let i in 0 .. 10) {
             quarter(s, 0, 4, 8, 12);
             quarter(s, 1, 5, 9, 13);
             quarter(s, 2, 6, 10, 14);
@@ -57,7 +57,7 @@ export let ChaCha20 = module (
         }
         rounds(s);
         let out: uint8[list] = new;
-        for (let i = 0; i < 16; i++) {
+        for (let i in 0 .. 16) {
             words.append32_le(out, words.add32(s[i], start[i]));
         }
         return out;
@@ -87,10 +87,10 @@ export let ChaCha20 = module (
         let s = initial(key, nonce);
         rounds(s);
         let out: uint8[list] = new;
-        for (let i = 0; i < 4; i++) {
+        for (let i in 0 .. 4) {
             words.append32_le(out, s[i]);
         }
-        for (let i = 12; i < 16; i++) {
+        for (let i in 12 .. 16) {
             words.append32_le(out, s[i]);
         }
         return out;

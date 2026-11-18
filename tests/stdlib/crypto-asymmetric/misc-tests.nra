@@ -1,0 +1,98 @@
+// test-options: --gpu=off --max-steps 20000000000
+// host-dependent-counts: generate_key_pair() draws from Entropy.os_bytes, so rejection sampling may take another number of draws
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let ecdh = import:Std.Crypto.Asymmetric.Ecdh;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let hex = import:Std.Encoding.Hex;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let test = import:Std.Test;
+let x25519 = import:Std.Crypto.Asymmetric.X25519;
+let x448 = import:Std.Crypto.Asymmetric.X448;
+
+// Key generation, low-S normalization, tasks and policies for Std.Crypto.Asymmetric (no external vectors:
+// these check properties and round trips; the known answers are in the other files).
+let MiscTests = module (
+    let seed = func(first: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            out.append(((first + 3 * i) % 256) as uint8);
+        }
+        return out;
+    };
+
+    export let test_generation_is_seeded_or_from_the_os = func {
+        last a = test.assert_ok(x25519.generate_key_pair(new drbg.ChaCha20Drbg(seed(1))));
+        last b = test.assert_ok(x25519.generate_key_pair(new drbg.ChaCha20Drbg(seed(1))));
+        test.assert(a.public_key().equals(b.public_key()));
+        last c = test.assert_ok(x25519.generate_key_pair());
+        test.assert(!a.public_key().equals(c.public_key()));
+        last shared = test.assert_ok(a.diffie_hellman(c.public_key()));
+        test.assert_equal_string(hex.encode(shared.expose()), hex.encode(test.assert_ok(c.diffie_hellman(a.public_key())).expose()));
+        last x = test.assert_ok(x448.generate_key_pair());
+        last y = test.assert_ok(x448.generate_key_pair(new drbg.ChaCha20Drbg(seed(2))));
+        test.assert(test.assert_ok(x.diffie_hellman(y.public_key())).length() == 56);
+        last edkey = test.assert_ok(ed25519.generate_key_pair());
+        test.assert(new ed25519.Ed25519Signer(edkey).verify(new([5]), new ed25519.Ed25519Signer(edkey).sign(new([5]))));
+        last ed448key = test.assert_ok(ed448.generate_key_pair(new drbg.ChaCha20Drbg(seed(3))));
+        last ed448signer = new ed448.Ed448Signer(ed448key);
+        test.assert(ed448signer.verify(new([6]), ed448signer.sign(new([6]))));
+        last curves: ecdsa.Curve[list] = new([ecdsa.Curve.P256, ecdsa.Curve.P384, ecdsa.Curve.Secp256k1]);
+        for (let curve in curves) {
+            last k1 = test.assert_ok(ecdsa.generate_key_pair(curve));
+            last k2 = test.assert_ok(ecdsa.generate_key_pair(curve, new drbg.ChaCha20Drbg(seed(4))));
+            last s1 = test.assert_ok(ecdh.diffie_hellman(k1, k2.public_key()));
+            last s2 = test.assert_ok(new ecdh.Ecdh(curve).diffie_hellman(k2, k1.public_key()));
+            test.assert(s1.ct_equals(s2));
+            test.assert_equal_int32(ecdsa.scalar_length(curve), s1.length());
+        }
+    };
+
+    export let test_low_s_on_secp256k1 = func {
+        last key = new ecdsa.EcPrivateKey(ecdsa.Curve.Secp256k1, seed(9));
+        last plain = new ecdsa.EcdsaSigner(key);
+        last low = new ecdsa.EcdsaSigner(key, Algorithm.Sha256, true);
+        last strict = new ecdsa.EcdsaVerifier(key.public_key(), Algorithm.Sha256, true);
+        last lenient = new ecdsa.EcdsaVerifier(key.public_key());
+        let normalized = 0;
+        for (let i = 0; i < 8; i++) {
+            last message: uint8[list] = new([i as uint8]);
+            last a = plain.sign(message);
+            last b = low.sign(message);
+            test.assert(lenient.verify(message, a));
+            test.assert(lenient.verify(message, b));
+            test.assert(strict.verify(message, b));
+            if (hex.encode(a) != hex.encode(b)) {
+                test.assert(!strict.verify(message, a));
+                // The same r: only s changed.
+                last raw_a = test.assert_ok(ecdsa.der_to_raw(ecdsa.Curve.Secp256k1, a));
+                last raw_b = test.assert_ok(ecdsa.der_to_raw(ecdsa.Curve.Secp256k1, b));
+                test.assert_equal_string(hex.encode(raw_a).substring(0, 64), hex.encode(raw_b).substring(0, 64));
+                normalized++;
+            }
+        }
+        test.assert(normalized > 0);
+    };
+
+    export let test_policies = func {
+        // 2^1023 + 1: an odd 1024-bit modulus.
+        let n: uint8[list] = new([128]);
+        for (let i = 0; i < 126; i++) {
+            n.append(0);
+        }
+        n.append(1);
+        test.assert_err(rsa.parse_public_key(n, new([1, 0, 1])));
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        test.assert(!crypto_policy.allows(Algorithm.X25519));
+        test.assert(crypto_policy.allows(Algorithm.P256));
+        last key = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, seed(5));
+        test.assert(new ecdsa.EcdsaSigner(key).verify(new([1]), new ecdsa.EcdsaSigner(key).sign(new([1]))));
+        crypto_policy.set_policy(crypto_policy.Policy.Modern);
+        test.assert_equal_string("EcPrivateKey(<redacted>)", key.to_string());
+        test.assert_equal_string("EcPublicKey(P-256)", key.public_key().to_string());
+        test.assert_equal_string("Ed25519PrivateKey(<redacted>)", new ed25519.Ed25519PrivateKey(seed(6)).to_string());
+    };
+);

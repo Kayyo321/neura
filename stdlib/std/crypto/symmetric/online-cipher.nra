@@ -34,8 +34,7 @@ export let OnlineCipher = module (
             trap_with_message("invalid argument: STREAM needs an AEAD with a nonce of at least 12 bytes");
         }
         if (prefix.length != nonce_length - 5) {
-            trap_with_message("invalid argument: STREAM nonce prefix must be " + (nonce_length - 5).to_string()
-                + " bytes");
+            trap_with_message("invalid argument: STREAM nonce prefix must be " .. (nonce_length - 5).to_string() .. " bytes");
         }
     };
 
@@ -78,7 +77,7 @@ export let OnlineCipher = module (
         /// @brief Whether the final segment was sealed.
         export let is_ended = func -> bool => ended;
 
-        export let.override to_string = func -> string => "StreamEncryptor(" + index.to_string() + " segments)";
+        export let.override to_string = func -> string => "StreamEncryptor(<redacted>)";
     );
 
     /// @brief Opens a stream segment by segment, in order.
@@ -127,13 +126,13 @@ export let OnlineCipher = module (
         /// cut short or failed.
         #NoDiscard
         export let finish = func -> Result<Unit> {
-            if (ended && !failed) {
+            if (ended && not failed) {
                 return Result<Unit>.Ok(Unit.Value);
             }
             return Result<Unit>.Err(error.custom("crypto.authentication", "stream truncated or not authentic"));
         };
 
-        export let.override to_string = func -> string => "StreamDecryptor(" + index.to_string() + " segments)";
+        export let.override to_string = func -> string => "StreamDecryptor(<redacted>)";
     );
 
     /// @brief The plaintext cut into segments of `segment_length` bytes (the last may be shorter; an empty

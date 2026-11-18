@@ -1,0 +1,15 @@
+// test-options: --gpu=off
+// run-options: --gpu=off
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): denied: XWing is not allowed under the Fips140_3 policy
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let kem = import:Std.Crypto.Pqc.XWing;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        let _ = new kem.XWing();
+        return program.ExitCode.Ok;
+    };
+);

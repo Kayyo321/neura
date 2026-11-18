@@ -1,0 +1,274 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.Extensions;
+let.promote _ = import:Std.Crypto.Pki.GeneralName;
+let.promote _ = import:Std.Crypto.Pki.Name;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let der = import:Std.Crypto.Pki.Der;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let identifiers = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let names = import:Std.Crypto.Pki.Name;
+let oid_module = import:Std.Crypto.Pki.Oid;
+let oids = import:Std.Crypto.Pki.Oids;
+let pem = import:Std.Crypto.Pki.Pem;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+/// @brief PKCS #10 certification requests (RFC 2986) (Stdlib.md section 21.10): parsing, and building one from a
+/// caller-supplied signing function.
+///
+/// The extensionRequest attribute (PKCS #9, RFC 2985) is read into `extensions`, and challengePassword into
+/// `challenge_password`; every attribute also stays in `attributes`. Call `verify_signature` to check
+/// a parsed request against its own public key.
+/// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
+#Since("0.3.0")
+export let Csr = module (
+    /// @brief One Attribute: a type and the DER of each of its values.
+    #[Final, Since("0.3.0")]
+    export let Attribute = class (
+        export last type: Oid;
+        export last values: uint8[list][list];
+
+        export let init = func(attribute: Oid, value_ders: uint8[list][list]) {
+            type = attribute;
+            values = value_ders;
+        };
+
+        /// @brief The DER of SEQUENCE { type, SET OF values }.
+        export let encode = func -> uint8[list] => writer.sequence(new([writer.oid(type), writer.set(values)]));
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not Attribute) {
+                return false;
+            }
+            last a = encode();
+            last b = (other as Attribute).encode();
+            return der.hash_range(a, 0, a.length) == der.hash_range(b, 0, b.length) && a.length == b.length
+                && same(a, b);
+        };
+
+        export let.override hash_code = func -> uint32 {
+            last a = encode();
+            return der.hash_range(a, 0, a.length);
+        };
+
+        export let.override to_string = func -> string => "Attribute(<redacted>)";
+    );
+
+    /// @brief A parsed certification request. Equal requests have equal DER.
+    #[Final, Since("0.3.0")]
+    export let CertificationRequest = class (
+        export last der_bytes: uint8[list];
+        /// @brief The DER of CertificationRequestInfo, which the signature covers.
+        export last info_bytes: uint8[list];
+        export last subject: Name;
+        export last public_key: SubjectPublicKeyInfo;
+        export last attributes: Attribute[list];
+        /// @brief The extensions of the extensionRequest attribute (empty without one).
+        export last extensions: Extension[list];
+        export last challenge_password: Optional<string>;
+        export last signature_algorithm: AlgorithmIdentifier;
+        export last signature: uint8[list];
+
+        export let init = func(encoded: uint8[list], info: uint8[list], name: Name, key: SubjectPublicKeyInfo,
+            attrs: Attribute[list], requested: Extension[list], password: Optional<string>,
+            algorithm: AlgorithmIdentifier, signature_bytes: uint8[list]) {
+            der_bytes = encoded;
+            info_bytes = info;
+            subject = name;
+            public_key = key;
+            attributes = attrs;
+            extensions = requested;
+            challenge_password = password;
+            signature_algorithm = algorithm;
+            signature = signature_bytes;
+        };
+
+        /// @brief Checks the request's signature under its public key. A supplied verifier overrides
+        /// the library's AlgorithmVerifier.
+        /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify_signature = func -> SignatureCheck {
+            return verify_signature(new algorithm_verifier.AlgorithmVerifier());
+        } or func(verifier: SignatureVerifier) -> SignatureCheck {
+            return verifier.verify_signature(signature_algorithm, public_key, info_bytes, signature);
+        };
+
+        /// @brief The requested subjectAltName entries, if the extensionRequest has them.
+        #NoDiscard
+        export let subject_alt_names = func -> Result<Optional<GeneralName[list]>> {
+            for (let e in extensions) {
+                if (e.oid.matches(oids.SubjectAltName)) {
+                    return Result<Optional<GeneralName[list]>>.Ok(Optional<GeneralName[list]>.Some(
+                        extensions_module_names(e.value)?));
+                }
+            }
+            return Result<Optional<GeneralName[list]>>.Ok(Optional<GeneralName[list]>.None);
+        };
+
+        export let.override equals = func(other: class) -> bool => other is CertificationRequest
+            && same(der_bytes, (other as CertificationRequest).der_bytes);
+
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+
+        /// @brief A fixed placeholder for a request that may contain a challenge password.
+        export let.override to_string = func -> string => "CertificationRequest(<redacted>)";
+    );
+
+    let extensions_module_names = func(value: uint8[list]) -> Result<GeneralName[list]> =>
+        extensions.parse_general_names(value);
+
+    let same = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Parses a DER certification request (version v1 only).
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(bytes: uint8[list]) -> Result<CertificationRequest> {
+        last top = der.parse(bytes)?;
+        if (not top.is_universal(der.TagSequence)) {
+            return fail<CertificationRequest>(0, "CertificationRequest must be a SEQUENCE");
+        }
+        let r = top.reader();
+        last info = r.next_universal(der.TagSequence, "certificationRequestInfo")?;
+        last algorithm = identifiers.parse(r.next_universal(der.TagSequence, "signatureAlgorithm")?)?;
+        last signature = (r.next_universal(der.TagBitString, "signature")?).bit_string()?;
+        r.finish()?;
+        if (signature.unused_bits != 0) {
+            return fail<CertificationRequest>(top.offset, "signature must be whole bytes");
+        }
+        let ir = info.reader();
+        last version = ir.next_universal(der.TagInteger, "version")?;
+        if (version.small_integer(0)? != 0) {
+            return fail<CertificationRequest>(version.offset, "only version v1 (0) is defined");
+        }
+        last subject = names.parse(ir.next_universal(der.TagSequence, "subject")?)?;
+        last key = public_keys.parse(ir.next_universal(der.TagSequence, "subjectPKInfo")?)?;
+        last attrs_element = ir.next()?;
+        if (not attrs_element.is_context(0) || not attrs_element.constructed) {
+            return fail<CertificationRequest>(attrs_element.offset, "attributes must be [0] IMPLICIT SET");
+        }
+        ir.finish()?;
+        let attributes: Attribute[list] = new;
+        let requested: Extension[list] = new;
+        let password = Optional<string>.None;
+        for (let a in attrs_element.children()?) {
+            if (not a.is_universal(der.TagSequence)) {
+                return fail<CertificationRequest>(a.offset, "Attribute must be a SEQUENCE");
+            }
+            let ar = a.reader();
+            last type = (ar.next_universal(der.TagOid, "attribute type")?).oid()?;
+            last set = ar.next_universal(der.TagSet, "attribute values")?;
+            ar.finish()?;
+            let values: uint8[list][list] = new;
+            for (let v in set.children()?) {
+                values.append(v.encoded());
+                if (type.matches(oids.ExtensionRequest)) {
+                    if (not v.is_universal(der.TagSequence)) {
+                        return fail<CertificationRequest>(v.offset, "extensionRequest must hold Extensions");
+                    }
+                    for (let item in v.children()?) {
+                        requested.append(extensions.parse_extension(item)?);
+                    }
+                } else if (type.matches(oids.ChallengePassword)) {
+                    password = Optional<string>.Some(v.text()?);
+                }
+            }
+            if (values.length == 0) {
+                return fail<CertificationRequest>(set.offset, "attribute must have a value");
+            }
+            attributes.append(new Attribute(type, values));
+        }
+        return Result<CertificationRequest>.Ok(new CertificationRequest(top.encoded(), info.encoded(), subject, key,
+            attributes, requested, password, algorithm, signature.bytes));
+    };
+
+    /// @brief The only CERTIFICATE REQUEST block of PEM text, parsed.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_pem = func(text: string) -> Result<CertificationRequest> =>
+        parse(pem.decode(text, "CERTIFICATE REQUEST")?);
+
+    /// @brief Checks the request's signature under its public key using the library verifier or a supplied verifier.
+    /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_signature = func(request: CertificationRequest) -> SignatureCheck {
+        return request.verify_signature();
+    } or func(request: CertificationRequest, verifier: SignatureVerifier) -> SignatureCheck {
+        return request.verify_signature(verifier);
+    };
+
+    /// @brief The extensionRequest attribute carrying the extensions.
+    #[NoDiscard, Since("0.3.0")]
+    export let extension_request = func(items: Extension[list]) -> Attribute {
+        let encoded: uint8[list][list] = new;
+        for (let e in items) {
+            encoded.append(e.encode());
+        }
+        return new Attribute(oid_module.of(oids.ExtensionRequest), new([writer.sequence(encoded)]));
+    };
+
+    /// @brief The challengePassword attribute (a PrintableString when every character allows it, else
+    /// UTF8String).
+    #[NoDiscard, Since("0.3.0")]
+    export let challenge_password = func(password: string) -> Attribute {
+        let printable = true;
+        for (let i = 0; i < password.byte_length; i++) {
+            last c = password.byte_at(i);
+            if (not ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
+                || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
+                || c == 61 || c == 63)) {
+                printable = false;
+            }
+        }
+        last value = printable ? writer.printable_string(password) : writer.utf8_string(password);
+        return new Attribute(oid_module.of(oids.ChallengePassword), new([value]));
+    };
+
+    /// @brief The DER of a certification request: CertificationRequestInfo (v1, the subject, the key, the
+    /// attributes) signed by `sign`, which receives the DER of CertificationRequestInfo and returns the
+    /// signature bytes for `algorithm`. The function is the caller's signer (a private key never enters this
+    /// module).
+    #[NoDiscard, Since("0.3.0")]
+    export let build = func(subject: Name, public_key: SubjectPublicKeyInfo, attributes: Attribute[list],
+        algorithm: AlgorithmIdentifier, sign: func(uint8[list]) -> uint8[list]) -> uint8[list] {
+        let encoded: uint8[list][list] = new;
+        for (let a in attributes) {
+            encoded.append(a.encode());
+        }
+        last attrs = writer.set(encoded);
+        last attrs_content = der.copy_range(attrs, attrs.length - set_content_length(attrs), attrs.length);
+        last info = writer.sequence(new([writer.integer(0), subject.der_bytes, public_key.der_bytes,
+            writer.implicit(0, true, attrs_content)]));
+        last signature = sign(info);
+        return writer.sequence(new([info, algorithm.der_bytes, writer.bit_string_bytes(signature)]));
+    };
+
+    /// @brief The content length of an encoded SET (its header is 2 to 6 bytes).
+    let set_content_length = func(encoded: uint8[list]) -> int {
+        match (der.parse(encoded)) {
+            Result.Ok(e) => {
+                return e.length;
+            },
+            Result.Err(err) => {
+                return 0;
+            },
+        }
+        return 0;
+    };
+);

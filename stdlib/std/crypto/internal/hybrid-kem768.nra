@@ -1,0 +1,148 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let error = import:Std.Core.Error;
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let words = import:Std.Crypto.Internal.Words;
+let x25519 = import:Std.Crypto.Asymmetric.X25519;
+
+/// @brief Shared ML-KEM-768 and X25519 operations for the two distinct hybrid KEMs.
+#Since("0.3.0")
+export let HybridKem768 = module (
+    const MlKeyLength = 1184;
+    const MlCiphertextLength = 1088;
+    const ScalarLength = 32;
+    export const PublicKeyLength = MlKeyLength + ScalarLength;
+    export const CiphertextLength = MlCiphertextLength + ScalarLength;
+    export const ExpandedSeedLength = 96;
+    export const EncapsulationSeedLength = 64;
+
+    let new_kem = func -> ml_kem.MlKem => new(ml_kem.ParameterSet.MlKem768);
+
+    let base = func -> uint8[list] {
+        let u = words.zeros(ScalarLength);
+        u[0] = 9;
+        return u;
+    };
+
+    let invalid = func<T>(code: string, text: string) -> Result<T> => Result<T>.Err(error.custom(code, text));
+
+    export let expand = func(seed: uint8[list], x_wing: bool) -> uint8[list] {
+        if (seed.length != (x_wing ? ScalarLength : ExpandedSeedLength)) {
+            trap_with_message("invalid argument: wrong hybrid KEM seed length");
+        }
+        return x_wing ? sha3.shake256(seed, ExpandedSeedLength) : words.copy(seed);
+    };
+
+    let ml_private = func(kem: ml_kem.MlKem, expanded: uint8[list]) -> ml_kem.MlKemPrivateKey {
+        let d = words.slice(expanded, 0, 32);
+        let z = words.slice(expanded, 32, 64);
+        last key = kem.key_pair_from_seed(d, z);
+        words.wipe(d);
+        words.wipe(z);
+        return key;
+    };
+
+    export let validate_public_key = func(bytes: uint8[list], x_wing: bool) -> Result<Unit> {
+        crypto_policy.require(Algorithm.X25519);
+        if (bytes.length != PublicKeyLength) {
+            return invalid<Unit>("crypto.invalid_key", "hybrid public key must be 1216 bytes");
+        }
+        last kem = new_kem();
+        let _ = kem.parse_public_key(words.slice(bytes, 0, MlKeyLength))?;
+        if (not x_wing) {
+            last x = words.slice(bytes, MlKeyLength, PublicKeyLength);
+            // With the clamped 2^254 scalar, this tests for low-order points without introducing a blocklist.
+            if (constant_time.ct_eq(x25519.x25519(words.zeros(ScalarLength), x), words.zeros(ScalarLength))) {
+                return invalid<Unit>("crypto.invalid_key", "X25519 share is a low-order point");
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    export let derive_public_key = func(expanded: uint8[list]) -> uint8[list] {
+        let private_x = words.slice(expanded, 64, ExpandedSeedLength);
+        last public_x = x25519.x25519(private_x, base());
+        words.wipe(private_x);
+        last private_ml = ml_private(new_kem(), expanded);
+        last public_ml = private_ml.public_key_bytes();
+        private_ml.wipe();
+        return words.concat(public_ml, public_x);
+    };
+
+    let combine = func(shared_ml: SecretBytes, shared_x: uint8[list], ciphertext_x: uint8[list], public_x: uint8[list],
+        x_wing: bool) -> SecretBytes {
+        let combined = words.copy(shared_ml.expose());
+        words.append_all(combined, shared_x);
+        shared_ml.wipe();
+        if (not x_wing) {
+            last secret = new SecretBytes(combined);
+            words.wipe(combined);
+            return secret;
+        }
+        words.append_all(combined, ciphertext_x);
+        words.append_all(combined, public_x);
+        let label: uint8[list] = new([92, 46, 47, 47, 94, 92]);
+        words.append_all(combined, label);
+        let digest = sha3.sha3_256(combined);
+        words.wipe(combined);
+        last secret = new SecretBytes(digest);
+        words.wipe(digest);
+        return secret;
+    };
+
+    export let encapsulate = func(public_key: uint8[list], seed: uint8[list], x_wing: bool)
+        -> Encapsulation<SecretBytes, uint8[list]> {
+        if (seed.length != EncapsulationSeedLength) {
+            trap_with_message("invalid argument: hybrid KEM encapsulation seed must be 64 bytes");
+        }
+        let ephemeral_x = words.slice(seed, 32, EncapsulationSeedLength);
+        last public_x = words.slice(public_key, MlKeyLength, PublicKeyLength);
+        last ciphertext_x = x25519.x25519(ephemeral_x, base());
+        let shared_x = x25519.x25519(ephemeral_x, public_x);
+        words.wipe(ephemeral_x);
+
+        last kem = new_kem();
+        last public_ml = new ml_kem.MlKemPublicKey(ml_kem.ParameterSet.MlKem768, words.slice(public_key, 0, MlKeyLength));
+        let m = words.slice(seed, 0, 32);
+        last encapsulated = kem.encapsulate_with(public_ml, m);
+        words.wipe(m);
+        last secret = combine(encapsulated.shared_secret, shared_x, ciphertext_x, public_x, x_wing);
+        words.wipe(shared_x);
+        return new(secret, words.concat(encapsulated.ciphertext, ciphertext_x));
+    };
+
+    export let decapsulate = func(expanded: uint8[list], ciphertext: uint8[list], public_key: uint8[list], x_wing: bool)
+        -> Result<SecretBytes> {
+        last ciphertext_x = words.slice(ciphertext, MlCiphertextLength, CiphertextLength);
+        let private_x = words.slice(expanded, 64, ExpandedSeedLength);
+        let shared_x = x25519.x25519(private_x, ciphertext_x);
+        words.wipe(private_x);
+        if (not x_wing && constant_time.ct_eq(shared_x, words.zeros(ScalarLength))) {
+            words.wipe(shared_x);
+            return invalid<SecretBytes>("crypto.invalid_ciphertext", "X25519 share is a low-order point");
+        }
+
+        last kem = new_kem();
+        let private_ml = ml_private(kem, expanded);
+        last recovered = kem.decapsulate(private_ml, words.slice(ciphertext, 0, MlCiphertextLength));
+        private_ml.wipe();
+        match (recovered) {
+            Result.Ok(shared_ml) => {
+                last public_x = words.slice(public_key, MlKeyLength, PublicKeyLength);
+                last secret = combine(shared_ml, shared_x, ciphertext_x, public_x, x_wing);
+                words.wipe(shared_x);
+                return Result<SecretBytes>.Ok(secret);
+            },
+            Result.Err(e) => {
+                words.wipe(shared_x);
+                return Result<SecretBytes>.Err(e);
+            },
+        }
+    };
+);

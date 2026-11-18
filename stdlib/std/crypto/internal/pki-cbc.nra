@@ -1,0 +1,79 @@
+let.promote _ = import:Std.Core.Optional;
+let aes = import:Std.Crypto.Internal.Aes;
+
+/// @brief AES-CBC with PKCS #7 padding, for PBES2 (RFC 8018, section 6.2) only. Internal: CBC is not public
+/// API, because unauthenticated CBC invites padding-oracle misuse (Crypto030.md: raw ECB and CBC are not exposed).
+///
+/// `decrypt` checks the padding with a mask over the whole block, without a data-dependent branch in source;
+/// the runtime does not guarantee constant time.
+#Since("0.3.0")
+export let PkiCbc = module (
+    /// @brief The ciphertext of the padded plaintext under the key (16, 24 or 32 bytes) and a 16-byte IV.
+    export let encrypt = func(key: uint8[list], iv: uint8[list], plaintext: uint8[list]) -> uint8[list] {
+        if (iv.length != 16) {
+            trap_with_message("invalid argument: AES-CBC IV must be 16 bytes");
+        }
+        let cipher = new aes.Cipher(key);
+        last pad = 16 - plaintext.length % 16;
+        let padded: uint8[list] = new;
+        for (let b in plaintext) {
+            padded.append(b);
+        }
+        for (let i = 0; i < pad; i++) {
+            padded.append(pad as uint8);
+        }
+        let out: uint8[list] = new;
+        let previous = iv;
+        for (let start = 0; start < padded.length; start += 16) {
+            let block: uint8[list] = new;
+            for (let i in 0 .. 16) {
+                block.append(padded[start + i] ^ previous[i]);
+            }
+            previous = cipher.encrypt(block, 0);
+            for (let b in previous) {
+                out.append(b);
+            }
+        }
+        return out;
+    };
+
+    /// @brief The plaintext, or None when the length is not a positive multiple of 16 or the padding is wrong.
+    export let decrypt = func(key: uint8[list], iv: uint8[list], ciphertext: uint8[list]) -> Optional<uint8[list]> {
+        if (iv.length != 16) {
+            trap_with_message("invalid argument: AES-CBC IV must be 16 bytes");
+        }
+        if (ciphertext.length == 0 || ciphertext.length % 16 != 0) {
+            return Optional<uint8[list]>.None;
+        }
+        let cipher = new aes.Cipher(key);
+        let plain: uint8[list] = new;
+        let previous = iv;
+        for (let start = 0; start < ciphertext.length; start += 16) {
+            last block = cipher.decrypt(ciphertext, start);
+            for (let i in 0 .. 16) {
+                plain.append(block[i] ^ previous[i]);
+            }
+            let next: uint8[list] = new;
+            for (let i in 0 .. 16) {
+                next.append(ciphertext[start + i]);
+            }
+            previous = next;
+        }
+        last pad = plain[plain.length - 1] as int;
+        // bad is nonzero when pad is 0 or above 16, or when any of the last pad bytes differs from pad.
+        let bad = ((pad - 1) & 256) | ((16 - pad) & 256);
+        for (let i in 1 ..= 16) {
+            last inside = ((i - pad - 1) >> 8) & 1;
+            last differs = (plain[plain.length - i] as int) ^ pad;
+            bad = bad | (differs * inside);
+        }
+        if (bad != 0) {
+            return Optional<uint8[list]>.None;
+        }
+        let out: uint8[list] = new;
+        for (let i = 0; i < plain.length - pad; i++) {
+            out.append(plain[i]);
+        }
+        return Optional<uint8[list]>.Some(out);
+    };
+);

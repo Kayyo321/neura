@@ -1,0 +1,29 @@
+let frost = import:Std.Crypto.Advanced.Frost;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:FrostVectors;
+
+export let FrostTestCases = module (
+    export let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let transcript = func(which: int) -> frost.Commitment =>
+        test.assert_ok(frost.parse_commitment(bytes(vectors.transcript[4 * which + 2])));
+
+    export let signature_share = func(which: int) -> frost.SignatureShare => test.assert_ok(
+        frost.parse_signature_share(bytes(vectors.transcript[4 * which]), bytes(vectors.transcript[4 * which + 3])));
+
+    export let trusted_group = func -> frost.SigningGroup {
+        last rows = vectors.members;
+        let members: frost.Member[list] = new;
+        for (let i = 0; i < rows.length; i += 3) {
+            members.append(test.assert_ok(frost.parse_member(bytes(rows[i] + rows[i + 2]))));
+        }
+        return test.assert_ok(frost.signing_group(bytes(vectors.group[2]), 2, members));
+    };
+
+    export let signer = func(group: frost.SigningGroup, index: int) -> frost.SigningShare =>
+        test.assert_ok(frost.signing_share(group, bytes(vectors.members[3 * index]), bytes(vectors.members[3 * index + 1])));
+
+    export let round = func(group: frost.SigningGroup) -> frost.SigningRound =>
+        test.assert_ok(frost.start_round(group, bytes(vectors.group[3]), new([transcript(0), transcript(1)])));
+);

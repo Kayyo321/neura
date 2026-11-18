@@ -36,7 +36,7 @@ export let Balloon = module (
                 last previous = buffer[(m + space_cost - 1) % space_cost];
                 buffer[m] = hash3<H>(counter, previous, buffer[m]);
                 counter += 1;
-                for (let i = 0; i < 3; i++) {
+                for (let i in 0 .. 3) {
                     let index_block: uint8[list] = new;
                     words.append64_le(index_block, t as uint64);
                     words.append64_le(index_block, m as uint64);

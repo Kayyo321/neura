@@ -1,0 +1,318 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let asym_hash = import:Std.Crypto.Internal.AsymHash;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The RSA arithmetic and encodings of PKCS #1 v2.2 (RFC 8017) shared by Std.Crypto.Asymmetric.Rsa,
+/// RsaPss, RsaOaep and RsaPkcs1v15, and later by RSA blind signatures (RFC 9474). Internal.
+///
+/// `PublicCore` and `PrivateCore` hold a key's numbers as limbs. The private operation uses the Chinese
+/// remainder theorem with the exponents dP and dQ and the coefficient qInv, then checks its result with the
+/// public exponent, so that a fault cannot leak a factor (RFC 8017, section 5.1.2, note). Exponentiation uses
+/// a fixed window and reads every table entry (Mp.Modulus.pow); the code is branch-free in source, and the
+/// runtime does not guarantee constant time. EMSA-PSS, EME-OAEP and EMSA-PKCS1-v1_5 follow RFC 8017, sections
+/// 9.1, 7.1 and 9.2; the DigestInfo prefixes come from RFC 8017, section 9.2, note 1, and for SHA-3 from
+/// `cryptography` signatures (scripts/crypto-vectors/gen-asymmetric-rsa.py prints them).
+#Since("0.3.0")
+export let RsaCore = module (
+    /// @brief The public numbers n and e and their Montgomery context.
+    #Final
+    export let PublicCore = class (
+        /// @brief The modulus, as big-endian bytes without leading zeros.
+        export last n_bytes: uint8[list];
+        /// @brief The modulus as limbs.
+        export last n: uint32[list];
+        /// @brief The public exponent as limbs.
+        export last e: uint32[list];
+        /// @brief The bit length of n.
+        export last bits: int;
+        /// @brief The byte length k of n.
+        export last k: int;
+        /// @brief Arithmetic modulo n.
+        export last modulus: mp.Modulus;
+
+        /// @brief n and e from big-endian bytes; n must be odd (checked by the caller).
+        export let init = func(modulus_bytes: uint8[list], exponent_bytes: uint8[list]) {
+            n_bytes = strip(modulus_bytes);
+            n = mp.from_bytes_be(n_bytes, (n_bytes.length + 3) / 4);
+            e = mp.from_bytes_be(strip(exponent_bytes), (exponent_bytes.length + 3) / 4);
+            bits = mp.bit_length(n);
+            k = (bits + 7) / 8;
+            modulus = new(n);
+        };
+
+        /// @brief x^e mod n for x below n, as limbs of n's length.
+        export let apply = func(x: uint32[list]) -> uint32[list] =>
+            modulus.from_mont(modulus.pow(modulus.to_mont(x), e));
+
+        export let.override to_string = func -> string => "RsaCore.PublicCore(" .. bits.to_string() .. " bits)";
+    );
+
+    /// @brief The private numbers: the primes, the CRT exponents and the coefficient.
+    #Final
+    export let PrivateCore = class (
+        /// @brief The public part.
+        export last public_core: PublicCore;
+        let p: mp.Modulus;
+        let q: mp.Modulus;
+        let wiped: bool = false;
+        last d_p: uint32[list];
+        last d_q: uint32[list];
+        /// @brief qInv in Montgomery form modulo p.
+        last q_inv: uint32[list];
+
+        /// @brief The key from n, e and p, q, dP, dQ, qInv as limbs (each of its natural size).
+        export let init = func(public_part: PublicCore, prime_p: uint32[list], prime_q: uint32[list],
+            exponent_p: uint32[list], exponent_q: uint32[list], coefficient: uint32[list]) {
+            public_core = public_part;
+            p = new(prime_p);
+            q = new(prime_q);
+            d_p = mp.copy(exponent_p);
+            d_q = mp.copy(exponent_q);
+            q_inv = p.to_mont(mp.resize(coefficient, p.n));
+        };
+
+        /// @brief Traps before a private operation when the owning key was wiped.
+        #Internal
+        export let require_live = func {
+            if (wiped) {
+                trap_with_message("invalid state: secret wiped");
+            }
+        };
+
+        /// @brief Disables this core and overwrites its directly accessible CRT buffers.
+        #Internal
+        export let wipe = func {
+            if (wiped) {
+                return;
+            }
+            wiped = true;
+            clear_limbs(d_p);
+            clear_limbs(d_q);
+            clear_limbs(q_inv);
+            clear_limbs(p.m);
+            clear_limbs(q.m);
+            clear_limbs(p.one);
+            clear_limbs(q.one);
+            // Each prime's Montgomery context is owned by this core. Release its other scratch buffers.
+            p = nil;
+            q = nil;
+        };
+
+        /// @brief x^d mod n by the CRT (RFC 8017, section 5.1.2, 2.b), or an empty list when the check
+        /// y^e = x fails. x must be below n. A wiped core traps.
+        export let apply = func(x: uint32[list]) -> uint32[list] {
+            require_live();
+            last m1 = p.from_mont(p.pow(p.to_mont(p.reduce(x)), d_p));
+            last m2 = q.from_mont(q.pow(q.to_mont(q.reduce(x)), d_q));
+            // h = qInv (m1 - m2) mod p; y = m2 + q h.
+            last h = p.mul(q_inv, p.sub(m1, p.reduce(m2)));
+            last qh = mp.mul_full(q.m, h);
+            last limbs = public_core.n.length;
+            let y = mp.resize(trim_to(qh, limbs), limbs);
+            let _ = mp.add_into(y, y, mp.resize(m2, limbs));
+            return if (mp.equal(public_core.apply(y), x) == 0) -> new else -> y;
+        };
+
+        /// @brief Text naming the size, never a value.
+        export let.override to_string = func -> string => "RsaCore.PrivateCore(<redacted>)";
+    );
+
+    let clear_limbs = func(buffer: uint32[list]) {
+        for (let i = 0; i < buffer.length; i++) {
+            buffer[i] = 0;
+        }
+    };
+
+    /// @brief The value with high zero limbs beyond `limbs` dropped (q h < n always fits).
+    let trim_to = func(a: uint32[list], limbs: int) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let i = 0; i < a.length; i++) {
+            if (i < limbs) {
+                out.append(a[i]);
+            }
+        }
+        return out;
+    };
+
+    /// @brief The bytes without leading zero bytes (at least one byte).
+    export let strip = func(bytes: uint8[list]) -> uint8[list] {
+        let start = 0;
+        while (start < bytes.length - 1 && bytes[start] == 0) {
+            start++;
+        }
+        return words.slice(bytes, start, bytes.length);
+    };
+
+    /// @brief OS2IP of RFC 8017, section 4.2, as limbs of n's length, or an empty list when the value is not
+    /// below n or the input is longer than k bytes.
+    export let os2ip_below = func(key: PublicCore, bytes: uint8[list]) -> uint32[list] {
+        if (bytes.length > key.k) {
+            return new;
+        }
+        last x = mp.from_bytes_be(bytes, key.n.length);
+        return if (mp.less(x, key.n) == 0) -> new else -> x;
+    };
+
+    /// @brief I2OSP of RFC 8017, section 4.1, to k bytes.
+    export let i2osp = func(key: PublicCore, x: uint32[list]) -> uint8[list] => mp.to_bytes_be(x, key.k);
+
+    /// @brief EMSA-PSS-ENCODE (RFC 8017, section 9.1.1) of a message digest with the given salt, for emBits =
+    /// modBits - 1. An encoding that does not fit traps with `invalid argument`.
+    export let pss_encode = func(hash: Algorithm, digest: uint8[list], salt: uint8[list], em_bits: int) -> uint8[list] {
+        last h_len = asym_hash.output_length(hash);
+        last em_len = (em_bits + 7) / 8;
+        if (em_len < h_len + salt.length + 2) {
+            trap_with_message("invalid argument: RSA-PSS salt too long for the key");
+        }
+        let m_prime = words.zeros(8);
+        words.append_all(m_prime, digest);
+        words.append_all(m_prime, salt);
+        last h = asym_hash.digest(hash, m_prime);
+        let db = words.zeros(em_len - salt.length - h_len - 2);
+        db.append(1);
+        words.append_all(db, salt);
+        let masked = words.xor(db, asym_hash.mgf1(hash, h, db.length));
+        masked[0] = masked[0] & ((255 >> (8 * em_len - em_bits)) as uint8);
+        words.append_all(masked, h);
+        masked.append(188);
+        return masked;
+    };
+
+    /// @brief EMSA-PSS-VERIFY (RFC 8017, section 9.1.2) with a fixed salt length, or any salt length when
+    /// `salt_length` is -1. MGF1 may use a separate digest.
+    export let pss_verify = func(hash: Algorithm, mask_hash: Algorithm, digest: uint8[list], em: uint8[list], em_bits: int,
+        salt_length: int) -> bool {
+        last h_len = asym_hash.output_length(hash);
+        last em_len = (em_bits + 7) / 8;
+        if (em.length != em_len || em_len < h_len + 2 || (salt_length >= 0 && em_len < h_len + salt_length + 2)) {
+            return false;
+        }
+        if (em[em_len - 1] != 188) {
+            return false;
+        }
+        last top_mask = (255 >> (8 * em_len - em_bits)) as uint8;
+        if ((em[0] & ~top_mask) != 0) {
+            return false;
+        }
+        last masked = words.slice(em, 0, em_len - h_len - 1);
+        last h = words.slice(em, em_len - h_len - 1, em_len - 1);
+        let db = words.xor(masked, asym_hash.mgf1(mask_hash, h, masked.length));
+        db[0] = db[0] & top_mask;
+        // DB = PS (zeros) || 0x01 || salt.
+        let one_at = -1;
+        for (let i = 0; i < db.length; i++) {
+            if (db[i] != 0) {
+                one_at = i;
+                break;
+            }
+        }
+        if (one_at < 0 || db[one_at] != 1) {
+            return false;
+        }
+        last salt = words.slice(db, one_at + 1, db.length);
+        if (salt_length >= 0 && salt.length != salt_length) {
+            return false;
+        }
+        let m_prime = words.zeros(8);
+        words.append_all(m_prime, digest);
+        words.append_all(m_prime, salt);
+        return constant_time.ct_eq(asym_hash.digest(hash, m_prime), h);
+    };
+
+    /// @brief EME-OAEP encoding (RFC 8017, section 7.1.1, step 2) of the message with the label and the seed
+    /// (hLen bytes) for a k-byte modulus. A message too long traps with `invalid argument`.
+    export let oaep_encode = func(hash: Algorithm, k: int, message: uint8[list], label: uint8[list], seed: uint8[list])
+        -> uint8[list] {
+        last h_len = asym_hash.output_length(hash);
+        if (message.length > k - 2 * h_len - 2) {
+            trap_with_message("invalid argument: message too long for RSA-OAEP with this key and hash");
+        }
+        if (seed.length != h_len) {
+            trap_with_message("invalid argument: RSA-OAEP seed must be the hash length");
+        }
+        let db = asym_hash.digest(hash, label);
+        words.append_all(db, words.zeros(k - message.length - 2 * h_len - 2));
+        db.append(1);
+        words.append_all(db, message);
+        last masked_db = words.xor(db, asym_hash.mgf1(hash, seed, k - h_len - 1));
+        last masked_seed = words.xor(seed, asym_hash.mgf1(hash, masked_db, h_len));
+        let em = words.zeros(1);
+        words.append_all(em, masked_seed);
+        words.append_all(em, masked_db);
+        return em;
+    };
+
+    /// @brief EME-OAEP decoding (RFC 8017, section 7.1.2, step 3) of a k-byte block: [message], or an empty
+    /// list on failure. Every check is folded into one flag computed without data-dependent branches, so the
+    /// reason for a failure is not visible in the steps taken (Manger's attack); only the message length is,
+    /// after success.
+    export let oaep_decode = func(hash: Algorithm, em: uint8[list], label: uint8[list]) -> uint8[list][list] {
+        last h_len = asym_hash.output_length(hash);
+        last k = em.length;
+        if (k < 2 * h_len + 2) {
+            return new;
+        }
+        last masked_seed = words.slice(em, 1, 1 + h_len);
+        last masked_db = words.slice(em, 1 + h_len, k);
+        last seed = words.xor(masked_seed, asym_hash.mgf1(hash, masked_db, h_len));
+        last db = words.xor(masked_db, asym_hash.mgf1(hash, seed, k - h_len - 1));
+        last l_hash = asym_hash.digest(hash, label);
+        // good = (Y == 0) and lHash' == lHash and a 0x01 follows the zero padding.
+        let bad: uint32 = em[0] as uint32;
+        for (let i = 0; i < h_len; i++) {
+            bad = bad | ((db[i] ^ l_hash[i]) as uint32);
+        }
+        let looking: uint32 = 1;
+        let index: uint32 = 0;
+        for (let i = h_len; i < db.length; i++) {
+            last value = db[i] as uint32;
+            last is_one = mp.eq32(value, 1);
+            last is_zero = mp.eq32(value, 0);
+            // While looking: a 1 ends the padding here; anything but 0 or 1 is an error.
+            index = index | ((looking & is_one) * (i as uint32));
+            bad = bad | (looking & (1 ^ (is_one | is_zero)));
+            looking = looking & (1 ^ is_one);
+        }
+        bad = bad | looking;
+        if (bad != 0) {
+            return new;
+        }
+        return new([words.slice(db, (index as int) + 1, db.length)]);
+    };
+
+    /// @brief The DigestInfo prefix of EMSA-PKCS1-v1_5 (RFC 8017, section 9.2, note 1) for the hash.
+    export let digest_info_prefix = func(hash: Algorithm) -> uint8[list] => from_hex(match (hash) {
+        Algorithm.Sha224 => "302d300d06096086480165030402040500041c",
+        Algorithm.Sha256 => "3031300d060960864801650304020105000420",
+        Algorithm.Sha384 => "3041300d060960864801650304020205000430",
+        Algorithm.Sha512 => "3051300d060960864801650304020305000440",
+        Algorithm.Sha512_256 => "3031300d060960864801650304020605000420",
+        Algorithm.Sha3_224 => "302d300d06096086480165030402070500041c",
+        Algorithm.Sha3_256 => "3031300d060960864801650304020805000420",
+        Algorithm.Sha3_384 => "3041300d060960864801650304020905000430",
+        _ => "3051300d060960864801650304020a05000440",
+    });
+
+    /// @brief EMSA-PKCS1-v1_5 encoding (RFC 8017, section 9.2) of a digest for a k-byte modulus, or an empty
+    /// list when k is too short.
+    export let pkcs1v15_encode = func(hash: Algorithm, digest: uint8[list], k: int) -> uint8[list] {
+        asym_hash.check(hash);
+        let t = digest_info_prefix(hash);
+        words.append_all(t, digest);
+        if (k < t.length + 11) {
+            return new;
+        }
+        let em: uint8[list] = new([0, 1]);
+        for (let i = 0; i < k - t.length - 3; i++) {
+            em.append(255);
+        }
+        em.append(0);
+        words.append_all(em, t);
+        return em;
+    };
+
+    let from_hex = func(text: string) -> uint8[list] => mp.to_bytes_be(mp.from_hex(text, (text.byte_length + 7) / 8),
+        text.byte_length / 2);
+);

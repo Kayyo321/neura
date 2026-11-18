@@ -1,0 +1,51 @@
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let hex = import:Std.Encoding.Hex;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+
+// Test doubles for the signature step of Std.Crypto.Pki (phase 1: the public-key algorithms are not wired yet).
+// They live with the tests, never in the library: a verifier that accepts everything is not a result.
+export let TestVerifiers = module (
+    /// @brief Accepts every signature.
+    export let AcceptAll = class implements SignatureVerifier (
+        export let verify_signature = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
+                signature: uint8[list]) -> SignatureCheck => SignatureCheck.Valid;
+
+        export let.override to_string = func -> string => "AcceptAll";
+    );
+
+    /// @brief Answers from a table computed by the generator with Python `cryptography` (or `openssl`): the key is
+    /// the SHA-256 of (signer SPKI DER || signed bytes || signature), in hex, and the value whether the signature
+    /// verifies. A triple not in the table is UnsupportedAlgorithm, so the table never makes a test pass by default.
+    export let Table = class implements SignatureVerifier (
+        last keys: string[list] = new;
+        last values: string[list] = new;
+        export let lookups: int = 0;
+
+        export let init = func(table_keys: string[list], table_values: string[list]) {
+            for (let i = 0; i < table_keys.length; i++) {
+                keys.append(table_keys[i]);
+                values.append(table_values[i]);
+            }
+        };
+
+        export let verify_signature = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
+                signature: uint8[list]) -> SignatureCheck {
+            lookups++;
+            let h = new sha2.Sha256();
+            h.update(key.der_bytes);
+            h.update(signed);
+            h.update(signature);
+            last wanted = hex.encode(h.finish());
+            for (let i = 0; i < keys.length; i++) {
+                if (keys[i] == wanted) {
+                    return values[i] == "valid" ? SignatureCheck.Valid : SignatureCheck.Invalid;
+                }
+            }
+            return SignatureCheck.UnsupportedAlgorithm;
+        };
+
+        export let.override to_string = func -> string => "Table";
+    );
+);

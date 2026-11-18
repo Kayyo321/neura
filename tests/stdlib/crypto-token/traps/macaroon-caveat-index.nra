@@ -1,0 +1,14 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy
+// stderr: explicit program failure \(trap reason 3\): invalid argument: macaroon caveat index is out of range
+let macaroon = import:Std.Crypto.Token.Macaroon;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last token = macaroon.create(new, new([1]), new([1]));
+        let _ = token.caveat_identifier(0);
+        return program.ExitCode.Ok;
+    };
+);

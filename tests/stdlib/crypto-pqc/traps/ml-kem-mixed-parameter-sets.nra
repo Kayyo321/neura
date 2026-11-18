@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: an ML-KEM-512 key given to ML-KEM-768
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(0);
+        }
+        let key = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem512).key_pair_from_seed(seed, seed);
+        let _ = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem768).encapsulate_with(key.public_key(), seed);
+        return program.ExitCode.Ok;
+    };
+);

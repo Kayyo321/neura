@@ -1,0 +1,101 @@
+// test-options: --gpu=off --max-steps 100000000000
+let.promote _ = import:Std.Crypto.Algorithm;
+let ecdh = import:Std.Crypto.Asymmetric.Ecdh;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:EcdsaVectors;
+
+// Deterministic ECDSA against RFC 6979 appendix A.2.5-A.2.7 and OpenSSL's deterministic ECDSA
+// (support/ecdsa-vectors.nra, scripts/crypto-vectors/gen-asymmetric-ecdsa.py).
+let EcdsaTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let curve_of = func(text: string) -> ecdsa.Curve {
+        if (text == "P256") {
+            return ecdsa.Curve.P256;
+        }
+        if (text == "P384") {
+            return ecdsa.Curve.P384;
+        }
+        if (text == "P521") {
+            return ecdsa.Curve.P521;
+        }
+        return ecdsa.Curve.Secp256k1;
+    };
+
+    let hash_of = func(text: string) -> Algorithm {
+        if (text == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (text == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (text == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        return Algorithm.Sha512;
+    };
+
+    export let test_deterministic_signatures = func {
+        last rows = vectors.deterministic;
+        for (let i = 0; i < rows.length; i += 6) {
+            last curve = curve_of(rows[i]);
+            last key = new ecdsa.EcPrivateKey(curve, decode(rows[i + 2]));
+            last signer = new ecdsa.EcdsaSigner(key, hash_of(rows[i + 1]));
+            last message = decode(rows[i + 3]);
+            last raw = signer.sign_raw(message);
+            test.assert_equal_string(rows[i + 4] + rows[i + 5], hex.encode(raw));
+            last der = signer.sign(message);
+            test.assert_equal_string(hex.encode(raw), hex.encode(test.assert_ok(ecdsa.der_to_raw(curve, der))));
+            last verifier = new ecdsa.EcdsaVerifier(key.public_key(), hash_of(rows[i + 1]));
+            test.assert(verifier.verify(message, der));
+            test.assert(verifier.verify_raw(message, raw));
+            test.assert(!verifier.verify(new([1]), der));
+        }
+        test.assert_equal_int32(39 * 6, rows.length);
+    };
+
+    // Wycheproof ECDSA: DER (strict), r || s, and Bitcoin's low-S rule.
+    export let test_wycheproof_signatures = func {
+        last rows = vectors.wycheproof;
+        last keys = vectors.public_keys;
+        for (let i = 0; i < rows.length; i += 8) {
+            last index = test.assert_ok(int.parse(rows[i + 4])) * 2;
+            last curve = curve_of(keys[index]);
+            last key = test.assert_ok(ecdsa.parse_public_key(curve, decode(keys[index + 1])));
+            last message = decode(rows[i + 5]);
+            last signature = decode(rows[i + 6]);
+            last verdict: bool;
+            if (rows[i + 3] == "raw") {
+                verdict = new ecdsa.EcdsaVerifier(key, hash_of(rows[i + 2])).verify_raw(message, signature);
+            } else if (rows[i + 3] == "low-s") {
+                verdict = new ecdsa.EcdsaVerifier(key, hash_of(rows[i + 2]), true).verify(message, signature);
+            } else {
+                verdict = new ecdsa.EcdsaVerifier(key, hash_of(rows[i + 2])).verify(message, signature);
+            }
+            if (verdict != (rows[i + 7] == "1")) {
+                test.fail(rows[i] + " tcId " + rows[i + 1]);
+            }
+        }
+    };
+
+    // Wycheproof ECDH over SEC1 points (invalid points, wrong curves, compressed points) and cryptography for
+    // secp256k1.
+    export let test_ecdh = func {
+        last rows = vectors.ecdh;
+        for (let i = 0; i < rows.length; i += 6) {
+            last curve = curve_of(rows[i + 1]);
+            last parsed = ecdsa.parse_public_key(curve, decode(rows[i + 3]));
+            if (rows[i + 5] == "invalid") {
+                test.assert_err(parsed);
+                continue;
+            }
+            last private_key = new ecdsa.EcPrivateKey(curve, decode(rows[i + 2]));
+            last shared = test.assert_ok(ecdh.diffie_hellman(private_key, test.assert_ok(parsed)));
+            if (rows[i + 4] != hex.encode(shared.expose())) {
+                test.fail("ECDH tcId " + rows[i] + " " + rows[i + 1]);
+            }
+        }
+    };
+);

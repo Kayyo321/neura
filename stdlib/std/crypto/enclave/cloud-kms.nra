@@ -1,0 +1,20 @@
+let.promote _ = import:Std.Core.Result;
+let versioned = import:Std.Crypto.Enclave.VersionedKeyStore;
+
+/// @brief A cloud KMS-backed key store provider.
+/// @see [Std.Crypto.Enclave.CloudKms](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CloudKms)
+#Since("0.3.0")
+export let CloudKms = module (
+    /// @brief An opaque versioned key store for this backend. String handles have meaning only to their provider.
+    /// @see [Std.Crypto.Enclave.CloudKms](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CloudKms)
+    #Since("0.3.0")
+    export let Provider = interface:versioned.VersionedKeyStore<string> ();
+
+    /// @brief Opens this configured provider.
+    /// @stub the runtime has no authenticated cloud key management host service
+    /// @see [Std.Crypto.Enclave.CloudKms](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-CloudKms)
+    #[NoDiscard, Since("0.3.0")]
+    export let open = func(provider_profile: string, endpoint: string) -> Result<Provider> {
+        trap_with_message("unsupported: Std.Crypto.Enclave.CloudKms.open is not implemented in Neura 0.3.0 (the runtime has no authenticated cloud key management host service)");
+    };
+);

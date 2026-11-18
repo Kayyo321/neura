@@ -17,25 +17,25 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Ff1** · [`export let Ff1 = class implements CryptographicPrimitive<Ff1>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L27)
+- **Ff1** · [`export let Ff1 = class implements CryptographicPrimitive<Ff1>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L28)
   FF1 under an AES key (16, 24 or 32 bytes) for one radix. Tagged `#Final`. Since 0.3.0.
-- **Ff1.Ff1** · [`export last radix: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L30)
+- **Ff1.Ff1** · [`export last radix: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L31)
   The radix, from 2 to 65536.
-- **Ff1.Ff1** · [`export last min_length: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L32)
+- **Ff1.Ff1** · [`export last min_length: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L33)
   The shortest accepted numeral string.
-- **Ff1.Ff1** · [`export let init = func(key: uint8[list], numeral_radix: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L35)
+- **Ff1.Ff1** · [`export let init = func(key: uint8[list], numeral_radix: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L36)
   Keys FF1 for the radix. A radix outside 2 to 65536, or a key of another length, traps.
-- **Ff1.Ff1** · [`export let algorithm = func -> Algorithm`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L52)
+- **Ff1.Ff1** · [`export let algorithm = func -> Algorithm`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L53)
   `Algorithm.Ff1`.
-- **Ff1.Ff1** · [`export let encrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L57)
+- **Ff1.Ff1** · [`export let encrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L58)
   FF1.Encrypt of the numerals (each below the radix) under the tweak. A numeral out of range or a string shorter than `min_length` traps. Tagged `#NoDiscard`.
-- **Ff1.Ff1** · [`export let decrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L61)
+- **Ff1.Ff1** · [`export let decrypt = func(numerals: int[list], tweak: uint8[list]) -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L62)
   FF1.Decrypt, the inverse of `encrypt`. Tagged `#NoDiscard`.
-- **Ff1.Ff1** · [`export let encrypt_text = func(text: string, tweak: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L67)
+- **Ff1.Ff1** · [`export let encrypt_text = func(text: string, tweak: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L68)
   `encrypt` over text in the alphabet 0-9a-z cut to the radix (radix 36 at most). A character outside it fails with an Encoding error at its offset; uppercase letters are accepted and the result is lowercase. Tagged `#NoDiscard`.
-- **Ff1.Ff1** · [`export let decrypt_text = func(text: string, tweak: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L71)
+- **Ff1.Ff1** · [`export let decrypt_text = func(text: string, tweak: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L72)
   `decrypt` over text, the inverse of `encrypt_text`. Tagged `#NoDiscard`.
-- **Ff1.Ff1** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L217)
+- **Ff1.Ff1** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/symmetric/ff1.nra#L218)
 <!-- END SOURCE API -->
 
 ## Detailed contracts

@@ -1,0 +1,214 @@
+let bits = import:Std.Crypto.Pki.BitString;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let oid = import:Std.Crypto.Pki.Oid;
+let test = import:Std.Test;
+let vectors = import:DerVectors;
+let writer = import:Std.Crypto.Pki.DerWriter;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+// DER reader and writer against `openssl asn1parse -genstr` encodings, malformed inputs built per X.690 rule,
+// and the recorded certificates (support/der-vectors.nra, scripts/crypto-vectors/gen-pki.py).
+let DerTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let error_offset = func(e: Error) -> int {
+        match (e) {
+            Error.Parse { kind, offset, message } => {
+                return offset;
+            },
+            _ => {
+                test.fail("expected a Parse error");
+            },
+        }
+        return -1;
+    };
+
+    export let test_oids_both_ways = func {
+        last rows = vectors.oids;
+        for (let i = 0; i < rows.length; i += 2) {
+            last element = test.assert_ok(der.parse(decode(rows[i + 1])));
+            last value = test.assert_ok(element.oid());
+            test.assert_equal_string(rows[i], value.dotted);
+            last parsed = test.assert_ok(oid.parse(rows[i]));
+            test.assert(parsed.equals(value));
+            test.assert(value.hash_code() == parsed.hash_code());
+            test.assert_equal_string(rows[i + 1], hex.encode(writer.oid(parsed)));
+        }
+    };
+
+    export let test_oid_text_rejections = func {
+        for (let text in ["", "1", "3.1", "1.40", "0.40", "1.2.", "1..2", "1.02", "1.a", ".1.2"]) {
+            let _ = test.assert_err(oid.parse(text));
+        }
+        test.assert(test.assert_ok(oid.parse("2.999")).matches("2.999"));
+    };
+
+    export let test_integers = func {
+        last rows = vectors.integers;
+        for (let i = 0; i < rows.length; i += 2) {
+            last encoded = decode(rows[i + 1]);
+            last element = test.assert_ok(der.parse(encoded));
+            last content = test.assert_ok(element.integer());
+            test.assert_equal_string(rows[i + 1].slice(4, rows[i + 1].byte_length), hex.encode(content));
+            test.assert_equal_bool(rows[i].byte_at(0) == 45, element.is_negative());
+            match (int64s.parse(rows[i])) {
+                Result.Ok(value) => {
+                    test.assert_equal_string(rows[i + 1], hex.encode(writer.integer(value)));
+                    if (value >= 0) {
+                        test.assert_equal_int64(value, test.assert_ok(element.small_integer(int64s.Max)));
+                    } else {
+                        let _ = test.assert_err(element.small_integer(int64s.Max));
+                    }
+                },
+                Result.Err(e) => {
+                    // Beyond int64: the magnitude writer gives the same encoding for positive values.
+                    if (!element.is_negative()) {
+                        test.assert_equal_string(rows[i + 1], hex.encode(writer.unsigned_integer(content)));
+                        let _ = test.assert_err(element.small_integer(int64s.Max));
+                    }
+                },
+            }
+        }
+        last five = test.assert_ok(der.parse(writer.integer(5)));
+        let _ = test.assert_err(five.small_integer(4));
+        test.assert_equal_string("020100", hex.encode(writer.unsigned_integer(new([0, 0]))));
+    };
+
+    export let test_times = func {
+        last rows = vectors.times;
+        for (let i = 0; i < rows.length; i += 2) {
+            last encoded = decode(rows[i]);
+            last element = test.assert_ok(der.parse(encoded));
+            last at = test.assert_ok(element.time());
+            test.assert_equal_int64(test.assert_ok(int64s.parse(rows[i + 1])), at.epoch_seconds);
+            if (element.tag_number == der.TagUtcTime) {
+                test.assert_equal_string(rows[i], hex.encode(writer.utc_time(at)));
+                test.assert_equal_string(rows[i], hex.encode(writer.time(at)));
+            } else {
+                test.assert_equal_string(rows[i], hex.encode(writer.generalized_time(at)));
+            }
+        }
+    };
+
+    export let test_strings = func {
+        last rows = vectors.strings;
+        for (let i = 0; i < rows.length; i += 2) {
+            last element = test.assert_ok(der.parse(decode(rows[i])));
+            last text = test.assert_ok(element.text());
+            test.assert_equal_string(rows[i + 1], hex.encode(utf8_bytes(text)));
+        }
+        test.assert_equal_string("0c03616263", hex.encode(writer.utf8_string("abc")));
+        test.assert_equal_string("1303612062", hex.encode(writer.printable_string("a b")));
+    };
+
+    let utf8_bytes = func(text: string) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < text.byte_length; i++) {
+            out.append(text.byte_at(i));
+        }
+        return out;
+    };
+
+    export let test_malformed_inputs = func {
+        last rows = vectors.malformed;
+        for (let i = 0; i < rows.length; i += 3) {
+            last e = test.assert_err(der.parse(decode(rows[i])));
+            test.assert_with(error_offset(e) == test.assert_ok(int64s.parse(rows[i + 1])) as int, rows[i + 2]);
+        }
+        test.assert_equal_int32(63, rows.length);
+    };
+
+    export let test_malformed_values = func {
+        last rows = vectors.malformed_values;
+        for (let i = 0; i < rows.length; i += 4) {
+            last element = test.assert_ok(der.parse(decode(rows[i + 1])));
+            last kind = rows[i];
+            let offset = -1;
+            if (kind == "boolean") {
+                offset = error_offset(test.assert_err(element.boolean()));
+            } else if (kind == "integer") {
+                offset = error_offset(test.assert_err(element.integer()));
+            } else if (kind == "bitstring") {
+                offset = error_offset(test.assert_err(element.bit_string()));
+            } else if (kind == "oid") {
+                offset = error_offset(test.assert_err(element.oid()));
+            } else if (kind == "null") {
+                offset = error_offset(test.assert_err(element.null()));
+            } else if (kind == "text") {
+                offset = error_offset(test.assert_err(element.text()));
+            } else {
+                offset = error_offset(test.assert_err(element.time()));
+            }
+            test.assert_with(offset == test.assert_ok(int64s.parse(rows[i + 2])) as int, rows[i + 3]);
+        }
+    };
+
+    export let test_nesting_limit_is_configurable = func {
+        // 40 SEQUENCEs around a NULL: rejected at the default depth of 32, accepted with a limit of 40.
+        let encoded = writer.null();
+        for (let i = 0; i < 40; i++) {
+            encoded = writer.sequence(new([encoded]));
+        }
+        let _ = test.assert_err(der.parse(encoded));
+        let _ = test.assert_err(der.parse_with_depth(encoded, 39));
+        last top = test.assert_ok(der.parse_with_depth(encoded, 40));
+        test.assert_equal_int32(0, top.depth);
+    };
+
+    export let test_bit_strings = func {
+        last value = new bits.BitString(new([160, 0]), 7);
+        test.assert_equal_int32(9, value.bit_length());
+        test.assert(value.bit(0) && !value.bit(1) && value.bit(2) && !value.bit(8) && !value.bit(9));
+        last encoded = writer.bit_string(value);
+        test.assert_equal_string("030307a000", hex.encode(encoded));
+        test.assert(test.assert_ok(test.assert_ok(der.parse(encoded)).bit_string()).equals(value));
+        test.assert_equal_string("BitString(9 bits)", value.to_string());
+    };
+
+    export let test_writer_lengths_and_tags = func {
+        let long: uint8[list] = new;
+        for (let i = 0; i < 300; i++) {
+            long.append(7);
+        }
+        last encoded = writer.octet_string(long);
+        test.assert_equal_string("0482012c07", hex.encode(der.copy_range(encoded, 0, 5)));
+        last element = test.assert_ok(der.parse(encoded));
+        test.assert_equal_int32(300, element.length);
+        test.assert_equal_int32(4, element.header_length);
+        last high = writer.implicit(1000, false, new([1]));
+        test.assert_equal_string("9f876801" + "01", hex.encode(high));
+        last parsed = test.assert_ok(der.parse(high));
+        test.assert(parsed.is_context(1000));
+        // SET sorts its members into DER order.
+        last set = writer.set(new([writer.integer(5), writer.integer(3), writer.boolean(true)]));
+        test.assert_equal_string("3109" + "0101ff" + "020103" + "020105", hex.encode(set));
+        let _ = test.assert_ok(der.parse(set));
+    };
+
+    /// @brief Re-encodes an element from its parts, recursing into constructed ones.
+    let rebuild = func(e: der.Element) -> uint8[list] {
+        if (!e.constructed) {
+            return writer.tlv(e.tag_class, false, e.tag_number, e.content());
+        }
+        let content: uint8[list] = new;
+        for (let child in test.assert_ok(e.children())) {
+            for (let b in rebuild(child)) {
+                content.append(b);
+            }
+        }
+        return writer.tlv(e.tag_class, true, e.tag_number, content);
+    };
+
+    export let test_certificates_rebuild_exactly = func {
+        last rows = vectors.certificates;
+        for (let i = 0; i < rows.length; i += 2) {
+            last bytes = decode(rows[i + 1]);
+            last top = test.assert_ok(der.parse(bytes));
+            test.assert_equal_string(rows[i + 1], hex.encode(rebuild(top)));
+            test.assert(top.equals(test.assert_ok(der.parse(top.encoded()))));
+        }
+    };
+);

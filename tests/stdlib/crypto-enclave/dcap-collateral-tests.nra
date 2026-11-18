@@ -1,0 +1,156 @@
+// test-options: --gpu=off --deny-all --max-steps 1200000000
+let result = import:Std.Core.Result;
+let certificate = import:Std.Crypto.Pki.Certificate;
+let collateral = import:Std.Crypto.Enclave.DcapCollateral;
+let dcap = import:Std.Crypto.Enclave.Dcap;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let policies = import:DcapCollateralVectors;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:DcapVectors;
+
+let DcapCollateralTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let time = func -> instant.Instant => instant.of_epoch_seconds(test.assert_ok(int64s.parse(policies.sgx[0])), 0);
+
+    let tcb = func -> collateral.SignedJson {
+        last row = policies.sgx;
+        return new collateral.SignedJson(test.assert_ok(utf8.decode(bytes(row[4]))), bytes(row[5]), bytes(row[6]));
+    };
+
+    let qe = func -> collateral.SignedJson {
+        last row = policies.sgx;
+        return new collateral.SignedJson(test.assert_ok(utf8.decode(bytes(row[7]))), bytes(row[8]), bytes(row[9]));
+    };
+
+    let allowed = func -> collateral.TcbStatus[list] =>
+        new([collateral.TcbStatus.UpToDate, collateral.TcbStatus.ConfigurationAndSwHardeningNeeded]);
+
+    let tdx_policy = func -> collateral.TdxCollateralVerifier {
+        last row = policies.tdx;
+        last tcb_info = new collateral.SignedJson(test.assert_ok(utf8.decode(bytes(row[4]))), bytes(row[5]), bytes(row[6]));
+        last identity = new collateral.SignedJson(test.assert_ok(utf8.decode(bytes(row[7]))), bytes(row[8]), bytes(row[9]));
+        return new collateral.TdxCollateralVerifier(tcb_info, identity, bytes(row[1]), bytes(row[2]), bytes(row[3]));
+    };
+
+    let check = func(verifier: dcap.CollateralVerifier, verification_time: instant.Instant) -> result.Result<dcap.Quote> {
+        last row = vectors.quotes;
+        return dcap.verify(bytes(row[1]), bytes(vectors.roots[0]), verification_time, dcap.Platform.Sgx,
+            bytes(row[4]), bytes(row[3]), verifier);
+    };
+
+    export let test_signed_sgx_collateral_with_explicit_tcb_policy = func {
+        last row = policies.sgx;
+        last default_verifier = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), bytes(row[2]), bytes(row[3]));
+        test.assert_equal_string("crypto.dcap_tcb_status", code(test.assert_err(check(default_verifier, time()))));
+        last configured = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), bytes(row[2]),
+            bytes(row[3]), allowed());
+        last verified = test.assert_ok(check(configured, time()));
+        test.assert(verified.platform == dcap.Platform.Sgx);
+    };
+
+    export let test_requires_both_crls_and_exact_signed_metadata = func {
+        last row = policies.sgx;
+        let root_crl = bytes(row[2]);
+        root_crl[root_crl.length - 1] = root_crl[root_crl.length - 1] ^ 1;
+        last bad_root_crl = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), root_crl, bytes(row[3]), allowed());
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(check(bad_root_crl, time()))));
+
+        last missing_pck_crl = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), bytes(row[2]), new, allowed());
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(check(missing_pck_crl, time()))));
+
+        last signed = tcb();
+        last changed_tcb = new collateral.SignedJson(signed.body + " ", signed.signature_bytes(), signed.certificate_der());
+        last bad_json = new collateral.SgxCollateralVerifier(changed_tcb, qe(), bytes(row[1]), bytes(row[2]),
+            bytes(row[3]), allowed());
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(check(bad_json, time()))));
+
+        last configured = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), bytes(row[2]), bytes(row[3]), allowed());
+        last expired = instant.of_epoch_seconds(time().epoch_seconds + 86400 * 35, 0);
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(check(configured, expired))));
+    };
+
+    export let test_native_policy_refuses_tdx = func {
+        last row = policies.sgx;
+        last configured = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), bytes(row[2]), bytes(row[3]), allowed());
+        last quote = vectors.quotes;
+        test.assert_equal_string("crypto.unsupported_dcap", code(test.assert_err(dcap.verify(bytes(quote[9]),
+            bytes(vectors.roots[0]), time(), dcap.Platform.Tdx, bytes(quote[12]), bytes(quote[11]), configured))));
+    };
+
+    export let test_qe_attribute_mask_rejects_mismatch = func {
+        last row = policies.sgx;
+        last quote = test.assert_ok(dcap.parse(bytes(vectors.quotes[1])));
+        let pem = quote.certification_data();
+        pem.remove_at(pem.length - 1);
+        last chain = test.assert_ok(certificate.parse_pem(test.assert_ok(utf8.decode(pem))));
+        let qe_report = quote.qe_report();
+        qe_report[48] = qe_report[48] ^ 1;
+        last mismatched = new dcap.Quote(quote.platform, quote.certification_type, quote.to_bytes(), quote.report_body(),
+            qe_report, quote.certification_data());
+        last configured = new collateral.SgxCollateralVerifier(tcb(), qe(), bytes(row[1]), bytes(row[2]), bytes(row[3]), allowed());
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(configured.verify(mismatched, chain[0].der_bytes,
+            bytes(vectors.roots[0]), time()))));
+    };
+
+    export let test_genuine_tdx_collateral_and_capture_bounds = func {
+        last row = policies.tdx;
+        last root = bytes(vectors.roots[0]);
+        last policy = tdx_policy();
+        last at = instant.of_epoch_seconds(test.assert_ok(int64s.parse(row[0])), 0);
+        let evidence = bytes(row[13]);
+        let binding = bytes(row[14]);
+        last measurement = bytes(row[15]);
+        test.assert_equal_string("UpToDate", row[10]);
+        test.assert_equal_string("UpToDate", row[11]);
+        test.assert_equal_string("UpToDate", row[12]);
+        last verified = test.assert_ok(dcap.verify(evidence, root, at, dcap.Platform.Tdx, measurement, binding, policy));
+        test.assert(verified.platform == dcap.Platform.Tdx);
+        binding[0] = binding[0] ^ 1;
+        test.assert_equal_string("crypto.attestation_nonce", code(test.assert_err(dcap.verify(evidence, root, at,
+            dcap.Platform.Tdx, measurement, binding, policy))));
+        for (let extra in bytes(row[16])) {
+            evidence.append(extra);
+        }
+        let _ = test.assert_err(dcap.parse(evidence));
+    };
+
+    export let test_tdx_collateral_module_signer_attributes_and_svn = func {
+        last row = policies.tdx;
+        last root = bytes(vectors.roots[0]);
+        last config = tdx_policy();
+        last at = instant.of_epoch_seconds(test.assert_ok(int64s.parse(row[0])), 0);
+        last quote = test.assert_ok(dcap.parse(bytes(row[13])));
+        let pem = quote.certification_data();
+        pem.remove_at(pem.length - 1);
+        last chain = test.assert_ok(certificate.parse_pem(test.assert_ok(utf8.decode(pem))));
+
+        // Exercise collateral checks after quote authentication using individually varied report fields.
+        let report = quote.report_body();
+        report[64] = report[64] ^ 1;
+        last wrong_signer = new dcap.Quote(quote.platform, quote.certification_type, quote.to_bytes(), report,
+            quote.qe_report(), quote.certification_data());
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(config.verify(wrong_signer,
+            chain[0].der_bytes, root, at))));
+        report[64] = report[64] ^ 1;
+        report[112] = 1;
+        last wrong_attributes = new dcap.Quote(quote.platform, quote.certification_type, quote.to_bytes(), report,
+            quote.qe_report(), quote.certification_data());
+        test.assert_equal_string("crypto.dcap_collateral", code(test.assert_err(config.verify(wrong_attributes,
+            chain[0].der_bytes, root, at))));
+        report[112] = 0;
+        report[0] = 2;
+        last outdated = new dcap.Quote(quote.platform, quote.certification_type, quote.to_bytes(), report,
+            quote.qe_report(), quote.certification_data());
+        test.assert_equal_string("crypto.dcap_tcb_status", code(test.assert_err(config.verify(outdated,
+            chain[0].der_bytes, root, at))));
+    };
+);

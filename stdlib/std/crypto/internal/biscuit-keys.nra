@@ -1,0 +1,207 @@
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let entropy = import:Std.Crypto.Random.Entropy;
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let mp = import:Std.Crypto.Internal.Mp;
+let strings = import:Std.Text.Strings;
+let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+let words = import:Std.Crypto.Internal.Words;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief Ed25519 and ECDSA P-256 key dispatch for the Biscuit wire format. Internal.
+export let BiscuitKeys = module (
+    export let SignatureAlgorithm = enum (Ed25519, P256);
+
+    let unsupported = func<T>(message: string) -> Result<T> => Result<T>.Err(errors.custom("biscuit.unsupported", message));
+    let invalid = func<T>(message: string) -> Result<T> => Result<T>.Err(errors.custom("biscuit.format", message));
+
+    export let allowed = func(kind: SignatureAlgorithm) -> bool {
+        if (kind == SignatureAlgorithm.Ed25519) {
+            return crypto_policy.allows(Algorithm.Ed25519);
+        }
+        return crypto_policy.allows(Algorithm.P256) && crypto_policy.allows(Algorithm.Sha256);
+    };
+
+    export let wire_id = func(kind: SignatureAlgorithm) -> uint32 =>
+        kind == SignatureAlgorithm.Ed25519 ? 0 : 1;
+
+    export let name = func(kind: SignatureAlgorithm) -> string =>
+        kind == SignatureAlgorithm.Ed25519 ? "ed25519" : "secp256r1";
+
+    // Normalize only the revocation identifier. Signature transcripts use the original wire bytes.
+    export let stable_identifier = func(kind: SignatureAlgorithm, signature: uint8[list]) -> Result<uint8[list]> {
+        if (kind == SignatureAlgorithm.Ed25519) {
+            return Result<uint8[list]>.Ok(words.copy(signature));
+        }
+        let raw = ecdsa.der_to_raw(ecdsa.Curve.P256, signature)?;
+        last group = new weierstrass.Curve(weierstrass.CurveId.P256);
+        last order = group.order;
+        last magnitude = mp.from_bytes_be(words.slice(raw, 32, 64), order.n);
+        if (mp.less(mp.shift_right(order.m, 1), magnitude) == 0) {
+            return Result<uint8[list]>.Ok(words.copy(signature));
+        }
+        let reduced = mp.small(0, order.n);
+        let _ = mp.sub_into(reduced, order.m, magnitude);
+        last bytes = mp.to_bytes_be(reduced, 32);
+        for (let i in 0 .. 32) {
+            raw[32 + i] = bytes[i];
+        }
+        return ecdsa.raw_to_der(ecdsa.Curve.P256, raw);
+    };
+
+    export let PublicKey = class (
+        export last algorithm: SignatureAlgorithm;
+        last ed_key: ed25519.Ed25519PublicKey;
+        last ec_key: ecdsa.EcPublicKey;
+
+        export let init = func(ed: ed25519.Ed25519PublicKey) {
+            algorithm = SignatureAlgorithm.Ed25519;
+            ed_key = ed;
+            ec_key = nil;
+        } or func(ec: ecdsa.EcPublicKey) {
+            if (ec.curve != ecdsa.Curve.P256) {
+                trap_with_message("invalid argument: Biscuit requires a P-256 key");
+            }
+            algorithm = SignatureAlgorithm.P256;
+            ed_key = nil;
+            ec_key = ec;
+        };
+
+        export let to_bytes = func -> uint8[list] {
+            if (algorithm == SignatureAlgorithm.Ed25519) {
+                return ed_key.to_bytes();
+            }
+            return ec_key.to_sec1(true);
+        };
+
+        export let signer_id = func -> string => name(algorithm) .. "/" .. hex.encode(to_bytes());
+
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool {
+            if (not allowed(algorithm)) {
+                return false;
+            }
+            if (algorithm == SignatureAlgorithm.Ed25519) {
+                return new ed25519.Ed25519Verifier(ed_key).verify(message, signature);
+            }
+            return new ecdsa.EcdsaVerifier(ec_key).verify(message, signature);
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not key: PublicKey) {
+                return false;
+            }
+            return algorithm == key.algorithm && constant_time.ct_eq(to_bytes(), key.to_bytes());
+        };
+
+        export let.override hash_code = func -> uint32 => signer_id().hash_code();
+        export let.override to_string = func -> string => "Biscuit PublicKey(" .. name(algorithm) .. ")";
+    );
+
+    export let PrivateKey = class (
+        export last algorithm: SignatureAlgorithm;
+        last ed_key: ed25519.Ed25519PrivateKey;
+        last ec_key: ecdsa.EcPrivateKey;
+
+        export let init = func(ed: ed25519.Ed25519PrivateKey) {
+            algorithm = SignatureAlgorithm.Ed25519;
+            ed_key = ed;
+            ec_key = nil;
+        } or func(ec: ecdsa.EcPrivateKey) {
+            if (ec.curve != ecdsa.Curve.P256) {
+                trap_with_message("invalid argument: Biscuit requires a P-256 key");
+            }
+            algorithm = SignatureAlgorithm.P256;
+            ed_key = nil;
+            ec_key = ec;
+        };
+
+        export let public_key = func -> PublicKey {
+            if (algorithm == SignatureAlgorithm.Ed25519) {
+                return new PublicKey(ed_key.public_key());
+            }
+            return new PublicKey(ec_key.public_key());
+        };
+
+        export let bytes = func -> uint8[list] {
+            if (algorithm == SignatureAlgorithm.Ed25519) {
+                return words.copy(ed_key.expose());
+            }
+            return words.copy(ec_key.expose());
+        };
+
+        export let sign = func(message: uint8[list]) -> uint8[list] {
+            if (algorithm == SignatureAlgorithm.Ed25519) {
+                return new ed25519.Ed25519Signer(ed_key).sign(message);
+            }
+            return new ecdsa.EcdsaSigner(ec_key).sign(message);
+        };
+
+        export let wipe = func {
+            if (algorithm == SignatureAlgorithm.Ed25519) {
+                ed_key.wipe();
+            } else {
+                ec_key.wipe();
+            }
+        };
+
+        export let.override to_string = func -> string => "Biscuit PrivateKey(<redacted>)";
+    );
+
+    export let parse_public = func(kind: SignatureAlgorithm, bytes: uint8[list]) -> Result<PublicKey> {
+        if (not allowed(kind)) {
+            return unsupported<PublicKey>("Biscuit key algorithm is denied by crypto policy");
+        }
+        if (kind == SignatureAlgorithm.Ed25519) {
+            last key = ed25519.parse_public_key(bytes)?;
+            return Result<PublicKey>.Ok(new PublicKey(key));
+        }
+        if (bytes.length != 33 || (bytes[0] != 2 && bytes[0] != 3)) {
+            return invalid<PublicKey>("Biscuit P-256 requires a compressed SEC1 public key");
+        }
+        last key = ecdsa.parse_public_key(ecdsa.Curve.P256, bytes)?;
+        return Result<PublicKey>.Ok(new PublicKey(key));
+    };
+
+    export let parse_id = func(text: string) -> Result<PublicKey> {
+        if (strings.starts_with(text, "ed25519/")) {
+            return parse_public(SignatureAlgorithm.Ed25519, hex.decode(text.slice(8, text.byte_length))?);
+        }
+        if (strings.starts_with(text, "secp256r1/")) {
+            return parse_public(SignatureAlgorithm.P256, hex.decode(text.slice(10, text.byte_length))?);
+        }
+        return invalid<PublicKey>("unsupported Biscuit scope public key");
+    };
+
+    export let parse_private = func(kind: SignatureAlgorithm, bytes: uint8[list]) -> Result<PrivateKey> {
+        if (not allowed(kind)) {
+            return unsupported<PrivateKey>("Biscuit key algorithm is denied by crypto policy");
+        }
+        if (bytes.length != 32) {
+            return invalid<PrivateKey>("Biscuit private key must have 32 bytes");
+        }
+        if (kind == SignatureAlgorithm.Ed25519) {
+            last key: ed25519.Ed25519PrivateKey = new(bytes);
+            return Result<PrivateKey>.Ok(new PrivateKey(key));
+        }
+        last key = ecdsa.parse_private_key(ecdsa.Curve.P256, bytes)?;
+        return Result<PrivateKey>.Ok(new PrivateKey(key));
+    };
+
+    export let generate = func(kind: SignatureAlgorithm) -> Result<PrivateKey> {
+        if (not allowed(kind)) {
+            return unsupported<PrivateKey>("Biscuit key algorithm is denied by crypto policy");
+        }
+        if (kind == SignatureAlgorithm.Ed25519) {
+            let seed = entropy.os_bytes(32)?;
+            let key: ed25519.Ed25519PrivateKey = new(seed);
+            words.wipe(seed);
+            return Result<PrivateKey>.Ok(new PrivateKey(key));
+        }
+        last key = ecdsa.generate_key_pair(ecdsa.Curve.P256)?;
+        return Result<PrivateKey>.Ok(new PrivateKey(key));
+    };
+);

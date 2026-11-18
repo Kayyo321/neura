@@ -1,0 +1,753 @@
+let externals = import:Std.Crypto.Internal.BiscuitExternals;
+let hex = import:Std.Encoding.Hex;
+let errors = import:Std.Core.Error;
+let int64s = import:Std.Core.Int64;
+let regex = import:Std.Text.Regex;
+let strings = import:Std.Text.Strings;
+let uint64s = import:Std.Core.UInt64;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Bounded typed Datalog values and expression evaluation for Biscuit. Internal.
+export let BiscuitExpr = module (
+    export const MaxDepth: int = 8;
+    export const MaxCollection: int = 32;
+    export const MaxOps: int = 64;
+    export const MaxTextBytes: int = 1024;
+    const MaxExternalNodes: int = 1024;
+
+    export let fail = func<T>(code: string, message: string) -> Result<T> =>
+        Result<T>.Err(errors.custom(code, message));
+
+    export let Kind = enum (Variable, Text, Integer, Date, Boolean, Bytes, Set, Null, Array, Map);
+
+    // Scalars retain their exact canonical text. Sets and arrays use items, and maps add parallel keys.
+    export let Term = class (
+        export last kind: Kind;
+        export last text: string;
+        export last items: Term[list];
+        export last keys: Term[list];
+
+        export let init = func(category: Kind, value: string) {
+            kind = category;
+            text = value;
+            items = new;
+            keys = new;
+        } or func(category: Kind, values: Term[list], indices: Term[list]) {
+            kind = category;
+            text = "";
+            items = values;
+            keys = indices;
+        };
+
+        export let contains = func(value: Term) -> bool {
+            last collection = kind == Kind.Map ? keys : items;
+            for (let member in collection) {
+                if (member.equals(value)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not term: Term) {
+                return false;
+            }
+            if (kind != term.kind || text != term.text || items.length != term.items.length) {
+                return false;
+            }
+            for (let i = 0; i < items.length; i++) {
+                if (kind == Kind.Set) {
+                    if (not term.contains(items[i])) {
+                        return false;
+                    }
+                } else if (kind == Kind.Map) {
+                    let equal = false;
+                    for (let j = 0; j < term.keys.length; j++) {
+                        if (keys[i].equals(term.keys[j])) {
+                            equal = items[i].equals(term.items[j]);
+                            break;
+                        }
+                    }
+                    return false unless equal;
+                } else if (not items[i].equals(term.items[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => text.hash_code();
+        export let.override to_string = func -> string => "Biscuit Term";
+    );
+
+    export let OperationKind = enum (Value, Unary, Binary, Closure);
+
+    // Unary and binary codes are the assigned protocol numbers.
+    export let Operation = class (
+        export last kind: OperationKind;
+        export last value: Term;
+        export last code: int;
+        export last parameter: string;
+        export last external_name: string;
+        export last body: Operation[list];
+
+        export let init = func(term: Term) {
+            kind = OperationKind.Value;
+            value = term;
+            code = 0;
+            parameter = "";
+            external_name = "";
+            body = new;
+        } or func(operator: OperationKind, number: int, function_name: string = "") {
+            kind = operator;
+            value = nil;
+            code = number;
+            parameter = "";
+            external_name = function_name;
+            body = new;
+        } or func(binding: string, operands: Operation[list]) {
+            kind = OperationKind.Closure;
+            value = nil;
+            code = 0;
+            parameter = binding;
+            external_name = "";
+            body = operands;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Expression Operation";
+    );
+
+    let contains_name = func(names: string[list], name: string) -> bool {
+        for (let current in names) {
+            if (current == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    export let valid = func(operations: Operation[list], variables: string[list], depth: int = 0) -> bool {
+        if (depth == MaxDepth || operations.length == 0 || operations.length > MaxOps) {
+            return false;
+        }
+        let stack: Operation[list] = new;
+        for (let op in operations) {
+            match (op.kind) {
+                OperationKind.Value => {
+                    if (op.value.kind == Kind.Variable && not contains_name(variables, op.value.text)) {
+                        return false;
+                    }
+                    stack.append(op);
+                },
+                OperationKind.Closure => {
+                    let names: string[list] = new;
+                    for (let name in variables) {
+                        names.append(name);
+                    }
+                    if (op.parameter != "") {
+                        if (contains_name(names, op.parameter)) {
+                            return false;
+                        }
+                        names.append(op.parameter);
+                    }
+                    if (not valid(op.body, names, depth + 1)) {
+                        return false;
+                    }
+                    stack.append(op);
+                },
+                OperationKind.Unary => {
+                    if (stack.length == 0 || stack[stack.length - 1].kind == OperationKind.Closure) {
+                        return false;
+                    }
+                },
+                OperationKind.Binary => {
+                    if (stack.length < 2) {
+                        return false;
+                    }
+                    last right = stack[stack.length - 1];
+                    stack.remove_at(stack.length - 1);
+                    last left = stack[stack.length - 1];
+                    if (op.code == 29) {
+                        if (left.kind != OperationKind.Closure || left.parameter != ""
+                            || right.kind == OperationKind.Closure) {
+                            return false;
+                        }
+                        stack[stack.length - 1] = right;
+                    } else {
+                        if (left.kind == OperationKind.Closure) {
+                            return false;
+                        }
+                        if (op.code >= 23 && op.code <= 26) {
+                            if (right.kind != OperationKind.Closure
+                                || ((op.code >= 25) != (right.parameter != ""))) {
+                                return false;
+                            }
+                        } else if (right.kind == OperationKind.Closure) {
+                            return false;
+                        }
+                    }
+                },
+            }
+        }
+        return stack.length == 1 && stack[0].kind != OperationKind.Closure;
+    };
+
+    /// @brief Rejects missing callbacks even when an expression branch would skip its call.
+    export let require_registered = func(operations: Operation[list], registry: externals.Registry) -> Result<Unit> {
+        for (let op in operations) {
+            if (op.external_name != "" && not registry.has(op.external_name)) {
+                return externals.fail<Unit>("unregistered Biscuit external function");
+            }
+            if (op.kind == OperationKind.Closure) {
+                require_registered(op.body, registry)?;
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let invalid = func<T>(message: string) -> Result<T> => fail<T>("biscuit.expression", message);
+    let bool_term = func(value: bool) -> Term => new Term(Kind.Boolean, value ? "true" : "false");
+    let int_term = func(value: int64) -> Term => new Term(Kind.Integer, value.to_string());
+
+    export let as_bool = func(value: Term) -> Result<bool> {
+        if (value.kind != Kind.Boolean) {
+            return invalid<bool>("Biscuit expression requires a Boolean");
+        }
+        return Result<bool>.Ok(value.text == "true");
+    };
+
+    let type_name = func(kind: Kind) -> string {
+        match (kind) {
+            Kind.Variable => {
+                return "variable";
+            },
+            Kind.Integer => {
+                return "integer";
+            },
+            Kind.Text => {
+                return "string";
+            },
+            Kind.Date => {
+                return "date";
+            },
+            Kind.Bytes => {
+                return "bytes";
+            },
+            Kind.Boolean => {
+                return "bool";
+            },
+            Kind.Set => {
+                return "set";
+            },
+            Kind.Null => {
+                return "null";
+            },
+            Kind.Array => {
+                return "array";
+            },
+            Kind.Map => {
+                return "map";
+            },
+        }
+        return "";
+    };
+
+    let unary = func(code: int, value: Term) -> Result<Term> {
+        if (code == 0) {
+            return Result<Term>.Ok(bool_term(not (as_bool(value)?)));
+        }
+        if (code == 1) {
+            return Result<Term>.Ok(value);
+        }
+        if (code == 3) {
+            return Result<Term>.Ok(new Term(Kind.Text, type_name(value.kind)));
+        }
+        if (code == 2) {
+            if (value.kind == Kind.Text || value.kind == Kind.Bytes) {
+                last length = value.kind == Kind.Text ? value.text.byte_length : value.text.byte_length / 2;
+                return Result<Term>.Ok(int_term(length as int64));
+            }
+            if (value.kind == Kind.Set || value.kind == Kind.Array || value.kind == Kind.Map) {
+                return Result<Term>.Ok(int_term(value.items.length as int64));
+            }
+        }
+        return invalid<Term>("invalid Biscuit unary operand");
+    };
+
+    let checked_integer = func(value: Optional<int64>) -> Result<Term> {
+        match (value) {
+            Optional.Some(number) => {
+                return Result<Term>.Ok(int_term(number));
+            },
+            Optional.None => {
+                return invalid<Term>("invalid Biscuit integer arithmetic");
+            },
+        }
+        return invalid<Term>("invalid Biscuit integer result");
+    };
+
+    let ordered = func(code: int, less: bool, equal: bool) -> Result<Term> {
+        last condition = code == 0 ? less : (code == 1 ? (not less && not equal) : (code == 2 ? (less || equal) : not less));
+        return Result<Term>.Ok(bool_term(condition));
+    };
+
+    let integer_operation = func(code: int, left: int64, right: int64) -> Result<Term> {
+        if (code <= 3) {
+            return ordered(code, left < right, left == right);
+        }
+        if (code == 9) {
+            return checked_integer(int64s.checked_add(left, right));
+        }
+        if (code == 10) {
+            return checked_integer(int64s.checked_sub(left, right));
+        }
+        if (code == 11) {
+            return checked_integer(int64s.checked_mul(left, right));
+        }
+        if (code == 12) {
+            return checked_integer(int64s.checked_div(left, right));
+        }
+        if (code == 17) {
+            return Result<Term>.Ok(int_term(left & right));
+        }
+        if (code == 18) {
+            return Result<Term>.Ok(int_term(left | right));
+        }
+        if (code == 19) {
+            return Result<Term>.Ok(int_term(left ^ right));
+        }
+        return invalid<Term>("invalid Biscuit integer operation");
+    };
+
+    let text_operation = func(code: int, left: string, right: string) -> Result<Term> {
+        if (code == 5) {
+            return Result<Term>.Ok(bool_term(strings.contains(left, right)));
+        }
+        if (code == 6) {
+            return Result<Term>.Ok(bool_term(strings.starts_with(left, right)));
+        }
+        if (code == 7) {
+            return Result<Term>.Ok(bool_term(strings.ends_with(left, right)));
+        }
+        if (code == 8) {
+            // The standard regex engine uses a bounded NFA. Limit work per expression as well.
+            if (left.byte_length > MaxTextBytes || right.byte_length > 128) {
+                return fail<Term>("biscuit.limit", "Biscuit regex input exceeds the byte limit");
+            }
+            match (regex.compile(right)) {
+                Result.Ok(pattern) => {
+                    return Result<Term>.Ok(bool_term(pattern.is_match(left)));
+                },
+                Result.Err(_) => {
+                    return invalid<Term>("unsupported Biscuit regular expression");
+                },
+            }
+        }
+        if (code == 9) {
+            if (left.byte_length + right.byte_length > MaxTextBytes) {
+                return fail<Term>("biscuit.limit", "Biscuit concatenation exceeds the byte limit");
+            }
+            return Result<Term>.Ok(new Term(Kind.Text, left .. right));
+        }
+        return invalid<Term>("invalid Biscuit text operation");
+    };
+
+    let set_operation = func(code: int, left: Term, right: Term) -> Result<Term> {
+        if (code == 5 && right.kind != Kind.Set) {
+            if (right.kind == Kind.Null || right.kind == Kind.Array || right.kind == Kind.Map) {
+                return invalid<Term>("invalid Biscuit set member type");
+            }
+            return Result<Term>.Ok(bool_term(left.contains(right)));
+        }
+        if (right.kind != Kind.Set) {
+            return invalid<Term>("Biscuit set operation requires another set");
+        }
+        if (code == 5) {
+            for (let member in right.items) {
+                if (not left.contains(member)) {
+                    return Result<Term>.Ok(bool_term(false));
+                }
+            }
+            return Result<Term>.Ok(bool_term(true));
+        }
+        let members: Term[list] = new;
+        if (code == 15 || code == 16) {
+            for (let member in left.items) {
+                if (code == 16 || right.contains(member)) {
+                    members.append(member);
+                }
+            }
+            if (code == 16) {
+                for (let member in right.items) {
+                    if (not left.contains(member)) {
+                        if (members.length == MaxCollection) {
+                            return fail<Term>("biscuit.limit", "Biscuit set union exceeds the collection limit");
+                        }
+                        members.append(member);
+                    }
+                }
+            }
+            return Result<Term>.Ok(new Term(Kind.Set, members, new));
+        }
+        return invalid<Term>("invalid Biscuit set operation");
+    };
+
+    let array_starts_or_ends = func(code: int, left: Term, right: Term) -> bool {
+        if (right.items.length > left.items.length) {
+            return false;
+        }
+        last offset = code == 6 ? 0 : left.items.length - right.items.length;
+        for (let i = 0; i < right.items.length; i++) {
+            if (not left.items[i + offset].equals(right.items[i])) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let get = func(left: Term, right: Term) -> Result<Term> {
+        if (left.kind == Kind.Array && right.kind == Kind.Integer) {
+            last index = int64s.parse(right.text)?;
+            if (index >= 0 && index < left.items.length as int64) {
+                return Result<Term>.Ok(left.items[index as int]);
+            }
+            return Result<Term>.Ok(new Term(Kind.Null, ""));
+        }
+        if (left.kind == Kind.Map && (right.kind == Kind.Integer || right.kind == Kind.Text)) {
+            for (let i = 0; i < left.keys.length; i++) {
+                if (left.keys[i].equals(right)) {
+                    return Result<Term>.Ok(left.items[i]);
+                }
+            }
+            return Result<Term>.Ok(new Term(Kind.Null, ""));
+        }
+        return invalid<Term>("invalid Biscuit lookup operands");
+    };
+
+    let binary = func(code: int, left: Term, right: Term) -> Result<Term> {
+        if (code == 4 || (code >= 20 && code <= 22)) {
+            if ((code == 4 || code == 20) && left.kind != right.kind) {
+                return invalid<Term>("strict Biscuit equality requires operands of one type");
+            }
+            last same = left.equals(right);
+            return Result<Term>.Ok(bool_term(code == 4 || code == 21 ? same : not same));
+        }
+        if (code == 27) {
+            return get(left, right);
+        }
+        if (left.kind == Kind.Set) {
+            return set_operation(code, left, right);
+        }
+        if (code == 5 && (left.kind == Kind.Array || left.kind == Kind.Map)) {
+            return Result<Term>.Ok(bool_term(left.contains(right)));
+        }
+        if ((code == 6 || code == 7) && left.kind == Kind.Array && right.kind == Kind.Array) {
+            return Result<Term>.Ok(bool_term(array_starts_or_ends(code, left, right)));
+        }
+        if (left.kind == right.kind) {
+            if (left.kind == Kind.Integer) {
+                return integer_operation(code, int64s.parse(left.text)?, int64s.parse(right.text)?);
+            }
+            if (left.kind == Kind.Text) {
+                return text_operation(code, left.text, right.text);
+            }
+            if (left.kind == Kind.Date && code <= 3) {
+                last a = uint64s.parse(left.text)?;
+                last b = uint64s.parse(right.text)?;
+                return ordered(code, a < b, a == b);
+            }
+            if (left.kind == Kind.Boolean && (code == 13 || code == 14)) {
+                last a = as_bool(left)?;
+                last b = as_bool(right)?;
+                return Result<Term>.Ok(bool_term(code == 13 ? (a && b) : (a || b)));
+            }
+        }
+        return invalid<Term>("invalid Biscuit binary operands");
+    };
+
+    let resolve = func(term: Term, bindings: [string, Term][list], step: func() -> Result<Unit>) -> Result<Term> {
+        if (term.kind != Kind.Variable) {
+            return Result<Term>.Ok(term);
+        }
+        for (let binding in bindings) {
+            step()?;
+            if (binding[0] == term.text) {
+                return Result<Term>.Ok(binding[1]);
+            }
+        }
+        return invalid<Term>("unbound Biscuit expression variable");
+    };
+
+    let check_external_size = func(depth: int, nodes: int[list], count: int) -> Result<Unit> {
+        if (depth >= MaxDepth || nodes[0] == MaxExternalNodes || count > MaxCollection) {
+            return fail<Unit>("biscuit.limit", "Biscuit external value exceeds its limits");
+        }
+        nodes[0]++;
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let to_external = func(term: Term, depth: int, nodes: int[list]) -> Result<externals.ExternalValue> {
+        check_external_size(depth, nodes, term.items.length)?;
+        match (term.kind) {
+            Kind.Integer => {
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Integer(int64s.parse(term.text)?));
+            },
+            Kind.Date => {
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Date(uint64s.parse(term.text)?));
+            },
+            Kind.Boolean => {
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Boolean(as_bool(term)?));
+            },
+            Kind.Text => {
+                if (term.text.byte_length > MaxTextBytes) {
+                    return fail<externals.ExternalValue>("biscuit.limit", "Biscuit external string exceeds its byte limit");
+                }
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Text(term.text));
+            },
+            Kind.Bytes => {
+                if (term.text.byte_length > 2 * MaxTextBytes) {
+                    return fail<externals.ExternalValue>("biscuit.limit", "Biscuit external byte array exceeds its limit");
+                }
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Bytes(hex.decode(term.text)?));
+            },
+            Kind.Null => {
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Null);
+            },
+            Kind.Map => {
+                let out: [externals.ExternalMapKey, externals.ExternalValue][list] = new;
+                for (let i = 0; i < term.items.length; i++) {
+                    last key = term.keys[i];
+                    if (key.text.byte_length > MaxTextBytes) {
+                        return fail<externals.ExternalValue>("biscuit.limit", "Biscuit external map key exceeds its byte limit");
+                    }
+                    last external_key = key.kind == Kind.Integer
+                        ? externals.ExternalMapKey.Integer(int64s.parse(key.text)?)
+                        : externals.ExternalMapKey.Text(key.text);
+                    out.append([external_key, to_external(term.items[i], depth + 1, nodes)?]);
+                }
+                return Result<externals.ExternalValue>.Ok(externals.ExternalValue.Map(out));
+            },
+            Kind.Variable => {
+                return invalid<externals.ExternalValue>("unbound Biscuit external argument");
+            },
+            _ => {
+                let out: externals.ExternalValue[list] = new;
+                for (let item in term.items) {
+                    out.append(to_external(item, depth + 1, nodes)?);
+                }
+                return Result<externals.ExternalValue>.Ok(term.kind == Kind.Set
+                    ? externals.ExternalValue.Set(out) : externals.ExternalValue.Array(out));
+            },
+        }
+        return invalid<externals.ExternalValue>("invalid Biscuit external argument");
+    };
+
+    let external_collection = func(kind: Kind, source: externals.ExternalValue[list], depth: int, nodes: int[list])
+        -> Result<Term> {
+        if (source.length > MaxCollection) {
+            return fail<Term>("biscuit.limit", "Biscuit external collection exceeds its item limit");
+        }
+        let items: Term[list] = new;
+        for (let value in source) {
+            last item = from_external(value, depth + 1, nodes)?;
+            if (kind == Kind.Set) {
+                if (item.kind == Kind.Null || item.kind == Kind.Set || item.kind == Kind.Array || item.kind == Kind.Map
+                    || (items.length > 0 && item.kind != items[0].kind)) {
+                    return externals.fail<Term>("Biscuit external set requires one scalar type");
+                }
+                let duplicated = false;
+                for (let existing in items) {
+                    if (existing.equals(item)) {
+                        duplicated = true;
+                        break;
+                    }
+                }
+                if (duplicated) {
+                    continue;
+                }
+            }
+            items.append(item);
+        }
+        return Result<Term>.Ok(new Term(kind, items, new));
+    };
+
+    let from_external = func(value: externals.ExternalValue, depth: int, nodes: int[list]) -> Result<Term> {
+        check_external_size(depth, nodes, 0)?;
+        match (value) {
+            externals.ExternalValue.Integer(number) => {
+                return Result<Term>.Ok(int_term(number));
+            },
+            externals.ExternalValue.Boolean(boolean) => {
+                return Result<Term>.Ok(bool_term(boolean));
+            },
+            externals.ExternalValue.Date(seconds) => {
+                return Result<Term>.Ok(new Term(Kind.Date, seconds.to_string()));
+            },
+            externals.ExternalValue.Null => {
+                return Result<Term>.Ok(new Term(Kind.Null, ""));
+            },
+            externals.ExternalValue.Text(text) => {
+                if (text.byte_length > MaxTextBytes) {
+                    return fail<Term>("biscuit.limit", "Biscuit external string exceeds its byte limit");
+                }
+                return Result<Term>.Ok(new Term(Kind.Text, text));
+            },
+            externals.ExternalValue.Bytes(bytes) => {
+                if (bytes.length > MaxTextBytes) {
+                    return fail<Term>("biscuit.limit", "Biscuit external byte array exceeds its limit");
+                }
+                return Result<Term>.Ok(new Term(Kind.Bytes, hex.encode(bytes)));
+            },
+            externals.ExternalValue.Set(items) => {
+                return external_collection(Kind.Set, items, depth, nodes);
+            },
+            externals.ExternalValue.Array(items) => {
+                return external_collection(Kind.Array, items, depth, nodes);
+            },
+            externals.ExternalValue.Map(entries) => {
+                if (entries.length > MaxCollection) {
+                    return fail<Term>("biscuit.limit", "Biscuit external map exceeds its item limit");
+                }
+                let keys: Term[list] = new;
+                let items: Term[list] = new;
+                for (let entry in entries) {
+                    last key = match (entry[0]) {
+                        externals.ExternalMapKey.Integer(number) => int_term(number),
+                        externals.ExternalMapKey.Text(text) => new Term(Kind.Text, text),
+                    };
+                    if (key.text.byte_length > MaxTextBytes) {
+                        return fail<Term>("biscuit.limit", "Biscuit external map key exceeds its byte limit");
+                    }
+                    for (let existing in keys) {
+                        if (existing.equals(key)) {
+                            return externals.fail<Term>("duplicate Biscuit external map key");
+                        }
+                    }
+                    keys.append(key);
+                    items.append(from_external(entry[1], depth + 1, nodes)?);
+                }
+                return Result<Term>.Ok(new Term(Kind.Map, items, keys));
+            },
+        }
+        return invalid<Term>("invalid Biscuit external result");
+    };
+
+    let external_call = func(registry: externals.Registry, name: string, left: Term, right: Optional<Term>) -> Result<Term> {
+        let nodes: int[list] = new([0]);
+        last first = to_external(left, 0, nodes)?;
+        let second = Optional<externals.ExternalValue>.None;
+        match (right) {
+            Optional.Some(value) => {
+                second = Optional<externals.ExternalValue>.Some(to_external(value, 0, nodes)?);
+            },
+            Optional.None => {},
+        }
+        match (registry.call(name, first, second)) {
+            Result.Ok(output) => {
+                return from_external(output, 0, new([0]));
+            },
+            Result.Err(error) => {
+                match (error) {
+                    errors.Error.Custom(detail) if detail.code() == "biscuit.limit" => {
+                        return Result<Term>.Err(error);
+                    },
+                    _ => {
+                        return invalid<Term>("Biscuit application function failed");
+                    },
+                }
+            },
+        }
+        return invalid<Term>("Biscuit application function failed");
+    };
+
+    let quantify = func(code: int, left: Term, closure: Operation, bindings: [string, Term][list],
+        step: func() -> Result<Unit>, registry: externals.Registry) -> Result<Term> {
+        if (left.kind != Kind.Set && left.kind != Kind.Array && left.kind != Kind.Map) {
+            return invalid<Term>("Biscuit quantifier requires a collection");
+        }
+        last unanimous = code == 25;
+        for (let i = 0; i < left.items.length; i++) {
+            step()?;
+            last item = left.kind == Kind.Map ? new Term(Kind.Array, new([left.keys[i], left.items[i]]), new) : left.items[i];
+            bindings.append([closure.parameter, item]);
+            last result = evaluate(closure.body, bindings, step, registry);
+            bindings.remove_at(bindings.length - 1);
+            if ((as_bool(result?)?) != unanimous) {
+                return Result<Term>.Ok(bool_term(not unanimous));
+            }
+        }
+        return Result<Term>.Ok(bool_term(unanimous));
+    };
+
+    let with_closure = func(code: int, left: Operation, right: Operation, bindings: [string, Term][list],
+        step: func() -> Result<Unit>, registry: externals.Registry) -> Result<Term> {
+        if (code == 29) {
+            match (evaluate(left.body, bindings, step, registry)) {
+                Result.Ok(value) => {
+                    return Result<Term>.Ok(value);
+                },
+                Result.Err(error) => {
+                    match (error) {
+                        errors.Error.Custom(detail) if detail.code() == "biscuit.expression" => {
+                            return Result<Term>.Ok(right.value);
+                        },
+                        _ => {
+                            return Result<Term>.Err(error);
+                        },
+                    }
+                },
+            }
+        }
+        if (code == 25 || code == 26) {
+            return quantify(code, left.value, right, bindings, step, registry);
+        }
+        last test = as_bool(left.value)?;
+        if ((code == 23 && not test) || (code == 24 && test)) {
+            return Result<Term>.Ok(left.value);
+        }
+        return evaluate(right.body, bindings, step, registry);
+    };
+
+    /// @brief Evaluates previously validated stack code under a shared work budget.
+    export let evaluate = func(operations: Operation[list], bindings: [string, Term][list],
+        step: func() -> Result<Unit>, registry: externals.Registry) -> Result<Term> {
+        let stack: Operation[list] = new;
+        for (let op in operations) {
+            step()?;
+            match (op.kind) {
+                OperationKind.Value => {
+                    stack.append(new Operation(resolve(op.value, bindings, step)?));
+                },
+                OperationKind.Closure => {
+                    stack.append(op);
+                },
+                OperationKind.Unary => {
+                    last index = stack.length - 1;
+                    last input = stack[index].value;
+                    last computed = op.external_name == "" ? unary(op.code, input)?
+                        : external_call(registry, op.external_name, input, Optional<Term>.None)?;
+                    stack[index] = new Operation(computed);
+                },
+                OperationKind.Binary => {
+                    last right = stack[stack.length - 1];
+                    stack.remove_at(stack.length - 1);
+                    last index = stack.length - 1;
+                    last left = stack[index];
+                    last computed: Term;
+                    if (left.kind == OperationKind.Closure || right.kind == OperationKind.Closure) {
+                        computed = with_closure(op.code, left, right, bindings, step, registry)?;
+                    } else if (op.external_name != "") {
+                        computed = external_call(registry, op.external_name, left.value, Optional<Term>.Some(right.value))?;
+                    } else {
+                        computed = binary(op.code, left.value, right.value)?;
+                    }
+                    stack[index] = new Operation(computed);
+                },
+            }
+        }
+        return Result<Term>.Ok(stack[0].value);
+    };
+);

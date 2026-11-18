@@ -23,11 +23,11 @@ The following public declarations are taken from the module source; each links t
   Replaces the process-wide policy. Since 0.3.0.
 - **CryptoPolicy** · [`export let policy = func -> Policy`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L35)
   The process-wide policy. Tagged `#NoDiscard`. Since 0.3.0.
-- **CryptoPolicy** · [`export let allowed_by = func(policy: Policy, algorithm: Algorithm) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L48)
+- **CryptoPolicy** · [`export let allowed_by = func(policy: Policy, algorithm: Algorithm) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L45)
   Whether the policy allows the algorithm. Tagged `#NoDiscard`, `#Pure`. Since 0.3.0.
-- **CryptoPolicy** · [`export let allows = func(algorithm: Algorithm) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L56)
+- **CryptoPolicy** · [`export let allows = func(algorithm: Algorithm) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L53)
   Whether the current policy allows the algorithm. Tagged `#NoDiscard`. Since 0.3.0.
-- **CryptoPolicy** · [`export let require = func(algorithm: Algorithm)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L61)
+- **CryptoPolicy** · [`export let require = func(algorithm: Algorithm)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/crypto-policy.nra#L58)
   Traps with "denied: <Algorithm> is not allowed under the <Policy> policy" unless the current policy allows the algorithm. Since 0.3.0.
 <!-- END SOURCE API -->
 

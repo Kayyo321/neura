@@ -1,0 +1,47 @@
+// test-options: --gpu=off --deny-entropy --max-steps 800000000
+let base64 = import:Std.Encoding.Base64;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let jwe = import:Std.Crypto.Token.Jwe;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JweRsaVectors;
+
+let JweRsaTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_rsa_oaep_256_vector = func {
+        last row = vectors.rsa256;
+        last private_key = test.assert_ok(rsa.parse_private_key(bytes(row[0]), bytes(row[1]), bytes(row[2]), bytes(row[3]),
+            bytes(row[4]), bytes(row[5]), bytes(row[6]), bytes(row[7])));
+        last opener = new jwe.RsaUnwrappingKey(jwe.ContentEncryption.A256Gcm, private_key);
+        last wrapper = new jwe.RsaWrappingKey(jwe.ContentEncryption.A256Gcm, private_key.public_key);
+
+        test.assert_equal_string(row[11], hex.encode(test.assert_ok(jwe.open(opener, row[13]))));
+        last sealed = jwe.seal_with(wrapper, bytes(row[11]), bytes(row[8]), bytes(row[9]), bytes(row[10]),
+            test.assert_ok(utf8.decode(bytes(row[12]))));
+        test.assert_equal_string(row[13], test.assert_ok(sealed));
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(opener, row[14]))));
+
+        let segments = strings.split(row[13], ".");
+        let encrypted_key = test.assert_ok(base64.decode_url_unpadded(segments[1]));
+        encrypted_key[encrypted_key.length - 1] = encrypted_key[encrypted_key.length - 1] ^ 1;
+        segments[1] = base64.encode_url_unpadded(encrypted_key);
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(opener, strings.join(segments, ".")))));
+
+        segments[0] = base64.encode_url_unpadded(utf8.encode("{\"alg\":\"RSA-OAEP\",\"enc\":\"A256GCM\"}"));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(opener, strings.join(segments, ".")))));
+
+        let _ = test.assert_err(jwe.seal(wrapper, new));
+        last token = test.assert_ok(jwe.seal(wrapper, bytes(row[11]), new drbg.ChaCha20Drbg(bytes(row[10]))));
+        test.assert_equal_string(row[11], hex.encode(test.assert_ok(jwe.open(opener, token))));
+    };
+);

@@ -1,0 +1,113 @@
+// test-options: --gpu=off --max-steps 4000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let test = import:Std.Test;
+let vectors = import:MlDsaVectors;
+
+// ML-DSA against NIST's ACVP test sets ML-DSA-keyGen-FIPS204, ML-DSA-sigGen-FIPS204 and ML-DSA-sigVer-FIPS204
+// (support/, scripts/crypto-vectors/gen-pqc-ml-dsa.py).
+let MlDsaSignTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let set_of = func(name: string) -> ml_dsa.ParameterSet {
+        if (name == "44") {
+            return ml_dsa.ParameterSet.MlDsa44;
+        }
+        if (name == "65") {
+            return ml_dsa.ParameterSet.MlDsa65;
+        }
+        return ml_dsa.ParameterSet.MlDsa87;
+    };
+
+    let hash_of = func(name: string) -> Algorithm {
+        if (name == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (name == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (name == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        if (name == "Sha512") {
+            return Algorithm.Sha512;
+        }
+        if (name == "Sha512_256") {
+            return Algorithm.Sha512_256;
+        }
+        if (name == "Sha3_224") {
+            return Algorithm.Sha3_224;
+        }
+        if (name == "Sha3_256") {
+            return Algorithm.Sha3_256;
+        }
+        if (name == "Sha3_384") {
+            return Algorithm.Sha3_384;
+        }
+        if (name == "Sha3_512") {
+            return Algorithm.Sha3_512;
+        }
+        if (name == "Shake128") {
+            return Algorithm.Shake128;
+        }
+        return Algorithm.Shake256;
+    };
+
+    let sign_row = func(rows: string[], i: int) {
+        last key = test.assert_ok(ml_dsa.parse_private_key(set_of(rows[i]), decode(rows[i + 6])));
+        last signer = new ml_dsa.MlDsaSigner(key);
+        last kind = rows[i + 1];
+        last message = decode(rows[i + 4]);
+        last context = decode(rows[i + 3]);
+        last rnd = decode(rows[i + 5]);
+        last signature: uint8[list];
+        if (kind == "pure") {
+            signature = signer.sign_with(message, context, rnd);
+        } else if (kind == "prehash") {
+            signature = signer.sign_prehash_with(message, context, hash_of(rows[i + 2]), rnd);
+        } else if (kind == "internal") {
+            signature = signer.sign_internal(message, rnd);
+        } else {
+            signature = signer.sign_mu(message, rnd);
+        }
+        test.assert_equal_string(rows[i + 7], hex.encode(signature));
+    };
+
+    export let test_signing = func {
+        last rows = vectors.sign;
+        for (let i = 0; i < rows.length; i += 8) {
+            sign_row(rows, i);
+        }
+        test.assert_equal_int32(232, rows.length);
+    };
+
+    /// @brief Wycheproof's boundary cases: each is signed from its seed, compared, and verified.
+    export let test_wycheproof_boundary_signing = func {
+        last rows = vectors.wycheproof_sign;
+        for (let i = 0; i < rows.length; i += 9) {
+            last set = set_of(rows[i]);
+            last key = ml_dsa.key_pair_from_seed(set, decode(rows[i + 2]));
+            test.assert_equal_string(rows[i + 3], hex.encode(key.public_key_bytes()));
+            last signer = new ml_dsa.MlDsaSigner(key);
+            last verifier = new ml_dsa.MlDsaVerifier(key.public_key());
+            last rnd = decode(rows[i + 7]);
+            last signature: uint8[list];
+            last valid: bool;
+            if (rows[i + 4] == "-") {
+                signature = signer.sign_mu(decode(rows[i + 6]), rnd);
+                valid = verifier.verify_mu(decode(rows[i + 6]), signature);
+            } else {
+                last message = decode(rows[i + 4]);
+                last context = decode(rows[i + 5]);
+                signature = signer.sign_with(message, context, rnd);
+                valid = verifier.verify_with_context(message, signature, context);
+            }
+            test.assert_with(rows[i + 8] == hex.encode(signature), "Wycheproof ML-DSA-" + rows[i] + " case " + rows[i + 1]);
+            test.assert(valid);
+        }
+        test.assert_equal_int32(783, rows.length);
+    };
+);

@@ -1,0 +1,141 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let keccak = import:Std.Crypto.Internal.Keccak;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Merlin v1.0 transcript operations using STROBE-128 and Keccak-f[1600].
+/// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+#Since("0.3.0")
+export let Merlin = module (
+    const Rate: int = 166;
+    const MetaAd: uint8 = 18;
+    const Ad: uint8 = 2;
+    const Prf: uint8 = 7;
+
+    /// @brief A mutable transcript with an application domain label and independent STROBE state.
+    /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+    #[Final, Since("0.3.0")]
+    export let Transcript = class (
+        let state: uint8[list] = words.zeros(200);
+        let position = 0;
+        let operation_start: uint8 = 0;
+        last permutation: keccak.Permutation = new;
+
+        /// @brief Starts a transcript and appends the application label under dom-sep.
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+        #Since("0.3.0")
+        export let init = func(application: uint8[list]) {
+            crypto_policy.require(Algorithm.Merlin);
+            last prefix: uint8[] = [1, 168, 1, 0, 1, 96];
+            for (let i = 0; i < prefix.length; i++) {
+                state[i] = prefix[i];
+            }
+            last version = words.utf8("STROBEv1.0.2");
+            for (let i = 0; i < version.length; i++) {
+                state[6 + i] = version[i];
+            }
+            permutation.apply_bytes(state);
+            begin(MetaAd);
+            absorb(words.utf8("Merlin v1.0"));
+            append_message(words.utf8("dom-sep"), application);
+        };
+
+        let run_permutation = func {
+            state[position] = state[position] ^ operation_start;
+            state[position + 1] = state[position + 1] ^ 4;
+            state[Rate + 1] = state[Rate + 1] ^ 128;
+            permutation.apply_bytes(state);
+            position = 0;
+            operation_start = 0;
+        };
+
+        let advance = func {
+            position++;
+            if (position == Rate) {
+                run_permutation();
+            }
+        };
+
+        let absorb_byte = func(byte: uint8) {
+            state[position] = state[position] ^ byte;
+            advance();
+        };
+
+        let absorb = func(bytes: uint8[list]) {
+            for (let byte in bytes) {
+                absorb_byte(byte);
+            }
+        };
+
+        let begin = func(flags: uint8) {
+            last previous = operation_start;
+            operation_start = (position + 1) as uint8;
+            absorb_byte(previous);
+            absorb_byte(flags);
+            if ((flags & 4) != 0 && position != 0) {
+                run_permutation();
+            }
+        };
+
+        let metadata = func(label: uint8[list], length: int) {
+            begin(MetaAd);
+            absorb(label);
+            let size: uint8[list] = new;
+            words.append32_le(size, length as uint32);
+            absorb(size);
+        };
+
+        /// @brief Appends a labeled byte string, framing its length as uint32 little-endian.
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+        #Since("0.3.0")
+        export let append_message = func(label: uint8[list], message: uint8[list]) {
+            metadata(label, message.length);
+            begin(Ad);
+            absorb(message);
+        };
+
+        /// @brief Appends a labeled uint64 in little-endian order.
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+        #Since("0.3.0")
+        export let append_u64 = func(label: uint8[list], value: uint64) {
+            let encoded: uint8[list] = new;
+            words.append64_le(encoded, value);
+            append_message(label, encoded);
+        };
+
+        /// @brief Derives a challenge at the current state and advances the transcript.
+        /// A negative length traps.
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+        #[NoDiscard, Since("0.3.0")]
+        export let challenge_bytes = func(label: uint8[list], length: int) -> uint8[list] {
+            if (length < 0) {
+                trap_with_message("invalid argument: negative Merlin challenge length");
+            }
+            metadata(label, length);
+            begin(Prf);
+            let challenge: uint8[list] = new;
+            for (let i = 0; i < length; i++) {
+                challenge.append(state[position]);
+                state[position] = 0;
+                advance();
+            }
+            return challenge;
+        };
+
+        /// @brief Creates an independent copy at the same transcript position.
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+        #[NoDiscard, Since("0.3.0")]
+        export let fork = func -> Transcript {
+            let copy: Transcript = new(new);
+            copy.state = words.copy(state);
+            copy.position = position;
+            copy.operation_start = operation_start;
+            return copy;
+        };
+
+        /// @brief Omits the transcript state.
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Merlin.Transcript(<redacted>)";
+    );
+);

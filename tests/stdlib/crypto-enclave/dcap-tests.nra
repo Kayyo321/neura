@@ -1,0 +1,109 @@
+// test-options: --gpu=off --deny-all --max-steps 800000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let dcap = import:Std.Crypto.Enclave.Dcap;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let test = import:Std.Test;
+let vectors = import:DcapVectors;
+
+let DcapTests = module (
+    const Columns = 8;
+
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let at = func(seconds: string) -> instant.Instant => instant.of_epoch_seconds(test.assert_ok(int64s.parse(seconds)), 0);
+
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_real_quotes = func {
+        last rows = vectors.quotes;
+        last root = bytes(vectors.roots[0]);
+        for (let i = 0; i < rows.length; i += Columns) {
+            last sample = bytes(rows[i + 1]);
+            last parsed = test.assert_ok(dcap.parse(sample));
+            last signed = test.assert_ok(dcap.verify_signed(sample, root, at(rows[i + 2])));
+            test.assert_equal_string(rows[i + 3], hex.encode(signed.report_data()));
+            test.assert_equal_string(rows[i + 4], hex.encode(signed.measurement()));
+            test.assert(signed.equals(parsed) && signed.hash_code() == parsed.hash_code());
+            test.assert(!signed.debug());
+            test.assert_equal_int32(384, signed.qe_report().length);
+            test.assert_equal_int32(5, signed.certification_type);
+            test.assert(signed.platform == (rows[i] == "sgx" ? dcap.Platform.Sgx : dcap.Platform.Tdx));
+        }
+    };
+
+    export let test_tampering_and_wrong_trust_anchor = func {
+        last rows = vectors.quotes;
+        last root = bytes(vectors.roots[0]);
+        last wrong_root = bytes(vectors.roots[1]);
+        last time = at(rows[2]);
+        let sample = bytes(rows[1]);
+        test.assert_equal_string("crypto.attestation_certificate",
+            code(test.assert_err(dcap.verify_signed(sample, wrong_root, time))));
+
+        // Change a report byte, the QE report signature, then the QE key binding independently.
+        sample[112] = sample[112] ^ 1;
+        test.assert_equal_string("crypto.attestation_signature", code(test.assert_err(dcap.verify_signed(sample, root, time))));
+        sample[112] = sample[112] ^ 1;
+        last qe_signature_offset = test.assert_ok(int32s.parse(rows[5]));
+        sample[qe_signature_offset] = sample[qe_signature_offset] ^ 1;
+        test.assert_equal_string("crypto.attestation_signature", code(test.assert_err(dcap.verify_signed(sample, root, time))));
+        sample[qe_signature_offset] = sample[qe_signature_offset] ^ 1;
+        last authentication_offset = test.assert_ok(int32s.parse(rows[6]));
+        sample[authentication_offset] = sample[authentication_offset] ^ 1;
+        test.assert_equal_string("crypto.attestation_signature", code(test.assert_err(dcap.verify_signed(sample, root, time))));
+    };
+
+    export let test_strict_framing = func {
+        last rows = vectors.quotes;
+        let source = bytes(rows[Columns + 1]);
+        for (let b in bytes(rows[Columns + 7])) {
+            source.append(b);
+        }
+        test.assert_equal_string("crypto.malformed_dcap", code(test.assert_err(dcap.parse(source))));
+        source = bytes(rows[Columns + 1]);
+        source.remove_at(source.length - 1);
+        test.assert_equal_string("crypto.malformed_dcap", code(test.assert_err(dcap.parse(source))));
+        source = bytes(rows[Columns + 1]);
+        source[764] = 5;
+        test.assert_equal_string("crypto.malformed_dcap", code(test.assert_err(dcap.parse(source))));
+        source = bytes(rows[Columns + 1]);
+        source[0] = 5;
+        test.assert_equal_string("crypto.unsupported_dcap", code(test.assert_err(dcap.parse(source))));
+        source = bytes(rows[1]);
+        source[12] = source[12] ^ 1;
+        test.assert_equal_string("crypto.malformed_dcap", code(test.assert_err(dcap.parse(source))));
+    };
+
+    let RejectCollateral = class implements dcap.CollateralVerifier (
+        export let verify = func(quote: dcap.Quote, pck_der: uint8[list], trusted_root_der: uint8[list], at: instant.Instant)
+                -> Result<Unit> {
+            test.assert(quote.platform == dcap.Platform.Sgx);
+            test.assert(pck_der.length > 0 && trusted_root_der.length > 0 && at.epoch_seconds > 0);
+            return Result<Unit>.Err(error.custom("test.collateral", "collateral authentication failed"));
+        };
+    );
+
+    export let test_full_policy_requires_collateral = func {
+        last row = vectors.quotes;
+        last root = bytes(vectors.roots[0]);
+        last quote = bytes(row[1]);
+        last time = at(row[2]);
+        last measurement = bytes(row[4]);
+        last report_data = bytes(row[3]);
+        last verifier = new RejectCollateral();
+        test.assert_equal_string("test.collateral", code(test.assert_err(dcap.verify(quote, root, time,
+            dcap.Platform.Sgx, measurement, report_data, verifier))));
+
+        report_data[0] = report_data[0] ^ 1;
+        test.assert_equal_string("crypto.attestation_nonce", code(test.assert_err(dcap.verify(quote, root, time,
+            dcap.Platform.Sgx, measurement, report_data, verifier))));
+    };
+);

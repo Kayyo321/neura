@@ -1,0 +1,121 @@
+// test-options: --gpu=off --deny-clock
+let fixed_clock = import:Std.Time.FixedClock;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let json = import:Std.Encoding.Json;
+let jwk = import:Std.Crypto.Token.Jwk;
+let signed_vectors = import:JwsVectors;
+let jwt = import:Std.Crypto.Token.Jwt;
+let system_clock = import:Std.Time.SystemClock;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JwtVectors;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+
+let JwtTests = module (
+    let clock_at = func(seconds: int64) -> fixed_clock.FixedClock =>
+        fixed_clock.of(instant.of_epoch_seconds(seconds, 0));
+
+    let code_of = func(error: Error) -> string {
+        match (error) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return error.to_string();
+            },
+        }
+        return "";
+    };
+
+    export let test_rfc_7519_payload = func {
+        last example = vectors.example;
+        last payload = test.assert_ok(hex.decode(example[0]));
+        last exp = test.assert_ok(int64s.parse(example[1]));
+        last clock = clock_at(exp - 1);
+        last claims = test.assert_ok(jwt.validate_claims(payload, clock, 0));
+        match (test.assert_some(json.member(claims, "iss"))) {
+            json.JsonValue.Text(issuer) => {
+                test.assert_equal_string(example[2], issuer);
+            },
+            _ => {
+                test.fail("RFC issuer has wrong type");
+            },
+        }
+        clock.set(instant.of_epoch_seconds(exp, 0));
+        test.assert_equal_string("jwt.expired", code_of(test.assert_err(jwt.validate_claims(payload, clock, 0))));
+        let _ = test.assert_ok(jwt.validate_claims(payload, clock, 1));
+        clock.set(instant.of_epoch_seconds(exp + 1, 0));
+        test.assert_equal_string("jwt.expired", code_of(test.assert_err(jwt.validate_claims(payload, clock, 1))));
+    };
+
+    export let test_not_before_and_issued_at_boundaries = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(99, 999999999));
+        last not_before = utf8.encode("{\"nbf\":100}");
+        last issued_at = utf8.encode("{\"iat\":100}");
+        test.assert_equal_string("jwt.not_before", code_of(test.assert_err(jwt.validate_claims(not_before, clock, 0))));
+        test.assert_equal_string("jwt.issued_at", code_of(test.assert_err(jwt.validate_claims(issued_at, clock, 0))));
+        let _ = test.assert_ok(jwt.validate_claims(not_before, clock, 1));
+        let _ = test.assert_ok(jwt.validate_claims(issued_at, clock, 1));
+        clock.set(instant.of_epoch_seconds(100, 0));
+        let _ = test.assert_ok(jwt.validate_claims(utf8.encode("{\"nbf\":100,\"iat\":100,\"exp\":101}"), clock, 0));
+    };
+
+    export let test_exact_integer_seconds_and_large_leeway = func {
+        last clock = clock_at(9007199254740992);
+        // The adjacent integers would round to the same float value.
+        let _ = test.assert_ok(jwt.validate_claims(utf8.encode("{\"exp\":9007199254740993}"), clock, 0));
+        test.assert_equal_string("jwt.not_before", code_of(test.assert_err(
+            jwt.validate_claims(utf8.encode("{\"nbf\":9007199254740993}"), clock, 0))));
+        clock.set(instant.of_epoch_seconds(int64s.Min, 0));
+        last minimum = utf8.encode("{\"exp\":-9223372036854775808,\"nbf\":-9223372036854775808}");
+        test.assert_equal_string("jwt.expired", code_of(test.assert_err(jwt.validate_claims(minimum, clock, 0))));
+        let _ = test.assert_ok(jwt.validate_claims(minimum, clock, 1));
+        clock.set(instant.of_epoch_seconds(int64s.Max, 999999999));
+        let _ = test.assert_ok(jwt.validate_claims(
+            utf8.encode("{\"exp\":9223372036854775807,\"nbf\":9223372036854775807,\"iat\":9223372036854775807}"),
+            clock, int64s.Max));
+    };
+
+    export let test_reject_invalid_claim_objects = func {
+        last clock = clock_at(0);
+        for (let payload in ["[]", "null", "{\"exp\":1,}", "{\"exp\":1,\"exp\":2}", "{\"exp\":1,\"\\u0065xp\":2}",
+            "{\"exp\":true}", "{\"exp\":1.5}", "{\"exp\":1e2}", "{\"nbf\":\"1\"}", "{\"iat\":null}",
+            "{\"exp\":9223372036854775808}", "{\"nbf\":-9223372036854775809}"]) {
+            test.assert_equal_string("jwt.claims", code_of(test.assert_err(jwt.validate_claims(utf8.encode(payload),
+                clock, 0))));
+        }
+        test.assert_equal_string("jwt.claims", code_of(test.assert_err(jwt.validate_claims(new([255]), clock, 0))));
+        let _ = test.assert_ok(jwt.validate_claims(utf8.encode("{\"ext\":{\"exp\":0},\"\\u0065xp\":1}"), clock, 0));
+    };
+
+    export let test_signed_rfc_7515_jwt = func {
+        last rows = signed_vectors.examples;
+        test.assert_equal_string("RFC 7515 A.1", rows[0]);
+        last key_text = test.assert_ok(utf8.decode(test.assert_ok(hex.decode(rows[2]))));
+        last key = test.assert_ok(jwk.parse_hmac(key_text, jwk.HmacAlgorithm.Hs256));
+        last expired_at = test.assert_ok(int64s.parse(vectors.example[1]));
+        let _ = test.assert_ok(jwt.verify<jwk.HmacKey>(rows[3], key, clock_at(expired_at - 1), 0));
+        test.assert_equal_string("jwt.expired", code_of(test.assert_err(
+            jwt.verify<jwk.HmacKey>(rows[3], key, clock_at(expired_at), 0))));
+        last wrong_token = rows[3].slice(0, rows[3].byte_length - 1) + "A";
+        test.assert_equal_string("jws.signature", code_of(test.assert_err(
+            jwt.verify<jwk.HmacKey>(wrong_token, key, clock_at(expired_at - 1), 0))));
+    };
+
+    export let test_read_clock_only_for_time_claims = func {
+        last clock = system_clock.create();
+        let _ = test.assert_ok(jwt.validate_claims(utf8.encode("{}"), clock, 0));
+        last error = test.assert_err(jwt.validate_claims(utf8.encode("{\"iat\":0}"), clock, 0));
+        match (error) {
+            Error.Io { kind, message: _, path: _ } => {
+                test.assert(kind == IoErrorKind.CapabilityDenied);
+            },
+            _ => {
+                test.fail("expected the clock capability error");
+            },
+        }
+    };
+);

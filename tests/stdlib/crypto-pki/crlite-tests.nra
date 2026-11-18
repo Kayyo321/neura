@@ -1,0 +1,108 @@
+let certificate = import:Std.Crypto.Pki.Certificate;
+let crlite = import:Std.Crypto.Pki.CrLite;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let test = import:Std.Test;
+let vectors = import:CrliteVectors;
+let.promote _ = import:Std.Core.Result;
+
+// CRLite cascades built by mozilla/filter-cascade and recorded rust-cascade test data, with the membership the
+// reference defines (support/crlite-vectors.nra, scripts/crypto-vectors/gen-pki-crlite.py).
+let CrliteTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_bloom_layers_compare_by_dimensions_and_bits = func {
+        last layer = new crlite.BloomLayer(8, 2, new([37]));
+        last copy = new crlite.BloomLayer(8, 2, new([37]));
+        test.assert(layer.equals(copy) && copy.equals(layer));
+        test.assert(layer.hash_code() == copy.hash_code());
+        test.assert(!layer.equals(new crlite.BloomLayer(7, 2, new([37]))));
+        test.assert(!layer.equals(new crlite.BloomLayer(8, 3, new([37]))));
+        test.assert(!layer.equals(new crlite.BloomLayer(8, 2, new([36]))));
+    };
+
+    /// @brief Checks every "key=expected" of the cell (hex keys).
+    let check_all = func(cascade: crlite.FilterCascade, cell: string) -> int {
+        let count = 0;
+        let start = 0;
+        for (let i = 0; i <= cell.byte_length; i++) {
+            if (i == cell.byte_length || cell.byte_at(i) == 124) {
+                last item = cell.slice(start, i);
+                last key_text = item.slice(0, item.byte_length - 2);
+                last expected = item.byte_at(item.byte_length - 1) == 49;
+                last key = decode(key_text);
+                test.assert_with(cascade.has(key) == expected, key_text);
+                count++;
+                start = i + 1;
+            }
+        }
+        return count;
+    };
+
+    export let test_reference_built_cascades = func {
+        last rows = vectors.cascades;
+        for (let i = 0; i < rows.length; i += 3) {
+            last cascade = test.assert_ok(crlite.parse(decode(rows[i + 1])));
+            test.assert_equal_int32(24, check_all(cascade, rows[i + 2]) as int32);
+            test.assert(cascade.hash == crlite.CascadeHash.Sha256Low32);
+            test.assert_equal_int32(2, cascade.version);
+        }
+    };
+
+    export let test_recorded_rust_cascade_files = func {
+        last rows = vectors.recorded;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i + 2] == "does not parse") {
+                let _ = test.assert_err(crlite.parse(decode(rows[i + 1])));
+                continue;
+            }
+            last cascade = test.assert_ok(crlite.parse(decode(rows[i + 1])));
+            test.assert(check_all(cascade, rows[i + 2]) >= 3);
+            last again = test.assert_ok(crlite.parse(cascade.encoded));
+            test.assert(again.equals(cascade) && again.hash_code() == cascade.hash_code());
+        }
+    };
+
+    export let test_revocation_decisions = func {
+        last cascade = test.assert_ok(crlite.parse(decode(vectors.cascades[1])));
+        last issuer = test.assert_ok(certificate.parse(decode(vectors.issuer[0])));
+        last covered: uint8[list][list] = new([sha2.sha256(issuer.public_key.der_bytes)]);
+        last rows = vectors.decisions;
+        for (let i = 0; i < rows.length; i += 2) {
+            last subject = test.assert_ok(certificate.parse(decode(vectors.subjects[i + 1])));
+            test.assert_equal_string(rows[i], vectors.subjects[i]);
+            last decision = crlite.check(cascade, subject, issuer, covered);
+            test.assert((rows[i + 1] == "revoked") == (decision == crlite.Decision.Revoked));
+            test.assert(decision != crlite.Decision.NotCovered);
+        }
+        // An issuer the filter does not cover.
+        last subject = test.assert_ok(certificate.parse(decode(vectors.subjects[1])));
+        last other: uint8[list][list] = new([sha2.sha256(subject.public_key.der_bytes)]);
+        test.assert(crlite.check(cascade, subject, issuer, other) == crlite.Decision.NotCovered);
+    };
+
+    export let test_malformed_cascades = func {
+        last good = decode(vectors.cascades[1]);
+        let _ = test.assert_err(crlite.parse(new));
+        let _ = test.assert_err(crlite.parse(new([3, 0])));
+        let _ = test.assert_err(crlite.parse(new([2, 0, 0, 0])));
+        let flag = der.copy_range(good, 0, good.length);
+        flag[2] = 2;
+        let _ = test.assert_err(crlite.parse(flag));
+        let _ = test.assert_err(crlite.parse(der.copy_range(good, 0, good.length - 1)));
+        // The first layer header follows the version, flag, salt length and salt.
+        last header = 4 + (good[3] as int);
+        let algorithm = der.copy_range(good, 0, good.length);
+        algorithm[header] = 9;
+        let _ = test.assert_err(crlite.parse(algorithm));
+        let number = der.copy_range(good, 0, good.length);
+        number[header + 9] = 2;
+        let _ = test.assert_err(crlite.parse(number));
+        let zero = der.copy_range(good, 0, good.length);
+        for (let k = 1; k <= 4; k++) {
+            zero[header + k] = 0;
+        }
+        let _ = test.assert_err(crlite.parse(zero));
+    };
+);

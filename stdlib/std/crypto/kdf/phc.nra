@@ -1,3 +1,4 @@
+let builders = import:Std.Core.StringBuilder;
 let base64 = import:Std.Encoding.Base64;
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Optional;
@@ -35,14 +36,14 @@ export let Phc = module (
         /// PHC ...".
         export let init = func(id: string, version_number: int, parameter_names: string[list],
             parameter_values: string[list], salt_bytes: uint8[list], hash_bytes: uint8[list]) {
-            if (!is_name(id)) {
+            if (not is_name(id)) {
                 trap_with_message("invalid argument: PHC identifier");
             }
             if (parameter_names.length != parameter_values.length) {
                 trap_with_message("invalid argument: PHC parameter lists differ in length");
             }
             for (let i = 0; i < parameter_names.length; i++) {
-                if (!is_name(parameter_names[i]) || !is_value(parameter_values[i])) {
+                if (not is_name(parameter_names[i]) || not is_value(parameter_values[i])) {
                     trap_with_message("invalid argument: PHC parameter");
                 }
             }
@@ -77,33 +78,34 @@ export let Phc = module (
         };
 
         export let.override to_string = func -> string {
-            let text = "$" + algorithm;
+            last text = builders.create();
+            text.append("$" .. algorithm);
             if (version >= 0) {
-                text += "$v=" + version.to_string();
+                text.append("$v=" .. version.to_string());
             }
             if (names.length > 0) {
-                text += "$";
+                text.append("$");
                 for (let i = 0; i < names.length; i++) {
                     if (i > 0) {
-                        text += ",";
+                        text.append(",");
                     }
-                    text += names[i] + "=" + values[i];
+                    text.append(names[i] .. "=" .. values[i]);
                 }
             }
             if (salt.length > 0) {
-                text += "$" + base64.encode_unpadded(salt);
+                text.append("$" .. base64.encode_unpadded(salt));
                 if (hash.length > 0) {
-                    text += "$" + base64.encode_unpadded(hash);
+                    text.append("$" .. base64.encode_unpadded(hash));
                 }
             }
-            return text;
+            return text.to_string();
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is PhcString)) {
+            if (other is not that: PhcString) {
                 return false;
             }
-            return to_string() == (other as PhcString).to_string();
+            return to_string() == that.to_string();
         };
 
         export let.override hash_code = func -> uint32 => to_string().hash_code();
@@ -131,7 +133,7 @@ export let Phc = module (
         }
         for (let i = 0; i < text.byte_length; i++) {
             last c = text.byte_at(i);
-            if (!((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45)) {
+            if (not ((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45)) {
                 return false;
             }
         }
@@ -144,7 +146,7 @@ export let Phc = module (
         }
         for (let i = 0; i < text.byte_length; i++) {
             last c = text.byte_at(i);
-            if (!((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 47 || c == 43
+            if (not ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 47 || c == 43
                 || c == 46 || c == 45)) {
                 return false;
             }
@@ -172,7 +174,7 @@ export let Phc = module (
                 start = i + 1;
             }
         }
-        if (!is_name(fields[0])) {
+        if (not is_name(fields[0])) {
             return fail(1, "invalid PHC identifier");
         }
         let index = 1;
@@ -200,7 +202,7 @@ export let Phc = module (
                     }
                     last name = part.slice(0, at);
                     last value = part.slice(at + 1, part.byte_length);
-                    if (!is_name(name) || !is_value(value)) {
+                    if (not is_name(name) || not is_value(value)) {
                         return fail(starts[index] + part_start, "invalid PHC parameter");
                     }
                     names.append(name);

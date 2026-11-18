@@ -1,0 +1,479 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Shamir secret sharing (Stdlib.md section 21.13): a secret split into n shares, any `threshold` of which
+/// rebuild it, over GF(2^8) or over the prime field modulo 2^521 - 1.
+///
+/// GF(2^8) sharing works byte by byte with the AES polynomial x^8 + x^4 + x^3 + x + 1 (0x11B), as HashiCorp
+/// Vault's `shamir` package does, and a share has Vault's layout: the y bytes followed by the x byte, so shares
+/// pass between the two in both directions. `split` gives the shares the x-coordinates 1 to n. The prime-field
+/// form treats a secret of up to 65 bytes as a big-endian integer below p = 2^521 - 1, draws each coefficient as
+/// 82 random bytes reduced modulo p, and gives shares (x, f(x)) for x = 1 to n. Both rebuild by Lagrange
+/// interpolation at 0, and reject duplicate x-coordinates and too few shares. Shamir sharing has no integrity:
+/// a forged or mixed-up share gives a wrong secret, not an error. Every split has a deterministic form that takes
+/// the coefficient bytes, a form over a `ChaCha20Drbg`, and a form over `Entropy.os_bytes`. The field arithmetic
+/// is branch-free in source; the runtime does not guarantee constant time.
+/// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+#Since("0.3.0")
+export let Sss = module (
+    /// @brief The prime 2^521 - 1 in hexadecimal.
+    const PrimeHex = "1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+    /// @brief The random bytes a prime-field coefficient takes.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #Since("0.3.0")
+    export const PrimeCoefficientBytes = 82;
+
+    /// @brief The byte length of a prime-field share value.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #Since("0.3.0")
+    export const PrimeValueBytes = 66;
+
+    /// @brief The longest secret the prime field takes.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #Since("0.3.0")
+    export const PrimeMaxSecretBytes = 65;
+
+    /// @brief A GF(2^8) share: the x-coordinate (1 to 255) and one y byte per secret byte, in secret memory.
+    /// `to_string` never prints the y bytes. Equality is identity, as for `SecretBytes`.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[Final, Since("0.3.0")]
+    export let Gf256Share = class (
+        /// @brief The x-coordinate, from 1 to 255.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export last x: uint8;
+        last value: SecretBytes;
+
+        /// @brief A share from its x-coordinate and y bytes; x = 0 or no y bytes trap.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let init = func(share_x: uint8, y: uint8[list]) {
+            crypto_policy.require(Algorithm.Shamir);
+            if (share_x == 0 || y.length == 0) {
+                trap_with_message("invalid argument: a Shamir share needs x from 1 to 255 and at least one y byte");
+            }
+            x = share_x;
+            value = new(y);
+        };
+
+        /// @brief The number of y bytes, which is the secret's length.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let length = func -> int => value.length();
+
+        /// @brief The y bytes.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #NoDiscard
+        #Since("0.3.0")
+        export let expose = func -> uint8[list] => value.expose();
+
+        /// @brief Vault's layout: the y bytes followed by the x byte.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #NoDiscard
+        #Since("0.3.0")
+        export let to_bytes = func -> uint8[list] {
+            let out = words.copy(value.expose());
+            out.append(x);
+            return out;
+        };
+
+        /// @brief Overwrites the y bytes.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let wipe = func => value.wipe();
+
+        /// @brief A fixed display that redacts the share.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Gf256Share(<redacted>)";
+    );
+
+    /// @brief A prime-field share: the x-coordinate (at least 1) and the 66-byte big-endian value f(x) below
+    /// 2^521 - 1, in secret memory. `to_string` never prints the value. Equality is identity.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[Final, Since("0.3.0")]
+    export let PrimeShare = class (
+        /// @brief The x-coordinate, at least 1.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export last x: int;
+        last value: SecretBytes;
+
+        /// @brief A share from its x-coordinate and 66-byte value; x below 1, another length or a value not below
+        /// p trap (use `parse_prime_share` for outside input).
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let init = func(share_x: int, y: uint8[list]) {
+            crypto_policy.require(Algorithm.Shamir);
+            if (share_x < 1 || y.length != PrimeValueBytes || mp.less(mp.from_bytes_be(y, 17), mp.from_hex(PrimeHex, 17)) == 0) {
+                trap_with_message("invalid argument: a prime-field share needs x >= 1 and a 66-byte value below 2^521 - 1");
+            }
+            x = share_x;
+            value = new(y);
+        };
+
+        /// @brief The 66 value bytes.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #NoDiscard
+        #Since("0.3.0")
+        export let expose = func -> uint8[list] => value.expose();
+
+        /// @brief x as 4 big-endian bytes followed by the 66 value bytes.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #NoDiscard
+        #Since("0.3.0")
+        export let to_bytes = func -> uint8[list] {
+            let out: uint8[list] = new;
+            words.append32_be(out, x as uint32);
+            words.append_all(out, value.expose());
+            return out;
+        };
+
+        /// @brief Overwrites the value bytes.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let wipe = func => value.wipe();
+
+        /// @brief A fixed display that redacts the share.
+        /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "PrimeShare(<redacted>)";
+    );
+
+    /// @brief a b in GF(2^8) modulo 0x11B, by shift and add with masks.
+    let gf_mul = func(a: uint8, b: uint8) -> uint8 {
+        let r: uint32 = 0;
+        last av = a as uint32;
+        last bv = b as uint32;
+        for (let i = 7; i >= 0; i--) {
+            r = ((r << 1) & 255) ^ (((r >> 7) & 1) * 27) ^ (((bv >> i) & 1) * av);
+        }
+        return r as uint8;
+    };
+
+    /// @brief a^254, the inverse of a nonzero a (and 0 for 0).
+    let gf_inv = func(a: uint8) -> uint8 {
+        let result: uint8 = 1;
+        let power = a;
+        // 254 = 0b11111110: multiply in a^2, a^4, ..., a^128.
+        for (let i = 0; i < 8; i++) {
+            if (i > 0) {
+                result = gf_mul(result, power);
+            }
+            power = gf_mul(power, power);
+        }
+        return result;
+    };
+
+    /// @brief Traps unless 2 <= threshold <= parts <= limit.
+    let check_counts = func(parts: int, threshold: int, limit: int) {
+        if (threshold < 2 || threshold > parts || parts > limit) {
+            trap_with_message("invalid argument: Shamir sharing needs 2 <= threshold <= parts <= " .. limit.to_string());
+        }
+    };
+
+    let coefficient_count = func(secret_length: int, threshold: int) -> int {
+        last count = (secret_length as int64) * ((threshold - 1) as int64);
+        if (secret_length == 0 || count > 2147483615) {
+            trap_with_message("invalid argument: invalid Shamir secret length for this threshold");
+        }
+        return count as int;
+    };
+
+    let entropy_in_chunks = func(count: int) -> Result<uint8[list]> {
+        if (count <= 1048576) {
+            return entropy.os_bytes(count);
+        }
+        let output: uint8[list] = new;
+        while (output.length < count) {
+            last remaining = count - output.length;
+            last size = remaining > 1048576 ? 1048576 : remaining;
+            match (entropy.os_bytes(size)) {
+                Result.Ok(chunk) => {
+                    words.append_all(output, chunk);
+                    words.wipe(chunk);
+                },
+                Result.Err(cause) => {
+                    words.wipe(output);
+                    return Result<uint8[list]>.Err(cause);
+                },
+            }
+        }
+        return Result<uint8[list]>.Ok(output);
+    };
+
+    /// @brief The GF(2^8) shares of the secret for x = 1 to `parts`, with the given coefficients: for each secret
+    /// byte in order, the coefficients a_1 to a_(threshold-1) (secret length times threshold - 1 bytes, as
+    /// Vault draws them). A wrong coefficient length, an empty secret, or counts outside
+    /// 2 <= threshold <= parts <= 255 trap.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let split_with_coefficients = func(secret: uint8[list], parts: int, threshold: int,
+        coefficients: uint8[list]) -> Gf256Share[list] {
+        crypto_policy.require(Algorithm.Shamir);
+        check_counts(parts, threshold, 255);
+        if (coefficients.length != coefficient_count(secret.length, threshold)) {
+            trap_with_message("invalid argument: Shamir split needs a secret and secret length x (threshold - 1) coefficient bytes");
+        }
+        let rows: uint8[list][list] = new;
+        for (let i = 0; i < parts; i++) {
+            rows.append(new);
+        }
+        for (let index = 0; index < secret.length; index++) {
+            last base = index * (threshold - 1);
+            for (let i = 0; i < parts; i++) {
+                last x = (i + 1) as uint8;
+                // Horner's rule from a_(t-1) down to a_0 = the secret byte.
+                let y = coefficients[base + threshold - 2];
+                for (let k = threshold - 3; k >= 0; k--) {
+                    y = gf_mul(y, x) ^ coefficients[base + k];
+                }
+                rows[i].append(gf_mul(y, x) ^ secret[index]);
+            }
+        }
+        let shares: Gf256Share[list] = new;
+        for (let i = 0; i < parts; i++) {
+            shares.append(new((i + 1) as uint8, rows[i]));
+            words.wipe(rows[i]);
+        }
+        return shares;
+    };
+
+    /// @brief The GF(2^8) shares with coefficients from `Entropy.os_bytes`; fails when the entropy source fails.
+    /// The same traps as `split_with_coefficients`.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let split = func(secret: uint8[list], parts: int, threshold: int) -> Result<Gf256Share[list]> {
+        check_counts(parts, threshold, 255);
+        crypto_policy.require(Algorithm.Shamir);
+        match (entropy_in_chunks(coefficient_count(secret.length, threshold))) {
+            Result.Ok(random) => {
+                last shares = split_with_coefficients(secret, parts, threshold, random);
+                words.wipe(random);
+                return Result<Gf256Share[list]>.Ok(shares);
+            },
+            Result.Err(e) => {
+                return Result<Gf256Share[list]>.Err(e);
+            },
+        }
+    } or func(secret: uint8[list], parts: int, threshold: int, random: drbg.ChaCha20Drbg) -> Gf256Share[list] {
+        check_counts(parts, threshold, 255);
+        crypto_policy.require(Algorithm.Shamir);
+        let coefficients = random.fill(coefficient_count(secret.length, threshold));
+        last shares = split_with_coefficients(secret, parts, threshold, coefficients);
+        words.wipe(coefficients);
+        return shares;
+    };
+
+    /// @brief A GF(2^8) share from Vault's layout (y bytes, then x). Fewer than 2 bytes or x = 0 is `Custom`
+    /// code `crypto.invalid_share`.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_share = func(bytes: uint8[list]) -> Result<Gf256Share> {
+        if (bytes.length < 2 || bytes[bytes.length - 1] == 0) {
+            return Result<Gf256Share>.Err(error.custom("crypto.invalid_share", "a Shamir share needs y bytes and a nonzero x byte"));
+        }
+        return Result<Gf256Share>.Ok(new(bytes[bytes.length - 1], words.slice(bytes, 0, bytes.length - 1)));
+    };
+
+    /// @brief The secret rebuilt from GF(2^8) shares by Lagrange interpolation at 0. Fewer than two shares (or
+    /// fewer than `threshold`), shares of different lengths, or a repeated x-coordinate is `Custom` code
+    /// `crypto.invalid_share`. Shares beyond the threshold take part in the interpolation; a wrong share gives
+    /// a wrong secret.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let combine = func(shares: Gf256Share[list]) -> Result<SecretBytes> => combine(shares, 2)
+        or func(shares: Gf256Share[list], threshold: int) -> Result<SecretBytes> {
+            crypto_policy.require(Algorithm.Shamir);
+            if (threshold < 2 || threshold > 255) {
+                trap_with_message("invalid argument: GF(2^8) Shamir threshold must be in 2 to 255");
+            }
+            if (shares.length < threshold) {
+                return Result<SecretBytes>.Err(error.custom("crypto.invalid_share", "too few Shamir shares"));
+            }
+            last length = shares[0].length();
+            for (let i = 0; i < shares.length; i++) {
+                if (shares[i].length() != length) {
+                    return Result<SecretBytes>.Err(error.custom("crypto.invalid_share", "Shamir shares differ in length"));
+                }
+                for (let j = 0; j < i; j++) {
+                    if (shares[i].x == shares[j].x) {
+                        return Result<SecretBytes>.Err(error.custom("crypto.invalid_share", "repeated Shamir share x-coordinate"));
+                    }
+                }
+            }
+            // basis[i] = prod over j != i of x_j / (x_i + x_j) (subtraction is addition in GF(2^8)).
+            let basis: uint8[list] = new;
+            for (let i = 0; i < shares.length; i++) {
+                let numerator: uint8 = 1;
+                let denominator: uint8 = 1;
+                for (let j = 0; j < shares.length; j++) {
+                    if (j != i) {
+                        numerator = gf_mul(numerator, shares[j].x);
+                        denominator = gf_mul(denominator, shares[i].x ^ shares[j].x);
+                    }
+                }
+                basis.append(gf_mul(numerator, gf_inv(denominator)));
+            }
+            let secret: uint8[list] = new;
+            for (let index = 0; index < length; index++) {
+                secret.append(0);
+            }
+            for (let i = 0; i < shares.length; i++) {
+                let y = shares[i].expose();
+                for (let index = 0; index < length; index++) {
+                    secret[index] = secret[index] ^ gf_mul(y[index], basis[i]);
+                }
+            }
+            last result = new SecretBytes(secret);
+            words.wipe(secret);
+            return Result<SecretBytes>.Ok(result);
+        };
+
+    /// @brief The prime-field shares of the secret (1 to 65 bytes, read as a big-endian integer) for x = 1 to
+    /// `parts`, with the given random bytes: 82 bytes per coefficient a_1 to a_(threshold-1), each read big-endian
+    /// and reduced modulo p. A wrong length or counts outside 2 <= threshold <= parts <= 65535 trap.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let split_prime_with_coefficients = func(secret: uint8[list], parts: int, threshold: int,
+        random: uint8[list]) -> PrimeShare[list] {
+        crypto_policy.require(Algorithm.Shamir);
+        check_counts(parts, threshold, 65535);
+        if (secret.length == 0 || secret.length > PrimeMaxSecretBytes
+            || random.length != PrimeCoefficientBytes * (threshold - 1)) {
+            trap_with_message("invalid argument: prime-field Shamir split needs a secret of 1 to 65 bytes and 82 x (threshold - 1) random bytes");
+        }
+        last field = new mp.Modulus(mp.from_hex(PrimeHex, 17));
+        let coefficients: uint32[list][list] = new;
+        coefficients.append(field.to_mont(mp.from_bytes_be(secret, 17)));
+        for (let k = 0; k < threshold - 1; k++) {
+            last bytes = words.slice(random, PrimeCoefficientBytes * k, PrimeCoefficientBytes * (k + 1));
+            coefficients.append(field.to_mont(field.reduce_bytes_be(bytes)));
+        }
+        let shares: PrimeShare[list] = new;
+        for (let i = 1; i <= parts; i++) {
+            last x = field.to_mont(mp.small(i as uint32, 17));
+            let y = coefficients[threshold - 1];
+            for (let k = threshold - 2; k >= 0; k--) {
+                y = field.add(field.mul(y, x), coefficients[k]);
+            }
+            shares.append(new(i, mp.to_bytes_be(field.from_mont(y), PrimeValueBytes)));
+        }
+        return shares;
+    };
+
+    let check_prime_length = func(length: int) {
+        if (length < 1 || length > PrimeMaxSecretBytes) {
+            trap_with_message("invalid argument: a prime-field secret has 1 to 65 bytes");
+        }
+    };
+
+    /// @brief The prime-field shares with random bytes from `Entropy.os_bytes` or the given generator; the same
+    /// traps as `split_prime_with_coefficients`.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let split_prime = func(secret: uint8[list], parts: int, threshold: int) -> Result<PrimeShare[list]> {
+        check_counts(parts, threshold, 65535);
+        crypto_policy.require(Algorithm.Shamir);
+        check_prime_length(secret.length);
+        match (entropy_in_chunks(PrimeCoefficientBytes * (threshold - 1))) {
+            Result.Ok(random) => {
+                last shares = split_prime_with_coefficients(secret, parts, threshold, random);
+                words.wipe(random);
+                return Result<PrimeShare[list]>.Ok(shares);
+            },
+            Result.Err(e) => {
+                return Result<PrimeShare[list]>.Err(e);
+            },
+        }
+    } or func(secret: uint8[list], parts: int, threshold: int, random: drbg.ChaCha20Drbg) -> PrimeShare[list] {
+        check_counts(parts, threshold, 65535);
+        crypto_policy.require(Algorithm.Shamir);
+        check_prime_length(secret.length);
+        let bytes = random.fill(PrimeCoefficientBytes * (threshold - 1));
+        last shares = split_prime_with_coefficients(secret, parts, threshold, bytes);
+        words.wipe(bytes);
+        return shares;
+    };
+
+    /// @brief A prime-field share from `PrimeShare.to_bytes`'s 70 bytes. Another length, x = 0 or above 2^31 - 1,
+    /// or a value not below p is `Custom` code `crypto.invalid_share`.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_prime_share = func(bytes: uint8[list]) -> Result<PrimeShare> {
+        if (bytes.length != 4 + PrimeValueBytes) {
+            return Result<PrimeShare>.Err(error.custom("crypto.invalid_share", "a prime-field share is 70 bytes"));
+        }
+        last x = words.load32_be(bytes, 0);
+        last y = words.slice(bytes, 4, bytes.length);
+        if (x == 0 || x > 2147483647 || mp.less(mp.from_bytes_be(y, 17), mp.from_hex(PrimeHex, 17)) == 0) {
+            return Result<PrimeShare>.Err(error.custom("crypto.invalid_share", "prime-field share out of range"));
+        }
+        return Result<PrimeShare>.Ok(new(x as int, y));
+    };
+
+    /// @brief The secret of `secret_length` bytes (1 to 65) rebuilt from prime-field shares by Lagrange
+    /// interpolation at 0. Too few shares, a repeated x-coordinate, or a result that does not fit in
+    /// `secret_length` bytes (shares that do not belong together) is `Custom` code `crypto.invalid_share`.
+    /// @see [Std.Crypto.Advanced.Sss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Sss)
+    #[NoDiscard, Since("0.3.0")]
+    export let combine_prime = func(shares: PrimeShare[list], secret_length: int) -> Result<SecretBytes> =>
+        combine_prime(shares, secret_length, 2)
+        or func(shares: PrimeShare[list], secret_length: int, threshold: int) -> Result<SecretBytes> {
+            crypto_policy.require(Algorithm.Shamir);
+            check_prime_length(secret_length);
+            if (threshold < 2 || threshold > 65535) {
+                trap_with_message("invalid argument: prime-field Shamir threshold must be in 2 to 65535");
+            }
+            if (shares.length < threshold) {
+                return Result<SecretBytes>.Err(error.custom("crypto.invalid_share", "too few Shamir shares"));
+            }
+            for (let i = 0; i < shares.length; i++) {
+                for (let j = 0; j < i; j++) {
+                    if (shares[i].x == shares[j].x) {
+                        return Result<SecretBytes>.Err(error.custom("crypto.invalid_share", "repeated Shamir share x-coordinate"));
+                    }
+                }
+            }
+            last field = new mp.Modulus(mp.from_hex(PrimeHex, 17));
+            let xs: uint32[list][list] = new;
+            for (let share in shares) {
+                xs.append(field.to_mont(mp.small(share.x as uint32, 17)));
+            }
+            let total = mp.zeros(17);
+            for (let i = 0; i < shares.length; i++) {
+                let numerator = field.one;
+                let denominator = field.one;
+                for (let j = 0; j < shares.length; j++) {
+                    if (j != i) {
+                        numerator = field.mul(numerator, xs[j]);
+                        denominator = field.mul(denominator, field.sub(xs[j], xs[i]));
+                    }
+                }
+                last y = field.to_mont(mp.from_bytes_be(shares[i].expose(), 17));
+                total = field.add(total, field.mul(y, field.mul(numerator, field.inv(denominator))));
+            }
+            let bytes = mp.to_bytes_be(field.from_mont(total), PrimeValueBytes);
+            let high: uint8 = 0;
+            for (let i = 0; i < PrimeValueBytes - secret_length; i++) {
+                high = high | bytes[i];
+            }
+            if (high != 0) {
+                words.wipe(bytes);
+                return Result<SecretBytes>.Err(error.custom("crypto.invalid_share", "the shares do not rebuild a secret of that length"));
+            }
+            last secret = words.slice(bytes, PrimeValueBytes - secret_length, PrimeValueBytes);
+            words.wipe(bytes);
+            last result = new SecretBytes(secret);
+            return Result<SecretBytes>.Ok(result);
+        };
+);

@@ -1,0 +1,171 @@
+// test-options: --gpu=off --deny-entropy --max-steps 8000000000
+let biscuit = import:Std.Crypto.Token.Biscuit;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:BiscuitV3Vectors;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+let BiscuitV3Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let code_of = func(error: Error) -> string {
+        match (error) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    let outcomes = func(rows: string[]) {
+        last root = test.assert_ok(ed25519.parse_public_key(decode(vectors.root[0])));
+        for (let i = 0; i < rows.length; i += 4) {
+            last token = decode(rows[i + 1]);
+            last code = test.assert_ok(utf8.decode(decode(rows[i + 2])));
+            match (biscuit.authorize(token, root, code)) {
+                Result.Ok(_) => {
+                    test.assert_with(rows[i + 3] == "allow", rows[i]);
+                },
+                Result.Err(error) => {
+                    last detail = code_of(error);
+                    let matches = rows[i + 3] == "execution"
+                        ? (detail == "biscuit.expression" || detail == "biscuit.authorizer")
+                        : (rows[i + 3] == "deny" && (detail == "biscuit.check" || detail == "biscuit.denied"));
+                    test.assert_with(matches, rows[i] + " " + error.to_string());
+                },
+            }
+        }
+    };
+
+    export let test_official_date_regex_arithmetic_and_collection_expressions = func {
+        outcomes(vectors.expressions);
+    };
+
+    export let test_official_scopes_and_third_party_blocks = func {
+        outcomes(vectors.scopes);
+    };
+
+    export let test_official_universal_and_reject_checks = func {
+        outcomes(vectors.checks);
+    };
+
+    let ambient = func -> string => "operation(\"read\");";
+
+    let scope = func -> string => "secp256r1/" + vectors.credentials[1];
+
+    let scoped_policy = func -> string => ambient() + " allow if group(\"admin\") trusting " + scope() + ";";
+
+    let key_bytes = func(byte: uint8) -> uint8[list] {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(byte);
+        }
+        return seed;
+    };
+
+    let root_key = func -> ecdsa.EcPublicKey =>
+        test.assert_ok(ecdsa.parse_public_key(ecdsa.Curve.P256, decode(vectors.credentials[0])));
+
+    export let test_reference_mixed_credential_and_scoped_authorization = func {
+        last root = root_key();
+        let _ = test.assert_ok(biscuit.authorize(decode(vectors.credentials[2]), root, "allow if right(\"read\");"));
+        last token = decode(vectors.credentials[6]);
+        let _ = test.assert_ok(biscuit.authorize(token, root, scoped_policy()));
+        let _ = test.assert_err(biscuit.authorize(token, root, ambient() + " allow if group(\"admin\");"));
+        last third = decode(vectors.credentials[7]);
+        let _ = test.assert_ok(biscuit.authorize(third, root, scoped_policy()));
+        let _ = test.assert_err(biscuit.third_party_request(third, root));
+        last identifiers = test.assert_ok(biscuit.revocation_identifiers(third, root));
+        test.assert(identifiers.length == 3);
+        for (let i = 0; i < identifiers.length; i++) {
+            test.assert_equal_string(vectors.credentials[8 + i], hex.encode(identifiers[i]));
+        }
+        last stable = test.assert_ok(biscuit.stable_revocation_identifiers(third, root));
+        test.assert_equal_string(vectors.credentials[11], hex.encode(stable[0]));
+        let _ = test.assert_ok(biscuit.authorize(third, root, scoped_policy() +
+            " check if revocation_id(0, hex:" + vectors.credentials[11] + ");"));
+        let _ = test.assert_err(biscuit.authorize(third, root,
+            "allow if revocation_id(2, hex:" + vectors.credentials[10] + ");"));
+        let _ = test.assert_err(biscuit.authorize(third, root, scoped_policy() + " revocation_id(1, hex:aa);"));
+    };
+
+    export let test_p256_revocation_identifiers_are_representation_independent = func {
+        last fixture = vectors.representations;
+        last root = test.assert_ok(ecdsa.parse_public_key(ecdsa.Curve.P256, decode(fixture[0])));
+        last low = decode(fixture[1]);
+        last high = decode(fixture[2]);
+        last low_ids = test.assert_ok(biscuit.revocation_identifiers(low, root));
+        last high_ids = test.assert_ok(biscuit.revocation_identifiers(high, root));
+        test.assert(hex.encode(low_ids[0]) != hex.encode(high_ids[0]));
+        last policy = "deny if revocation_id(0, hex:" + fixture[3] + "); allow if true;";
+        for (let token in new uint8[list][list]([low, high])) {
+            last stable = test.assert_ok(biscuit.stable_revocation_identifiers(token, root));
+            test.assert_equal_string(fixture[3], hex.encode(stable[0]));
+            test.assert_equal_string("biscuit.denied", code_of(test.assert_err(biscuit.authorize(token, root, policy))));
+        }
+    };
+
+    export let test_reference_third_party_mutations_known_answers = func {
+        last root = root_key();
+        last encoded = decode(vectors.credentials[3]);
+        last request = test.assert_ok(biscuit.third_party_request(encoded, root));
+        test.assert_equal_string(vectors.credentials[4], hex.encode(request));
+
+        let external = test.assert_ok(ecdsa.parse_private_key(ecdsa.Curve.P256, key_bytes(5)));
+        last response = test.assert_ok(biscuit.create_third_party(request,
+            "group(\"admin\"); check if right(\"read\");", external));
+        external.wipe();
+        test.assert_equal_string(vectors.credentials[5], hex.encode(response));
+
+        last appended = test.assert_ok(biscuit.append_third_party_with(encoded, root, scope(), response, key_bytes(4),
+            biscuit.KeyAlgorithm.Ed25519));
+        test.assert_equal_string(vectors.credentials[6], hex.encode(appended));
+        last sealed = test.assert_ok(biscuit.seal(appended, root));
+        test.assert_equal_string(vectors.credentials[7], hex.encode(sealed));
+        let _ = test.assert_err(biscuit.append_third_party_with(appended, root, scope(), response, key_bytes(6)));
+        let _ = test.assert_err(biscuit.append_third_party_with(encoded, root,
+            "secp256r1/" + vectors.credentials[0], response, key_bytes(6)));
+        let _ = test.assert_err(biscuit.append_third_party_with(encoded, root, scope(), response, key_bytes(2),
+            biscuit.KeyAlgorithm.Ed25519));
+        response[response.length - 1] = response[response.length - 1] ^ 1;
+        let _ = test.assert_err(biscuit.append_third_party_with(encoded, root, scope(), response, key_bytes(6)));
+    };
+
+    export let test_reference_p256_root_and_mixed_attenuation_known_answers = func {
+        let root_secret = test.assert_ok(ecdsa.parse_private_key(ecdsa.Curve.P256, key_bytes(1)));
+        last authority = test.assert_ok(biscuit.mint_with("right(\"read\");", root_secret, key_bytes(2),
+            biscuit.KeyAlgorithm.Ed25519));
+        root_secret.wipe();
+        last root = root_key();
+        test.assert_equal_string(vectors.credentials[2], hex.encode(authority));
+        last attenuated = test.assert_ok(biscuit.append_with(authority, root, "check if operation(\"read\");", key_bytes(3)));
+        test.assert_equal_string(vectors.credentials[3], hex.encode(attenuated));
+        let _ = test.assert_ok(biscuit.authorize(attenuated, root, ambient() + " allow if right(\"read\");"));
+        let _ = test.assert_err(biscuit.authorize(attenuated, root, "allow if true;"));
+    };
+
+    export let test_writes_expression_version_and_checks_alternatives = func {
+        let secret = test.assert_ok(ecdsa.parse_private_key(ecdsa.Curve.P256, key_bytes(1)));
+        last root = secret.public_key();
+        last authority = test.assert_ok(biscuit.mint_with(
+            "check if [1, 2].all($n -> $n > 0); reject if forbidden(1) or forbidden(2);",
+            secret, key_bytes(2), biscuit.KeyAlgorithm.Ed25519));
+        secret.wipe();
+        last code = "// Check compound syntax\n allow if {\"role\": [1, 2]}.get(\"role\") == [1, 2];";
+        let _ = test.assert_ok(biscuit.authorize(authority, root, code));
+        test.assert_equal_string("biscuit.check", code_of(test.assert_err(
+            biscuit.authorize(authority, root, "forbidden(1); " + code))));
+        test.assert_equal_string("biscuit.check", code_of(test.assert_err(
+            biscuit.authorize(authority, root, "forbidden(2); " + code))));
+        test.assert_equal_string("biscuit.expression", code_of(test.assert_err(
+            biscuit.authorize(authority, root, "reject if \"test\".matches(\"[\"); allow if true;"))));
+        let _ = test.assert_err(biscuit.append(authority, root, "check if true;"));
+    };
+);

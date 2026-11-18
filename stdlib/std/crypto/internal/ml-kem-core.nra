@@ -1,0 +1,471 @@
+let pqc_keccak = import:Std.Crypto.Internal.PqcKeccak;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The algorithms of FIPS 203 (ML-KEM) over byte lists, without policy checks or key objects. Internal:
+/// Std.Crypto.Pqc.MlKem wraps it. Polynomials are `int32[list]` of 256 coefficients in [0, q), q = 3329, and
+/// every product of two coefficients stays below 2^24, so no intermediate value leaves `int32`.
+#Since("0.3.0")
+export let MlKemCore = module (
+    const Q = 3329;
+
+    /// @brief One ML-KEM parameter set with its NTT tables (built per object, so tasks can use it).
+    export let Engine = class (
+        /// @brief The module rank k.
+        export last k: int;
+        last eta1: int;
+        last eta2: int;
+        last du: int;
+        last dv: int;
+        /// @brief zeta^BitRev7(i) for i < 128.
+        let zetas: int32[list] = new;
+        /// @brief zeta^(2 BitRev7(i) + 1) for i < 128.
+        let gammas: int32[list] = new;
+        /// @brief The Keccak functions of FIPS 203, section 4.1, reset for each message.
+        let xof128: pqc_keccak.Xof = new(168, 31);
+        let xof256: pqc_keccak.Xof = new(136, 31);
+        let hash256: pqc_keccak.Xof = new(136, 6);
+        let hash512: pqc_keccak.Xof = new(72, 6);
+
+        /// @brief The parameter set of rank 2, 3 or 4 (ML-KEM-512, -768, -1024).
+        export let init = func(rank: int) {
+            k = rank;
+            if (rank == 2) {
+                eta1 = 3;
+            } else {
+                eta1 = 2;
+            }
+            eta2 = 2;
+            if (rank == 4) {
+                du = 11;
+                dv = 5;
+            } else {
+                du = 10;
+                dv = 4;
+            }
+            let powers: int32[list] = new;
+            let p = 1;
+            for (let i in 0 .. 256) {
+                powers.append(p);
+                p = (p * 17) % Q;
+            }
+            for (let i in 0 .. 128) {
+                let r = 0;
+                for (let b in 0 .. 7) {
+                    r = r | (((i >> b) & 1) << (6 - b));
+                }
+                zetas.append(powers[r]);
+                gammas.append(powers[2 * r + 1]);
+            }
+        };
+
+        /// @brief The encapsulation-key length, 384k + 32.
+        export let ek_length = func -> int => 384 * k + 32;
+        /// @brief The decapsulation-key length, 768k + 96.
+        export let dk_length = func -> int => 768 * k + 96;
+        /// @brief The ciphertext length, 32(du k + dv).
+        export let ciphertext_length = func -> int => 32 * (du * k + dv);
+
+        /// @brief H: SHA3-256.
+        let sha3_256 = func(bytes: uint8[list]) -> uint8[list] {
+            hash256.reset();
+            hash256.absorb(bytes);
+            return hash256.squeeze(32);
+        };
+
+        /// @brief G: SHA3-512.
+        let sha3_512 = func(bytes: uint8[list]) -> uint8[list] {
+            hash512.reset();
+            hash512.absorb(bytes);
+            return hash512.squeeze(64);
+        };
+
+        /// @brief J and PRF: SHAKE256.
+        let shake256 = func(bytes: uint8[list], length: int) -> uint8[list] {
+            xof256.reset();
+            xof256.absorb(bytes);
+            return xof256.squeeze(length);
+        };
+
+        // ---- Byte encoding (Algorithms 5 and 6) ----
+
+        /// @brief ByteEncode_d of one polynomial, appended to `out`.
+        let encode = func(out: uint8[list], f: int32[list], d: int) {
+            let acc = 0;
+            let bits = 0;
+            for (let i in 0 .. 256) {
+                acc = acc | (f[i] << bits);
+                bits += d;
+                while (bits >= 8) {
+                    out.append((acc & 255) as uint8);
+                    acc = acc >> 8;
+                    bits -= 8;
+                }
+            }
+        };
+
+        /// @brief ByteDecode_d of the 32d bytes at `at`; for d = 12 the values are reduced modulo q.
+        let decode = func(bytes: uint8[list], at: int, d: int) -> int32[list] {
+            let f: int32[list] = new;
+            last mask = (1 << d) - 1;
+            let acc = 0;
+            let bits = 0;
+            for (let i = at; i < at + 32 * d; i++) {
+                acc = acc | ((bytes[i] as int32) << bits);
+                bits += 8;
+                while (bits >= d) {
+                    last value = acc & mask;
+                    if (d == 12) {
+                        f.append(value % Q);
+                    } else {
+                        f.append(value);
+                    }
+                    acc = acc >> d;
+                    bits -= d;
+                }
+            }
+            return f;
+        };
+
+        /// @brief Compress_d of every coefficient: round(2^d x / q) mod 2^d.
+        let compress = func(f: int32[list], d: int) -> int32[list] {
+            let out: int32[list] = new;
+            last mask = (1 << d) - 1;
+            for (let i in 0 .. 256) {
+                out.append((((f[i] << (d + 1)) + Q) / (2 * Q)) & mask);
+            }
+            return out;
+        };
+
+        /// @brief Decompress_d of every coefficient: round(q y / 2^d).
+        let decompress = func(f: int32[list], d: int) -> int32[list] {
+            let out: int32[list] = new;
+            last half = 1 << (d - 1);
+            for (let i in 0 .. 256) {
+                out.append((f[i] * Q + half) >> d);
+            }
+            return out;
+        };
+
+        // ---- Sampling (Algorithms 7 and 8) ----
+
+        /// @brief SampleNTT over SHAKE128(rho || j || i).
+        let sample_ntt = func(rho: uint8[list], j: int, i: int) -> int32[list] {
+            let sponge = xof128;
+            sponge.reset();
+            let seed = words.copy(rho);
+            seed.append(j as uint8);
+            seed.append(i as uint8);
+            sponge.absorb(seed);
+            let a: int32[list] = new;
+            while (a.length < 256) {
+                last block = sponge.squeeze(168);
+                for (let at = 0; at < 168 && a.length < 256; at += 3) {
+                    last c0 = block[at] as int32;
+                    last c1 = block[at + 1] as int32;
+                    last c2 = block[at + 2] as int32;
+                    last d1 = c0 + 256 * (c1 & 15);
+                    last d2 = (c1 >> 4) + 16 * c2;
+                    if (d1 < Q) {
+                        a.append(d1);
+                    }
+                    if (d2 < Q && a.length < 256) {
+                        a.append(d2);
+                    }
+                }
+            }
+            return a;
+        };
+
+        /// @brief SamplePolyCBD_eta over PRF_eta(s, n) = SHAKE256(s || n, 64 eta).
+        let sample_cbd = func(s: uint8[list], n: int, eta: int) -> int32[list] {
+            let input = words.copy(s);
+            input.append(n as uint8);
+            last bytes = shake256(input, 64 * eta);
+            let f: int32[list] = new;
+            let acc = 0;
+            let bits = 0;
+            let at = 0;
+            last width = 2 * eta;
+            for (let i in 0 .. 256) {
+                while (bits < width) {
+                    acc = acc | ((bytes[at] as int32) << bits);
+                    at++;
+                    bits += 8;
+                }
+                let x = 0;
+                let y = 0;
+                for (let b = 0; b < eta; b++) {
+                    x += (acc >> b) & 1;
+                    y += (acc >> (eta + b)) & 1;
+                }
+                acc = acc >> width;
+                bits -= width;
+                if (x >= y) {
+                    f.append(x - y);
+                } else {
+                    f.append(x - y + Q);
+                }
+            }
+            words.wipe(bytes);
+            return f;
+        };
+
+        // ---- NTT (Algorithms 9 to 12) ----
+
+        /// @brief The NTT, in place.
+        let ntt = func(f: int32[list]) {
+            let i = 1;
+            for (let len = 128; len >= 2; len = len / 2) {
+                for (let start = 0; start < 256; start += 2 * len) {
+                    last zeta = zetas[i];
+                    i++;
+                    for (let j = start; j < start + len; j++) {
+                        last t = (zeta * f[j + len]) % Q;
+                        last a = f[j];
+                        f[j + len] = (a - t + Q) % Q;
+                        f[j] = (a + t) % Q;
+                    }
+                }
+            }
+        };
+
+        /// @brief The inverse NTT, in place.
+        let inverse_ntt = func(f: int32[list]) {
+            let i = 127;
+            for (let len = 2; len <= 128; len = len * 2) {
+                for (let start = 0; start < 256; start += 2 * len) {
+                    last zeta = zetas[i];
+                    i--;
+                    for (let j = start; j < start + len; j++) {
+                        last t = f[j];
+                        last u = f[j + len];
+                        f[j] = (t + u) % Q;
+                        f[j + len] = (zeta * (u - t + Q)) % Q;
+                    }
+                }
+            }
+            for (let j in 0 .. 256) {
+                f[j] = (f[j] * 3303) % Q;
+            }
+        };
+
+        /// @brief acc += a * b in the NTT domain (MultiplyNTTs with BaseCaseMultiply), in place.
+        let multiply_add = func(acc: int32[list], a: int32[list], b: int32[list]) {
+            for (let i in 0 .. 128) {
+                last a0 = a[2 * i];
+                last a1 = a[2 * i + 1];
+                last b0 = b[2 * i];
+                last b1 = b[2 * i + 1];
+                acc[2 * i] = (acc[2 * i] + a0 * b0 + ((a1 * b1) % Q) * gammas[i]) % Q;
+                acc[2 * i + 1] = (acc[2 * i + 1] + a0 * b1 + a1 * b0) % Q;
+            }
+        };
+
+        let zero = func -> int32[list] {
+            let f: int32[list] = new;
+            for (let i in 0 .. 256) {
+                f.append(0);
+            }
+            return f;
+        };
+
+        /// @brief f + g, coefficient-wise, in place in f.
+        let add_into = func(f: int32[list], g: int32[list]) {
+            for (let i in 0 .. 256) {
+                f[i] = (f[i] + g[i]) % Q;
+            }
+        };
+
+        /// @brief The matrix A-hat, row-major: entry (i, j) is SampleNTT(rho || j || i).
+        let expand_a = func(rho: uint8[list]) -> int32[list][list] {
+            let a: int32[list][list] = new;
+            for (let i = 0; i < k; i++) {
+                for (let j = 0; j < k; j++) {
+                    a.append(sample_ntt(rho, j, i));
+                }
+            }
+            return a;
+        };
+
+        // ---- K-PKE (Algorithms 13 to 15) ----
+
+        /// @brief K-PKE.KeyGen: [ek, dk_pke].
+        let pke_keygen = func(d: uint8[list]) -> uint8[list][list] {
+            let seed = words.copy(d);
+            seed.append(k as uint8);
+            last g = sha3_512(seed);
+            words.wipe(seed);
+            last rho = words.slice(g, 0, 32);
+            last sigma = words.slice(g, 32, 64);
+            words.wipe(g);
+            last a = expand_a(rho);
+            let n = 0;
+            let s: int32[list][list] = new;
+            for (let i = 0; i < k; i++) {
+                let poly = sample_cbd(sigma, n, eta1);
+                ntt(poly);
+                s.append(poly);
+                n++;
+            }
+            let e: int32[list][list] = new;
+            for (let i = 0; i < k; i++) {
+                let poly = sample_cbd(sigma, n, eta1);
+                ntt(poly);
+                e.append(poly);
+                n++;
+            }
+            words.wipe(sigma);
+            let ek: uint8[list] = new;
+            for (let i = 0; i < k; i++) {
+                let t = e[i];
+                for (let j = 0; j < k; j++) {
+                    multiply_add(t, a[i * k + j], s[j]);
+                }
+                encode(ek, t, 12);
+            }
+            words.append_all(ek, rho);
+            let dk: uint8[list] = new;
+            for (let i = 0; i < k; i++) {
+                encode(dk, s[i], 12);
+            }
+            return new([ek, dk]);
+        };
+
+        /// @brief K-PKE.Encrypt(ek, m, r).
+        let pke_encrypt = func(ek: uint8[list], m: uint8[list], r: uint8[list]) -> uint8[list] {
+            let t: int32[list][list] = new;
+            for (let i = 0; i < k; i++) {
+                t.append(decode(ek, 384 * i, 12));
+            }
+            last rho = words.slice(ek, 384 * k, 384 * k + 32);
+            last a = expand_a(rho);
+            let n = 0;
+            let y: int32[list][list] = new;
+            for (let i = 0; i < k; i++) {
+                let poly = sample_cbd(r, n, eta1);
+                ntt(poly);
+                y.append(poly);
+                n++;
+            }
+            let c: uint8[list] = new;
+            for (let i = 0; i < k; i++) {
+                let u = zero();
+                for (let j = 0; j < k; j++) {
+                    multiply_add(u, a[j * k + i], y[j]);
+                }
+                inverse_ntt(u);
+                add_into(u, sample_cbd(r, n, eta2));
+                n++;
+                encode(c, compress(u, du), du);
+            }
+            let v = zero();
+            for (let i = 0; i < k; i++) {
+                multiply_add(v, t[i], y[i]);
+            }
+            inverse_ntt(v);
+            add_into(v, sample_cbd(r, n, eta2));
+            add_into(v, decompress(decode(m, 0, 1), 1));
+            encode(c, compress(v, dv), dv);
+            return c;
+        };
+
+        /// @brief K-PKE.Decrypt(dk_pke, c), with dk_pke at offset 0 of `dk`.
+        let pke_decrypt = func(dk: uint8[list], c: uint8[list]) -> uint8[list] {
+            let w = zero();
+            for (let i = 0; i < k; i++) {
+                let u = decompress(decode(c, 32 * du * i, du), du);
+                ntt(u);
+                multiply_add(w, decode(dk, 384 * i, 12), u);
+            }
+            inverse_ntt(w);
+            last v = decompress(decode(c, 32 * du * k, dv), dv);
+            for (let i in 0 .. 256) {
+                w[i] = (v[i] - w[i] + Q) % Q;
+            }
+            let m: uint8[list] = new;
+            encode(m, compress(w, 1), 1);
+            return m;
+        };
+
+        // ---- ML-KEM internal algorithms (16 to 18) and input checks (section 7) ----
+
+        /// @brief ML-KEM.KeyGen_internal(d, z): [ek, dk].
+        export let keygen = func(d: uint8[list], z: uint8[list]) -> uint8[list][list] {
+            last pair = pke_keygen(d);
+            last ek = pair[0];
+            let dk = pair[1];
+            words.append_all(dk, ek);
+            words.append_all(dk, sha3_256(ek));
+            words.append_all(dk, z);
+            return new([ek, dk]);
+        };
+
+        /// @brief ML-KEM.Encaps_internal(ek, m): [K, c].
+        export let encaps = func(ek: uint8[list], m: uint8[list]) -> uint8[list][list] {
+            last g = sha3_512(words.concat(m, sha3_256(ek)));
+            last key = words.slice(g, 0, 32);
+            last r = words.slice(g, 32, 64);
+            words.wipe(g);
+            last c = pke_encrypt(ek, m, r);
+            words.wipe(r);
+            return new([key, c]);
+        };
+
+        /// @brief ML-KEM.Decaps_internal(dk, c): K, or the implicit-rejection key J(z || c) when the
+        /// re-encryption differs. The comparison and the choice are branch-free in source.
+        export let decaps = func(dk: uint8[list], c: uint8[list]) -> uint8[list] {
+            last ek = words.slice(dk, 384 * k, 768 * k + 32);
+            last h = words.slice(dk, 768 * k + 32, 768 * k + 64);
+            last z = words.slice(dk, 768 * k + 64, 768 * k + 96);
+            last m = pke_decrypt(dk, c);
+            last g = sha3_512(words.concat(m, h));
+            let key = words.slice(g, 0, 32);
+            last r = words.slice(g, 32, 64);
+            last rejected = shake256(words.concat(z, c), 32);
+            last again = pke_encrypt(ek, m, r);
+            let diff: uint8 = 0;
+            for (let i = 0; i < c.length; i++) {
+                diff = diff | (c[i] ^ again[i]);
+            }
+            // mask is 0xFF when diff != 0, else 0.
+            last wide = diff as int32;
+            last mask = (((0 - wide) >> 8) & 255) as uint8;
+            for (let i in 0 .. 32) {
+                key[i] = (key[i] & ~mask) | (rejected[i] & mask);
+            }
+            words.wipe(g);
+            words.wipe(m);
+            words.wipe(r);
+            return key;
+        };
+
+        /// @brief The encapsulation-key modulus check of FIPS 203, section 7.2 (the length is checked by the
+        /// caller): ByteEncode12(ByteDecode12(ek)) == ek.
+        export let check_ek = func(ek: uint8[list]) -> bool {
+            for (let i = 0; i < k; i++) {
+                let again: uint8[list] = new;
+                encode(again, decode(ek, 384 * i, 12), 12);
+                for (let j in 0 .. 384) {
+                    if (again[j] != ek[384 * i + j]) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+
+        /// @brief The decapsulation-key hash check of FIPS 203, section 7.3 (the length is checked by the
+        /// caller): H(ek) equals the stored hash.
+        export let check_dk = func(dk: uint8[list]) -> bool {
+            last hash = sha3_256(words.slice(dk, 384 * k, 768 * k + 32));
+            for (let i in 0 .. 32) {
+                if (hash[i] != dk[768 * k + 32 + i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override to_string = func -> string => "MlKemCore.Engine(k = " .. k.to_string() .. ")";
+    );
+);

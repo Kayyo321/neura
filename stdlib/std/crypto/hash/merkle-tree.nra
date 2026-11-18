@@ -140,7 +140,7 @@ export let MerkleTree = module (
         let subproof = func(m: int, start: int, end: int, whole: bool, proof: uint8[list][list]) {
             last n = end - start;
             if (m == n) {
-                if (!whole) {
+                if (not whole) {
                     proof.append(subtree<H>(leaves, start, end));
                 }
                 return;
@@ -155,7 +155,7 @@ export let MerkleTree = module (
             }
         };
 
-        export let.override to_string = func -> string => "MerkleTree(" + leaves.length.to_string() + " leaves)";
+        export let.override to_string = func -> string => "MerkleTree(" .. leaves.length.to_string() .. " leaves)";
     );
 
     /// @brief Whether `proof` shows that the leaf hash is at `index` in the tree of `tree_size` leaves with

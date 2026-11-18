@@ -1,0 +1,53 @@
+// test-options: --gpu=off --max-steps 2000000000 --deny-entropy
+let composite = import:Std.Crypto.Pqc.Ed25519MlDsa65;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:HybridSignVectors;
+
+let HybridSignTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_composite_key_generation_and_signatures = func {
+        last material = vectors.material;
+        last key = new composite.CompositePrivateKey(decode(material[0]));
+        test.assert_equal_string(material[1], hex.encode(key.public_key_bytes()));
+        last imported = test.assert_ok(composite.parse_public_key(decode(material[1])));
+        test.assert(key.public_key().equals(imported));
+        test.assert(key.public_key().hash_code() == imported.hash_code());
+        test.assert_equal_string("CompositePrivateKey(<redacted>)", key.to_string());
+
+        last message = decode(material[2]);
+        last signer = new composite.CompositeSigner(key);
+        last verifier = new composite.CompositeVerifier(imported);
+        last cases = vectors.signatures;
+        for (let i = 0; i < cases.length; i += 3) {
+            last context = decode(cases[i]);
+            last official = decode(cases[i + 1]);
+            test.assert(verifier.verify_with_context(message, official, context));
+            test.assert_equal_string(cases[i + 2], hex.encode(signer.sign_deterministic(message, context)));
+            test.assert(verifier.verify_with_context(message, decode(cases[i + 2]), context));
+        }
+        test.assert(verifier.verify(message, decode(cases[1])));
+        let _ = test.assert_err(signer.try_sign(message, new));
+        key.wipe();
+        test.assert(key.is_wiped());
+    };
+
+    export let test_composite_rejects_component_and_context_mismatches = func {
+        last material = vectors.material;
+        last key = test.assert_ok(composite.parse_public_key(decode(material[1])));
+        last verifier = new composite.CompositeVerifier(key);
+        last message = decode(material[2]);
+        last cases = vectors.signatures;
+        let signature = decode(cases[1]);
+        signature[0] = signature[0] ^ 1;
+        test.assert(!verifier.verify(message, signature));
+        signature[0] = signature[0] ^ 1;
+        signature[3309] = signature[3309] ^ 1;
+        test.assert(!verifier.verify(message, signature));
+        test.assert(!verifier.verify(message, decode(cases[4])));
+        test.assert(!verifier.verify(message, new));
+        let _ = test.assert_err(composite.parse_public_key(new));
+        let _ = test.assert_err(composite.generate_key_pair());
+    };
+);

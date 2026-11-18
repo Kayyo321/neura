@@ -1,0 +1,23 @@
+// test-options: --gpu=off --max-steps 20000000000
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let cases = import:SignatureTestCases;
+let vectors = import:SlhSignatureVectors;
+
+let SignatureSlhDsaTests = module (
+    export let test_slh_dsa_sha2 = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["slh-sha2-128s", "slh-sha2-128f", "slh-sha2-192s", "slh-sha2-192f", "slh-sha2-256s",
+            "slh-sha2-256f"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+        cases.reject_flipped(cases.read(vectors.certificates, "slh-sha2-128s"), verifier, "slh-sha2-128s");
+    };
+
+    export let test_slh_dsa_shake = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["slh-shake-128s", "slh-shake-128f", "slh-shake-192s", "slh-shake-192f", "slh-shake-256s",
+            "slh-shake-256f"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+    };
+);
