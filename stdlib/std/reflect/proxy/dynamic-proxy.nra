@@ -1,4 +1,4 @@
-let intrinsics = import:Std.Reflect.Core.Intrinsics;
+let intrinsics = import:Std.Reflect.Internal.Intrinsics;
 let model = import:Std.Reflect.Internal.Model;
 
 /// @brief Interface proxies (docs/design/Reflect030.md, Proxies). `create<I>(handler)` returns an object that

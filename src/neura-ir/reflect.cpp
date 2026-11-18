@@ -24,7 +24,7 @@
 namespace neura {
 namespace {
 
-constexpr std::string_view intrinsics_path = "std/reflect/core/intrinsics.nra";
+constexpr std::string_view intrinsics_path = "std/reflect/internal/intrinsics.nra";
 constexpr std::string_view policy_path = "std/reflect/core/reflect-policy.nra";
 
 const IrType int_type{TypeKind::Integer, "int32", no_symbol, {}};
@@ -92,7 +92,7 @@ public:
         for (auto& constant : program_.static_constants) collect_sites_one(constant.value, sites);
         if (sites.empty()) return;
         find_intrinsics();
-        if (module_ == no_symbol) throw Diagnostic(sites.front()->span, "reflection needs Std.Reflect.Core.Intrinsics")
+        if (module_ == no_symbol) throw Diagnostic(sites.front()->span, "reflection needs Std.Reflect.Internal.Intrinsics")
             .with_code("E0899");
         span_ = symbol(module_).span;
         setup();

@@ -1,6 +1,6 @@
 let hashing = import:Std.Core.Hash;
 let.promote optional = import:Std.Core.Optional;
-let intrinsics = import:Std.Reflect.Core.Intrinsics;
+let intrinsics = import:Std.Reflect.Internal.Intrinsics;
 let layouts = import:Std.Reflect.Core.MemoryLayout;
 let policies = import:Std.Reflect.Core.ReflectPolicy;
 let type_ids = import:Std.Reflect.Core.TypeId;

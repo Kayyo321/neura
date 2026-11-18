@@ -7,8 +7,8 @@
 
 namespace neura {
 
-// docs/design/Reflect030.md. The trusted file std/reflect/core/intrinsics.nra
-// declares the bodyless functions of Std.Reflect.Core.Intrinsics. Before
+// docs/design/Reflect030.md. The trusted file std/reflect/internal/intrinsics.nra
+// declares the bodyless functions of Std.Reflect.Internal.Intrinsics. Before
 // specialization, prepare_reflection turns every call of one of them into a
 // Reflect node (text: the function's name, operands: the arguments, type
 // arguments: the call's), so that specialization substitutes its types like
