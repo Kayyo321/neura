@@ -1,0 +1,175 @@
+let.promote _ = import:Std.Time.Clock;
+let.promote _ = import:Std.Time.Duration;
+let.promote _ = import:Std.Core.Result;
+let sha256 = import:Std.Digest.Sha256;
+
+/// @brief A Bloom filter that rejects replayed 0-RTT data (RFC 9001 section 9.2, RFC 8446 section 8): a server
+/// records each ClientHello or ticket identity it accepts early data for, and refuses early data for one it
+/// may have seen within the replay window.
+///
+/// The filter has `bits` bits (a multiple of 64 from 64 through 2^32) and `hashes` probes (1 through 32). The
+/// probe positions of a token are deterministic: with `d` = SHA-256(seed || token), `h1` the first eight bytes
+/// of `d` and `h2` the next eight with the lowest bit set, both big-endian, probe `i` is
+/// `(h1 + i * h2) mod bits` (double hashing). The seed is the server's secret, so a client cannot aim tokens at
+/// chosen bits. Two generations cover the window: a token is checked against both and recorded in the newer,
+/// and when `window` has passed on the clock's monotonic reading the newer generation becomes the older and a
+/// fresh one starts, so a token is remembered for at least one window and at most two. A Bloom filter has false
+/// positives (fresh early data refused, which only costs a round trip) and never false negatives within the
+/// window.
+/// @see [Std.Net.Quic.ReplayFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-ReplayFilter)
+#Since("0.3.0")
+export let ReplayFilter = module (
+    /// @brief The double-hashing Bloom filter with two generations.
+    #[Final, NotThreadSafe]
+    export let ReplayFilter = class (
+        /// @brief The number of bits per generation.
+        export last bits: int64;
+        /// @brief The number of probes per token.
+        export last hashes: int;
+        /// @brief The secret prefix of every hashed token.
+        last seed: uint8[list];
+        /// @brief The monotonic time source.
+        last clock: Clock;
+        /// @brief The generation length in nanoseconds.
+        last window_nanos: int64;
+        /// @brief The newer generation's words.
+        let current: uint64[list] = new;
+        /// @brief The older generation's words.
+        let previous: uint64[list] = new;
+        /// @brief The monotonic reading when the newer generation started; -1 before the first use.
+        let started: int64 = -1;
+
+        /// @brief An empty filter. A bit count that is not a multiple of 64 from 64 through 2^32 traps with
+        /// "invalid argument: bits", a probe count outside 1 through 32 with "invalid argument: hashes", and a
+        /// window that is not positive with "invalid argument: window".
+        export let init = func(bit_count: int64, probe_count: int, secret: uint8[list], source: Clock,
+            window: Duration) {
+            if (bit_count < 64 || bit_count > 4294967296 || bit_count % 64 != 0) {
+                trap_with_message("invalid argument: bits");
+            }
+            if (probe_count < 1 || probe_count > 32) {
+                trap_with_message("invalid argument: hashes");
+            }
+            if (window.to_nanos() <= 0) {
+                trap_with_message("invalid argument: window");
+            }
+            bits = bit_count;
+            hashes = probe_count;
+            let copy: uint8[list] = new;
+            for (let b in secret) {
+                copy.append(b);
+            }
+            seed = copy;
+            clock = source;
+            window_nanos = window.to_nanos();
+            current = empty_words(bit_count);
+            previous = empty_words(bit_count);
+        };
+
+        /// @brief The probe positions of `token`, in probe order (see the module documentation).
+        #NoDiscard
+        export let positions = func(token: uint8[list]) -> int64[list] {
+            let input: uint8[list] = new;
+            for (let b in seed) {
+                input.append(b);
+            }
+            for (let b in token) {
+                input.append(b);
+            }
+            last digest = sha256.of(input);
+            last m = bits as uint64;
+            last h1 = big_endian(digest, 0) % m;
+            last h2 = (big_endian(digest, 8) | 1) % m;
+            let out: int64[list] = new;
+            let i: uint64 = 0;
+            while (i < (hashes as uint64)) {
+                out.append(((h1 + (i * h2) % m) % m) as int64);
+                i++;
+            }
+            return out;
+        };
+
+        /// @brief Records `token` and returns Ok(true) when it was not seen within the window (accept the early
+        /// data), Ok(false) when it may have been (refuse it). Err only when the clock fails.
+        #NoDiscard
+        export let check_and_insert = func(token: uint8[list]) -> Result<bool> {
+            rotate()?;
+            last probes = positions(token);
+            last seen = all_set(current, probes) || all_set(previous, probes);
+            for (let p in probes) {
+                last word = (p / 64) as int;
+                current[word] = current[word] | ((1 as uint64) << ((p % 64) as uint64));
+            }
+            return Result<bool>.Ok(!seen);
+        };
+
+        /// @brief True when `token` may have been recorded within the window, without recording it. Err only
+        /// when the clock fails.
+        #NoDiscard
+        export let may_contain = func(token: uint8[list]) -> Result<bool> {
+            rotate()?;
+            last probes = positions(token);
+            return Result<bool>.Ok(all_set(current, probes) || all_set(previous, probes));
+        };
+
+        /// @brief Text such as "ReplayFilter(4096 bits, 4 hashes)". The seed is not shown.
+        export let.override to_string = func -> string =>
+            "ReplayFilter(" + bits.to_string() + " bits, " + hashes.to_string() + " hashes)";
+
+        /// @brief Moves to a new generation when the window has passed.
+        let rotate = func -> Result<bool> {
+            last now = (clock.monotonic()?).to_nanos();
+            if (started < 0) {
+                started = now;
+                return Result<bool>.Ok(false);
+            }
+            if (now - started >= 2 * window_nanos) {
+                previous = empty_words(bits);
+                current = empty_words(bits);
+                started = now;
+            } else if (now - started >= window_nanos) {
+                previous = current;
+                current = empty_words(bits);
+                started = started + window_nanos;
+            }
+            return Result<bool>.Ok(true);
+        };
+    );
+
+    /// @brief A filter of `bits` bits and `hashes` probes with the server's secret `seed` and a replay window.
+    #NoDiscard
+    export let create = func(bits: int64, hashes: int, seed: uint8[list], clock: Clock, window: Duration)
+        -> ReplayFilter => new ReplayFilter(bits, hashes, seed, clock, window);
+
+    /// @brief A zeroed generation.
+    let empty_words = func(bits: int64) -> uint64[list] {
+        let out: uint64[list] = new;
+        let i: int64 = 0;
+        while (i < bits / 64) {
+            out.append(0);
+            i++;
+        }
+        return out;
+    };
+
+    /// @brief True when every probe bit is set.
+    let all_set = func(words: uint64[list], probes: int64[list]) -> bool {
+        for (let p in probes) {
+            if ((words[(p / 64) as int] >> ((p % 64) as uint64)) & 1 == 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Eight bytes from `offset` as a big-endian number.
+    let big_endian = func(bytes: uint8[list], offset: int) -> uint64 {
+        let value: uint64 = 0;
+        let i = 0;
+        while (i < 8) {
+            value = (value << 8) | (bytes[offset + i] as uint64);
+            i++;
+        }
+        return value;
+    };
+);

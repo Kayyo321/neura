@@ -1,0 +1,200 @@
+let controller = import:Std.Net.Quic.CongestionController;
+let cubic = import:Std.Net.Quic.Cubic;
+let duration = import:Std.Time.Duration;
+let ledbat = import:Std.Net.Quic.Ledbat;
+let new_reno = import:Std.Net.Quic.NewReno;
+let test = import:Std.Test;
+
+// Congestion controllers: NewReno (RFC 9002 section 7 and Appendix B), CUBIC (RFC 9438 section 4) and LEDBAT
+// (RFC 6817 section 2.4.2). Times are nanoseconds.
+let CongestionTests = module (
+    const Ms: int64 = 1000000;
+
+    // RFC 9002 section 7.2: min(10 * size, max(14720, 2 * size)).
+    export let test_initial_and_minimum_windows = func {
+        test.assert_equal_int64(12000, controller.initial_window(1200));
+        test.assert_equal_int64(14720, controller.initial_window(1500));
+        test.assert_equal_int64(18000, controller.initial_window(9000));
+        test.assert_equal_int64(2400, controller.minimum_window(1200));
+    };
+
+    export let test_new_reno_slow_start_and_avoidance = func {
+        last reno = new new_reno.NewReno(1200);
+        last cc: controller.CongestionController = reno;
+        test.assert_equal_string("NewReno", cc.name());
+        test.assert_equal_int64(12000, cc.window());
+        cc.on_packet_sent(1200, 1 * Ms);
+        test.assert_equal_int64(1200, cc.bytes_in_flight());
+        test.assert(cc.can_send(10800));
+        test.assert(!cc.can_send(10801));
+        // Slow start: the window grows by the acknowledged bytes.
+        cc.on_packet_acked(1200, 1 * Ms, 20 * Ms, 19 * Ms);
+        test.assert_equal_int64(13200, cc.window());
+        test.assert_equal_int64(0, cc.bytes_in_flight());
+        // A loss of a packet sent at 2 ms, detected at 30 ms: ssthresh = 13200 / 2 = 6600.
+        cc.on_packet_sent(1200, 2 * Ms);
+        cc.on_packets_lost(1200, 2 * Ms, 30 * Ms);
+        test.assert_equal_int64(6600, cc.window());
+        test.assert_equal_int64(6600, reno.ssthresh());
+        // Packets sent before recovery began neither grow nor shrink the window again.
+        cc.on_packet_sent(2400, 3 * Ms);
+        cc.on_packet_acked(1200, 3 * Ms, 31 * Ms, 28 * Ms);
+        test.assert_equal_int64(6600, cc.window());
+        cc.on_congestion_event(25 * Ms, 32 * Ms);
+        test.assert_equal_int64(6600, cc.window());
+        // Congestion avoidance after recovery: + 1200 * 1200 / 6600 = 218 bytes.
+        cc.on_packet_acked(1200, 40 * Ms, 60 * Ms, 20 * Ms);
+        test.assert_equal_int64(6818, cc.window());
+        // Halving never goes below the minimum window.
+        cc.on_congestion_event(50 * Ms, 70 * Ms);
+        test.assert_equal_int64(3409, cc.window());
+        cc.on_congestion_event(71 * Ms, 72 * Ms);
+        test.assert_equal_int64(2400, cc.window());
+        cc.on_persistent_congestion();
+        test.assert_equal_int64(2400, cc.window());
+        test.assert_equal_string("NewReno(window 2400, in flight 0)", reno.to_string());
+    };
+
+    export let test_new_reno_app_limited = func {
+        last cc = new new_reno.NewReno(1200);
+        cc.set_app_limited(true);
+        cc.on_packet_sent(1200, 0);
+        cc.on_packet_acked(1200, 0, 10 * Ms, 10 * Ms);
+        test.assert_equal_int64(12000, cc.window());
+    };
+
+    // Script: /home/dev/neura-gate/030/std-net/vectors-socket-tls-quic/quic_vec.py.
+    // Generated with python3 -I (Fractions, exact): K = floor(cbrt((w_max - cwnd_epoch) / (0.4 * size)) in ms) and
+    // W_cubic(t) = w_max + sign(t - K) * floor(0.4 * size * (|t - K| / 1000)^3).
+    export let test_cubic_k_and_w_cubic = func {
+        test.assert_equal_int64(4217, cubic.k_millis(120000, 84000, 1200));
+        test.assert_equal_int64(8008, cubic.k_millis(1000000, 700000, 1460));
+        test.assert_equal_int64(1782, cubic.k_millis(14720, 12000, 1200));
+        test.assert_equal_int64(0, cubic.k_millis(50000, 60000, 1200));
+        test.assert_equal_int64(84005, cubic.w_cubic(0, 4217, 120000, 1200));
+        test.assert_equal_int64(104020, cubic.w_cubic(1000, 4217, 120000, 1200));
+        test.assert_equal_int64(120000, cubic.w_cubic(4217, 4217, 120000, 1200));
+        test.assert_equal_int64(120230, cubic.w_cubic(5000, 4217, 120000, 1200));
+        test.assert_equal_int64(212832, cubic.w_cubic(10000, 4217, 120000, 1200));
+        test.assert_equal_int64(2007165, cubic.w_cubic(20000, 4217, 120000, 1200));
+        test.assert_equal_int64(53132, cubic.integer_cube_root(150000000000000));
+        test.assert_equal_int64(3, cubic.integer_cube_root(27));
+        test.assert_equal_int64(2, cubic.integer_cube_root(26));
+        test.assert_equal_int64(2097151, cubic.integer_cube_root(9223358842721533951));
+    };
+
+    // RFC 9438 section 4.3: alpha_cubic = 3 * (1 - 0.7) / (1 + 0.7) = 9/17 before W_est reaches cwnd_prior.
+    export let test_cubic_reno_estimate_step = func {
+        test.assert_equal_int64(9 * 1200 * 1200 / (17 * 24000), cubic.w_est_increase(1200, 1200, 24000, false));
+        test.assert_equal_int64(60, cubic.w_est_increase(1200, 1200, 24000, true));
+    };
+
+    export let test_cubic_decrease_and_fast_convergence = func {
+        last cc = new cubic.Cubic(1200, true);
+        test.assert_equal_string("Cubic", cc.name());
+        // Slow start to 24,000 bytes.
+        cc.on_packet_sent(12000, 0);
+        cc.on_packet_acked(12000, 0, 10 * Ms, 10 * Ms);
+        test.assert_equal_int64(24000, cc.window());
+        // Section 4.6: W_max = 24000, ssthresh = cwnd = 24000 * 0.7 = 16800.
+        cc.on_congestion_event(5 * Ms, 20 * Ms);
+        test.assert_equal_int64(24000, cc.max_window());
+        test.assert_equal_int64(16800, cc.window());
+        test.assert_equal_int64(16800, cc.ssthresh());
+        // Section 4.7: a second event below W_max lowers W_max to cwnd * (1 + 0.7) / 2 = 16800 * 17 / 20.
+        cc.on_congestion_event(25 * Ms, 30 * Ms);
+        test.assert_equal_int64(14280, cc.max_window());
+        test.assert_equal_int64(11760, cc.window());
+        // Without fast convergence W_max is the window before the reduction.
+        last plain = new cubic.Cubic(1200, false);
+        plain.on_congestion_event(5 * Ms, 20 * Ms);
+        plain.on_congestion_event(25 * Ms, 30 * Ms);
+        test.assert_equal_int64(8400, plain.max_window());
+        test.assert_equal_int64(5880, plain.window());
+        plain.on_persistent_congestion();
+        test.assert_equal_int64(2400, plain.window());
+    };
+
+    export let test_cubic_epoch_follows_w_cubic = func {
+        last cc = new cubic.Cubic(1200, false);
+        cc.on_packet_sent(12000, 0);
+        cc.on_packet_acked(12000, 0, 10 * Ms, 10 * Ms);
+        // cwnd 24000; loss: W_max 24000, cwnd 16800; K = floor(cbrt(7200 / 480) s) = 2466 ms.
+        cc.on_congestion_event(5 * Ms, 20 * Ms);
+        test.assert_equal_int64(2466, cubic.k_millis(24000, 16800, 1200));
+        // The first acknowledgment in congestion avoidance starts the epoch at 100 ms.
+        cc.on_packet_sent(1200, 50 * Ms);
+        cc.on_packet_acked(1200, 50 * Ms, 100 * Ms, 0);
+        test.assert_equal_int64(2466, cc.k_of_epoch());
+        // t = 0, RTT 0: W_cubic(0) is about cwnd_epoch and W_est (16800 + 9 * 1200 * 1200 / (17 * 16800) = 16845)
+        // is above it: the Reno-friendly region sets cwnd = W_est.
+        test.assert_equal_int64(16800 + 9 * 1200 * 1200 / (17 * 16800), cc.reno_estimate());
+        test.assert_equal_int64(cc.reno_estimate(), cc.window());
+        // Far past K the cubic target, capped at 1.5 * cwnd, dominates: cwnd += (target - cwnd) * acked / cwnd.
+        last before = cc.window();
+        cc.on_packet_sent(1200, 9000 * Ms);
+        cc.on_packet_acked(1200, 9000 * Ms, 10100 * Ms, 0);
+        test.assert_equal_int64(before + (before * 3 / 2 - before) * 1200 / before, cc.window());
+    };
+
+    // RFC 6817 section 2.4.2 with TARGET 100 ms, MSS 1200: cwnd starts at INIT_CWND * MSS = 2400 and each
+    // acknowledgment adds ((TARGET - queuing_delay) * acked / TARGET) * MSS / cwnd; the current delay is the
+    // minimum of the last four samples.
+    export let test_ledbat_window = func {
+        last cc = new ledbat.Ledbat(1200, duration.of_millis(100));
+        test.assert_equal_string("Ledbat", cc.name());
+        test.assert_equal_int64(2400, cc.window());
+        cc.on_packet_sent(24000, 0);
+        let expected: int64 = 2400;
+        let t: int64 = 1;
+        last delays: int64[list] = new([20, 70, 70, 70, 70, 300, 300, 300, 300]);
+        last queuing: int64[list] = new([0, 0, 0, 0, 50000, 50000, 50000, 50000, 280000]);
+        let i = 0;
+        while (i < delays.length) {
+            last before = cc.window();
+            cc.on_packet_acked(1200, 0, t * Ms, delays[i] * Ms);
+            test.assert_equal_int64(queuing[i], cc.queuing_delay_micros());
+            expected = expected + ((100000 - queuing[i]) * 1200 / 100000) * 1200 / expected;
+            test.assert_equal_int64(expected, cc.window());
+            // Above the target the window shrinks.
+            test.assert_equal_bool(queuing[i] > 100000, cc.window() < before);
+            t++;
+            i++;
+        }
+        // Generated with python3 -I /home/dev/neura-gate/030/std-net/vectors-socket-tls-quic/ledbat_vec.py (divisions
+        // truncated toward zero): the windows end 4899 then, with off_target -1.8 (scaled -2160), 4370.
+        test.assert_equal_int64(4370, cc.window());
+        // A loss halves the window but not below MIN_CWND * MSS.
+        cc.on_packets_lost(1200, 5 * Ms, 20 * Ms);
+        test.assert_equal_int64(expected / 2 > 2400 ? expected / 2 : 2400, cc.window());
+        // The congestion timeout sets one MSS.
+        cc.on_persistent_congestion();
+        test.assert_equal_int64(1200, cc.window());
+    };
+
+    // RFC 6817 section 2.4.2: cwnd stays at most flightsize + ALLOWED_INCREASE * MSS.
+    export let test_ledbat_allowed_increase = func {
+        last cc = new ledbat.Ledbat(1200, duration.of_millis(100));
+        cc.on_packet_sent(1200, 0);
+        cc.on_packet_acked(1200, 0, 1 * Ms, 20 * Ms);
+        // 2400 + 1200 * 1200 / 2400 = 3000, limited to 1200 + 1200.
+        test.assert_equal_int64(2400, cc.window());
+    };
+
+    // RFC 6817 section 2.4.2: the base delay is the minimum over per-minute minima.
+    export let test_ledbat_base_delay_history = func {
+        last cc = new ledbat.Ledbat(1200, duration.of_millis(25));
+        cc.on_packet_sent(12000, 0);
+        cc.on_packet_acked(1200, 0, 1 * Ms, 40 * Ms);
+        cc.on_packet_acked(1200, 0, 2 * Ms, 30 * Ms);
+        // Within the first minute the base is 30 ms; the filter's minimum is 30 ms too.
+        test.assert_equal_int64(0, cc.queuing_delay_micros());
+        // Eleven minutes later only newer minima remain: the 30 ms minimum has rolled out.
+        let minute: int64 = 1;
+        while (minute <= 10) {
+            cc.on_packet_acked(100, 0, minute * 60000 * Ms + 1, 50 * Ms);
+            minute++;
+        }
+        test.assert_equal_int64(0, cc.queuing_delay_micros());
+    };
+);
