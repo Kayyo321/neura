@@ -1,0 +1,205 @@
+let controls = import:Std.Ui.Controls;
+let forms = import:Std.Ui.Forms;
+let frozen = import:Std.Collections.Frozen;
+let model = import:Std.Ui.ModelHost;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let ui = import:Std.Ui;
+
+#Immutable
+let Part = class (
+    export last id: string;
+    export last name: string;
+
+    export let init = func(id: string, name: string) => set;
+);
+
+let fields_view = html(name: ui.View, email: ui.View, count: ui.View, send: ui.View, attempts: int32) {
+    <fieldset data-attempts={attempts}>{name}{email}{count}{send}</fieldset>
+};
+
+let part_view = html(name: string) {
+    <span>{name}</span>
+};
+
+let note_view = html(text: string) {
+    <p>{text}</p>
+};
+
+let UiFormsTests = module (
+    let mounted = func(host: model.Host, target: string, top: ui.Component) -> ui.Root =>
+        test.assert_ok<ui.Root>(ui.mount(host, target, top));
+
+    let join = func(items: string[list]) -> string {
+        let text = "";
+        for (let i = 0; i < items.length; i++) {
+            if (i > 0) {
+                text = text + "; ";
+            }
+            text = text + items[i];
+        }
+        return text;
+    };
+
+    // The parsers: required text, integers at their bounds, and e-mail shapes.
+    export let test_parsers = func() -> void {
+        last required = forms.required_text("Enter a name");
+        test.assert_equal_string("bolt", test.assert_ok<string>(required("  bolt ")));
+        test.assert_err<string>(required("   "));
+        last count = forms.integer(-9223372036854775807 - 1, 9223372036854775807, "Enter a number");
+        test.assert(test.assert_ok<int64>(count("9223372036854775807")) == 9223372036854775807);
+        test.assert(test.assert_ok<int64>(count("-9223372036854775808")) == -9223372036854775807 - 1);
+        test.assert(test.assert_ok<int64>(count(" 42 ")) == 42);
+        test.assert_err<int64>(count("9223372036854775808"));
+        test.assert_err<int64>(count("-9223372036854775809"));
+        test.assert_err<int64>(count("12a"));
+        test.assert_err<int64>(count("-"));
+        test.assert_err<int64>(count(""));
+        last small = forms.integer(1, 99, "1 to 99");
+        test.assert_err<int64>(small("0"));
+        test.assert_err<int64>(small("100"));
+        last email = forms.email("Enter an e-mail address");
+        test.assert_equal_string("a@b.co", test.assert_ok<string>(email(" a@b.co ")));
+        test.assert_err<string>(email("a@b"));
+        test.assert_err<string>(email("@b.co"));
+        test.assert_err<string>(email("a@@b.co"));
+        test.assert_err<string>(email("a b@c.co"));
+        test.assert_err<string>(email("a@b..co"));
+        test.assert_err<string>(email("a@b.co."));
+        test.assert_equal_string("x", test.assert_ok<string>(forms.any_text()("x")));
+    };
+
+    // A field: the draft changes with input, the error shows only once touched (by a blur), and
+    // value parses; composition input updates the draft too.
+    export let test_field = func() -> void {
+        let field = new forms.Field<int64>("count", "Count", "3", forms.integer(1, 99, "1 to 99"));
+        test.assert_equal_string("FieldState(\"3\")", field.state.get().to_string());
+        let input = controls.text_input<int64>(field, "number");
+        let host = new model.Host();
+        let root = mounted(host, "#app", input);
+        host.input(1, input, field.on_input(), "120");
+        host.end_batch();
+        root.turn();
+        test.assert(!field.state.get().shows_error());
+        test.assert_equal_string("FieldState(\"120\", 1 to 99)", field.state.get().to_string());
+        test.assert_err<int64>(field.value());
+        host.blur(2, input, field.on_blur());
+        host.end_batch();
+        root.turn();
+        test.assert(field.state.get().shows_error());
+        host.input(1, input, field.on_input(), "12");
+        host.end_batch();
+        root.run();
+        test.assert(!field.state.get().shows_error());
+        test.assert(test.assert_ok<int64>(field.value()) == 12);
+        test.assert(input.render_count() == 4);
+        field.reset();
+        test.assert_equal_string("3", field.draft());
+        test.assert(!field.state.get().touched);
+        test.assert_equal_string("Field(count, FieldState(\"3\"))", field.to_string());
+    };
+
+    // A form of controls: an invalid submit shows every error and focuses the first invalid field
+    // after the commit; fixing the fields and submitting calls the action once. Each input renders
+    // only its own control.
+    export let test_form_submit_and_focus = func() -> void {
+        let trace: string[list] = new;
+        let name = new forms.Field<string>("name", "Name", "", forms.required_text("Enter a name"));
+        let email = new forms.Field<string>("email", "E-mail", "", forms.email("Enter an e-mail address"));
+        let count = new forms.Field<int64>("count", "Count", "1", forms.integer(1, 99, "1 to 99"));
+        let order = new forms.Form();
+        order.add(name);
+        order.add(email);
+        order.add(count);
+        let name_input = controls.text_input<string>(name, "text");
+        let email_input = controls.text_input<string>(email, "email");
+        let count_input = controls.text_input<int64>(count, "number");
+        let top = controls.form(order, new func() {
+            trace.append("sent " + name.draft() + " " + email.draft());
+        }, new func(state: forms.FormState) -> ui.View {
+            trace.append("form " + state.attempts.to_string());
+            return fields_view(ui.slot(name_input), ui.slot(email_input), ui.slot(count_input),
+                               controls.submit_button("Order"), state.attempts);
+        });
+        let host = new model.Host();
+        let root = mounted(host, "#order", top);
+        host.input(1, email_input, email.on_input(), "parts@example.com");
+        host.end_batch();
+        host.submit(2, top, order.on_submit(new func() {
+            trace.append("unexpected");
+        }));
+        host.end_batch();
+        host.input(3, name_input, name.on_input(), "Ada");
+        host.end_batch();
+        host.click(2, top, new func(event: ui.ClickEvent) {
+            order.submit(new func() {
+                trace.append("sent " + name.draft() + " " + email.draft());
+            });
+        });
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("form 0; form 1; sent Ada parts@example.com; form 2", join(trace));
+        test.assert_equal_string("name", host.focused);
+        test.assert_equal_string("FormState(2 attempts, 1 submitted, invalid '')", order.state.get().to_string());
+        test.assert(name.state.get().touched && email.state.get().touched);
+        test.assert_equal_string("open #order: root 1; commit 1 on root 1: 4 renders; commit 2 on root 1: 1 render; "
+                                 + "commit 3 on root 1: 4 renders; focus #name on root 1; commit 4 on root 1: 1 render; "
+                                 + "commit 5 on root 1: 1 render", join(host.log));
+        order.reset();
+        test.assert_equal_string("", name.draft());
+        test.assert_equal_int32(3, order.field_count() as int32);
+    };
+
+    // A checkbox, a select over a field, a keyed list and a table, each re-rendering alone.
+    export let test_controls = func() -> void {
+        let host = new model.Host();
+        let agreed = new ui.State<bool>(false);
+        let box = controls.checkbox("agree", "I agree", agreed);
+        let size = new forms.Field<string>("size", "Size", "m", forms.any_text());
+        let sizes = frozen.of<controls.Choice>(new controls.Choice("s", "Small"), new controls.Choice("m", "Medium"));
+        let picker = controls.select<string>(size, sizes);
+        let parts = new ui.State<frozen.FrozenList<Part>>(frozen.of<Part>(new Part("p1", "bolt")));
+        let shown: string[list] = new;
+        let listing = controls.list<Part>(parts, new func(part: Part) -> string => part.id,
+            new func(part: Part) -> ui.View {
+                shown.append(part.name);
+                return part_view(part.name);
+            });
+        let rows = new ui.State<frozen.FrozenList<controls.TableRow>>(frozen.empty<controls.TableRow>());
+        let grid = controls.table("Stock", frozen.of<string>("Part", "Count"), rows);
+        let open = new ui.State<bool>(false);
+        let notice = controls.dialog("notice", "Saved", open, new func() -> ui.View => note_view("The order is saved."));
+        let page = ui.component<bool>(new ui.State<bool>(true), new func(unused: bool) -> ui.View =>
+            fields_view(ui.slot(box), ui.slot(picker), ui.slot(listing), ui.slot(grid), 0));
+        let root = mounted(host, "#app", page);
+        let second = mounted(host, "#dialog", notice);
+        host.clear_log();
+        host.click(1, box, new func(event: ui.ClickEvent) {
+            agreed.set(true);
+        });
+        host.end_batch();
+        host.click(2, listing, new func(event: ui.ClickEvent) {
+            parts.update(func(all: frozen.FrozenList<Part>) -> frozen.FrozenList<Part> =>
+                all.appended(new Part("p2", "nut")));
+            rows.set(frozen.of<controls.TableRow>(new controls.TableRow("r1", frozen.of<string>("bolt", "12"))));
+        });
+        host.end_batch();
+        root.run();
+        host.change(4, picker, size.on_change(), "s", false);
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("s", size.draft());
+        test.assert(size.state.get().touched);
+        test.assert(agreed.get());
+        test.assert_equal_string("bolt; bolt; nut", join(shown));
+        test.assert_equal_string("commit 2 on root 1: 1 render; commit 3 on root 1: 2 renders; "
+                                 + "commit 4 on root 1: 1 render", join(host.log));
+        host.click(3, notice, new func(event: ui.ClickEvent) {
+            open.set(true);
+        });
+        host.end_batch();
+        second.run();
+        test.assert(open.get());
+        test.assert_equal_string("Medium", sizes.get(1).label);
+    };
+);
