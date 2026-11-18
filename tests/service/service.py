@@ -56,6 +56,11 @@ class Work:
         self.env = dict(os.environ)
         self.env.update(XDG_RUNTIME_DIR=str(self.run_dir), XDG_STATE_HOME=str(self.state), HOME=str(self.home),
                         NEURA_GPU="off")
+        # The other XDG base directories default to places under HOME. A
+        # caller's own (GitHub's runners set XDG_CONFIG_HOME) would put login
+        # start's unit outside this test's home.
+        for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
+            self.env.pop(name, None)
         self.env.pop("NEURA_JIT", None)
         self.images: dict[str, Path] = {}
 
@@ -354,7 +359,9 @@ def worker_suite(work: Work) -> None:
         check(tier_lines(got) == tier_lines(expected) and tier_lines(got),
               f"case 26: NEURA_TIER3={mode} shows its own mode")
     _, _, got = driven(["--tier-stats", image, "--", "0"], driver_options=["--supervisor-env", "NEURA_JIT=off"])
-    check(b"tier: jit auto: " in got and b"tier: jit off" not in got,
+    # "tier: jit auto: N regions compiled", or where this target's JIT is not
+    # used (aarch64), "tier: jit auto, not used: ...": the mode is auto either way.
+    check(b"tier: jit auto" in got and b"tier: jit off" not in got,
           "case 27: NEURA_JIT=off in the supervisor's environment does not reach the application")
     _, _, got = driven(["--tier-stats", image, "--", "0"], env=dict(work.env, NEURA_JIT="off"),
                        driver_options=["--supervisor-env", "NEURA_JIT=on"])
@@ -670,7 +677,16 @@ def protocol_suite(work: Work) -> None:
     check(outcome.kind == "Outcome" and control.receive().number("CacheBytes") == 0,
           "case 24: once it ended, cache clear drops it")
 
-    # Case 25: an image larger than the cache; three of 100 MiB.
+    # Case 25: an image larger than the cache; three of 100 MiB. The two held
+    # images must stay reserved while the third is asked for: under the 1.5 s
+    # reservation of the cases above, copying and hashing 200 MiB on a loaded
+    # machine can outlast the first reservation, which then frees its entry.
+    # A new supervisor with the default reservation (30 s) runs this case.
+    connection.close()
+    service.process.kill()
+    service.process.wait()
+    service.start()
+    connection = service.hello()
     connection.send("Prepare", pc.envelope(size=300 << 20, digest=b"\1" * 32, environment=work.env))
     reply = connection.receive()
     check(reply.kind == "Rejected" and reply.text("Reason") == "image-too-large", "case 25: 300 MiB is image-too-large")
@@ -934,8 +950,11 @@ def run_suite(work: Work) -> None:
     status, out, err = neura_run(["--runtime=required", "--gpu=off", hello], env=no_gpu)
     check((status, out, err) == (0, b"Hello, World!\n", b""), "--gpu=off runs through the service")
     status, out, err = neura_run(["--runtime=required", "--gpu=always", hello], env=no_gpu)
-    check(status == 5 and b"a graph device" in err and b"--gpu=off" in err,
-          "case 58: a graph device with required is status 5 and names --gpu=off")
+    # Only a GPU build's message names --gpu=off (docs/design/Service030.md):
+    # a build without a graph device uses one only when the run asks for it.
+    gpu_build = os.environ.get("NEURA_TEST_GPU_BUILD") == "1"
+    check(status == 5 and b"a graph device" in err and (b"--gpu=off" in err) == gpu_build,
+          f"case 58: a graph device with required is status 5{' and names --gpu=off' if gpu_build else ''} ({err!r})")
 
     # Case 23: an image that fails validation.
     bad = work.root / "bad.nvr"
