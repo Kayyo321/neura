@@ -50,7 +50,7 @@ FF1_URL = ("https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-an
 def fetch(url: str, directory: pathlib.Path) -> pathlib.Path:
     path = directory / url.rsplit("/", 1)[1]
     if not path.exists():
-        with urllib.request.urlopen(url, timeout=60) as response:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "curl/8"}), timeout=60) as response:
             path.write_bytes(response.read())
     return path
 

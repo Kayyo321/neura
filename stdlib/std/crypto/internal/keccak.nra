@@ -5,20 +5,23 @@ let words = import:Std.Crypto.Internal.Words;
 /// are printed by scripts/crypto-vectors/constants.py.
 #Since("0.3.0")
 export let Keccak = module (
-    let RoundConstants: uint64[] = [
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let round_constants_table = func -> uint64[list] => new([
         1, 32898, 9223372036854808714, 9223372039002292224,
         32907, 2147483649, 9223372039002292353, 9223372036854808585,
         138, 136, 2147516425, 2147483658,
         2147516555, 9223372036854775947, 9223372036854808713, 9223372036854808579,
         9223372036854808578, 9223372036854775936, 32778, 9223372039002259466,
         9223372039002292353, 9223372036854808704, 2147483649, 9223372039002292232
-    ];
+    ]);
 
     /// @brief The rotation offset of lane x + 5y.
-    let Rho: int[] = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14];
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let rho_table = func -> int[list] => new([0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]);
 
     /// @brief The lane that lane x + 5y moves to: y + 5((2x + 3y) mod 5).
-    let Pi: int[] = [0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9, 19, 4];
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let pi_table = func -> int[list] => new([0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9, 19, 4]);
 
     /// @brief A sponge: absorb, then squeeze. The first squeeze pads with the domain byte and 0x80.
     export let Sponge = class (
@@ -26,6 +29,9 @@ export let Keccak = module (
         let moved: uint64[list] = new;
         let columns: uint64[list] = new;
         let pending: uint8[list] = new;
+        let rho: int[list] = rho_table();
+        let pi: int[list] = pi_table();
+        let round_constants: uint64[list] = round_constants_table();
         let output: uint8[list] = new;
         let output_at: int = 0;
         let squeezing: bool = false;
@@ -142,16 +148,16 @@ export let Keccak = module (
                 }
                 b[0] = a[0];
                 for (let i = 1; i < 25; i++) {
-                    last n = Rho[i];
+                    last n = rho[i];
                     last lane = a[i];
-                    b[Pi[i]] = (lane << n) | (lane >> (64 - n));
+                    b[pi[i]] = (lane << n) | (lane >> (64 - n));
                 }
                 for (let y = 0; y < 25; y += 5) {
                     for (let x = 0; x < 5; x++) {
                         a[x + y] = b[x + y] ^ ((~b[(x + 1) % 5 + y]) & b[(x + 2) % 5 + y]);
                     }
                 }
-                a[0] = a[0] ^ RoundConstants[round];
+                a[0] = a[0] ^ round_constants[round];
             }
         };
 

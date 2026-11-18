@@ -6,12 +6,14 @@ let words = import:Std.Crypto.Internal.Words;
 /// known answers (and, when this table was written, by a Python BLAKE2b compared with hashlib.blake2b).
 #Since("0.3.0")
 export let Blake2b = module (
-    let Iv: uint64[] = [
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let iv_table = func -> uint64[list] => new([
         7640891576956012808, 13503953896175478587, 4354685564936845355, 11912009170470909681,
         5840696475078001361, 11170449401992604703, 2270897969802886507, 6620516959819538809
-    ];
+    ]);
 
-    let Sigma: int[] = [
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let sigma_table = func -> int[list] => new([
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
         14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
         11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
@@ -22,7 +24,7 @@ export let Blake2b = module (
         13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
         6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
         10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0
-    ];
+    ]);
 
     let mix = func(v: uint64[list], a: int, b: int, c: int, d: int, x: uint64, y: uint64) {
         v[a] = words.add64(words.add64(v[a], v[b]), x);
@@ -41,6 +43,8 @@ export let Blake2b = module (
 
     /// @brief A running BLAKE2b hash.
     export let Hasher = class (
+        let iv: uint64[list] = iv_table();
+        let sigma: int[list] = sigma_table();
         let h: uint64[list] = new;
         let v: uint64[list] = new;
         let m: uint64[list] = new;
@@ -60,7 +64,7 @@ export let Blake2b = module (
                 trap_with_message("invalid argument: BLAKE2b output must be 1 to 64 bytes and key at most 64");
             }
             out_length = output_length;
-            for (let w in Iv) {
+            for (let w in iv) {
                 h.append(w);
             }
             h[0] = h[0] ^ 16842752 ^ ((key.length as uint64) << 8) ^ (output_length as uint64);
@@ -110,7 +114,7 @@ export let Blake2b = module (
             }
             for (let i = 0; i < 8; i++) {
                 v[i] = h[i];
-                v[i + 8] = Iv[i];
+                v[i + 8] = iv[i];
             }
             v[12] = v[12] ^ total;
             if (final_block) {
@@ -118,14 +122,14 @@ export let Blake2b = module (
             }
             for (let round = 0; round < 12; round++) {
                 last s = 16 * (round % 10);
-                mix(v, 0, 4, 8, 12, m[Sigma[s]], m[Sigma[s + 1]]);
-                mix(v, 1, 5, 9, 13, m[Sigma[s + 2]], m[Sigma[s + 3]]);
-                mix(v, 2, 6, 10, 14, m[Sigma[s + 4]], m[Sigma[s + 5]]);
-                mix(v, 3, 7, 11, 15, m[Sigma[s + 6]], m[Sigma[s + 7]]);
-                mix(v, 0, 5, 10, 15, m[Sigma[s + 8]], m[Sigma[s + 9]]);
-                mix(v, 1, 6, 11, 12, m[Sigma[s + 10]], m[Sigma[s + 11]]);
-                mix(v, 2, 7, 8, 13, m[Sigma[s + 12]], m[Sigma[s + 13]]);
-                mix(v, 3, 4, 9, 14, m[Sigma[s + 14]], m[Sigma[s + 15]]);
+                mix(v, 0, 4, 8, 12, m[sigma[s]], m[sigma[s + 1]]);
+                mix(v, 1, 5, 9, 13, m[sigma[s + 2]], m[sigma[s + 3]]);
+                mix(v, 2, 6, 10, 14, m[sigma[s + 4]], m[sigma[s + 5]]);
+                mix(v, 3, 7, 11, 15, m[sigma[s + 6]], m[sigma[s + 7]]);
+                mix(v, 0, 5, 10, 15, m[sigma[s + 8]], m[sigma[s + 9]]);
+                mix(v, 1, 6, 11, 12, m[sigma[s + 10]], m[sigma[s + 11]]);
+                mix(v, 2, 7, 8, 13, m[sigma[s + 12]], m[sigma[s + 13]]);
+                mix(v, 3, 4, 9, 14, m[sigma[s + 14]], m[sigma[s + 15]]);
             }
             for (let i = 0; i < 8; i++) {
                 h[i] = h[i] ^ v[i] ^ v[i + 8];

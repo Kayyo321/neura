@@ -12,8 +12,10 @@ let words = import:Std.Crypto.Internal.Words;
 #Since("0.3.0")
 export let Blake3 = module (
     /// @brief The initial value: the SHA-256 initial words.
-    let Iv: uint32[] = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225];
-    let Permutation: int[] = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let iv_table = func -> uint32[list] => new([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]);
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let permutation_table = func -> int[list] => new([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]);
     const ChunkStart = 1;
     const ChunkEnd = 2;
     const Parent = 4;
@@ -25,12 +27,14 @@ export let Blake3 = module (
     /// @brief The 16 output words of the compression function.
     let compress = func(cv: uint32[list], block: uint32[list], counter: uint64, block_length: int, flags: int)
             -> uint32[list] {
+        last iv = iv_table();
+        last permutation = permutation_table();
         let s: uint32[list] = new;
         for (let i = 0; i < 8; i++) {
             s.append(cv[i]);
         }
         for (let i = 0; i < 4; i++) {
-            s.append(Iv[i]);
+            s.append(iv[i]);
         }
         s.append((counter & 4294967295) as uint32);
         s.append((counter >> 32) as uint32);
@@ -52,7 +56,7 @@ export let Blake3 = module (
             if (round < 6) {
                 let permuted: uint32[list] = new;
                 for (let i = 0; i < 16; i++) {
-                    permuted.append(m[Permutation[i]]);
+                    permuted.append(m[permutation[i]]);
                 }
                 m = permuted;
             }
@@ -96,7 +100,7 @@ export let Blake3 = module (
     /// @brief A new list holding the initial value.
     let iv_words = func -> uint32[list] {
         let out: uint32[list] = new;
-        for (let w in Iv) {
+        for (let w in iv_table()) {
             out.append(w);
         }
         return out;

@@ -83,6 +83,23 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 | `Entropy.fork_generation` (used by `ChaCha20Drbg.fork_safe`) | `neura.process.generation` (new host service, version 1): no arguments; result `Ok(uint64)`, a number that the runtime changes in a forked child (`pthread_atfork` or a `MADV_WIPEONFORK` page) and after a VM snapshot restore (the Linux `vmgenid` generation counter), or `Error(uint32)` with code 14. Capability group: `entropy`. Record/replay: the values are recorded and replayed, so a replay reseeds at the same points. |
 | `SecretBytes.lock`, `Secret.lock` (and `SecretKey.lock`) | `neura.memory.lock` (new host service, version 1): arguments: the handle of a heap object holding a byte list; results: `Ok` when the runtime has moved the list's storage to locked pages (`mlock`/`VirtualLock`), excluded from core dumps, and promises to zero the storage when the object is reclaimed or the run ends, or `Error(uint32)` with code 12 (out of memory or lock limit) or 14 (capability denied). The collector must then not copy the storage. Capability group: a new `memory` group, granted by default. Record/replay: the call has no observable result besides success, so a trace records only the status. |
 
+## Edge cases
+
+1. An `update` after a digest's output was read, and a second `finish` or `verify` of a MAC, trap. They never return a value that looks valid.
+2. `verify` accepts only a full-length tag, because a truncated tag weakens it without the caller noticing. The lengths of byte lists are treated as public, and only the contents are compared in constant time.
+3. A failed AEAD `open` returns an error and never releases plaintext, including for input shorter than the tag.
+4. A key, nonce or parameter of the wrong size traps with an `invalid argument:` message, because it is a programming error. A wrong tag, a malformed PHC string or a refused entropy request is a `Result` error, because it depends on data.
+5. Primitives work inside spawned tasks. The policy lives in an `AtomicInt64`, and every constant table is built per object, because arrays are not transferable (`E0601` otherwise).
+6. A stub traps with `unsupported: ...` instead of returning something that looks like a result. The default paths (`SecretBytes` construction, a seeded `ChaCha20Drbg`, `Entropy.os_bytes`) never reach a stub.
+
+## Order of work and gate
+
+The packages landed in the order the owner asked for, one commit each: contracts, Core, Hash, Mac (with the internal AES core), Kdf, Symmetric (with the internal ChaCha20 core) and Random. Each commit had to pass the same gate. Its area under `tests/stdlib/crypto-*` passes in the three runs of `area.cmake`, with trap programs in both build modes, together with `stdlib-install`. `check-docs.py`, `generate-wiki.py --check` and `build-site.py --check` pass. Every generator in `scripts/crypto-vectors/` reproduces its committed vector file byte for byte from the downloaded sources.
+
+## Migration
+
+Nothing changes for existing programs. `Std.Digest.Sha256` keeps its API, and `Std.Crypto.Hash.Sha2.Sha256` wraps the same kernel. `Std.Random.Random` stays a non-cryptographic generator. Programs that need secrets move to `Std.Crypto.Random`.
+
 ## Decisions taken without the owner
 
 1. `OutLen` became the static requirement `output_length()`, because Neura has no value type parameters.
@@ -97,3 +114,7 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 10. Neither RFC 5297 nor `cryptography` provides an empty-plaintext AES-SIV case, so there is none here. The empty-plaintext GCM-SIV cases come from RFC 8452.
 11. `ChaCha20Drbg`'s construction (SHA-256 seeding and reseeding with fixed labels, fast key erasure over ChaCha20 with a zero nonce) is defined here, not taken from a standard. FIPS 140-3 approves only the SP 800-90A generators, so `Fips140_3` and `Cnsa2_0` deny it.
 12. OS entropy is not a stub: the runtime already has `neura.entropy.fill`, and `Std.Crypto.Random.Entropy` binds it directly, with requests of up to 1 MiB.
+13. The policy tables are this library's reading of the standards. `Fips140_3` allows SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2 and the FIPS 186-5, 203, 204 and 205 schemes. It denies ChaCha20, Poly1305, BLAKE3, AES-SIV, GCM-SIV, scrypt, Argon2id, Balloon, STREAM and ChaCha20-DRBG. `Cnsa2_0` allows only AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The default is `Modern`.
+14. The constant-time helpers are functions over `uint32` and byte lists, not the specification's `CtEq`, `CtSelect` and `CtLess` value types.
+15. The library adds contracts and modules the specification does not name: the `Algorithm` enum, `ExtendableOutput` (the XOF contract), `Mac.Authenticator`, `Core.SecretKey<Alg>`, `Core.Secret<T>` with an eraser function, and `Kdf.PasswordHash`.
+16. `SecretBytes` and the key classes keep identity `equals` and `hash_code`. Contents are compared only with `ct_equals`.

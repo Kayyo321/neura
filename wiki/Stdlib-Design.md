@@ -132,6 +132,7 @@ The language has no hexadecimal integer literals, no inference of type arguments
 | `Std.Test` | Assertions | [14.2](#142-stdtest) |
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop) |
 | `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](Concurrency#9-stdconcurrent) |
+| `Std.Crypto` | The contracts, and the packages `Core`, `Random`, `Hash`, `Mac`, `Kdf` and `Symmetric` | [20](#20-stdcrypto) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retired-built-ins)).
 
@@ -157,6 +158,7 @@ A module may import only modules above it. Cycles are forbidden.
 6. `Std.Io`, `Std.Program`, `Std.Concurrent`
 7. `Std.Fs`, `Std.Net`, `Std.DynamicForeign`
 8. `Std.Log`, `Std.Test`
+9. `Std.Crypto`: its contracts, then `Core`, `Hash`, `Mac`, `Kdf`, `Symmetric` and `Random`, each above the next. It imports `Std.Core`, `Std.Concurrent.AtomicInt64`, `Std.Digest.Sha256`, `Std.Encoding`, `Std.Math.BigInteger` and `Std.Time`.
 
 `StringBuilder` is in `Std.Core` because number formatting needs it. `IntRange` imports the `Iterable` and `Iterator` interfaces from `Std.Collections` so that for-each can visit a range; those two modules import nothing, so no cycle forms. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`.
 
@@ -180,7 +182,7 @@ Every interaction with the outside world is a host service with a name, a versio
 | `neura.fs.stat`, `list`, `make_directory`, `remove`, `rename` | 1 | path text (two for rename); `stat` also takes a follow-links flag and `remove` a directory flag | kind, size, and modified time; list of names; none | `Fs` |
 | `neura.clock.wall`, `monotonic` | 1 | none | seconds and nanoseconds; nanoseconds | `SystemClock` |
 | `neura.clock.sleep` | 1, 2 | nanoseconds | none | `SystemClock` (version 2); overlaps in an image with tasks |
-| `neura.entropy.fill` | 1 | count | bytes | `Random.from_entropy` |
+| `neura.entropy.fill` | 1 | count | bytes | `Random.from_entropy`, `Std.Crypto.Random.Entropy.os_bytes` |
 | `neura.env.get` | 1 | name text | found flag and value text | `Environment` |
 | `neura.process.exit` | 1 | status | does not return | `Process.exit` |
 | `neura.net.listen`, `local_port`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID or port | `Std.Net` |
@@ -1485,7 +1487,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 | `Secret` | `Secret<T>` wraps any value with an `eraser` function that `wipe()` calls once, because generic code cannot overwrite a value of unknown type. `zero_bytes` is the eraser for byte lists. `to_string` is `Secret(<redacted>)`, and `lock()` is a stub. |
 | `SecretKey` | `SecretKey<Alg>` implements `SymmetricKey<Alg>` over a `SecretBytes`. A cipher constructor that takes a `SymmetricKey<AesGcm>` rejects a key typed for another algorithm at compile time. |
 | `ConstantTime` | `ct_eq(a, b)` on byte lists (a length difference returns false at once, because lengths are public), `ct_eq_uint32`, `ct_less` and `ct_select` on `uint32` (results 0 or 1), and `ct_select_bytes`. Branch-free in source; the runtime does not guarantee constant time. |
-| `CryptoPolicy` | One process-wide `Policy`, which is `Modern` (the default), `Fips140_3` or `Cnsa2_0`. `set_policy`, `policy`, `allows(algorithm)`, `allowed_by(policy, algorithm)`, and `require(algorithm)`, which traps with `denied: <Algorithm> is not allowed under the <Policy> policy`. Each primitive calls `require` when it is created. `Modern` denies `Md5`, `Sha1` and `Rsa1024`. `Fips140_3` allows the FIPS-approved algorithms: SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2, and the approved public-key and post-quantum schemes. `Cnsa2_0` allows AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The policy is checked at run time only. Set it before tasks start. |
+| `CryptoPolicy` | One process-wide `Policy`, which is `Modern` (the default), `Fips140_3` or `Cnsa2_0`. `set_policy`, `policy`, `allows(algorithm)`, `allowed_by(policy, algorithm)`, and `require(algorithm)`, which traps with `denied: <Algorithm> is not allowed under the <Policy> policy`. Each primitive calls `require` when it is created. `Modern` denies `Md5`, `Sha1` and `Rsa1024`. `Fips140_3` allows the FIPS-approved algorithms: SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2, and the approved public-key and post-quantum schemes. `Cnsa2_0` allows AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The policy is checked at run time only. It is held in a `Std.Concurrent.AtomicInt64`, so primitives can be created in spawned tasks; set it at startup, because a change reaches each task at its next creation of a primitive. |
 
 ### 20.3 `Std.Crypto.Random`
 

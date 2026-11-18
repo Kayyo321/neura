@@ -35,7 +35,7 @@ HEX_LINE = re.compile(r"^\s*([0-9A-Fa-f]{2}(\s+[0-9A-Fa-f]{2})*)\s*$")
 def text_of(name: str, pdf_dir: pathlib.Path) -> str:
     pdf = pdf_dir / f"{name}.pdf"
     if not pdf.exists():
-        with urllib.request.urlopen(BASE + name + ".pdf", timeout=60) as response:
+        with urllib.request.urlopen(urllib.request.Request(BASE + name + ".pdf", headers={"User-Agent": "curl/8"}), timeout=60) as response:
             pdf.write_bytes(response.read())
     return subprocess.run(["pdftotext", "-layout", str(pdf), "-"], check=True,
                           capture_output=True, text=True).stdout

@@ -39,6 +39,7 @@ Ada
 | `Std.Random` | `Random` (xoshiro256**), `Uuid` |
 | `Std.Encoding` | `Utf8`, `Hex`, `Base64`, `Csv`, `Json` |
 | `Std.Digest` | `Crc32`, `Sha256` |
+| `Std.Crypto` | Contracts (`SecretMemory`, `StreamingDigest`, `AeadCipher`, ...); `Core` (`SecretBytes`, `ConstantTime`, `CryptoPolicy`); `Random` (`Entropy`, `ChaCha20Drbg`); `Hash` (`Sha2`, `Sha3`, `TupleHash`, `Blake3`, `MerkleTree`); `Mac` (`Hmac`, `Kmac`, `Poly1305`, `AesCmac`); `Kdf` (`Hkdf`, `Pbkdf2`, `Scrypt`, `Argon2`, `Balloon`, `Phc`, `PasswordHash`); `Symmetric` (`AesGcm`, `AesGcmSiv`, `AesSiv`, `ChaCha20Poly1305`, `XChaCha20Poly1305`, `OnlineCipher`, `Ff1`) ([Stdlib, section 20](Stdlib.md#20-stdcrypto)) |
 | `Std.Io` | `Console`, `Closeable`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer` |
 | `Std.Fs` | `Path`, `File`, `Fs` |
 | `Std.Net` | `TcpStream`, `TcpListener` |
@@ -188,6 +189,7 @@ A call that `spawn` starts must be [task-safe](Concurrency.md#52-task-safe-calls
 | `Std.Time` | Every function, `SystemClock`, `FixedClock`, and `Stopwatch` included. The value classes are `#Immutable`, so a task may be given their instances and may read `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc` | None |
 | `Std.Encoding` | Every function. `Utf8.validate`, `Hex`, and `Base64` run built-in kernels, which keep no module state | None |
 | `Std.Digest` | Every function. Both digests run built-in kernels, which keep no module state, so a task or a parallel item can compute either one | None |
+| `Std.Crypto` | Every function. The policy is an `AtomicInt64` and the constant tables are built per object, so a task can create and use any primitive (`tests/stdlib/crypto-contracts/tasks-tests.nra`). The classes hold mutable state and belong to the task that made them | None |
 | `Std.DynamicForeign` | | Every function: it cannot be linked into a program with tasks |
 
 The table is the report for a program that links every module of the library except `Std.DynamicForeign`. The `concurrency-frontend` test pins a smaller set: with `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json` linked, only the console's input functions may be listed. The rows for `Std.Encoding`, `Std.Digest`, the two readers of `Std.Io`, and the two `Std.Time` classes come from the report alone. A function that calls a function value is judged by every function value of that type the program can create, so a program that makes an unsafe function value of a type the library calls, such as a logger's sink or a comparator, adds the library functions that call it to the list.

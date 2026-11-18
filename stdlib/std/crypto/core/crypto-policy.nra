@@ -1,11 +1,13 @@
+let atomics = import:Std.Concurrent.AtomicInt64;
 let.promote _ = import:Std.Crypto.Algorithm;
 
 /// @brief The process-wide policy that every primitive of Std.Crypto consults (Stdlib.md section 20.2).
 ///
 /// A primitive calls `require` with its algorithm when it is created, so a denied algorithm traps with
 /// "denied: <Algorithm> is not allowed under the <Policy> policy" before it processes any data. Enforcement is
-/// at run time only; checking a policy at compile time is outside 0.3.0. The policy is one module variable:
-/// set it at startup, before any task starts, and do not change it while tasks run.
+/// at run time only; checking a policy at compile time is outside 0.3.0. The policy is held in one
+/// Std.Concurrent.AtomicInt64, so primitives can be created in spawned tasks; set it at startup, because a
+/// change while tasks run takes effect for each task at its next creation of a primitive.
 /// @see [Std.Crypto.Core.CryptoPolicy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-CryptoPolicy)
 #Since("0.3.0")
 export let CryptoPolicy = module (
@@ -15,18 +17,31 @@ export let CryptoPolicy = module (
     #Since("0.3.0")
     export let Policy = enum (Modern, Fips140_3, Cnsa2_0);
 
-    /// @brief The current policy.
-    let current: Policy = Policy.Modern;
+    /// @brief The current policy's code: 0 Modern, 1 Fips140_3, 2 Cnsa2_0.
+    last current: atomics.AtomicInt64 = atomics.create(0);
 
     /// @brief Replaces the process-wide policy.
     #Since("0.3.0")
     export let set_policy = func(policy: Policy) {
-        current = policy;
+        current.store(match (policy) {
+            Policy.Modern => 0,
+            Policy.Fips140_3 => 1,
+            Policy.Cnsa2_0 => 2,
+        });
     };
 
     /// @brief The process-wide policy.
     #[NoDiscard, Since("0.3.0")]
-    export let policy = func -> Policy => current;
+    export let policy = func -> Policy {
+        last code = current.load();
+        if (code == 1) {
+            return Policy.Fips140_3;
+        }
+        if (code == 2) {
+            return Policy.Cnsa2_0;
+        }
+        return Policy.Modern;
+    };
 
     /// @brief Whether the policy allows the algorithm.
     #[NoDiscard, Pure, Since("0.3.0")]
@@ -38,14 +53,15 @@ export let CryptoPolicy = module (
 
     /// @brief Whether the current policy allows the algorithm.
     #[NoDiscard, Since("0.3.0")]
-    export let allows = func(algorithm: Algorithm) -> bool => allowed_by(current, algorithm);
+    export let allows = func(algorithm: Algorithm) -> bool => allowed_by(policy(), algorithm);
 
     /// @brief Traps with "denied: <Algorithm> is not allowed under the <Policy> policy" unless the current
     /// policy allows the algorithm.
     #Since("0.3.0")
     export let require = func(algorithm: Algorithm) {
-        if (!allowed_by(current, algorithm)) {
-            trap_with_message("denied: " + algorithm.to_string() + " is not allowed under the " + current.to_string()
+        last active = policy();
+        if (!allowed_by(active, algorithm)) {
+            trap_with_message("denied: " + algorithm.to_string() + " is not allowed under the " + active.to_string()
                 + " policy");
         }
     };
