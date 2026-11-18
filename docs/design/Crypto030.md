@@ -37,7 +37,7 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | `ct_eq`, `ct_select`, `ct_less` (2.1) | logic | edge values (0, 2^32-1, neighbours) | implemented; branch-free in source; the runtime does not guarantee constant time |
 | `CryptoPolicy` `Modern`, `Fips140_3`, `Cnsa2_0` (2.1) | logic | table tests and a trap | implemented at run time; compile-time enforcement is outside 0.3.0 |
 | OS entropy (`getrandom` and the platform equivalents) (2.2) | logic over host data | allowed and denied capability tests | implemented over the existing `neura.entropy.fill` service |
-| Hardware entropy RDSEED/RNDR and fusion with OS entropy (2.2) | stub (`hardware_bytes`, used by `fused_seed`) | The runtime has a hardware entropy service. The public wrapper remains unbound. | stub |
+| Hardware entropy RDSEED/RNDR and fusion with OS entropy (2.2) | logic over host data | Exact length or documented provider refusal, capability denial, request limit, record/replay and restricted-policy rejection. | implemented over native `neura.entropy.hardware`. The Modern policy allows the raw source. |
 | ChaCha20-DRBG over a seed, reseeding (2.2) | logic | no standard vectors exist for this construction; an independent Python reference (`gen-drbg.py`) over hashlib and `cryptography`'s ChaCha20 (11 outputs over 3 seeds, with reseeds) | implemented |
 | Fork and VM-clone detection with immediate reseed (2.2) | stub (`fork_generation`, used by `fork_safe`) | The host process-generation service detects forked children. VM snapshot restores require a host signal. | stub. The reseed logic is implemented. |
 | SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/256 (2.3) | KAT | Python `hashlib`: 26 messages per digest around every block and padding boundary; streaming in pieces | implemented; `Sha256` shares the kernel of `Std.Digest.Sha256` |
@@ -160,7 +160,6 @@ The following public entries need a runtime service or a binding to a service. T
 
 | Stub | Host operation needed |
 | --- | --- |
-| `Entropy.hardware_bytes` | A library binding to the existing `neura.entropy.hardware` service for RDSEED or RNDR. |
 | `Entropy.fork_generation` (used by `ChaCha20Drbg.fork_safe`) | A runtime adapter that detects VM snapshot restores as well as forked children. The current `neura.process.generation` service detects a change of process ID after fork. |
 | `Secret<T>.lock` | The host services accept dedicated byte buffers. They have no adapter for an arbitrary generic Neura value. |
 | `Pkcs11.open`, `Tpm.open`, `CloudKms.open` | Host providers for token sessions, TPM commands, or authenticated KMS communications. They must hold credentials and private keys outside the circuit, issue opaque scoped handles, and implement the versioned lookup and authenticated wrap contracts. |

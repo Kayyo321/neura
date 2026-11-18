@@ -1,6 +1,10 @@
-// test-options: --allow-entropy
+// test-options: --gpu=off --allow-entropy
+// host-dependent-counts: CPU features and hardware entropy retry outcomes determine the exercised branch
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
 let constant_time = import:Std.Crypto.Core.ConstantTime;
 let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let error = import:Std.Core.Error;
 let entropy = import:Std.Crypto.Random.Entropy;
 let test = import:Std.Test;
 
@@ -13,6 +17,35 @@ let EntropyAllowedTests = module (
         test.assert_equal_int32(32, a.length);
         test.assert(!constant_time.ct_eq(a, b));
         test.assert_equal_int32(0, test.assert_ok(entropy.os_bytes(0)).length);
+    };
+
+    let assert_hardware_result = func(result: Result<uint8[list]>, count: int) {
+        match (result) {
+            Result.Ok(bytes) => {
+                test.assert_equal_int32(count, bytes.length);
+            },
+            Result.Err(Error.Io { kind: kind, message: message, path: _ }) => {
+                test.assert(kind == IoErrorKind.Unsupported || kind == IoErrorKind.Other);
+                test.assert_equal_string("hardware entropy request failed", message);
+            },
+            _ => {
+                test.fail("expected bytes or a hardware entropy provider error");
+            },
+        }
+    };
+
+    export let test_hardware_bytes = func {
+        test.assert_equal_int32(0, test.assert_ok(entropy.hardware_bytes(0)).length);
+        assert_hardware_result(entropy.hardware_bytes(19), 19);
+    };
+
+    export let test_hardware_request_limit = func {
+        last failure = test.assert_err(entropy.hardware_bytes(1048577));
+        test.assert_equal_string("InvalidInput: hardware entropy request failed", error.message(failure));
+    };
+
+    export let test_fused_seed = func {
+        assert_hardware_result(entropy.fused_seed(), 64);
     };
 
     export let test_drbg_from_entropy = func {
