@@ -6,6 +6,7 @@ error[E0518]: accessors require a field, but 'size' is a function
 5 |         | get: 0;
   |         ^^^^^^^^^ accessor clause on a function
   |
+  = note: a '|' clause after a member is an accessor clause of that member; class hooks are written after the class's '(', before its first member
   = help: remove the clause; only an exported instance field can have 'get' and 'set' accessors
 
 For more information about this error, try `neura explain E0518`.
