@@ -42,8 +42,8 @@ let make_stock = func(name: string) -> ui.Component {
 | `subscribe(new func(T))` returns a `ui.Subscription` whose `close()` is idempotent. A class's `get` and `set` clauses and hooks are never observed: only `ui.State` is. | implemented |
 | A state, a subscription, a component, a root and a view belong to one task (`E0602` when given to another). | implemented through `#NotThreadSafe` |
 | `ui.component(state:, styles:, render:)` returns a `ui.Component`. `render` is retained and render-compatible (`E1010`): it receives a snapshot and returns a view. `styles` keeps the stylesheet reachable; it registers nothing at run time. | partly implemented: `ui.component<T>(state, render)`; no `styles` (no `ui.Stylesheet` yet) and no `E1010` (Html030 step 6) |
-| A component is embedded in another's view with `{ ui.slot(child) }`. The child renders by itself when its state changes; the parent's render is not run again for it. Children and named slots are ordinary `ui.View` parameters of a factory. | implemented |
-| `web.mount(selector, component, tasks)` and `desktop.mount(window, component, tasks)` return `Result<ui.Root>`. `tasks` is the handle of the enclosing `scope`, so every task the root starts is lexically inside it. A second root on one element, or more than `U-9` roots, is `Err`. | partly implemented: `ui.mount(host, target, component)`; `Std.Web.mount` is a stub (no `neura.ui.*` services); `desktop.mount` is not declared (no window type) |
+| A component is embedded in another's view with `{ ui.slot(child) }`. The child renders by itself when its state changes; the parent's render is not run again for it. Children and named slots are ordinary `ui.View` parameters of a factory. | implemented, with [subtree commits](#subtree-commits): the commit of a child that rendered alone changes only the child's nodes |
+| `web.mount(selector, component, tasks)` and `desktop.mount(window, component, tasks)` return `Result<ui.Root>`. `tasks` is the handle of the enclosing `scope`, so every task the root starts is lexically inside it. A second root on one element, or more than `U-9` roots, is `Err`. | `ui.mount(host, target, component)` and `Std.Web.mount` over the browser's `neura.ui.*` services are implemented; the root starts no task yet (no commands); `desktop.mount` is not declared (no window type) |
 | `root.run()` is the event loop. One *turn* is: take the next event; call its handler; apply queued updates and notify; render each component whose state changed, once, parents before children; commit. It returns when the root is closed or its scope is cancelled. | implemented; `run` also returns when the host has no more events |
 | An `Invalid` or `Err` commit is delivered to the root's `on_render_failure` callback (default: log it and keep the previous view) and the loop continues, except that a faulted root stops taking events until `reset`. | implemented; a faulted root stops its loop, and `reset` restarts it |
 | Unmounting a component removes its listeners, closes its subscriptions, cancels its commands and raises its generation. | implemented except commands (not implemented) |
@@ -330,3 +330,28 @@ A program that passed an `ImmutableList` to another task or stored one as shared
 8. A change made between turns renders in the next turn. A faulted root ends `run`; `reset` asks the host to empty the root, renders every component again and lets `run` continue.
 9. An event is stale when its component has unmounted or its generation has changed; removing one listener of a still-mounted component is the host's part. The overflow notice is queued as a marker before the next accepted event, and the host resynchronizes controlled values when the marker's turn runs; the input events it posts then are delivered before the events that arrived after the overflow.
 10. When a commit is refused (`Invalid`), components mounted or unmounted by that turn's renders stay so; only the host keeps its previous view. A component embedded by two parents traps with `a component is mounted twice`.
+
+## Subtree commits
+
+*Proposed* 2026-11-17, implemented by autonomous agents in the apps integration, awaiting owner confirmation. A3's roots render only the components whose state changed, but A1's reconciler took one whole view per commit and refused a view that was already mounted, so a child that rendered alone could not be committed without its parent. This section fixes how a turn's renders become one commit.
+
+| Rule | Status |
+| --- | --- |
+| A turn's commit carries its renders and the root's top component (`ui.Commit.top`). A host that reconciles builds the root's tree from `top`: each component contributes its current view, and a `ui.slot(child)` in it is replaced by the child's tree. | implemented (`Reconciler.prepare_turn`) |
+| A component that rendered for the commit is *fresh*: its view must be new, as before (`ViewReused` for a mounted view). A component that did not render is *retained*: its mounted view is expanded again and is not refused. A view used twice in one tree, or held by another root, is refused in both. | implemented |
+| A retained component's nodes match their mounted nodes by key and origin, so they produce no operation unless they moved. The commit of a child that rendered alone holds only the operations of the child's nodes. | implemented; checked on the model host and in headless Chromium and Firefox |
+| A retained node writes no property. A fresh node writes its bound properties as before, and the browser adapter skips equal values. A value the user is editing in one component is not overwritten by the commit of another. | implemented |
+| A listener belongs to the component whose view holds it. The host posts a browser event to the root with that component as the target, so an event for a component that unmounted or remounted since is discarded by the root's generation check. | implemented (`Reconciler.target_of`) |
+| After a refused commit the mounted tree stays. The next commit is built from every component's current view, including the refused render of a component that did not render again, so the root reports the refusal until the state that caused it changes. | implemented |
+| The commit encoding is unchanged: subtree commits are ordinary version 1 batches ([Providers](../runtime/Providers.md#commit-encoding)). | implemented |
+
+Cost: a commit expands every component's view and compares the whole tree, which is linear in the root's nodes; only the operations are limited to what changed. A later change may keep a retained component's nodes without expanding them again, when no component below it rendered; it changes no operation and no rule above.
+
+### Decisions taken without the owner
+
+1. The component boundary is the view that `ui.slot` makes, recognized by the reconciler; no new view kind and no encoding change.
+2. Re-expanding retained views, rather than reconciling each component's subtree against an anchor in its parent, keeps one algorithm for every commit and makes keyed moves across component boundaries impossible to get wrong. The linear cost is accepted for 0.3.0.
+3. A retained node writes no property, so a commit never moves the value of an element whose component did not render. A fresh node keeps A1's rule and writes every bound property.
+4. `ui.Host` gains `stats(root) -> ui.HostStats`: nodes, listeners, templates and queued events, the counts of `neura.ui.stats`. The model host reports its reconciled tree's counts, or zeros when it does not reconcile.
+5. A host that queues events itself, as the browser does, reports an overflow with `Root.post_overflow(dropped)`; the inputs the browser kept follow it in the same batch, so the web host's `resynchronize` does nothing.
+

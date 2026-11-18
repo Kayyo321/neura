@@ -1,3 +1,4 @@
+let frozen = import:Std.Collections.Frozen;
 let model = import:Std.Ui.ModelHost;
 let result = import:Std.Core.Result;
 let test = import:Std.Test;
@@ -22,6 +23,24 @@ let panel_view = html(title: string, child: ui.View) {
 let pair_view = html(first: ui.View, second: ui.View) {
     <div>{first}{second}</div>
 };
+
+let draft_view = html(draft: string) {
+    <input type="text" prop:value={draft}>
+};
+
+let names_view = html(names: frozen.FrozenList<string>) {
+    <ul>
+        @for (const name in names; key: name) {
+            <li>{name}</li>
+        }
+    </ul>
+};
+
+let page_view = html(title: string, on_next: func(ui.ClickEvent) -> void, first: ui.View, second: ui.View) {
+    <main><h1>{title}</h1><button type="button" on:click={on_next}>Next</button>{first}{second}</main>
+};
+
+let click = func -> ui.ClickEvent => new ui.ClickEvent(0, 0.0, 0.0, new ui.Modifiers(false, false, false, false), 1);
 
 let UiStateTests = module (
     let mounted = func(host: model.Host, target: string, top: ui.Component) -> ui.Root =>
@@ -354,5 +373,82 @@ let UiStateTests = module (
             root.close();
             test.assert_equal_int32(0, state.subscriber_count());
         }
+    };
+
+    // Subtree commits on a reconciling host: a child that renders alone changes only its own nodes, and a
+    // retained sibling writes no property; then the parent renders alone and the children keep their nodes.
+    export let test_subtree_commits = func() -> void {
+        let host = new model.Host();
+        host.reconcile_commits();
+        let count = new ui.State<int32>(0);
+        let counter = ui.component<int32>(count, new func(value: int32) -> ui.View =>
+            counter_view(value, new func(event: ui.ClickEvent) {
+                count.set(count.get() + 1);
+            }));
+        let draft = ui.component<string>(new ui.State<string>("typed"), new func(value: string) -> ui.View =>
+            draft_view(value));
+        let title = new ui.State<string>("Parts");
+        let rename = new func(event: ui.ClickEvent) {
+            title.set("Stock");
+        };
+        let page = ui.component<string>(title, new func(value: string) -> ui.View =>
+            page_view(value, rename, ui.slot(counter), ui.slot(draft)));
+        let root = mounted(host, "#app", page);
+        test.assert_equal_string("nodes 8, listeners 2, templates 3, queued 0", root.host_stats().to_string());
+        host.clear_log();
+        test.assert_equal_bool(true, host.dispatch_click(root, 2, click()));
+        root.run();
+        test.assert_equal_string("commit 2 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":7,\"value\":\"1\"}", join(host.log));
+        host.clear_log();
+        test.assert_equal_bool(true, host.dispatch_click(root, 1, click()));
+        root.run();
+        test.assert_equal_string("commit 3 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":3,\"value\":\"Stock\"}", join(host.log));
+        test.assert_equal_int64(2, page.render_count());
+        test.assert_equal_int64(2, counter.render_count());
+        test.assert_equal_int64(1, draft.render_count());
+        root.close();
+        test.assert_equal_string("nodes 0, listeners 0, templates 0, queued 0", root.host_stats().to_string());
+    };
+
+    // A refused child commit keeps the mounted tree; the next valid render of the child converges to it.
+    export let test_refused_subtree_converges = func() -> void {
+        let host = new model.Host();
+        host.reconcile_commits();
+        let failures: string[list] = new;
+        let names = new ui.State<frozen.FrozenList<string>>(frozen.of<string>("bolt", "nut"));
+        let list = ui.component<frozen.FrozenList<string>>(names, new func(value: frozen.FrozenList<string>) -> ui.View =>
+            names_view(value));
+        let script: frozen.FrozenList<string>[list] = new;
+        script.append(frozen.of<string>("gear", "gear"));
+        script.append(frozen.of<string>("nut", "gear"));
+        let advance = new func(event: ui.ClickEvent) {
+            names.set(script[0]);
+            script.remove_at(0);
+        };
+        let page = ui.component<string>(new ui.State<string>("Parts"), new func(value: string) -> ui.View =>
+            page_view(value, advance, ui.slot(list), ui.slot(ui.component<int32>(new ui.State<int32>(0),
+                new func(n: int32) -> ui.View => counter_view(n, new func(event: ui.ClickEvent) {})))));
+        let root = mounted(host, "#app", page);
+        root.on_render_failure(new func(failure: ui.RenderFailure) {
+            match (failure) {
+                ui.RenderFailure.Invalid(diagnostic) => {
+                    failures.append(diagnostic.kind.to_string() + " " + diagnostic.key);
+                },
+                ui.RenderFailure.Fault(_) => {
+                    failures.append("fault");
+                },
+            }
+        });
+        host.dispatch_click(root, 1, click());
+        root.run();
+        test.assert_equal_string("DuplicateKey gear", join(failures));
+        test.assert_equal_string("nodes 12, listeners 2, templates 3, queued 0", root.host_stats().to_string());
+        host.clear_log();
+        host.dispatch_click(root, 1, click());
+        root.run();
+        test.assert_equal_string("commit 3 on root 1: 1 render, 3 operations", host.log[0]);
+        test.assert_equal_string("nodes 12, listeners 2, templates 3, queued 0", root.host_stats().to_string());
     };
 );

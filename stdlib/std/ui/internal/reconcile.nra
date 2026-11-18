@@ -305,6 +305,8 @@ export let Reconcile = module (
         export last stop_propagation: bool;
         export last callable: storage.Slot;
         export let id: uint64 = 0;
+        // The component whose view holds the listener, or nil outside a component.
+        export let component: ui.Component = nil;
 
         export let init = func(event: string, prevent_default: bool, stop_propagation: bool, callable: storage.Slot)
             => set;
@@ -341,6 +343,8 @@ export let Reconcile = module (
         export let state: int = 0;
         export let old: VNode = nil;
         export let removed: bool = false;
+        // False for a node of a component that was not rendered in this commit; its properties are not written.
+        export let fresh: bool = true;
 
         export let init = func(element: bool, name: string, svg: bool, origin: string, key: string) => set;
     );
@@ -381,13 +385,28 @@ export let Reconcile = module (
     let Expansion = class (
         export let nodes: int = 0;
         export let refusal: ui.Diagnostic = nil;
+        // The component being expanded, or nil for a view committed without components.
+        export let component: ui.Component = nil;
+        // Whether that component rendered for this commit. A component that did not keeps its mounted view, which
+        // may then be expanded again (a retained view).
+        export let fresh: bool = true;
+        // Whether every view is new (prepare of a whole view); otherwise only the components of `rendered` rendered.
+        export let whole: bool = true;
+        export let rendered: ui.Rendered[list] = new();
     );
+
+    // The descriptor of the view that `ui.slot` makes: one payload, the embedded component.
+    let SlotDescriptor: string = "neura:slot";
 
     #[Final, NotThreadSafe]
     export let Reconciler = class (
         let templates: StringMap<Template> = string_maps.create<Template>();
         let mounted: VNode[list] = new();
         let handlers: StringMap<storage.Slot> = string_maps.create<storage.Slot>();
+        // The component of each listener of the mounted tree that belongs to one.
+        let targets: StringMap<ui.Component> = string_maps.create<ui.Component>();
+        // Every template descriptor parsed, in the order first seen; a host registers them in this order.
+        let descriptors: string[list] = new();
         let next_id: uint32 = 1;
         let next_handler: uint64 = 1;
         let passes: uint64 = 1;
@@ -403,6 +422,7 @@ export let Reconcile = module (
             }
             last parsed = parse_template(descriptor, templates.size());
             templates.set(descriptor, parsed);
+            descriptors.append(descriptor);
             return parsed;
         };
 
@@ -427,13 +447,60 @@ export let Reconcile = module (
             }
         };
 
-        let expand_view = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
-            if (view.owner != nil && (!(view.owner === instance) || view.pass == pass || view.pass == mounted_pass)) {
+        // A view is refused when another root holds it, when it appears twice in this tree, or when a component
+        // rendered for this commit returns a view that is mounted. A component that did not render keeps its
+        // mounted view, which is expanded again.
+        let claim = func(view: ui.View, pass: uint64, state: Expansion) -> bool {
+            if (view.owner != nil &&
+                (!(view.owner === instance) || view.pass == pass || (view.pass == mounted_pass && state.fresh))) {
                 refuse(state, ui.DiagnosticKind.ViewReused, "a view appears once in one tree, in one root", 0, -1, "");
-                return;
+                return false;
             }
             view.owner = instance;
             view.pass = pass;
+            return true;
+        };
+
+        let was_rendered = func(state: Expansion, component: ui.Component) -> bool {
+            if (state.whole) {
+                return true;
+            }
+            for (let entry in state.rendered) {
+                if (entry.component === component) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // A component boundary: the embedded component's current view takes the slot's place, expanded as fresh
+        // when the component rendered for this commit and as retained otherwise. Its listeners belong to it.
+        let expand_component = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
+            if (!claim(view, pass, state)) {
+                return;
+            }
+            last child = (view.slots as storage.Payload<ui.Component>).value;
+            last current = child.current_view();
+            if (current == nil) {
+                trap_with_message("a component in a slot has not rendered");
+            }
+            last outer = state.component;
+            last outer_fresh = state.fresh;
+            state.component = child;
+            state.fresh = was_rendered(state, child);
+            expand_view(current, key, pass, state, out);
+            state.component = outer;
+            state.fresh = outer_fresh;
+        };
+
+        let expand_view = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
+            if (view.descriptor == SlotDescriptor) {
+                expand_component(view, key, pass, state, out);
+                return;
+            }
+            if (!claim(view, pass, state)) {
+                return;
+            }
             last t = template(view.descriptor);
             last fragment = t.fragments[view.fragment as int];
             let values: storage.Slot[list] = new();
@@ -461,10 +528,12 @@ export let Reconcile = module (
                 if (node.kind == 0) {
                     last text = new VNode(false, "", false, where, path);
                     text.text = node.value;
+                    text.fresh = state.fresh;
                     count(state);
                     out.append(text);
                 } else if (node.kind == 1) {
                     last element = new VNode(true, node.name, node.svg, where, path);
+                    element.fresh = state.fresh;
                     count(state);
                     for (let attribute in node.attributes) {
                         if (attribute[2] < 0) {
@@ -520,7 +589,9 @@ export let Reconcile = module (
             } else if (slot.kind == "custom-property") {
                 element.variables.append([slot.name, (value as storage.Payload<ui.CssValue>).value]);
             } else if (slot.kind == "handler") {
-                element.listeners.append(new Listener(slot.name, slot.prevent_default, slot.stop_propagation, value));
+                last listener = new Listener(slot.name, slot.prevent_default, slot.stop_propagation, value);
+                listener.component = state.component;
+                element.listeners.append(listener);
             }
         };
 
@@ -531,6 +602,7 @@ export let Reconcile = module (
             }
             if (slot.kind == "text") {
                 last text = new VNode(false, "", false, origin, key);
+                text.fresh = state.fresh;
                 text.text = (value as storage.Payload<string>).value;
                 value_bytes(state, text.text, index);
                 count(state);
@@ -565,13 +637,32 @@ export let Reconcile = module (
             }
         };
 
-        /// @brief Validates `view` and computes the commit; changes nothing the root has mounted.
-        export let prepare = func(view: ui.View) -> Plan {
+        /// @brief Validates `view` and computes the commit; changes nothing the root has mounted. Every view in it
+        /// is new: a view that is mounted is refused (`ViewReused`).
+        export let prepare = func(view: ui.View) -> Plan => plan_from(view, new Expansion());
+
+        /// @brief Validates the tree of `top` and computes the commit of one turn, in which the components of
+        /// `rendered` rendered. The tree is each component's current view, with every `ui.slot` replaced by its
+        /// component's tree. A component that did not render keeps its mounted view and writes no properties, so
+        /// a child that rendered alone changes only its own nodes. Changes nothing the root has mounted.
+        export let prepare_turn = func(top: ui.Component, rendered: ui.Rendered[list]) -> Plan {
+            last view = top.current_view();
+            if (view == nil) {
+                trap_with_message("the root component has not rendered");
+            }
+            last state = new Expansion();
+            state.whole = false;
+            state.rendered = rendered;
+            state.component = top;
+            state.fresh = was_rendered(state, top);
+            return plan_from(view, state);
+        };
+
+        let plan_from = func(view: ui.View, state: Expansion) -> Plan {
             last plan = new Plan();
             last pass = passes + 1;
             passes = pass;
             plan.pass = pass;
-            last state = new Expansion();
             expand_view(view, "", pass, state, plan.tree);
             if (state.refusal != nil) {
                 plan.diagnostic = state.refusal;
@@ -835,13 +926,16 @@ export let Reconcile = module (
                         }
                     }
                 }
-                for (let property in node.properties) {
-                    last operation = new Operation(OpKind.Property, node.id);
-                    operation.name = property.name;
-                    operation.boolean = property.boolean;
-                    operation.flag = property.flag;
-                    operation.value = property.text;
-                    properties.append(operation);
+                // A retained node writes no property, so a value the user is editing in another component stays.
+                if (node.fresh || old == nil) {
+                    for (let property in node.properties) {
+                        last operation = new Operation(OpKind.Property, node.id);
+                        operation.name = property.name;
+                        operation.boolean = property.boolean;
+                        operation.flag = property.flag;
+                        operation.value = property.text;
+                        properties.append(operation);
+                    }
                 }
                 changes(node.children, contents, listeners, properties);
             }
@@ -852,6 +946,9 @@ export let Reconcile = module (
                 node.old = nil;
                 for (let listener in node.listeners) {
                     handlers.set(listener.id.to_string(), listener.callable);
+                    if (listener.component != nil) {
+                        targets.set(listener.id.to_string(), listener.component);
+                    }
                 }
                 register(node.children);
             }
@@ -865,6 +962,7 @@ export let Reconcile = module (
             mounted = plan.tree;
             mounted_pass = plan.pass;
             handlers = string_maps.create<storage.Slot>();
+            targets = string_maps.create<ui.Component>();
             register(mounted);
         };
 
@@ -872,6 +970,7 @@ export let Reconcile = module (
         export let reset = func {
             mounted = new();
             handlers = string_maps.create<storage.Slot>();
+            targets = string_maps.create<ui.Component>();
             mounted_pass = 0;
             passes += 1;
         };
@@ -893,6 +992,32 @@ export let Reconcile = module (
 
         /// @brief The number of handlers of the mounted tree.
         export let handler_count = func -> int => handlers.size();
+
+        /// @brief The component whose view holds the listener `handler`, or nil.
+        export let target_of = func(handler: uint64) -> ui.Component {
+            last found = targets.get(handler.to_string());
+            if (optional.is_none<ui.Component>(found)) {
+                return nil;
+            }
+            return optional.expect<ui.Component>(found, "target");
+        };
+
+        /// @brief The number of template descriptors parsed so far.
+        export let template_count = func -> int => descriptors.length;
+
+        /// @brief The template descriptor parsed `index`-th (from 0).
+        export let template_at = func(index: int) -> string => descriptors[index];
+
+        /// @brief The number of host nodes of the mounted tree.
+        export let node_count = func -> int => count_nodes(mounted);
+
+        let count_nodes = func(nodes: VNode[list]) -> int {
+            let total = 0;
+            for (let node in nodes) {
+                total += 1 + count_nodes(node.children);
+            }
+            return total;
+        };
     );
 
     let put_u8 = func(out: uint8[list], value: uint8) {

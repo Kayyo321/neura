@@ -587,14 +587,17 @@ export let Ui = module (
         export let.override to_string = func -> string => "Rendered(" + component.to_string() + ")";
     );
 
-    /// @brief The renders of one turn, parents before children, sent to the host as one request.
+    /// @brief The renders of one turn, parents before children, sent to the host as one request. A host that
+    /// reconciles builds the root's tree from `top`: the components that did not render keep their views.
     #[Final, NotThreadSafe]
     export let Commit = class (
         export last sequence: uint64;
         export last rendered: Rendered[list];
+        /// @brief The component the root was mounted with.
+        export last top: Component;
 
         #Internal
-        export let init = func(sequence: uint64, rendered: Rendered[list]) => set;
+        export let init = func(sequence: uint64, rendered: Rendered[list], top: Component) => set;
 
         /// @brief `Commit(` the sequence number and the number of renders `)`.
         export let.override to_string = func -> string =>
@@ -616,6 +619,39 @@ export let Ui = module (
         let reset = func(root: uint64);
         /// @brief Closes the root.
         let close = func(root: uint64);
+        /// @brief The host's counts for the root: nodes, listeners, templates and queued events.
+        let stats = func(root: uint64) -> HostStats;
+    );
+
+    /// @brief What a host holds for one root (budget B-W9): its nodes (the container excluded), installed
+    /// listeners, registered templates and queued events. A host that keeps no document reports zeros.
+    #[Final, Immutable]
+    export let HostStats = class (
+        export last nodes: int64;
+        export last listeners: int64;
+        export last templates: int64;
+        export last queued: int64;
+
+        export let init = func(nodes: int64, listeners: int64, templates: int64, queued: int64) => set;
+
+        /// @brief Every count, by name.
+        export let.override to_string = func -> string =>
+            "nodes " + nodes.to_string() + ", listeners " + listeners.to_string() + ", templates "
+            + templates.to_string() + ", queued " + queued.to_string();
+
+        /// @brief Other stats with equal counts.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is HostStats)) {
+                return false;
+            }
+            last that = other as HostStats;
+            return nodes == that.nodes && listeners == that.listeners && templates == that.templates
+                && queued == that.queued;
+        };
+
+        /// @brief Combines the hashes of the counts.
+        export let.override hash_code = func -> uint32 =>
+            nodes.hash_code() ^ listeners.hash_code() ^ templates.hash_code() ^ queued.hash_code();
     );
 
     /// @brief One event waiting in a root's queue.
@@ -780,6 +816,20 @@ export let Ui = module (
             return true;
         };
 
+        /// @brief Queues the notice that the host dropped `dropped` events while the root was overloaded. It is
+        /// delivered to `on_overflow` before the events posted after it. Called by a host that queues events itself.
+        #Internal
+        export let post_overflow = func(dropped: uint32) {
+            if (closed || dropped == 0) {
+                return;
+            }
+            dropped_total += dropped as uint64;
+            queue.append(new QueuedEvent(0, nil, 0, false, new func() {}, dropped));
+        };
+
+        /// @brief The host's counts for this root: nodes, listeners, templates and queued events.
+        export let host_stats = func -> HostStats => host.stats(handle);
+
         /// @brief Runs one turn. Returns false when the root is closed or faulted, or the host has no more events.
         export let turn = func -> bool {
             if (closed || faulted) {
@@ -896,7 +946,7 @@ export let Ui = module (
                 return;
             }
             sequence += 1;
-            match (host.commit(handle, new Commit(sequence, rendered))) {
+            match (host.commit(handle, new Commit(sequence, rendered, top))) {
                 result.Result.Ok(outcome) => {
                     match (outcome) {
                         RenderOutcome.Committed => {

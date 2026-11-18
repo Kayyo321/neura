@@ -213,66 +213,85 @@ The following public declarations are taken from the module source; each links t
 - **Ui.Rendered** · [`export let init = func(component: Component, view: View)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L584)
 - **Ui.Rendered** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L587)
   `Rendered(` the component `)`.
-- **Ui** · [`export let Commit = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L592)
-  The renders of one turn, parents before children, sent to the host as one request. Tagged `#Final`, `#NotThreadSafe`.
-- **Ui.Commit** · [`export last sequence: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L593)
-- **Ui.Commit** · [`export last rendered: Rendered[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L594)
-- **Ui.Commit** · [`export let init = func(sequence: uint64, rendered: Rendered[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L597)
-- **Ui.Commit** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L600)
-  `Commit(` the sequence number and the number of renders `)`.
-- **Ui** · [`export let Host = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L606)
-  The services a root needs from the document or window that shows it. The web, desktop and model hosts implement it; `mount` takes one.
-- **Ui** · [`export let RootStats = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L645)
-  Counts that show what a root holds and has done. Tagged `#Final`, `#Immutable`.
-- **Ui.RootStats** · [`export last components: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L646)
-- **Ui.RootStats** · [`export last subscriptions: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L647)
-- **Ui.RootStats** · [`export last queued: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L648)
-- **Ui.RootStats** · [`export last turns: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L649)
-- **Ui.RootStats** · [`export last renders: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L650)
-- **Ui.RootStats** · [`export last commits: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L651)
-- **Ui.RootStats** · [`export last dropped: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L652)
-- **Ui.RootStats** · [`export last discarded: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L653)
-- **Ui.RootStats** · [`export let init = func(components: int32, subscriptions: int32, queued: int32, turns: uint64, renders: uint64, commits: uint64, dropped: uint64, discarded: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L656)
-- **Ui.RootStats** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L660)
-  Every count, by name.
-- **Ui.RootStats** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L666)
-  Other stats with equal counts.
-- **Ui.RootStats** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L674)
-  The hash of the counts' text.
-- **Ui** · [`export let Root = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L681)
-  A mounted component tree and its event loop. One turn takes the next event, calls its handler, renders each component whose state notified, once, parents before children, and commits the renders as one host request. Tagged `#Final`, `#NotThreadSafe`.
-- **Ui.Root** · [`export let init = func(host: Host, handle: uint64, top: Component)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L703)
-- **Ui.Root** · [`export let on_render_failure = func(handler: func(RenderFailure) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L714)
-  Replaces the handler of failed commits. The default prints the failure and keeps the previous view.
-- **Ui.Root** · [`export let on_overflow = func(handler: func(RootEvent) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L719)
-  Sets the handler of `RootEvent.InputOverflow`, delivered before the first event accepted after an overflow.
-- **Ui.Root** · [`export let set_queue_limit = func(limit: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L725)
-  Sets the number of queued events at which the root is overloaded (U-7, default 1,024; at most 65,536).
-- **Ui.Root** · [`export let host_handle = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L733)
-  The host's handle of this root.
-- **Ui.Root** · [`export let component = func -> Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L736)
+- **Ui** · [`export let Commit = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L593)
+  The renders of one turn, parents before children, sent to the host as one request. A host that reconciles builds the root's tree from `top`: the components that did not render keep their views. Tagged `#Final`, `#NotThreadSafe`.
+- **Ui.Commit** · [`export last sequence: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L594)
+- **Ui.Commit** · [`export last rendered: Rendered[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L595)
+- **Ui.Commit** · [`export last top: Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L597)
   The component the root was mounted with.
-- **Ui.Root** · [`export let is_faulted = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L739)
+- **Ui.Commit** · [`export let init = func(sequence: uint64, rendered: Rendered[list], top: Component)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L600)
+- **Ui.Commit** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L603)
+  `Commit(` the sequence number and the number of renders `)`.
+- **Ui** · [`export let Host = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L609)
+  The services a root needs from the document or window that shows it. The web, desktop and model hosts implement it; `mount` takes one.
+- **Ui** · [`export let HostStats = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L629)
+  What a host holds for one root (budget B-W9): its nodes (the container excluded), installed listeners, registered templates and queued events. A host that keeps no document reports zeros. Tagged `#Final`, `#Immutable`.
+- **Ui.HostStats** · [`export last nodes: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L630)
+- **Ui.HostStats** · [`export last listeners: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L631)
+- **Ui.HostStats** · [`export last templates: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L632)
+- **Ui.HostStats** · [`export last queued: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L633)
+- **Ui.HostStats** · [`export let init = func(nodes: int64, listeners: int64, templates: int64, queued: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L635)
+- **Ui.HostStats** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L638)
+  Every count, by name.
+- **Ui.HostStats** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L643)
+  Other stats with equal counts.
+- **Ui.HostStats** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L653)
+  Combines the hashes of the counts.
+- **Ui** · [`export let RootStats = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L681)
+  Counts that show what a root holds and has done. Tagged `#Final`, `#Immutable`.
+- **Ui.RootStats** · [`export last components: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L682)
+- **Ui.RootStats** · [`export last subscriptions: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L683)
+- **Ui.RootStats** · [`export last queued: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L684)
+- **Ui.RootStats** · [`export last turns: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L685)
+- **Ui.RootStats** · [`export last renders: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L686)
+- **Ui.RootStats** · [`export last commits: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L687)
+- **Ui.RootStats** · [`export last dropped: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L688)
+- **Ui.RootStats** · [`export last discarded: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L689)
+- **Ui.RootStats** · [`export let init = func(components: int32, subscriptions: int32, queued: int32, turns: uint64, renders: uint64, commits: uint64, dropped: uint64, discarded: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L692)
+- **Ui.RootStats** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L696)
+  Every count, by name.
+- **Ui.RootStats** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L702)
+  Other stats with equal counts.
+- **Ui.RootStats** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L710)
+  The hash of the counts' text.
+- **Ui** · [`export let Root = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L717)
+  A mounted component tree and its event loop. One turn takes the next event, calls its handler, renders each component whose state notified, once, parents before children, and commits the renders as one host request. Tagged `#Final`, `#NotThreadSafe`.
+- **Ui.Root** · [`export let init = func(host: Host, handle: uint64, top: Component)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L739)
+- **Ui.Root** · [`export let on_render_failure = func(handler: func(RenderFailure) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L750)
+  Replaces the handler of failed commits. The default prints the failure and keeps the previous view.
+- **Ui.Root** · [`export let on_overflow = func(handler: func(RootEvent) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L755)
+  Sets the handler of `RootEvent.InputOverflow`, delivered before the first event accepted after an overflow.
+- **Ui.Root** · [`export let set_queue_limit = func(limit: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L761)
+  Sets the number of queued events at which the root is overloaded (U-7, default 1,024; at most 65,536).
+- **Ui.Root** · [`export let host_handle = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L769)
+  The host's handle of this root.
+- **Ui.Root** · [`export let component = func -> Component`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L772)
+  The component the root was mounted with.
+- **Ui.Root** · [`export let is_faulted = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L775)
   Reports whether the root stopped after a host failure.
-- **Ui.Root** · [`export let is_closed = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L742)
+- **Ui.Root** · [`export let is_closed = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L778)
   Reports whether the root was closed.
-- **Ui.Root** · [`export let is_overloaded = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L745)
+- **Ui.Root** · [`export let is_overloaded = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L781)
   Reports whether events are being dropped because the queue is full.
-- **Ui.Root** · [`export let post = func(listener: uint64, target: Component, coalesce: bool, deliver: func() -> void) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L751)
+- **Ui.Root** · [`export let post = func(listener: uint64, target: Component, coalesce: bool, deliver: func() -> void) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L787)
   Queues an event for `listener` of `target`, called by a host. A coalesced event replaces the queued one of the same listener and keeps its place. Over the queue limit an event that cannot be coalesced is dropped and counted, and false is returned. An event whose component unmounted before its turn is discarded.
-- **Ui.Root** · [`export let turn = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L784)
+- **Ui.Root** · [`export let post_overflow = func(dropped: uint32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L822)
+  Queues the notice that the host dropped `dropped` events while the root was overloaded. It is delivered to `on_overflow` before the events posted after it. Called by a host that queues events itself.
+- **Ui.Root** · [`export let host_stats = func -> HostStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L831)
+  The host's counts for this root: nodes, listeners, templates and queued events.
+- **Ui.Root** · [`export let turn = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L834)
   Runs one turn. Returns false when the root is closed or faulted, or the host has no more events.
-- **Ui.Root** · [`export let run = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L828)
+- **Ui.Root** · [`export let run = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L878)
   Runs turns until the root is closed or faulted, or the host has no more events.
-- **Ui.Root** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L834)
+- **Ui.Root** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L884)
   Clears a fault: the host empties the root, every component renders again and the root takes events.
-- **Ui.Root** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L845)
+- **Ui.Root** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L895)
   Unmounts the component tree and closes the root on the host.
-- **Ui.Root** · [`export let stats = func -> RootStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L856)
+- **Ui.Root** · [`export let stats = func -> RootStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L906)
   The root's counts.
-- **Ui.Root** · [`export let start = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L864)
-- **Ui.Root** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L949)
+- **Ui.Root** · [`export let start = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L914)
+- **Ui.Root** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L999)
   `Root(handle N)` with its state.
-- **Ui** · [`export let mount = func(host: Host, target: string, top: Component) -> result.Result<Root>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L999)
+- **Ui** · [`export let mount = func(host: Host, target: string, top: Component) -> result.Result<Root>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1049)
   Opens a root on `target` of `host`, renders `top` and commits it. `Err` when the host refuses the target (a second root on one element, more than U-9 roots) or `top` is mounted.
 <!-- END SOURCE API -->

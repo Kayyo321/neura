@@ -1,12 +1,14 @@
 let error = import:Std.Core.Error;
+let reconcile = import:Std.Ui.Internal.Reconcile;
 let result = import:Std.Core.Result;
 let ui = import:Std.Ui;
 
 /// @brief A UI host in memory, for tests of state, components and turns without a browser.
 /// A test scripts events in batches; each `wait` of a root posts the next batch, and a root's
 /// `run` returns when the script is exhausted. Commits are recorded as lines in `log`, and a
-/// test can make the next commit fail or be refused. The host does not interpret views: the
-/// browser and desktop hosts apply them, and reconciliation belongs to them.
+/// test can make the next commit fail or be refused. By default the host does not interpret views;
+/// after `reconcile_commits()` it reconciles each commit as the browser host does, logs the
+/// operations, and refuses an invalid tree with the reconciler's diagnostic.
 #Since("0.3.0")
 export let ModelHost = module (
     /// @brief One scripted event.
@@ -44,10 +46,17 @@ export let ModelHost = module (
         let invalid_next: bool = false;
         let invalid_kind: ui.DiagnosticKind = ui.DiagnosticKind.ViewReused;
         let root_limit: int = 16;
+        let reconciling: bool = false;
+        let reconcilers: reconcile.Reconciler[list] = new;
         /// @brief One line per host request, in order.
         export last log: string[list] = new;
         /// @brief How many events `post` refused.
         export let refused: int = 0;
+
+        /// @brief Reconciles every later commit as the browser host does and logs its operations, one line each.
+        export let reconcile_commits = func {
+            reconciling = true;
+        };
 
         /// @brief Sets the number of live roots (U-9, default 16).
         export let set_root_limit = func(limit: int) {
@@ -140,6 +149,10 @@ export let ModelHost = module (
                 targets[index] = target;
                 open_roots[index] = true;
             }
+            while (reconcilers.length <= index) {
+                reconcilers.append(new reconcile.Reconciler());
+            }
+            reconcilers[index] = new reconcile.Reconciler();
             last handle = (index + 1) as uint64;
             log.append("open " + target + ": root " + handle.to_string());
             return result.Result<uint64>.Ok(handle);
@@ -162,8 +175,45 @@ export let ModelHost = module (
                 last diagnostic = new ui.Diagnostic(invalid_kind, "refused by the model host", 0, -1, "");
                 return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(diagnostic));
             }
+            if (reconciling) {
+                last reconciler = reconcilers[(root as int) - 1];
+                last plan = reconciler.prepare_turn(batch.top, batch.rendered);
+                if (plan.diagnostic != nil) {
+                    log.append(line + ", invalid: " + plan.diagnostic.message);
+                    return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(plan.diagnostic));
+                }
+                log.append(line + ", " + plan.operations.length.to_string() + " operations");
+                for (let operation in plan.operations) {
+                    log.append("  " + operation.to_string());
+                }
+                reconciler.accept(plan);
+                return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
+            }
             log.append(line);
             return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
+        };
+
+        /// @brief Delivers `event` to the listener `handler` of the reconciled tree of `root`, through the root's
+        /// queue, as the browser host does. False when no mounted listener has that handler.
+        export let dispatch_click = func(root: ui.Root, handler: uint64, event: ui.ClickEvent) -> bool {
+            last reconciler = reconcilers[(root.host_handle() as int) - 1];
+            last target = reconciler.target_of(handler);
+            if (target == nil) {
+                return false;
+            }
+            return root.post(handler, target, false, new func() {
+                reconciler.deliver<ui.ClickEvent>(handler, event);
+            });
+        };
+
+        export let stats = func(root: uint64) -> ui.HostStats {
+            last index = (root as int) - 1;
+            if (index < 0 || index >= open_roots.length || !open_roots[index] || index >= reconcilers.length) {
+                return new ui.HostStats(0, 0, 0, 0);
+            }
+            last reconciler = reconcilers[index];
+            return new ui.HostStats(reconciler.node_count() as int64, reconciler.handler_count() as int64,
+                                    reconciler.template_count() as int64, 0);
         };
 
         export let wait = func(root: ui.Root) -> bool {
@@ -184,11 +234,13 @@ export let ModelHost = module (
         };
 
         export let reset = func(root: uint64) {
+            reconcilers[(root as int) - 1].reset();
             log.append("reset root " + root.to_string());
         };
 
         export let close = func(root: uint64) {
             open_roots[(root as int) - 1] = false;
+            reconcilers[(root as int) - 1] = new reconcile.Reconciler();
             log.append("close root " + root.to_string());
         };
 

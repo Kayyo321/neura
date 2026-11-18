@@ -118,6 +118,8 @@ Version 1. A batch is the byte 1, a `uint32` operation count, then the operation
 
 A flag byte other than 0 or 1, an unknown code or kind, a count larger than the bytes can hold, and trailing bytes reject the batch.
 
+`Std.Web`'s host produces these batches with `Std.Ui`'s reconciler. A commit of a child component that rendered without its parent is an ordinary version 1 batch that holds only the operations of the child's nodes ([subtree commits](../design/Components030.md#subtree-commits)); the encoding has no component boundary.
+
 ### Event encoding
 
 Version 1. A batch is the byte 1, a `uint32` record count, then the records. Each record is its kind, the `uint32` node and the `uint64` handler of the listener, then its fields. Modifiers are one byte: 1 alt, 2 ctrl, 4 meta, 8 shift. A button is the DOM's button number as `uint8`; -1 (no button changed, as in `pointermove`) is 255. The pointer kind is 0 mouse, 1 pen, 2 touch, 3 other.
