@@ -74,6 +74,7 @@ GENERATED: dict[str, str] = {
     "docs/runtime/Kernels.md": "Kernels",
     "docs/runtime/NVR.md": "NVR",
     "docs/runtime/ServerHost.md": "Server-Host",
+    "docs/runtime/Sql.md": "Sql",
     "docs/style/CodingStyle.md": "CodingStyle",
 }
 

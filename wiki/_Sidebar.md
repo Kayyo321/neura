@@ -42,6 +42,7 @@
 - [NeuraIR format](NirFormat)
 - [NVR format](NVR)
 - [Server host](Server-Host)
+- [SQL](Sql)
 - [Neura Virtual Machine](NVM)
 - [Kernels](Kernels)
 - [Wall-clock benchmarks](Benchmarks)

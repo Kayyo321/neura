@@ -37,6 +37,7 @@ curl http://127.0.0.1:8080/parts
 | `run(serve)` | Builds the context, calls `serve`, and returns `Ok` or, after logging the error, `Failure` |
 | `Context.serve(handler)` | Receives the assigned request, calls `handler.handle`, sends the response. A handler `Err` is answered with 500 and `{"error":"internal"}` and logged with the request identifier. Fails when there is no assigned request, as under `neura run` |
 | `Context.config(key)` | A configuration value of the host, or `None` |
+| `Context.sql_pool(name)` | The host's [SQL pool](Sql.md) of that name; the host owns the connections and rolls back and returns what a request leaves open |
 | `Context.log(level, message)` | A JSON log record with the request identifier |
 | `Request` | `method`, `target`, `path`, `query`, `headers` (lowercase names, arrival order), `body` (complete), `client`, `scheme`, `request_id`; `header(name)`, `body_text()` |
 | `Response` | `new Response(status, headers, body)`, `with_header`; `text`, `html`, `json` (status and text), `empty(status)` |
@@ -70,8 +71,11 @@ neura-server-host [options] <image.nvr>
 | `--allow-fs[=prefix,...]`, `--allow-net`, `--allow-env` | Grant the workers that capability group | denied |
 | `--record-dir <directory>` | Record each request's host requests to `<request id>.trace` | |
 | `--no-startup-check` | Listen without running the startup check | |
+| `--sql-pool <name>=<url>` | An SQL pool for `Std.Data.Sql`: `sqlite:<path>`, `sqlite::memory:`, or a `postgresql://` URL without a password. Its settings and password are `sql.<name>.*` configuration keys ([SQL](Sql.md#configuring-pools)). Repeatable | |
 
 The host prints one `listening on` line per listener and then `ready` on standard output.
+
+`neura-server-host migrate [options] <image.nvr>` applies the pending [migrations](Sql.md#migrations) of the configured pools and exits without listening. Before a host listens, it opens one connection of each pool and checks its migrations: with `sql.<name>.migrate=on_start` it applies them, and otherwise it refuses to start while any is pending.
 
 Before it listens, the host runs one worker with a *startup check*: `Context.serve` answers it with 204 without calling the handler. If `serve` fails or the worker does not exit with status 0, the host does not listen and exits with status 1.
 
@@ -94,7 +98,7 @@ Each worker runs the image with the default limits of `neura run` (100,000,000 s
 
 ## Configuration, logs and signals
 
-`Context.config(key)` reads the environment variable `<prefix><key>` when `--config-env-prefix` is set, then the `--config` values, then the configuration file. The worker asks the host for each value over its channel; it never receives the whole configuration.
+`Context.config(key)` reads the environment variable `<prefix><key>` when `--config-env-prefix` is set, then the `--config` values, then the configuration file. The worker asks the host for each value over its channel; it never receives the whole configuration. Keys that start with `sql.` are pool settings: the host removes them before any worker starts and answers `None` for them.
 
 The host and its workers write JSON lines on standard error: `time_ms`, `level`, `request_id` when there is one, `message`, and named fields. A record longer than 16 KiB keeps its first 2 KiB of message and gains `"truncated":"true"`.
 
@@ -112,4 +116,4 @@ Under `neura run` without a trace, a server image binds its application services
 
 ## Not in 0.3.0
 
-Streamed request and response bodies (the host buffers both within S-6 and S-7), HTTP/2, HTTP/3 and WebSocket upgrades, the admin listener (`/livez`, `/readyz`, `/metrics`), SQL pools and migrations, trusted proxies, and running a project bundle with `neura run`. See the [implementation status](../design/Backend030.md#implementation-status-2026-11-17).
+Streamed request and response bodies (the host buffers both within S-6 and S-7), HTTP/2, HTTP/3 and WebSocket upgrades, the admin listener (`/livez`, `/readyz`, `/metrics`), trusted proxies, and running a project bundle with `neura run`. See the [implementation status](../design/Backend030.md#implementation-status-2026-11-17).

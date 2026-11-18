@@ -45,7 +45,12 @@ Added by this branch:
 | Error codes 16 to 22 in the provider table | `src/nvm/providers.hpp` | codes defined; the library maps them to `Other` until `IoErrorKind` gains their names |
 | The admin listener (`/livez`, `/readyz`, `/metrics`), `neura.app.metric`, `neura.app.shutdown.wait` | | not started |
 | Streamed request bodies (`open_body`) and streamed responses with backpressure | | not started: the host reads the whole body within S-6 before it assigns the request, and buffers the response within S-7 before it writes it |
-| SQL, migrations, `neura run <bundle>`, `neura dev`, `trusted_proxies`, authentication helpers | | not started |
+| `Std.Data.Sql` (`Pool`, `Connection`, `Transaction`, `Cursor`, `Row`, `Value`, `SqlError`, `in_transaction`) and `Context.sql_pool` | `stdlib/std/data/sql.nra`, `stdlib/std/app.nra` | implemented (`sql_pool`, steps 5 to 7 below) |
+| `neura.sql.*` services and the `sql` capability group; `Call` operation 2 over the worker channel; pools, sessions and leases in the host; `--sql-pool` for `neura run` and `neura test` | `src/nvm/sql_services.cpp`, `src/server/sql_channel.cpp`, `src/server/sql_host.cpp`, `src/sql/` | implemented |
+| SQLite 3.54.1 provider, compiled in from the pinned amalgamation | `src/sql/sqlite_connection.cpp` | implemented |
+| PostgreSQL provider over libpq 18.7, non-blocking, servers 16, 17 and 18 | `src/sql/postgres_connection.cpp` | implemented behind `NEURA_ENABLE_POSTGRES` |
+| Migrations, `neura-server-host migrate` | `src/sql/migrations.cpp` | implemented; the `E1044` check runs in the host, not in a project build |
+| `neura run <bundle>`, `neura dev`, `trusted_proxies`, authentication helpers | | not started |
 
 Departures, each to be confirmed by the owner:
 
@@ -56,7 +61,11 @@ Departures, each to be confirmed by the owner:
 5. **`Cancel`** is not sent: at the deadline the host kills the worker with `SIGKILL` and answers 504; no grace period applies to a request past S-8. A worker whose channel ends without `Done` gets the grace period S-12 (5 s) to exit before it is killed.
 6. **The handler interface** the `Std.Net.Http` router implements is `Std.App.Handler` (below), not `http.Router` itself, so that `Std.App` does not depend on `Std.Net.Http`.
 7. **File paths outside the file group.** A Unix-domain socket path and the CA, certificate and key files of the TLS services are opened by the network services and are not checked against `--allow-fs` prefixes; `neura.net.tls.accept` requires the file group as a whole. A program with the network group can therefore reach any Unix socket the process can.
-8. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host. Native code is always denied.
+8. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host, and the `sql` group when the host has pools. Native code is always denied.
+9. **SQL calls do not overlap.** The `neura.sql.*` services are synchronous: a statement holds its execution, and every task in it, until it ends. The request's deadline interrupts it (`sqlite3_interrupt` through a progress handler, `PQcancel`); a scope's cancellation and a client's disconnection do not. A true overlapping call needs a multiplexed channel in the worker.
+10. **SQL values and errors.** A host call cannot carry a list of tuples, so parameters and rows cross as four parallel lists (kinds, bits, texts, blobs), and a host error is a `uint32` code only, so the detail text (a constraint or column name) is read with a further service, `neura.sql.detail`, which answers in the execution. `acquire` takes a wait in nanoseconds rather than an absolute deadline.
+11. **SQL library shape.** Without `using`, implicit conversions or named arguments on this baseline, the statement methods take their parameters as a trailing variadic argument list (`execute(sql, parameters...)`), whose strings, integers, floats and Booleans become `Value`s, and a `Value` object stands for `NULL` and bytes; `in_transaction(pool, body)` stands in for a `using` block. Every SQL failure is an `Error.Custom` holding an `SqlError` with its own `ErrorKind`, so that the new kinds need no change to `IoErrorKind`. Using a closed connection, transaction or cursor is `InvalidInput`, as edge case 39 says.
+12. **`E1044` in the host.** There is no project build to report `E1044`, so `neura-server-host` checks a migration directory when it starts and reports `error[E1044]: invalid migration set` with the file; the code is not in the compiler's registry yet. Pending migrations in `manual` mode refuse the start, since there is no `/readyz` to hold at 503.
 
 ### Host services for the standard library
 
@@ -107,6 +116,10 @@ All integers are little-endian; a *text* is a `uint32` byte count and the bytes.
 | `Head` | `uint32` status, `uint32` field count and that many (text name, text value) |
 | `Call` | `uint32` call identifier, `uint32` operation (1: configuration), text key |
 | `Return` | `uint32` call identifier, `uint32` error code (0 for success), `uint8` found, text value |
+| `Call`, operation 2 (SQL) | `uint32` call identifier, `uint32` operation 2, `uint32` SQL operation (1 `pool`, 2 `acquire`, 3 `release`, 4 `begin`, 5 `commit`, 6 `rollback`, 7 `execute`, 8 `query`, 9 `open_cursor`, 10 `fetch`, 11 `close_cursor`), `uint32` argument count, that many encoded values |
+| `Return` of an SQL call | `uint32` call identifier, `uint32` 0, `uint8` success, one encoded value (the success payload or the `uint32` error code), text detail |
+
+An encoded value is a `uint64` of bits, a text of bytes, a `uint32` element count and that many encoded values, nested at most 8 deep: the host value of the service's arguments or result. The hello's provider map of a server channel is `neura.app = 1`, `neura.http.server = 1` and `neura.sql = 1`.
 
 The host sends `Assign`, the request body as `BodyChunk` frames of at most 64 KiB, and `BodyEnd` before the worker runs any Neura code. The worker sends `Head`, its body chunks, `BodyEnd` and `Done` as the image responds. Both sides check every frame with `ChannelSequence`.
 
@@ -202,8 +215,8 @@ A provider is trusted host code behind host services. The ABI is today's `nvm::H
 | Completions are applied in the order they become ready, and by request sequence among those ready at one check, as the driver does today. | proposed |
 | Every request and completion is in the trace. Under replay no provider is constructed and none of its code runs. | implemented: `--record-dir`, replayed by `neura run --replay` |
 | Error codes extend the existing table ([Stdlib](../lang/Stdlib.md#45-host-services)): 16 `TooLarge`, 17 `Busy`, 18 `OutcomeUnknown`, 19 `PoolExhausted`, 20 `VersionMismatch`, 21 `ConstraintViolation`, 22 `Serialization`. The library maps them to new `IoErrorKind` values of the same names. | codes defined; the library maps them to `Other` |
-| Capability groups are added to `nvm::Capabilities`, all denied by default: `ui`, `http_client`, `bridge`, `http_server`, `sql`, `app`, `desktop`. Which target kind may list which is the table of [the overview](Apps030.md#capability-groups). A target's manifest lists the groups and their scope (origins, pool names, operations); the host grants exactly those. A denied service binds and answers 14, as today. | partly: `http_server` and `app` |
-| Handles (connections, statements, transactions, bodies) are numbers valid for one execution, checked against a generation; a forged or stale one is `invalid_input`. | proposed |
+| Capability groups are added to `nvm::Capabilities`, all denied by default: `ui`, `http_client`, `bridge`, `http_server`, `sql`, `app`, `desktop`. Which target kind may list which is the table of [the overview](Apps030.md#capability-groups). A target's manifest lists the groups and their scope (origins, pool names, operations); the host grants exactly those. A denied service binds and answers 14, as today. | partly: `http_server`, `app` and `sql` |
+| Handles (connections, statements, transactions, bodies) are numbers valid for one execution, checked against a generation; a forged or stale one is `invalid_input`. | implemented for SQL connections and cursors: a per-request table of numbers never reused |
 | `import:c` and dynamic native calls stay unusable together with tasks, as today. A provider is not a way around that rule. | proposed |
 
 Every service below is version 1. Text is UTF-8 text, bytes a `uint8` sequence, a handle an `int64`, a time a count of nanoseconds as `int64`, and *pairs* a list of name and value texts. The error of each is a `uint32` code of the table above, except the SQL services, whose error is a code and a detail text (a constraint or column name, never row data).
@@ -246,30 +259,30 @@ The [server component lock](../../packaging/server-components.lock.toml) pins Op
 
 | Rule | Status |
 | --- | --- |
-| `context.sql_pool(name)` returns the `sql.Pool` the manifest declares under that name. The connections live in the host; the worker holds a lease. | proposed |
-| `pool.acquire()` returns `Result<sql.Connection>`, and `pool.begin()` a `Result<sql.Transaction>`. Both are closeable and are owned by `using`. A wait beyond `S-10` is `Err`. | proposed |
-| SQL is a `string`; values are parameters. `execute(sql:, parameters:)` returns the affected row count; `query_one` a row or `Err(NotFound)`; `query_page(sql:, parameters:, limit:)` a `FrozenList<sql.Row>` of at most `limit` and `S-11` rows; `open_cursor` a `sql.Cursor` owned by `using`, fetched in pages. | proposed |
-| Parameters are a tuple or array of `sql.Value`: `Null`, `Bool`, `Int(int64)`, `Float(float64)`, `Text(string)`, `Bytes`. Scalars convert implicitly at the call. The provider copies them before the task parks. Placeholders are `$1`, `$2` for both databases; the SQLite provider rewrites them. | proposed |
-| `sql.Row` is immutable. `row.int64("id")`, `row.text("name")`, `row.bool(...)`, `row.float64(...)`, `row.bytes(...)` and their `optional_` forms return a `Result`: a missing column, a `NULL` in a required column, or a type that does not convert exactly is `Err`. No integer is narrowed or rounded silently. | proposed |
-| A transaction ends by `commit()` or by `close()`. `close()` without a commit rolls back. After a commit that returned `Ok`, `close()` releases only. | proposed |
-| If the connection fails after the commit was sent and before its answer, `commit()` returns `Err(OutcomeUnknown)`. The library does not retry, does not report a rollback, and the lease's connection is discarded. | proposed |
-| A serialization failure or deadlock is `Err(Serialization)`; a unique, foreign-key or check failure is `Err(ConstraintViolation)` with the constraint's name. Retrying is the application's decision. | proposed |
-| Cancelling the scope cancels the running statement: `PQcancel` for PostgreSQL, `sqlite3_interrupt` for SQLite. The call returns `Err(Cancelled)` and the transaction is rolled back. | proposed |
+| `context.sql_pool(name)` returns the `sql.Pool` the manifest declares under that name. The connections live in the host; the worker holds a lease. | implemented: the host's `--sql-pool` and `sql.<name>.*` keys stand in for the manifest |
+| `pool.acquire()` returns `Result<sql.Connection>`, and `pool.begin()` a `Result<sql.Transaction>`. Both are closeable and are owned by `using`. A wait beyond `S-10` is `Err`. | implemented, without `using` (departure 11) |
+| SQL is a `string`; values are parameters. `execute(sql:, parameters:)` returns the affected row count; `query_one` a row or `Err(NotFound)`; `query_page(sql:, parameters:, limit:)` a `FrozenList<sql.Row>` of at most `limit` and `S-11` rows; `open_cursor` a `sql.Cursor` owned by `using`, fetched in pages. | implemented: parameters trail as a variadic list, the page is an `ImmutableList<sql.Row>`, and a limit above S-11 is `Err(TooLarge)` |
+| Parameters are a tuple or array of `sql.Value`: `Null`, `Bool`, `Int(int64)`, `Float(float64)`, `Text(string)`, `Bytes`. Scalars convert implicitly at the call. The provider copies them before the task parks. Placeholders are `$1`, `$2` for both databases; the SQLite provider rewrites them. | implemented: scalars convert through the variadic list; SQLite binds `$n` by name instead of rewriting the text |
+| `sql.Row` is immutable. `row.int64("id")`, `row.text("name")`, `row.bool(...)`, `row.float64(...)`, `row.bytes(...)` and their `optional_` forms return a `Result`: a missing column, a `NULL` in a required column, or a type that does not convert exactly is `Err`. No integer is narrowed or rounded silently. | implemented, with `int32` |
+| A transaction ends by `commit()` or by `close()`. `close()` without a commit rolls back. After a commit that returned `Ok`, `close()` releases only. | implemented |
+| If the connection fails after the commit was sent and before its answer, `commit()` returns `Err(OutcomeUnknown)`. The library does not retry, does not report a rollback, and the lease's connection is discarded. | implemented; no test cuts a connection between `COMMIT` and its answer |
+| A serialization failure or deadlock is `Err(Serialization)`; a unique, foreign-key or check failure is `Err(ConstraintViolation)` with the constraint's name. Retrying is the application's decision. | implemented; SQLite gives its message, which names the table and columns, not a constraint |
+| Cancelling the scope cancels the running statement: `PQcancel` for PostgreSQL, `sqlite3_interrupt` for SQLite. The call returns `Err(Cancelled)` and the transaction is rolled back. | partly: the request's deadline interrupts a statement (`Err(TimedOut)`, 504); scope cancellation does not reach it (departure 9) |
 | A cursor or transaction cannot be held across a generator's suspension, by the rule of the generator milestone. | proposed |
-| When a worker exits, the host rolls back its open transactions and returns each connection to the pool after a reset (`DISCARD ALL`; for SQLite, a finalized statement set), or closes it if its state is unknown. | proposed |
-| SQLite 3.54.1 is compiled in from the amalgamation, in WAL mode, with `foreign_keys` on and a busy timeout equal to the statement's deadline. Statements run on host threads, never on the listener's. | proposed |
-| PostgreSQL uses libpq 18.7 in non-blocking mode against servers 16, 17 and 18, with `sslmode=verify-full` unless the configuration lowers it for loopback. Passwords come from the host's configuration only. | proposed |
-| Types that convert: SQLite `INTEGER`, `REAL`, `TEXT`, `BLOB`, `NULL`; PostgreSQL `bool`, `int2`, `int4`, `int8`, `float4`, `float8`, `text`, `varchar`, `bytea`, `uuid` and `timestamptz` (as text), and `numeric` (as text). Any other column type is `Err(Unsupported)` naming it. | proposed |
+| When a worker exits, the host rolls back its open transactions and returns each connection to the pool after a reset (`DISCARD ALL`; for SQLite, a finalized statement set), or closes it if its state is unknown. | implemented |
+| SQLite 3.54.1 is compiled in from the amalgamation, in WAL mode, with `foreign_keys` on and a busy timeout equal to the statement's deadline. Statements run on host threads, never on the listener's. | implemented: on the request's connection thread |
+| PostgreSQL uses libpq 18.7 in non-blocking mode against servers 16, 17 and 18, with `sslmode=verify-full` unless the configuration lowers it for loopback. Passwords come from the host's configuration only. | implemented behind `NEURA_ENABLE_POSTGRES`; tested against 16.16, 17.12 and 18.7 |
+| Types that convert: SQLite `INTEGER`, `REAL`, `TEXT`, `BLOB`, `NULL`; PostgreSQL `bool`, `int2`, `int4`, `int8`, `float4`, `float8`, `text`, `varchar`, `bytea`, `uuid` and `timestamptz` (as text), and `numeric` (as text). Any other column type is `Err(Unsupported)` naming it. | implemented, with `bpchar` as text |
 
 ### Migrations
 
 | Rule | Status |
 | --- | --- |
-| A pool's migrations are files `NNNN_name.sql` in the directory the manifest names, numbered from 0001 without gaps, one or more statements each. The build copies them into the bundle with their digests; a gap, a repeat or an empty file is `E1044`. | proposed |
-| The host records applied migrations in `neura_migrations(version, name, checksum, applied_at)`. Each is applied in its own transaction, in order, forward only. | proposed |
-| `neura-server-host migrate dist/server` applies them and exits. With `migrate = "on_start"` the host applies them before the startup check; with `"manual"` (the default) it refuses to become ready while any is pending. | proposed |
-| An applied migration whose checksum differs from the bundle's refuses the start. Nothing is repaired or re-run. | proposed |
-| Concurrent hosts serialize on a PostgreSQL advisory lock, or on SQLite's write lock. | proposed |
+| A pool's migrations are files `NNNN_name.sql` in the directory the manifest names, numbered from 0001 without gaps, one or more statements each. The build copies them into the bundle with their digests; a gap, a repeat or an empty file is `E1044`. | partly: the host reads the directory and checks it at start (departure 12) |
+| The host records applied migrations in `neura_migrations(version, name, checksum, applied_at)`. Each is applied in its own transaction, in order, forward only. | implemented |
+| `neura-server-host migrate dist/server` applies them and exits. With `migrate = "on_start"` the host applies them before the startup check; with `"manual"` (the default) it refuses to become ready while any is pending. | implemented: `manual` refuses the start |
+| An applied migration whose checksum differs from the bundle's refuses the start. Nothing is repaired or re-run. | implemented |
+| Concurrent hosts serialize on a PostgreSQL advisory lock, or on SQLite's write lock. | implemented; not tested with two hosts at once |
 
 ## Operation
 
@@ -359,9 +372,9 @@ Each step is one commit with its targeted tests. None changes the image of a pro
 | 2 | The wait-source change to `PendingOperation` and the driver; the new error codes and capability groups | Existing concurrency and host suites unchanged; a unit test per wait form available on the platform |
 | 3 | The host: listeners, HTTP/1.1 wire, limits, TLS; a fixed in-process responder in place of workers | Wire tests of cases 1 to 3, 6, 19 to 22, 44 |
 | 4 | The worker protocol, ready pool, assignment, trap handling, drain; `neura.http.server.*`; `Std.Net.Http` requests, responses, router, middleware | Cases 4, 5, 8, 9, 23 to 29, 46, 47; the isolation journey |
-| 5 | `neura.sql.*` with SQLite; `Std.Data.Sql`; transactions and cursors | Cases 10 to 13, 34, 36 to 40 on a temporary database |
-| 6 | PostgreSQL; cancellation; outcome unknown with a proxy that cuts the connection | Cases 14, 30, 35 against servers 16 and 18 in containers |
-| 7 | Migrations and `E1044` | Cases 15, 41 to 43 |
+| 5 | `neura.sql.*` with SQLite; `Std.Data.Sql`; transactions and cursors | Cases 10 to 13, 34, 36 to 40 on a temporary database (done: `stdlib-sql`, `server-sql`; case 34 is not tested) |
+| 6 | PostgreSQL; cancellation; outcome unknown with a proxy that cuts the connection | Cases 14, 30, 35 against servers 16 and 18 in containers (done for 14 and for cancellation at the deadline, against 16, 17 and 18: `server-sql-postgres`; 30 needs disconnection, 35 the proxy) |
+| 7 | Migrations and `E1044` | Cases 15, 41 to 43 (done for 41 and 42 and the manual refusal of 43 in `server-sql`; 15 is not tested) |
 | 8 | Configuration, secrets, health, metrics, logs, authentication helpers, trusted proxies | Cases 7, 16, 31 to 33 |
 | 9 | Replay of a server image; the load, saturation, drain and sustained budgets | Case 18; budgets B-S1 to B-S6 |
 
