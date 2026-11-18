@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstring>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -174,7 +175,17 @@ Direction inbound(PeerRole role) {
 } // namespace
 
 Channel::Channel(int descriptor, PeerRole role, WorkerIdentity expected)
-    : descriptor_(descriptor), role_(role), sequence_(std::move(expected)), decoder_(inbound(role)) {}
+    : descriptor_(descriptor), role_(role), sequence_(std::move(expected)), decoder_(inbound(role)) {
+    // send(2) and recv(2) below must never block: a full socket waits in
+    // poll, with the deadline, and the worker reads meanwhile. MSG_DONTWAIT
+    // alone is not enough, because macOS honours it on recv(2) but not on
+    // send(2), where a blocking AF_UNIX socket still sleeps until the peer
+    // reads: a worker streaming its response before it reads the body and a
+    // host sending that body then each sleep in send(2), past both deadlines.
+    if (const int flags = ::fcntl(descriptor_, F_GETFL); flags >= 0 && !(flags & O_NONBLOCK)) {
+        (void)::fcntl(descriptor_, F_SETFL, flags | O_NONBLOCK);
+    }
+}
 
 Channel::~Channel() {
     if (descriptor_ >= 0) ::close(descriptor_);
