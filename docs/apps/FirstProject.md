@@ -69,4 +69,4 @@ neura dev --target web
 
 ## 6. Change something and build again
 
-Edit `contracts/parts.nra` to add a starting part, and build the server again: only `dist/server` changes, and the same sources give the same bytes on every build and in every directory. If `neura build` reports `E1022`, the lock no longer matches the manifest (a provider was added, for example); run `neura build --target <name> --update-lock` once and commit the new `neura.lock`.
+Edit `contracts/parts.nra` to add a starting part, and build the server again: only `dist/server` changes, and the same sources give the same bytes on every build and in every directory. If `neura build` reports `E1022`, the lock no longer matches the manifest or the SDK (a provider was added, or the SDK was updated); run `neura build --target <name> --update-lock` once and commit the new `neura.lock`.

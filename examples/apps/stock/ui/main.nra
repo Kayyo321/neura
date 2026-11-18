@@ -39,7 +39,7 @@ let make_counter = func -> ui.Component {
 let title_text = func -> string {
     let text = "Stock:";
     for (let name: string in parts.starter_names()) {
-        text = text + " " + name;
+        text = $"{text} {name}";
     }
     return text;
 };

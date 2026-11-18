@@ -22,7 +22,7 @@ let Main = module:program.Entry (
         if (request.path == "/hello" && (request.method == "GET" || request.method == "HEAD")) {
             last name = strings.starts_with(request.query, "name=")
                 ? request.query.slice(5, request.query.byte_length) : "world";
-            return Result<app.Response>.Ok(app.text(200, greeting + ", " + name + "\n"));
+            return Result<app.Response>.Ok(app.text(200, $"{greeting}, {name}\n"));
         }
         return Result<app.Response>.Ok(app.text(404, "not found\n"));
     };

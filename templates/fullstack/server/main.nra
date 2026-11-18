@@ -19,7 +19,7 @@ let Main = module:program.Entry (
         if (request.path == "/parts" && request.method == "GET") {
             let text = "";
             for (let name: string in parts.starter_names()) {
-                text = text + name + "\n";
+                text = $"{text}{name}\n";
             }
             return Result<app.Response>.Ok(app.text(200, text));
         }
@@ -29,7 +29,7 @@ let Main = module:program.Entry (
             if (!parts.valid_name(name)) {
                 return Result<app.Response>.Ok(app.text(422, "rejected: a name has 1 to 40 bytes\n"));
             }
-            return Result<app.Response>.Ok(app.text(201, "accepted: " + name + "\n"));
+            return Result<app.Response>.Ok(app.text(201, $"accepted: {name}\n"));
         }
         return Result<app.Response>.Ok(app.text(404, "not found\n"));
     };

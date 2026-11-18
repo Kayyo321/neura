@@ -95,8 +95,9 @@ def main():
 
     # Cases 5, 6, 7, 9: every target, the desktop one building its web target; run from a subdirectory with
     # --project ../neura.toml; two directories give identical bundles.
-    native = True
-    for name in ('server', 'web', 'desktop'):
+    # A desktop target's child is a native executable, built on Linux only in 0.3.0.
+    native = sys.platform.startswith('linux')
+    for name in ('server', 'web', 'desktop') if native else ('server', 'web'):
         for project in (first, second):
             result = run('build', '--project', '../neura.toml', '--target', name, cwd=project / 'server', env=env)
             if name == 'desktop' and result.returncode != 0 and 'native' in (result.stdout + result.stderr):

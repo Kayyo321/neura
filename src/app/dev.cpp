@@ -13,6 +13,8 @@
 #include "tooling/json.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -248,7 +250,11 @@ bool only_styles_changed(const BuildState& before, const BuildState& after) {
 
 void send_all(int fd, std::string_view data) {
     while (!data.empty()) {
+#ifdef MSG_NOSIGNAL
         const auto sent = ::send(fd, data.data(), data.size(), MSG_NOSIGNAL);
+#else
+        const auto sent = ::send(fd, data.data(), data.size(), 0); // SIGPIPE is ignored
+#endif
         if (sent <= 0) {
             if (sent < 0 && errno == EINTR) continue;
             return;
@@ -326,8 +332,9 @@ void serve_request(int fd, const fs::path& bundle, const BuildState& state) {
 }
 
 int open_listener(std::uint16_t port, std::uint16_t& bound) {
-    const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
+    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
     const int on = 1;
     ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
     sockaddr_in address{};
@@ -450,8 +457,9 @@ int develop(const Options& options) {
         for (const auto& entry : watched) {
             if (!entry.revents) continue;
             if (entry.fd == listener) {
-                const int client = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+                const int client = ::accept(listener, nullptr, nullptr);
                 if (client >= 0) {
+                    ::fcntl(client, F_SETFD, FD_CLOEXEC);
                     serve_request(client, result->directory, state);
                     ::close(client);
                 }

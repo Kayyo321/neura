@@ -30,6 +30,14 @@
 
 extern char** environ;
 
+// posix_spawn can start a child in another directory with glibc 2.29 and
+// macOS 10.15; elsewhere the compiler is given an absolute source path.
+#if defined(__APPLE__) || (defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29)))
+#define NEURA_SPAWN_CHDIR 1
+#else
+#define NEURA_SPAWN_CHDIR 0
+#endif
+
 namespace neura::app {
 namespace {
 
@@ -412,7 +420,7 @@ Compiled compile(const Project& project, const Target& target, const BuildOption
     }
     // The source is named relative to the project, as an import root sees it,
     // so the image records no absolute path.
-    command.push_back(source.lexically_relative(project.resolved.root).string());
+    command.push_back(NEURA_SPAWN_CHDIR ? source.lexically_relative(project.resolved.root).string() : source.string());
     const auto out = scratch / output_name;
     command.emplace_back("-o");
     command.push_back(out.string());
@@ -887,8 +895,10 @@ int spawn_and_wait(const std::vector<std::string>& arguments, const std::optiona
     argv.push_back(nullptr);
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29))
+#if NEURA_SPAWN_CHDIR
     if (directory) posix_spawn_file_actions_addchdir_np(&actions, directory->c_str());
+#else
+    (void)directory;
 #endif
     pid_t pid = -1;
     const int error = ::posix_spawn(&pid, arguments.front().c_str(), &actions, nullptr, argv.data(), environ);

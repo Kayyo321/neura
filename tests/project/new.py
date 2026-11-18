@@ -74,6 +74,8 @@ def main():
         check(result.returncode == 0 and tree(direct) == tree(project), f'neura-new --template {template} is the same')
         # Case 17: every target builds at once.
         for target in targets:
+            if target == 'desktop' and not sys.platform.startswith('linux'):
+                continue  # The native child is built on Linux only in 0.3.0.
             result = run('build', '--target', target, cwd=project, env=env)
             check(result.returncode == 0, f'{template}: build --target {target}')
             if result.returncode != 0:

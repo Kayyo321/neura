@@ -94,17 +94,20 @@ class Dev:
 
 
 def group_members(group):
-    members = []
-    for entry in Path('/proc').iterdir():
-        if not entry.name.isdigit():
-            continue
+    """Whether any process of the process group remains, waited for up to five seconds: the hosts' workers are
+    reparented when the leader ends and leave the group as they exit."""
+    def alive():
         try:
-            fields = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
-        except OSError:
-            continue
-        if int(fields[2]) == group and fields[0] != 'Z':
-            members.append(int(entry.name))
-    return members
+            os.killpg(group, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+    deadline = time.monotonic() + 5
+    while alive() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return alive()
 
 
 def port_closed(port):
