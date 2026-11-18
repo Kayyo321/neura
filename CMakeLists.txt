@@ -189,7 +189,7 @@ if(NEURA_WASM_RUNTIME)
         set(neura_wasm_exports
             _malloc _free _neura_wasm_interface _neura_wasm_open _neura_wasm_close _neura_wasm_error
             _neura_wasm_advance _neura_wasm_respond _neura_wasm_deliver _neura_wasm_clock
-            _neura_wasm_has_proof _neura_wasm_prove_idle)
+            _neura_wasm_has_proof _neura_wasm_prove_idle _neura_wasm_last_proof _neura_wasm_tier_stats)
         list(JOIN neura_wasm_exports "','" neura_wasm_exports)
         target_link_options(neura_wasm PRIVATE
             --no-entry -sENVIRONMENT=web,node -sSTACK_SIZE=1048576 -sDYNAMIC_EXECUTION=0

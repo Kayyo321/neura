@@ -320,7 +320,9 @@ export class NvmExecution {
     #wake = null;
     #failure = null;
 
-    constructor(module, image, { args = [], host = {}, tier = 2, maxSteps = 0n } = {}) {
+    // `regions: true` forms tier 2 regions instead of function programs; it
+    // exists to measure the two (Apps030.md, "Execution in the browser").
+    constructor(module, image, { args = [], host = {}, tier = 2, maxSteps = 0n, regions = false } = {}) {
         if (typeof module._neura_wasm_interface !== 'function' || module._neura_wasm_interface() !== ADAPTER_INTERFACE) {
             throw new Error(`nvm.wasm does not provide browser adapter interface ${ADAPTER_INTERFACE}`);
         }
@@ -344,7 +346,8 @@ export class NvmExecution {
         }
         this.#handle = withArguments(module, args, (argv, argc) => withBytes(module, encoder.encode(granted.join('\n')),
             (grants, grantsSize) => withBytes(module, image, (data, size) =>
-                module._neura_wasm_open(data, size, argv, argc, grants, grantsSize, tier, maxSteps))));
+                module._neura_wasm_open(data, size, argv, argc, grants, grantsSize, tier | (regions ? 0x100 : 0),
+                    maxSteps))));
         if (!this.#handle) throw wasmError(module);
     }
 
@@ -500,6 +503,17 @@ export class NvmExecution {
 
     get proofPending() {
         return Boolean(this.#module._neura_wasm_has_proof(this.#liveHandle()));
+    }
+
+    // The tier statistics as `neura run --tier-stats` prints them, for measurements.
+    get tierStatistics() {
+        return this.#module.UTF8ToString(this.#module._neura_wasm_tier_stats(this.#liveHandle()));
+    }
+
+    // The function and block of the last idle proof, for measurements.
+    get lastProof() {
+        const packed = BigInt.asUintN(64, BigInt(this.#module._neura_wasm_last_proof(this.#liveHandle())));
+        return { function: Number(packed >> 32n), block: Number(packed & 0xffffffffn) };
     }
 
     proveOneIdle() {

@@ -216,11 +216,22 @@ private:
     bool cancellable_;
 };
 
+// The tier argument of neura_wasm_open: the tier in the low byte, and this
+// bit to form tier 2 regions instead of function programs, for measurement.
+constexpr unsigned regions_flag = 0x100;
+
+TierOptions tier_options(unsigned mode) {
+    auto options = TierOptions::browser();
+    if ((mode & regions_flag) != 0) options.programs = TierOptions::Programs::Off;
+    return options;
+}
+
 class Runner {
 public:
-    Runner(nvr::Image image, std::span<const Text> arguments, std::string_view granted, unsigned tier,
+    Runner(nvr::Image image, std::span<const Text> arguments, std::string_view granted, unsigned mode,
            std::uint64_t max_steps)
-        : image_(std::move(image)), cache_(image_, TierOptions::browser()) {
+        : image_(std::move(image)), cache_(image_, tier_options(mode)) {
+        const auto tier = mode & 0xff;
         std::set<std::string, std::less<>> grants;
         for (std::size_t start = 0; start < granted.size();) {
             const auto end = std::min(granted.find('\n', start), granted.size());
@@ -300,6 +311,11 @@ public:
     }
 
     bool has_proof() const { return cache_.proofs_pending(); }
+    std::pair<std::uint32_t, std::uint32_t> last_proof() const { return cache_.last_idle_proof(); }
+    const std::string& tier_statistics() {
+        statistics_ = describe(cache_.statistics());
+        return statistics_;
+    }
 
     double prove_one_idle() {
         if (is_host_request()) return -1;
@@ -399,6 +415,7 @@ private:
     Report report_;
     std::string diagnostic_;
     std::string arguments_;
+    std::string statistics_;
 };
 
 // JS reads this synchronously after a failing call. Storing an error must
@@ -421,7 +438,7 @@ extern "C" const char* neura_wasm_error() { return last_error.data(); }
 extern "C" Runner* neura_wasm_open(const std::uint8_t* bytes, std::size_t size, const Text* args,
                                    std::uint32_t argc, const char* granted, std::size_t granted_size,
                                    unsigned tier, std::uint64_t max_steps) try {
-    if (tier > 2) throw std::invalid_argument("the browser requires a tier from 0 to 2");
+    if ((tier & ~regions_flag) > 2) throw std::invalid_argument("the browser requires a tier from 0 to 2");
     return new Runner(nvr::load({bytes, size}), {args, argc}, {granted, granted_size}, tier, max_steps);
 } catch (const std::exception& error) {
     report_error(error);
@@ -462,6 +479,16 @@ extern "C" double neura_wasm_clock(Runner* runner, std::int64_t now) try {
 }
 
 extern "C" bool neura_wasm_has_proof(Runner* runner) { return runner->has_proof(); }
+
+// The tier statistics of the run's cache, as `--tier-stats` prints them,
+// NUL-terminated, valid until the next call; for measurements.
+extern "C" const char* neura_wasm_tier_stats(Runner* runner) { return runner->tier_statistics().c_str(); }
+
+// The function and block of the last idle proof, as function * 2^32 + block.
+extern "C" std::uint64_t neura_wasm_last_proof(Runner* runner) {
+    const auto [function, block] = runner->last_proof();
+    return (static_cast<std::uint64_t>(function) << 32) | block;
+}
 
 extern "C" double neura_wasm_prove_idle(Runner* runner) try {
     return runner->prove_one_idle();
