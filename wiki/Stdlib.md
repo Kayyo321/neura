@@ -133,6 +133,8 @@ Hashes, MACs, key derivation, authenticated encryption, and secure random genera
 | [`Std.Crypto.Mac.Kmac`](Stdlib-Crypto-Kmac) | [Contracts](Stdlib-Crypto-Kmac#detailed-contracts) | [Declarations](Stdlib-Crypto-Kmac#exported-declarations) |
 | [`Std.Crypto.Mac.Poly1305`](Stdlib-Crypto-Poly1305) | [Contracts](Stdlib-Crypto-Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-Poly1305#exported-declarations) |
 | [`Std.Crypto.PrivateKey`](Stdlib-Crypto-PrivateKey) | [Contracts](Stdlib-Crypto-PrivateKey#detailed-contracts) | [Declarations](Stdlib-Crypto-PrivateKey#exported-declarations) |
+| [`Std.Crypto.Random.ChaCha20Drbg`](Stdlib-Crypto-ChaCha20Drbg) | [Contracts](Stdlib-Crypto-ChaCha20Drbg#detailed-contracts) | [Declarations](Stdlib-Crypto-ChaCha20Drbg#exported-declarations) |
+| [`Std.Crypto.Random.Entropy`](Stdlib-Crypto-Entropy) | [Contracts](Stdlib-Crypto-Entropy#detailed-contracts) | [Declarations](Stdlib-Crypto-Entropy#exported-declarations) |
 | [`Std.Crypto.SecretMemory`](Stdlib-Crypto-SecretMemory) | [Contracts](Stdlib-Crypto-SecretMemory#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretMemory#exported-declarations) |
 | [`Std.Crypto.Signer`](Stdlib-Crypto-Signer) | [Contracts](Stdlib-Crypto-Signer#detailed-contracts) | [Declarations](Stdlib-Crypto-Signer#exported-declarations) |
 | [`Std.Crypto.StreamingDigest`](Stdlib-Crypto-StreamingDigest) | [Contracts](Stdlib-Crypto-StreamingDigest#detailed-contracts) | [Declarations](Stdlib-Crypto-StreamingDigest#exported-declarations) |
@@ -371,6 +373,7 @@ The [complete specification](Stdlib-Design) has these sections.
 - [20. `Std.Crypto`](Stdlib-Design#20-stdcrypto)
   - [20.1 Contracts](Stdlib-Design#201-contracts)
   - [20.2 `Std.Crypto.Core`](Stdlib-Design#202-stdcryptocore)
+  - [20.3 `Std.Crypto.Random`](Stdlib-Design#203-stdcryptorandom)
   - [20.4 `Std.Crypto.Hash`](Stdlib-Design#204-stdcryptohash)
   - [20.5 `Std.Crypto.Mac`](Stdlib-Design#205-stdcryptomac)
   - [20.6 `Std.Crypto.Kdf`](Stdlib-Design#206-stdcryptokdf)

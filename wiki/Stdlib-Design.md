@@ -1180,7 +1180,7 @@ There is no time zone database, no named zones, and no daylight-saving rules. Co
 | `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback. |
 | `choose<T>(items: T[list]) → T` | Traps with `no such element` for an empty list. |
 
-The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets, and the library offers no cryptographic generator.
+The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets; use `Std.Crypto.Random` ([section 20.3](#203-stdcryptorandom)).
 
 **`Uuid`** is an `#Immutable` value of 16 bytes. The module function `random(random: Random)` makes a version 4 identifier from `fill_bytes`, then sets the version and variant bits. `to_string` writes the 36-character hyphenated form in lowercase. `parse(text) → Result<Uuid>` accepts either case and needs T1. It has `compare_to`, `equals`, and `hash_code` over its bytes.
 
@@ -1290,7 +1290,7 @@ Contracts deliberately kept: insertion-ordered hash collections, separate read-o
 | Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
 | Time zones, locales, localized formatting, collation | Not provided | They need large versioned data tables. |
 | Unicode normalization, non-ASCII classification | Not provided | Same reason. |
-| Signatures, key exchange, TLS, HTTP | Not provided | They need security review. Hashes, MACs, key derivation, authenticated encryption and a seeded cryptographic generator are in [`Std.Crypto`](#20-stdcrypto); public-key cryptography is planned there. |
+| Signatures, key exchange, TLS, HTTP | Not provided | They need security review. Hashes, MACs, key derivation, authenticated encryption and a cryptographic generator are in [`Std.Crypto`](#20-stdcrypto); public-key cryptography is planned there. |
 | `BigInteger` bitwise operations, UDP | Not provided | |
 | Facade modules such as `Std.Collections` that re-export every collection type | Not provided | They need re-export of generic classes, which the language does not have. The type modules are the import paths. |
 
@@ -1486,6 +1486,13 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 | `SecretKey` | `SecretKey<Alg>` implements `SymmetricKey<Alg>` over a `SecretBytes`. A cipher constructor that takes a `SymmetricKey<AesGcm>` rejects a key typed for another algorithm at compile time. |
 | `ConstantTime` | `ct_eq(a, b)` on byte lists (a length difference returns false at once, because lengths are public), `ct_eq_uint32`, `ct_less` and `ct_select` on `uint32` (results 0 or 1), and `ct_select_bytes`. Branch-free in source; the runtime does not guarantee constant time. |
 | `CryptoPolicy` | One process-wide `Policy`, which is `Modern` (the default), `Fips140_3` or `Cnsa2_0`. `set_policy`, `policy`, `allows(algorithm)`, `allowed_by(policy, algorithm)`, and `require(algorithm)`, which traps with `denied: <Algorithm> is not allowed under the <Policy> policy`. Each primitive calls `require` when it is created. `Modern` denies `Md5`, `Sha1` and `Rsa1024`. `Fips140_3` allows the FIPS-approved algorithms: SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2, and the approved public-key and post-quantum schemes. `Cnsa2_0` allows AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The policy is checked at run time only. Set it before tasks start. |
+
+### 20.3 `Std.Crypto.Random`
+
+| Module | Contract |
+| --- | --- |
+| `Entropy` | `os_bytes(count) -> Result<uint8[list]>` reads the operating system's generator through the existing host service `neura.entropy.fill` (requests of at most 1 MiB each) and needs the entropy capability. A denied capability is an `Io` error of kind `CapabilityDenied` with the message `entropy request failed`. `hardware_bytes(count)` (RDSEED or RNDR) and `fork_generation()` (fork and VM-clone detection) are stubs. `fused_seed()` is SHA-512 over a label, 64 OS bytes and 64 hardware bytes, so it traps while `hardware_bytes` is a stub. |
+| `ChaCha20Drbg` | A generator with fast key erasure. The key starts as SHA-256("Neura ChaCha20-DRBG seed" ‖ seed), for a seed of at least 32 bytes; `reseed(material)` sets it to SHA-256("Neura ChaCha20-DRBG reseed" ‖ key ‖ material). `fill(count)` takes the ChaCha20 keystream under the key with a zero nonce, uses its first 32 bytes as the next key, and returns the next `count` bytes. Also `next_uint32`, `next_uint64`, `next_below(bound)` (rejection sampling), `reseed_from_entropy() -> Result<Unit>`, and `wipe`. `from_entropy()` seeds from 32 OS bytes. `fork_safe()` also checks `fork_generation` before every output and reseeds after a change, so it traps until that stub is implemented. A seeded generator is reproducible, which makes it suitable for tests and for deterministic derivation; seed it from `os_bytes` for secrets. |
 
 ### 20.4 `Std.Crypto.Hash`
 

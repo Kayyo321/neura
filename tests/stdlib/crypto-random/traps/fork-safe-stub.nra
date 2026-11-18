@@ -1,0 +1,12 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): unsupported: Std.Crypto.Random.Entropy.fork_generation is not implemented in Neura 0.3.0
+// run-options: --allow-entropy
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = drbg.fork_safe();
+        return program.ExitCode.Ok;
+    };
+);

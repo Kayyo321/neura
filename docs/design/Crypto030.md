@@ -38,6 +38,10 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | Page locking, swap exclusion and zeroization on drop (2.1) | stub (`lock`) | not provided by this runtime | stub |
 | `ct_eq`, `ct_select`, `ct_less` (2.1) | logic | edge values (0, 2^32-1, neighbours) | implemented; branch-free in source; the runtime does not guarantee constant time |
 | `CryptoPolicy` `Modern`, `Fips140_3`, `Cnsa2_0` (2.1) | logic | table tests and a trap | implemented at run time; compile-time enforcement is outside 0.3.0 |
+| OS entropy (`getrandom` and the platform equivalents) (2.2) | logic over host data | allowed and denied capability tests | implemented over the existing `neura.entropy.fill` service |
+| Hardware entropy RDSEED/RNDR and fusion with OS entropy (2.2) | stub (`hardware_bytes`; `fused_seed` traps through it) | none | stub |
+| ChaCha20-DRBG over a seed, reseeding (2.2) | logic | no standard vectors exist for this construction; an independent Python reference (`gen-drbg.py`) over hashlib and `cryptography`'s ChaCha20 (11 outputs over 3 seeds, with reseeds) | implemented |
+| Fork and VM-clone detection with immediate reseed (2.2) | stub (`fork_generation`; `fork_safe` traps through it) | none | stub; the reseed logic is implemented |
 | SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/256 (2.3) | KAT | Python `hashlib`: 26 messages per digest around every block and padding boundary; streaming in pieces | implemented; `Sha256` shares the kernel of `Std.Digest.Sha256` |
 | SHA3-224/256/384/512, SHAKE128/256 (2.3) | KAT | `hashlib`, including lengths rate - 1, rate and rate + 1 for every rate; multi-block squeeze | implemented |
 | XOFs as readers (2.3) | logic | `squeeze`, `read` and `reader()` give one stream | implemented |
@@ -75,6 +79,8 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 
 | Stub | Host operation needed |
 | --- | --- |
+| `Entropy.hardware_bytes` | `neura.entropy.hardware` (new host service, version 1): argument `count: int32` (at most 1 MiB); result `Ok(uint8[list])` with exactly `count` bytes from RDSEED (x86-64) or RNDR (AArch64), retried by the provider on transient failure, or `Error(uint32)` with code 14 (capability denied) or a new code for "no hardware source". Capability group: `entropy`. Record/replay: recorded like `neura.entropy.fill` (the bytes are the observable result) and returned from the trace on replay. |
+| `Entropy.fork_generation` (used by `ChaCha20Drbg.fork_safe`) | `neura.process.generation` (new host service, version 1): no arguments; result `Ok(uint64)`, a number that the runtime changes in a forked child (`pthread_atfork` or a `MADV_WIPEONFORK` page) and after a VM snapshot restore (the Linux `vmgenid` generation counter), or `Error(uint32)` with code 14. Capability group: `entropy`. Record/replay: the values are recorded and replayed, so a replay reseeds at the same points. |
 | `SecretBytes.lock`, `Secret.lock` (and `SecretKey.lock`) | `neura.memory.lock` (new host service, version 1): arguments: the handle of a heap object holding a byte list; results: `Ok` when the runtime has moved the list's storage to locked pages (`mlock`/`VirtualLock`), excluded from core dumps, and promises to zero the storage when the object is reclaimed or the run ends, or `Error(uint32)` with code 12 (out of memory or lock limit) or 14 (capability denied). The collector must then not copy the storage. Capability group: a new `memory` group, granted by default. Record/replay: the call has no observable result besides success, so a trace records only the status. |
 
 ## Decisions taken without the owner
@@ -89,3 +95,5 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 8. STREAM's segment nonce (prefix ‖ big-endian `uint32` counter ‖ last-segment byte) and its prefix length (the AEAD's nonce length less 5) are defined here, as Tink's nonce-prefix segmented AEAD does. No standard fixes them.
 9. FF1 uses the minimum domain of SP 800-38G Revision 1 (radix^minlen ≥ 10^6). Its text forms return `Result`, and misuse of the numeral API traps.
 10. Neither RFC 5297 nor `cryptography` provides an empty-plaintext AES-SIV case, so there is none here. The empty-plaintext GCM-SIV cases come from RFC 8452.
+11. `ChaCha20Drbg`'s construction (SHA-256 seeding and reseeding with fixed labels, fast key erasure over ChaCha20 with a zero nonce) is defined here, not taken from a standard. FIPS 140-3 approves only the SP 800-90A generators, so `Fips140_3` and `Cnsa2_0` deny it.
+12. OS entropy is not a stub: the runtime already has `neura.entropy.fill`, and `Std.Crypto.Random.Entropy` binds it directly, with requests of up to 1 MiB.
