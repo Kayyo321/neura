@@ -94,7 +94,7 @@ The slice and proof rules of the [browser runtime](https://github.com/Kayyo321/n
 
 ### Idle proofs
 
-A browser run proves blocks only on idle callbacks, one attempt at a time, and each attempt is bounded so that it stays a short task on the page's main thread (budget B-W7). The overflow analysis of one attempt gets at most 2^19 work units, about 8 ms of native work, and a search at most 8 ms of wall time. A block whose proof needs more work than one attempt allows stays on tier 0 for the rest of the run; a search cut short is tried again while the image's search budget of 250 ms lasts. These bounds change which blocks are lifted, never what a run does. Native hosts keep their unbounded attempts.
+A browser run proves blocks only on idle callbacks, one attempt at a time, and each attempt is bounded so that it stays a short task on the page's main thread (budget B-W7). The overflow analysis of one attempt gets at most 2^19 work units, about 8 ms of native work, and a search at most 8 ms of wall time. An attempt that runs out keeps what the analysis settled, and the block is queued again at its next visit; the next attempt resumes there, so a graph that needs more work than one attempt allows is proven over several idle callbacks. A block stays on tier 0 for the rest of the run only when an attempt settles nothing more than the one before it. A search cut short is tried again while the image's search budget of 250 ms lasts. These bounds change which blocks are lifted, never what a run does. Native hosts keep their unbounded attempts.
 
 A function program formed while some of its blocks wait for a proof runs those blocks by reference. A native host forms it again at four times its arrivals, at most four times. A browser forms it again once an idle proof has settled one of the function's blocks since it was formed, with no cap, and looks for one at arrivals that grow by an eighth (at least 16), so a proof that an idle callback finishes late is still used. The number of programs a function can have is then bounded by its blocks, not by four.
 
@@ -189,7 +189,7 @@ The answer is the response's status, its headers in the browser's order (lowerca
 | 17 | `Busy`: W-4 (16) fetches are in flight |
 | 18 | `OutcomeUnknown`: the browser reports a network failure, a CORS refusal, a policy refusal, or a body that ended early. It does not say which, nor whether the server acted on the request |
 
-The host's promise never rejects, so a failed exchange fails the call, never the run. `FetchHost` takes `body` and `inFlight` to change W-3 and W-4 within their maxima (256 MiB and 256), `origins: null` to leave the origin check to the browser and the page's policy, and `fetch` to substitute the function. Requests go out with `mode: "cors"` and `redirect: "follow"`; the browser's cache rules apply as for any `fetch`. A bundle grants the group with `--http-client` or `--connect ORIGIN` ([Web bundles](#web-bundles)).
+The host's promise never rejects, so a failed exchange fails the call, never the run. `FetchHost` takes `body` and `inFlight` to change W-3 and W-4 within their maxima (256 MiB and 256), `origins: null` to leave the origin check to the browser and the page's policy, and `fetch` to substitute the function. Requests go out with `mode: "cors"` and `redirect: "follow"`; the browser's cache rules apply as for any `fetch`. Requests for the same URL may not overlap: Chromium holds a second request for a URL until the first has finished, so three tasks fetching one URL take three times as long as three fetching three URLs. A bundle grants the group with `--http-client` or `--connect ORIGIN` ([Web bundles](#web-bundles)).
 
 The browser enforces CORS: a cross-origin backend must answer the request (and its preflight, for a method other than `GET`, `HEAD` or `POST`, or a header outside the safelisted ones, such as `Content-Type: application/json`) with `Access-Control-Allow-Origin` naming the page's origin, and, for credentials `include`, `Access-Control-Allow-Credentials: true`. Without them the call answers 18. A response the page cannot read is never delivered in part.
 
@@ -197,7 +197,7 @@ The browser enforces CORS: a cross-origin backend must answer the request (and i
 
 `import:Std.Net.Http.Fetch` is the binding. `request(method, url)` makes a `Request` with no headers or body, a 30-second timeout and `SameOrigin` credentials; `with_header`, `with_body`, `with_text`, `with_timeout` and `with_credentials` return changed copies, and `send()` returns `Result<Response>`. `get(url)` and `post_text(url, content_type, text)` are shorthands. A `Response` has `status`, `body`, `ok()`, `header(name)` (ASCII case-insensitive), `headers()` and `text()`.
 
-<!-- example: skip (needs a browser and a server) -->
+<!-- example: check -->
 ```neura
 let http = import:Std.Net.Http.Fetch;
 let result = import:Std.Core.Result;
