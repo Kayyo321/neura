@@ -1,0 +1,206 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let resolvers = import:Std.Net.Dns.StubResolver;
+
+/// @brief SRV service discovery (RFC 2782) over a `StubResolver`, with target ordering by priority and weighted
+/// random selection from an injected `Random`.
+///
+/// `order_targets` follows the "Weight" paragraph of RFC 2782 literally: lowest priority first; within one
+/// priority, repeatedly place the zero-weight records first, sum the weights, pick a uniform number from 0 to the
+/// sum inclusive, and take the first record whose running sum reaches it. A single record whose target is "."
+/// means the service is decidedly not available, and `lookup` answers an empty list. `socket_addresses` resolves
+/// every target in that order into `SocketAddr` values, the endpoint list a `Std.Net.Resilience` load balancer
+/// such as `RoundRobin<SocketAddr>` takes (its RFC 2782 order is lost once a balancer picks).
+/// @see [Std.Net.Dns.SrvLookup](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-SrvLookup)
+#Since("0.3.0")
+export let SrvLookup = module (
+    /// @brief One SRV target.
+    #Final
+    export let SrvTarget = class (
+        /// @brief The priority (lower first).
+        export last priority: int;
+        /// @brief The relative weight within the priority.
+        export last weight: int;
+        /// @brief The port.
+        export last port: int;
+        /// @brief The target host.
+        export last target: names.DnsName;
+
+        /// @brief A target.
+        export let init = func(rank: int, share: int, service_port: int, host: names.DnsName) {
+            priority = rank;
+            weight = share;
+            port = service_port;
+            target = host;
+        };
+
+        /// @brief Equal when every field is.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SrvTarget)) {
+                return false;
+            }
+            last that = other as SrvTarget;
+            return priority == that.priority && weight == that.weight && port == that.port
+                && target.equals(that.target);
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(hashing.combine(
+            target.hash_code(), priority as uint32), weight as uint32), port as uint32);
+
+        /// @brief Text such as "10 60 5060 sip.example.com.".
+        export let.override to_string = func -> string => priority.to_string() + " " + weight.to_string() + " "
+            + port.to_string() + " " + target.to_string();
+    );
+
+    /// @brief SRV lookups through a resolver.
+    #[Final, NotThreadSafe]
+    export let SrvLookup = class (
+        /// @brief The resolver.
+        last resolver: resolvers.StubResolver;
+        /// @brief The source for weighted selection.
+        last random: Random;
+
+        /// @brief A lookup over `stub` choosing with `source`.
+        export let init = func(stub: resolvers.StubResolver, source: Random) {
+            resolver = stub;
+            random = source;
+        };
+
+        /// @brief The ordered targets of `_service._proto.domain`; empty when the service is not available (no
+        /// records, a name error, or the single target ".").
+        #NoDiscard
+        export let lookup = func(service: string, proto: string, domain: string) -> Result<SrvTarget[list]> {
+            last answer = resolver.lookup(service_name(service, proto, domain), messages.TypeSrv)?;
+            last found = targets_from(answer.records);
+            if (found.length == 1 && found[0].target.is_root()) {
+                return Result<SrvTarget[list]>.Ok(new);
+            }
+            return Result<SrvTarget[list]>.Ok(order_targets(found, random));
+        };
+
+        /// @brief The socket addresses of every target, in target order, each target's addresses in resolver
+        /// order. Targets that do not resolve are skipped; Err (Io NotFound) when none resolves.
+        #NoDiscard
+        export let socket_addresses = func(service: string, proto: string, domain: string) -> Result<SocketAddr[list]> {
+            last out: SocketAddr[list] = new;
+            for (let target in lookup(service, proto, domain)?) {
+                match (resolver.resolve(target.target.to_string())) {
+                    Result.Ok(addresses) => {
+                        for (let ip in addresses) {
+                            out.append(new SocketAddr(ip, target.port));
+                        }
+                    },
+                    Result.Err(_) => {
+                    },
+                }
+            }
+            if (out.length == 0) {
+                return Result<SocketAddr[list]>.Err(errors.Error.Io { kind: errors.IoErrorKind.NotFound,
+                    message: "dns: no SRV target resolved", path: service_name(service, proto, domain) });
+            }
+            return Result<SocketAddr[list]>.Ok(out);
+        };
+
+        /// @brief Text "SrvLookup".
+        export let.override to_string = func -> string => "SrvLookup";
+    );
+
+    /// @brief The owner name "_service._proto.domain." (underscores added when missing).
+    #NoDiscard
+    export let service_name = func(service: string, proto: string, domain: string) -> string {
+        last head = service.byte_length > 0 && service.byte_at(0) == 95 ? service : "_" + service;
+        last middle = proto.byte_length > 0 && proto.byte_at(0) == 95 ? proto : "_" + proto;
+        last tail = domain.byte_length > 0 && domain.byte_at(domain.byte_length - 1) == 46 ? domain : domain + ".";
+        return head + "." + middle + "." + tail;
+    };
+
+    /// @brief The SRV targets among records.
+    #NoDiscard
+    export let targets_from = func(records: messages.ResourceRecord[list]) -> SrvTarget[list] {
+        last out: SrvTarget[list] = new;
+        for (let record in records) {
+            match (record.data) {
+                messages.RecordData.Srv { priority, weight, port, target } => {
+                    out.append(new SrvTarget(priority, weight, port, target));
+                },
+                _ => {
+                },
+            }
+        }
+        return out;
+    };
+
+    /// @brief Orders targets by priority, and within a priority by RFC 2782 weighted random selection.
+    #NoDiscard
+    export let order_targets = func(targets: SrvTarget[list], source: Random) -> SrvTarget[list] {
+        last out: SrvTarget[list] = new;
+        last priorities: int[list] = new;
+        for (let target in targets) {
+            let known = false;
+            for (let p in priorities) {
+                if (p == target.priority) {
+                    known = true;
+                }
+            }
+            if (!known) {
+                priorities.append(target.priority);
+            }
+        }
+        // Ascending priorities (insertion sort; the list is short).
+        for (let i = 1; i < priorities.length; i++) {
+            let j = i;
+            while (j > 0 && priorities[j - 1] > priorities[j]) {
+                last swap = priorities[j - 1];
+                priorities[j - 1] = priorities[j];
+                priorities[j] = swap;
+                j--;
+            }
+        }
+        for (let p in priorities) {
+            // Zero weights at the beginning, then the others, each group in record order.
+            let pending: SrvTarget[list] = new;
+            for (let target in targets) {
+                if (target.priority == p && target.weight == 0) {
+                    pending.append(target);
+                }
+            }
+            for (let target in targets) {
+                if (target.priority == p && target.weight > 0) {
+                    pending.append(target);
+                }
+            }
+            while (pending.length > 0) {
+                let sum = 0;
+                for (let target in pending) {
+                    sum = sum + target.weight;
+                }
+                last chosen_value = source.next_int_below(sum + 1);
+                let running = 0;
+                let chosen = pending.length - 1;
+                for (let i = 0; i < pending.length; i++) {
+                    running = running + pending[i].weight;
+                    if (running >= chosen_value) {
+                        chosen = i;
+                        break;
+                    }
+                }
+                out.append(pending[chosen]);
+                last rest: SrvTarget[list] = new;
+                for (let i = 0; i < pending.length; i++) {
+                    if (i != chosen) {
+                        rest.append(pending[i]);
+                    }
+                }
+                pending = rest;
+            }
+        }
+        return out;
+    };
+);

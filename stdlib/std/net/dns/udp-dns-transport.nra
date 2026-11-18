@@ -1,0 +1,109 @@
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let messages = import:Std.Net.Dns.Message;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let transports = import:Std.Net.Dns.DnsTransport;
+
+/// @brief DNS over UDP (RFC 1035 section 4.2.1): one datagram out, one datagram back.
+///
+/// The logic is real: it binds an ephemeral socket of the server's family, sends the encoded query, and reads
+/// datagrams until one comes from the server's address and port and carries the query's ID (others are
+/// dropped; RFC 5452 section 9.1 lists the matching rules), or the timeout passes (TimedOut). Datagrams are read
+/// up to 65,535 bytes so a response of any EDNS size fits; a truncated response comes back as it is and the resolver retries over TCP.
+/// The host calls are the UDP wrappers of `Std.Net.Socket.Internal.HostCalls` (`neura.net.udp.bind`,
+/// `neura.net.udp.send_to`, `neura.net.udp.receive_from`, version 1), which trap until the runtime-services
+/// branch is merged; then this transport works unchanged. Those services do not overlap: a waiting receive
+/// blocks every task.
+/// @see [Std.Net.Dns.UdpDnsTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-UdpDnsTransport)
+#Since("0.3.0")
+export let UdpDnsTransport = module (
+    /// @brief The largest datagram read.
+    export const MaxDatagram: int = 65535;
+
+    /// @brief A DNS transport over UDP datagrams.
+    #[Final, NotThreadSafe]
+    export let UdpDnsTransport = class implements transports.DnsTransport (
+        /// @brief The server.
+        export last server: SocketAddr;
+        /// @brief The longest to wait for the response (zero: no limit).
+        export last timeout: durations.Duration;
+
+        /// @brief A transport to `address` with a timeout.
+        export let init = func(address: SocketAddr, limit: durations.Duration) {
+            server = address;
+            timeout = limit;
+        };
+
+        /// @brief A datagram transport.
+        export let is_stream = func -> bool => false;
+
+        /// @brief Sends the query and waits for the matching datagram.
+        export let exchange = func(query: messages.Message) -> Result<messages.Message> {
+            last bytes = messages.encode(query)?;
+            last local = ips.family(server.ip) == AddressFamily.Ipv6 ? "::" : "";
+            return match (host.udp_bind(local, 0)) {
+                host.IdOutcome.Ok(socket) => finish(socket, send_and_receive(socket, bytes, query.header.id)),
+                host.IdOutcome.Error(code) => Result<messages.Message>.Err(host_error.io(code, "dns udp bind failed",
+                    server.to_string())),
+            };
+        };
+
+        /// @brief Text such as "UdpDnsTransport(192.0.2.53:53)".
+        export let.override to_string = func -> string => "UdpDnsTransport(" + server.to_string() + ")";
+
+        /// @brief Closes the socket and passes the outcome on.
+        let finish = func(socket: int64, outcome: Result<messages.Message>) -> Result<messages.Message> {
+            host.close(socket);
+            return outcome;
+        };
+
+        /// @brief Sends the query and reads until a matching datagram arrives.
+        let send_and_receive = func(socket: int64, bytes: uint8[list], id: int) -> Result<messages.Message> {
+            match (host.udp_send_to(socket, server.host_text(), server.port, bytes)) {
+                host.CountOutcome.Ok(_) => {
+                },
+                host.CountOutcome.Error(code) => {
+                    return Result<messages.Message>.Err(host_error.io(code, "dns udp send failed", server.to_string()));
+                },
+            }
+            while (true) {
+                match (host.udp_receive_from(socket, MaxDatagram, timeout.to_nanos())) {
+                    host.DatagramOutcome.Ok(datagram) => {
+                        const [data, sender, port] = datagram;
+                        if (accepts(sender, port, data, id)) {
+                            return messages.decode(data);
+                        }
+                    },
+                    host.DatagramOutcome.Error(code) => {
+                        return Result<messages.Message>.Err(host_error.io(code, "dns udp receive failed",
+                            server.to_string()));
+                    },
+                }
+            }
+            return Result<messages.Message>.Err(errors.custom("dns.unreachable", "receive loop ended"));
+        };
+
+        /// @brief Whether a datagram comes from the server and carries the query's ID.
+        let accepts = func(sender: string, port: int, data: uint8[list], id: int) -> bool {
+            if (port != server.port || data.length < 2) {
+                return false;
+            }
+            match (ips.parse(sender)) {
+                Result.Ok(ip) => {
+                    if (!ips.equals(ip, server.ip)) {
+                        return false;
+                    }
+                },
+                Result.Err(_) => {
+                    return false;
+                },
+            }
+            return (data[0] as int) * 256 + (data[1] as int) == id;
+        };
+    );
+);

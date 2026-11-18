@@ -1,0 +1,60 @@
+let host_error = import:Std.Core.Internal.HostError;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The operating system's resolver (getaddrinfo) through the host service `neura.net.resolve` version 1.
+///
+/// The address parsing and family selection are real; the host call is a private wrapper with exactly the
+/// signature of `Std.Net.Internal.Sockets.resolve` on the runtime-services branch, and it traps until that branch
+/// is merged, when its body becomes the host clause. The service blocks every task while it waits, which is why
+/// `StubResolver` exists.
+/// @see [Std.Net.Dns.SystemResolver](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-SystemResolver)
+#Since("0.3.0")
+export let SystemResolver = module (
+    /// @brief Any family.
+    export const AnyFamily: int = 0;
+    /// @brief IPv4 only.
+    export const Ipv4Only: int = 4;
+    /// @brief IPv6 only.
+    export const Ipv6Only: int = 6;
+
+    /// @brief Numeric address texts, or an unsigned host error code (as `Std.Net.Internal.Sockets.AddressesOutcome`).
+    let AddressesOutcome = enum (Ok(string[list]), Error(uint32));
+
+    /// @brief The addresses of `host` from the system resolver: `family` 0 (any), 4 or 6. Err (Io NotFound) when
+    /// the name does not exist; other host errors as Stdlib.md section 4.5 maps them. A family other than 0, 4 or
+    /// 6 traps with "invalid argument: family". Addresses the host returns that do not parse are skipped.
+    #NoDiscard
+    export let resolve = func(host: string, family: int) -> Result<ips.IpAddr[list]> {
+        if (family != AnyFamily && family != Ipv4Only && family != Ipv6Only) {
+            trap_with_message("invalid argument: family");
+        }
+        return match (host_resolve(host, family)) {
+            AddressesOutcome.Ok(texts) => Result<ips.IpAddr[list]>.Ok(parse_all(texts)),
+            AddressesOutcome.Error(code) => Result<ips.IpAddr[list]>.Err(host_error.io(code, "system resolve failed",
+                host)),
+        };
+    };
+
+    /// @brief The addresses among host texts, skipping any that do not parse.
+    #NoDiscard
+    export let parse_all = func(texts: string[list]) -> ips.IpAddr[list] {
+        last out: ips.IpAddr[list] = new;
+        for (let text in texts) {
+            match (ips.parse(text)) {
+                Result.Ok(ip) => {
+                    out.append(ip);
+                },
+                Result.Err(_) => {
+                },
+            }
+        }
+        return out;
+    };
+
+    /// @brief `neura.net.resolve` version 1; the merge makes the body `host("neura.net.resolve", 1)`.
+    /// @stub host service neura.net.resolve is not in this runtime (runtime-services branch)
+    let host_resolve = func(host: string, family: int) -> AddressesOutcome {
+        trap_with_message("unsupported: Std.Net.Dns.SystemResolver.host_resolve is not implemented in Neura 0.3.0 (host service neura.net.resolve is not in this runtime)");
+    };
+);

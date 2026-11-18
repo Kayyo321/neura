@@ -1,0 +1,37 @@
+// test-options: --allow-net
+// host-dependent-counts: the kernel decides how the framed bytes are split between reads
+let duration = import:Std.Time.Duration;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let tcp_dns = import:Std.Net.Dns.TcpDnsTransport;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// DNS over TCP framing (RFC 1035 section 4.2.2) over real loopback sockets, in one task: the server side writes
+// its framed response first (the kernel buffers it), then the client exchanges, then the server reads the query.
+let LoopbackTests = module (
+    export let test_framed_exchange_over_loopback = func {
+        last listener = test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
+        last client = test.assert_ok<tcp_stream.TcpStream>(
+            tcp_stream.connect("127.0.0.1", listener.local_port, duration.of_seconds(5)));
+        last server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        last query = messages.query(4660, test.assert_ok<names.DnsName>(names.parse("www.example.com")),
+            messages.TypeA);
+        last response = messages.response_to(query, messages.RcodeNoError);
+        response.answers.append(new messages.ResourceRecord(query.question().name, messages.TypeA, messages.ClassIn,
+            300, messages.RecordData.A(ipv4.of(192, 0, 2, 1))));
+        test.assert_ok<unit.Unit>(server.write(tcp_dns.frame(test.assert_ok<uint8[list]>(messages.encode(response)))));
+        last answer = test.assert_ok<messages.Message>(tcp_dns.exchange_on(client.read, client.write, query));
+        test.assert_equal<int>(4660, answer.header.id);
+        test.assert_equal_string("www.example.com. 300 IN A 192.0.2.1", answer.answers[0].to_string());
+        last received = test.assert_ok<uint8[list]>(tcp_dns.read_framed(server.read));
+        last decoded = test.assert_ok<messages.Message>(messages.decode(received));
+        test.assert(decoded.question().equals(query.question()));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(server.close());
+        test.assert_ok<unit.Unit>(listener.close());
+    };
+);

@@ -1,0 +1,11 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Dns\.SystemResolver\.host_resolve is not implemented in Neura 0\.3\.0
+let program = import:Std.Program;
+let system = import:Std.Net.Dns.SystemResolver;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = system.resolve("localhost", 0);
+        return program.ExitCode.Ok;
+    };
+);
