@@ -106,6 +106,7 @@ set(neura_nvm_sources
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
     src/nvm/socket_provider.cpp
+    src/nvm/tls_provider.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
@@ -517,6 +518,11 @@ if(NEURA_ENABLE_SERVER_TLS)
         target_link_libraries(neura_server_tls PRIVATE neura_server_http OpenSSL::SSL)
         neura_target_defaults(neura_server_tls)
         target_compile_definitions(neura_server_listeners PRIVATE NEURA_SERVER_TLS_ENABLED)
+        # TLS client and server streams of the standard providers
+        # (src/nvm/tls_provider.cpp); without this build option they answer
+        # Unsupported.
+        target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
+        target_link_libraries(neura_nvm PRIVATE OpenSSL::SSL)
         target_link_libraries(neura_server_listeners PRIVATE neura_server_tls)
 
         if(BUILD_TESTING)
@@ -846,6 +852,9 @@ if(BUILD_TESTING)
     target_link_libraries(neura_backend_tests PRIVATE neura_compiler neura_nvm neura_decompiler)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
+    if(NEURA_ENABLE_SERVER_TLS)
+        target_compile_definitions(neura_backend_tests PRIVATE NEURA_NVM_TLS)
+    endif()
 
     if(NEURA_HAS_GPU)
         target_sources(neura_backend_tests PRIVATE tests/backend/gpu_tests.cpp)

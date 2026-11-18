@@ -431,6 +431,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
     };
     add_net_services(adder, overlap, *tables_, capabilities_);
     add_socket_services(adder, *tables_, capabilities_);
+    add_tls_services(adder, *tables_, capabilities_);
     add_ffi_services(adder, *tables_, capabilities_);
 }
 
@@ -460,6 +461,7 @@ void StandardServices::register_all(HostRegistry& registry) {
 
 void StandardServices::end_run() {
     close_files(*tables_);
+    close_tls(*tables_);
     close_sockets(*tables_);
     close_native(*tables_);
 }

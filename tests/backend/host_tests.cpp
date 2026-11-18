@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <thread>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -1165,6 +1166,11 @@ export let BindingCheck = module (
         last replies = [server.respond(200 as uint32, fields, bytes, true), server.write_body(bytes), server.close_body(),
                         server.log(0 as uint32, "x", fields)];
         last config = server.config("x");
+        last tls = [sockets.tls_connect("x", 1, 0 as int64, "", fields, ""),
+                    sockets.tls_accept(1 as int64, "c", "k", fields, 0 as int64)];
+        last tls_read = sockets.tls_read(1 as int64, 1, 0 as int64);
+        last tls_write = sockets.tls_write(1 as int64, bytes);
+        last tls_close = sockets.tls_close(1 as int64);
     };
 );
 )");
@@ -1186,8 +1192,80 @@ export let Check = module:program.Entry (
     nvm::ApplicationServices application(nullptr, false, false);
     application.register_all(host.registry);
     nvm::bind(image, host.registry);
-    check(image.imports.size() >= 24, "every internal binding is reached: " + std::to_string(image.imports.size()));
+    check(image.imports.size() >= 29, "every internal binding is reached: " + std::to_string(image.imports.size()));
 }
+
+
+#ifdef NEURA_NVM_TLS
+// TLS client and server streams (src/nvm/tls_provider.cpp) against each
+// other, with a certificate the openssl command generates.
+NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
+    TemporaryDirectory dir("tls");
+    const auto certificate = (dir.path() / "cert.pem").string();
+    const auto key = (dir.path() / "key.pem").string();
+    const auto command = "openssl req -x509 -newkey rsa:2048 -nodes -keyout '" + key + "' -out '" + certificate +
+                         "' -days 2 -subj /CN=localhost -addext subjectAltName=IP:127.0.0.1,DNS:localhost "
+                         ">/dev/null 2>&1";
+    if (std::system(command.c_str()) != 0) {
+        std::cout << "  (skipped: no openssl command)\n";
+        return;
+    }
+    const auto names = [](std::vector<std::string> values) {
+        HostValue list;
+        for (auto& value : values) list.elements.push_back(text(std::move(value)));
+        return list;
+    };
+    Host server(everything());
+    const auto listener = server.call("neura.net.listen", {text("127.0.0.1"), i32(0)});
+    expect_ok(listener, "listen");
+    const auto port = server.call("neura.net.local_port", {listener.value});
+    std::vector<std::string> served;
+    std::thread acceptor([&] {
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            const auto accepted = server.call("neura.net.tls.accept", {listener.value, text(certificate), text(key),
+                                                                       names({"h2", "http/1.1"}), i64(10'000'000'000)});
+            if (!accepted.success) {
+                served.push_back("failed");
+                continue;
+            }
+            const auto id = accepted.value.elements.at(0);
+            served.push_back(accepted.value.elements.at(1).bytes);
+            const auto got = server.call("neura.net.tls.read", {id, i32(64), i64(5'000'000'000)});
+            server.call("neura.net.tls.write", {id, bytes("pong:" + got.value.bytes)});
+            server.call("neura.net.tls.close", {id});
+        }
+    });
+    Host client(everything());
+    const auto connected = client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(10'000'000'000),
+                                                                 text(""), names({"http/1.1"}), text(certificate)});
+    expect_ok(connected, "verified connect");
+    check_equal(connected.value.elements.at(1).bytes, std::string("http/1.1"), "client sees the ALPN choice");
+    const auto id = connected.value.elements.at(0);
+    check_equal(as_i32(client.call("neura.net.tls.write", {id, bytes("ping")}).value), 4, "tls write");
+    check_equal(client.call("neura.net.tls.read", {id, i32(64), i64(5'000'000'000)}).value.bytes,
+                std::string("pong:ping"), "tls read");
+    check_equal(client.call("neura.net.tls.read", {id, i32(64), i64(5'000'000'000)}).value.bytes, std::string(),
+                "empty at the end");
+    expect_ok(client.call("neura.net.tls.close", {id}), "tls close");
+    expect_error(client.call("neura.net.tls.close", {id}), host_error::invalid_input, "closed twice");
+
+    expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(10'000'000'000), text(""),
+                                                       names({}), text("")}),
+                 host_error::permission_denied, "a self-signed peer is not in the system store");
+    expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), port.value, i64(10'000'000'000),
+                                                       text("other.example"), names({}), text(certificate)}),
+                 host_error::permission_denied, "a name the certificate does not carry");
+    acceptor.join();
+    check(served.size() == 3 && served[0] == "http/1.1", "the server chose http/1.1 first");
+    expect_error(client.call("neura.net.tls.connect", {text("127.0.0.1"), i32(0), i64(0), text(""), names({}),
+                                                       text("")}),
+                 host_error::invalid_input, "port 0");
+    Host nothing({});
+    expect_error(nothing.call("neura.net.tls.connect", {text("127.0.0.1"), i32(443), i64(0), text(""), names({}),
+                                                        text("")}),
+                 host_error::capability_denied, "tls denied");
+}
+#endif
 
 #endif
 

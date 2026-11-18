@@ -1,5 +1,5 @@
 /// @brief Host bindings for sockets beyond TCP streams (docs/runtime/NVM.md, "Socket services"): UDP, Unix-domain
-/// stream and datagram sockets, socket options, system name resolution and sending a file. The public Std.Net
+/// stream and datagram sockets, socket options, system name resolution, sending a file, and TLS streams. The public Std.Net
 /// types wrap them; the IDs share the table of Std.Net.TcpStream and Std.Net.TcpListener, so a Unix stream reads,
 /// writes, accepts and closes through the same services. Every call needs the net capability (send_file also
 /// fs) and fails with error 14 without it. None of these calls overlaps with other tasks.
@@ -66,6 +66,28 @@ export let Sockets = module (
     /// @brief The numeric addresses of `host` from the system resolver (getaddrinfo): family 0 for any, 4 or 6.
     /// It blocks every task while it waits. NotFound (1) when the name does not exist.
     export let resolve = func(host: string, family: int) -> AddressesOutcome host("neura.net.resolve", 1);
+    /// @brief A TLS stream ID and the ALPN protocol the handshake selected (empty when none), or an unsigned
+    /// host error code.
+    export let TlsOutcome = enum (Ok([int64, string]), Error(uint32));
+
+    /// @brief A TLS 1.2 or 1.3 client stream to `host` and `port`, waiting at most `timeout_nanos` (0 without
+    /// limit). The peer is always verified, against `ca_file` or, when it is empty, the system trust store, and
+    /// must carry `server_name` (empty: `host`), which is also sent as SNI. A failed verification is
+    /// PermissionDenied (2). `alpn` lists the protocols to offer. Unsupported (13) in a build without TLS.
+    export let tls_connect = func(host: string, port: int, timeout_nanos: int64, server_name: string,
+                                  alpn: string[list], ca_file: string) -> TlsOutcome host("neura.net.tls.connect", 1);
+    /// @brief Accepts one connection from a TCP listener and completes a TLS server handshake with the PEM
+    /// certificate chain and key files, selecting the first of `alpn` the client offers. Needs net and fs.
+    export let tls_accept = func(listener: int64, certificate_file: string, key_file: string, alpn: string[list],
+                                 timeout_nanos: int64) -> TlsOutcome host("neura.net.tls.accept", 1);
+    /// @brief Up to `max` decrypted bytes; empty once the peer has closed the stream.
+    export let tls_read = func(stream: int64, max: int, timeout_nanos: int64) -> BytesOutcome
+        host("neura.net.tls.read", 1);
+    /// @brief Encrypts and sends a prefix of `bytes`; its length.
+    export let tls_write = func(stream: int64, bytes: uint8[list]) -> CountOutcome host("neura.net.tls.write", 1);
+    /// @brief Sends close_notify and releases the stream.
+    export let tls_close = func(stream: int64) -> DoneOutcome host("neura.net.tls.close", 1);
+
     /// @brief The bound port of a TCP or UDP socket.
     export let local_port = func(socket: int64) -> CountOutcome host("neura.net.local_port", 1);
     /// @brief Accepts one stream from a TCP or Unix listener. Overlapping and cancellable.
