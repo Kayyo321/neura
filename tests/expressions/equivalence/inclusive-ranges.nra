@@ -1,0 +1,65 @@
+// Inclusive ranges (docs/design/Expressions030.md, Ranges with `..=`, edge
+// cases 29 to 31 and 33): the elements of each form, bounds at the ends of
+// a type's domain, braces, lists, for-each sources and `??` in the stop.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let show = func(values: int[]) -> string {
+    let text = values.length.to_string() + ":";
+    for (let value: int in values) {
+        text = text + " " + value.to_string();
+    }
+    return text;
+};
+
+let Limit = class (
+    export let stop: int = 0;
+);
+
+let stop_or = func(limit: Limit, fallback: int) -> int[] => 0 ..= limit?.stop ?? fallback;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(show(0 ..= 5));
+        console.print_line(show(5 ..= 0 : -1));
+        console.print_line(show(0 ..= 5 : 2));
+        console.print_line(show(0 ..= 6 : 3));
+        console.print_line(show(3 ..= 3));
+        console.print_line(show(3 ..= 2));
+        console.print_line(show(-3 ..= 3 : 3));
+        console.print_line(show({0 ..= 5}));
+        let limit = new Limit();
+        limit.stop = 4;
+        console.print_line(show(stop_or(nil, 2)) + " / " + show(stop_or(limit, 2)));
+
+        let list: int[list] = new(0 ..= 3);
+        console.print_line(list.length.to_string() + " " + list[3].to_string());
+
+        let total = 0;
+        for (let value: int in 1 ..= 10) {
+            total = total + value;
+        }
+        console.print_line(total.to_string());
+
+        let top: uint8[] = 250 ..= 255;
+        console.print_line(top.length.to_string() + " " + top[0].to_string() + " " + top[5].to_string());
+        let down: int8[] = 127 ..= 120 : -7;
+        console.print_line(down.length.to_string() + " " + down[1].to_string());
+        let full: int8[] = -128 ..= 127;
+        console.print_line(full.length.to_string() + " " + full[0].to_string() + " " + full[255].to_string());
+        let maximum: int64 = 9223372036854775807;
+        let high: int64[] = maximum - 20 ..= maximum : 5;
+        console.print_line(high.length.to_string() + " " + high[4].to_string());
+        let low: int64[] = -9223372036854775807 - 1 ..= -9223372036854775807 + 20 : 9;
+        console.print_line(low.length.to_string() + " " + low[0].to_string() + " " + low[2].to_string());
+        let wide: int64[] = 0 ..= maximum : 4611686018427387904;
+        console.print_line(wide.length.to_string() + " " + wide[1].to_string());
+        let backwards: int64[] = maximum ..= maximum - 9 : -4;
+        console.print_line(backwards.length.to_string() + " " + backwards[2].to_string());
+        let letters = 'a' ..= 'z';
+        console.print_line(letters.length.to_string() + " " + letters[25].to_string());
+        let bytes: uint32[] = 4294967290 ..= 4294967295 : 2;
+        console.print_line(bytes.length.to_string() + " " + bytes[2].to_string());
+        return program.ExitCode.Ok;
+    };
+);

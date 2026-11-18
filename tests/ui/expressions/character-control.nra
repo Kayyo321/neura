@@ -1,0 +1,4 @@
+// A raw control byte between quotes is E0261 (docs/design/Expressions030.md,
+// edge case 26): a bell and a delete.
+let bell = '';
+let delete = '';

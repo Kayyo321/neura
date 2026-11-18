@@ -1,0 +1,51 @@
+/// @brief The host services of the `ui` capability group, version 1 (docs/runtime/Providers.md, "UI services" and
+/// "History services"). Bindings only: the library code of Std.Ui and Std.Web decides every rule and calls these.
+///
+/// A web or desktop host grants the group; `neura run` denies it, so every call fails with error 14. Handles are
+/// numbers the host issued to this run and checks on every call. `next_events` and `next_path` overlap in a
+/// program with tasks and can be cancelled (error 15). `focus` and `link_path` were added to the group in 0.3.0
+/// as `neura.ui.focus` and `neura.history.link`, version 1.
+#Internal
+#Since("0.3.0")
+export let Host = module (
+    /// @brief A root or template handle, or a host error code.
+    export let HandleOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Success without a value, or a host error code.
+    export let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief An encoded event batch, or a host error code.
+    export let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief Managed nodes, listeners, template handles and queued events of a root, or a host error code.
+    export let StatsOutcome = enum (Ok([int64, int64, int64, int64]), Error(uint32));
+    /// @brief A path, or a host error code.
+    export let PathOutcome = enum (Ok(string), Error(uint32));
+
+    /// @brief Opens a root on the element the selector names.
+    export let open_root = func(selector: string) -> HandleOutcome host("neura.ui.root.open", 1);
+    /// @brief Empties and closes a root; a waiting `next_events` answers an empty batch.
+    export let close_root = func(root: int64) -> DoneOutcome host("neura.ui.root.close", 1);
+    /// @brief Registers a template descriptor after the host checks its encoding and the limits U-1 to U-3.
+    export let register_template = func(root: int64, descriptor: string) -> HandleOutcome
+        host("neura.ui.template", 1);
+
+    /// @brief Applies one encoded commit, all or nothing for a rejected batch.
+    export let commit = func(root: int64, operations: uint8[list]) -> DoneOutcome host("neura.ui.commit", 1);
+    /// @brief Waits for at least one event of the root and returns at most `max` of them, encoded.
+    export let next_events = func(root: int64, max: int) -> BytesOutcome host("neura.ui.event.next", 1);
+    /// @brief Reads the root's counters.
+    export let stats = func(root: int64) -> StatsOutcome host("neura.ui.stats", 1);
+    /// @brief Moves the keyboard focus to the element of the root whose `id` is `element_id`; error 1 when the
+    /// root holds no such element.
+    export let focus = func(root: int64, element_id: string) -> DoneOutcome host("neura.ui.focus", 1);
+
+    /// @brief The current path.
+    export let current_path = func -> PathOutcome host("neura.history.current", 1);
+    /// @brief Adds a history entry for the path and returns the current path.
+    export let push_path = func(path: string) -> PathOutcome host("neura.history.push", 1);
+    /// @brief Replaces the current history entry and returns the current path.
+    export let replace_path = func(path: string) -> PathOutcome host("neura.history.replace", 1);
+    /// @brief Waits for a navigation the program did not make and returns the new path.
+    export let next_path = func -> PathOutcome host("neura.history.next", 1);
+    /// @brief The `href` of a link to `path` in the page's routing mode: `#/parts/7` with hash routing, the path
+    /// below the bundle's base with history routing.
+    export let link_path = func(path: string) -> PathOutcome host("neura.history.link", 1);
+);

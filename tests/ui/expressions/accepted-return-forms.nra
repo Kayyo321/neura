@@ -1,0 +1,23 @@
+// Return forms (docs/design/Expressions030.md, Return forms, edge cases
+// 48-54): compact arms with and without `;`, line breaks and comments, a
+// guard on a value, on a `return if` and on a `return match`, and `unless`
+// as an ordinary name.
+let unless = func(x: int) -> int => x;
+let Mode = enum (Plain, Loud);
+
+let sign = func(x: int) -> string {
+    return if (x > 0) -> "Positive";
+           else if (x == 0) -> "Zero";
+           else -> "Negative";
+};
+
+let spread = func(x: int, quiet: bool, mode: Mode) -> int {
+    return if (x > 0) // positive
+        -> x
+        else -> -x unless quiet;
+    return match (mode) {
+        Mode.Plain => 1,
+        Mode.Loud => 2,
+    } unless x > 100;
+    return unless(x);
+};

@@ -1,0 +1,3 @@
+// Edge case 37 of docs/design/Expressions030.md: a string chain takes no
+// step; E0263 at the colon.
+let stepped = func() -> string => "a" .. "b" : 2;

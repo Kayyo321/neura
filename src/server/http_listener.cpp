@@ -43,12 +43,13 @@ void validate_limits(const ListenerLimits& limits) {
     if (limits.connections > 1'000'000 || limits.http.request.head_bytes > 1024 * 1024 ||
         limits.http.request.body_bytes > gibibyte || limits.http.response_bytes > gibibyte ||
         limits.http.head_timeout <= 0ms || limits.http.head_timeout > 10s ||
-        limits.http.request_timeout <= 0ms || limits.http.request_timeout > 3600s || limits.handshake_timeout <= 0ms) {
+        limits.http.request_timeout <= 0ms || limits.http.request_timeout > 3600s || limits.handshake_timeout <= 0ms ||
+        limits.http.http2.max_concurrent_streams == 0 || limits.http.http2.max_concurrent_streams > 1000) {
         throw std::invalid_argument("HTTP listener limits exceed the host's supported range");
     }
 }
 
-std::vector<TlsContextHandle> load_contexts(std::span<const ListenEndpoint> endpoints) {
+std::vector<TlsContextHandle> load_contexts(std::span<const ListenEndpoint> endpoints, bool offer_http2) {
     std::vector<TlsContextHandle> contexts;
     contexts.reserve(endpoints.size());
     for (const auto& endpoint : endpoints) {
@@ -57,8 +58,9 @@ std::vector<TlsContextHandle> load_contexts(std::span<const ListenEndpoint> endp
             continue;
         }
 #ifdef NEURA_SERVER_TLS_ENABLED
-        contexts.push_back(load_tls_context(endpoint.tls->certificate_chain, endpoint.tls->private_key));
+        contexts.push_back(load_tls_context(endpoint.tls->certificate_chain, endpoint.tls->private_key, offer_http2));
 #else
+        (void)offer_http2;
         throw std::invalid_argument("this server build has no TLS adapter");
 #endif
     }
@@ -196,7 +198,7 @@ ListenerSet::ListenerSet(std::span<const ListenEndpoint> endpoints, ListenerLimi
     auto& state = *state_;
     state.limits = limits;
     state.configurations.assign(endpoints.begin(), endpoints.end());
-    state.contexts = load_contexts(endpoints);
+    state.contexts = load_contexts(endpoints, limits.http.http2.tls);
     state.sockets.reserve(endpoints.size());
     state.endpoints.reserve(endpoints.size());
     state.poll_entries.reserve(endpoints.size());
@@ -252,6 +254,8 @@ AcceptResult ListenerSet::accept_until(ConnectionClock::time_point deadline) {
     }
 }
 
-void ListenerSet::reload_tls() { state_->contexts = load_contexts(state_->configurations); }
+void ListenerSet::reload_tls() {
+    state_->contexts = load_contexts(state_->configurations, state_->limits.http.http2.tls);
+}
 
 } // namespace neura::server::http

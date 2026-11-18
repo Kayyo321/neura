@@ -1,0 +1,7 @@
+// A character literal names one byte: a character outside ASCII and a \u
+// escape above FF are E0260 (docs/design/Expressions030.md, edge case 27).
+let accent = 'é';
+let euro = '€';
+let escape = '\u{100}';
+let emoji = '\u{1F600}';
+let several = 'éa';

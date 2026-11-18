@@ -1,0 +1,9 @@
+error[E0240]: malformed html factory
+ --> $DIR/html-no-parameters.nra:1:12
+  |
+1 | let view = html { <p></p> };
+  |            ^^^^^^^^^^^^^^^^ the parameter list is required
+  |
+  = help: write 'html(parameters) { ... }' or 'html(parameters) from "path.html"'
+
+For more information about this error, try `neura explain E0240`.

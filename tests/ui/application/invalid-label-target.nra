@@ -1,0 +1,1 @@
+let view = html() { <label for="unknown">Name</label><input id="known"> };

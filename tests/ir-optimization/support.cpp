@@ -82,6 +82,8 @@ std::string_view op_name(IrOp op) {
     case IrOp::Cleanup: return "cleanup";
     case IrOp::Pending: return "pending";
     case IrOp::Yield: return "yield";
+    case IrOp::ConcatText: return "concat_text";
+    case IrOp::TypeOf: return "type_of";
     }
     return "<invalid>";
 }

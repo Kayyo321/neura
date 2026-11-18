@@ -1,0 +1,16 @@
+// Console output through neura.console.write, which the browser serves as it serves line writes: formatted and
+// raw writes to stdout, split across calls, and a line to stderr.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print("{} plus {} is ", 2, 3);
+        console.println("{}", 5);
+        console.write("café\nsplit ");
+        console.write("line\n");
+        console.eprintln("to stderr");
+        console.print_line("done");
+        return program.ExitCode.Ok;
+    };
+);

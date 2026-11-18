@@ -1,0 +1,1 @@
+let view = html(items: float64[]) { @for (let item in items; key: item) { <p>{item}</p> } };

@@ -1,0 +1,1 @@
+let select_style = func() { const Local = css { }; };

@@ -38,6 +38,8 @@ Added by this branch:
 | --- | --- | --- |
 | `neura-server-host`, the foreground host: listeners, optional TLS, the startup check, S-1 and S-3 admission with 503 and `Retry-After: 1`, S-2 ready workers, the S-8 deadline (504, worker killed), S-7 response limit (500), traps (500, logged), JSON log lines, `SIGTERM`/`SIGINT` drain within S-12, `SIGHUP` TLS reload | `src/server/server_host.cpp` | implemented |
 | The request worker: the same executable with `--worker`, spawned with `posix_spawn` over a socket pair on descriptor 3; it loads and verifies the image, greets, waits for one `Assign` and its body, runs the image once, and exits | `src/server/request_worker.cpp` | implemented |
+| The worker zygote (`--worker-start zygote`, the default on Linux): one helper process loads and verifies the image once and forks each worker with `CLONE_PARENT`, so the worker is still the host's child; a zygote that ends is replaced up to three times, then workers start with `exec` (`--worker-start exec`) | `src/server/worker_zygote.cpp`, `server_host.cpp` | implemented on Linux (departure 13); `exec` elsewhere |
+| A worker holds its S-1 slot until the host has reaped it; the reaper waits on each worker's `pidfd` (Linux 5.3 and later; elsewhere it looks every 2 ms) | `src/server/server_host.cpp` | implemented |
 | Typed `Assign`, `Head`, `Call` and `Return` bodies and a blocking checked channel | `src/server/worker_messages.cpp` | implemented |
 | `neura.http.server.next`, `respond`, `body.read`, `body.write`, `body.close`, `neura.app.config`, `neura.app.log`; the `http_server` and `app` capability groups | `src/nvm/app_provider.cpp` | implemented |
 | `Std.App` (`Context`, `Request`, `Response`, `Handler`, `handler_of`, `run`) and the internal binding `Std.Net.Internal.HttpServer` | `stdlib/std/app.nra`, `stdlib/std/net/internal/http-server.nra` | implemented |
@@ -47,7 +49,7 @@ Added by this branch:
 | Streamed request bodies and streamed responses with backpressure: the request is assigned at the end of its head and its body streams to the worker; a response sent with `respond(..., complete: false)` streams back with chunked transfer coding, one chunk per write; `Context.serve_streamed`, `BodyReader`, `stream`, `BodyWriter` | `src/server/http_connection.cpp`, `server_host.cpp`, `request_worker.cpp`, `stdlib/std/app.nra` | implemented; the response is forwarded once the request body has been received |
 | S-8 from the end of the request head, for the connection and the worker alike | `src/server/http_connection.cpp`, `server_host.cpp` | implemented |
 | The worker step limit (`--max-steps`) and the worker tier (`--worker-tier`, `--worker-jit`) | `src/server/server_host.cpp`, `request_worker.cpp` | implemented; one value for every request (no per-route limit is defined) |
-| A ready worker that has ended is discarded and the request given to another, once | `src/server/server_host.cpp` | implemented |
+| A ready worker that has ended, or a worker whose channel refuses its `Assign`, is discarded and the request given to another, once; a second refusal answers 500 | `src/server/server_host.cpp` | implemented; the refusal is tested through the hook `NEURA_SERVER_TEST_REFUSE_ASSIGN` (`test_refused_assignment`) |
 | `neura serve`, the closest form of `neura run <bundle>` | `src/cli/serve.cpp` | implemented: builds a source program and runs the host in the foreground; bundles wait for the project build |
 | `Std.Data.Sql` (`Pool`, `Connection`, `Transaction`, `Cursor`, `Row`, `Value`, `SqlError`, `in_transaction`) and `Context.sql_pool` | `stdlib/std/data/sql.nra`, `stdlib/std/app.nra` | implemented (`sql_pool`, steps 5 to 7 below) |
 | `neura.sql.*` services and the `sql` capability group; `Call` operation 2 over the worker channel; pools, sessions and leases in the host; `--sql-pool` for `neura run` and `neura test` | `src/nvm/sql_services.cpp`, `src/server/sql_channel.cpp`, `src/server/sql_host.cpp`, `src/sql/` | implemented |
@@ -74,6 +76,7 @@ Departures, each to be confirmed by the owner:
 14. **SQL values and errors.** A host call cannot carry a list of tuples, so parameters and rows cross as four parallel lists (kinds, bits, texts, blobs), and a host error is a `uint32` code only, so the detail text (a constraint or column name) is read with a further service, `neura.sql.detail`, which answers in the execution. `acquire` takes a wait in nanoseconds rather than an absolute deadline.
 15. **SQL library shape.** Without `using`, implicit conversions or named arguments on this baseline, the statement methods take their parameters as a trailing variadic argument list (`execute(sql, parameters...)`), whose strings, integers, floats and Booleans become `Value`s, and a `Value` object stands for `NULL` and bytes; `in_transaction(pool, body)` stands in for a `using` block. Every SQL failure is an `Error.Custom` holding an `SqlError` with its own `ErrorKind`, so that the new kinds need no change to `IoErrorKind`. Using a closed connection, transaction or cursor is `InvalidInput`, as edge case 39 says.
 16. **`E1044` in the host.** There is no project build to report `E1044`, so `neura-server-host` checks a migration directory when it starts and reports `error[E1044]: invalid migration set` with the file; the code is not in the compiler's registry yet. Pending migrations in `manual` mode refuse the start, so the host does not reach the point where `/readyz` could answer 503.
+17. **Worker start from a zygote.** Approved decision 1 asks for a process per request "with a full startup, and no reuse". On Linux a worker is now forked from a zygote that read, hashed, loaded and verified the image once, instead of `exec`-ing the host and doing those steps itself. The reading taken here: what decision 1 protects is that no state of one request reaches another, and that every request runs the whole program from its startup. Both still hold: the zygote runs no Neura code (no global initializer, no `static scope`, no entry) and holds no request data, so a forked worker is in the state an `exec`-ed worker reaches after its verification, and runs the whole program for its one request. What differs: forked workers share the zygote's address-space layout (ASLR differs between the host and its workers, not between workers), and the image bytes are verified once per zygote rather than once per worker. `--worker-start exec` restores the earlier start.
 
 ### Host services for the standard library
 
@@ -89,7 +92,7 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a copy elsewhere | `backend-host` |
 | `splice` with pipe handles, `neura.net.pipe` and `neura.net.splice` | implemented on Linux (`splice(2)`, the bytes never reach the NVM); 13 elsewhere | `backend-host` |
 | System name resolution, `neura.net.resolve` | implemented with `getaddrinfo`; blocks every task while it waits | `backend-host` |
-| HTTP/2 over TLS through ALPN, and h2c | not provided: approved decision 9 excludes HTTP/2 from 0.3.0 and allows no flag; see "HTTP/2 and decision 9" below | |
+| HTTP/2 over TLS through ALPN `h2` (on by default, `--no-http2`), and h2c with prior knowledge (`--h2c`) | implemented in builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0), by the owner's amendment of decision 9; see "HTTP/2 and decision 9" below | `server-host` (`test_http2_curl`, `test_http2_streams`, `test_http2_reload`), `server-host-h2c` |
 | `MSG_ZEROCOPY` | not provided, after measurement: see "MSG_ZEROCOPY" below | |
 | UDP GSO and GRO: options 13 `UDP_SEGMENT` and 14 `UDP_GRO`, `neura.net.udp.receive_segments` with the segment size | implemented on Linux; 13 elsewhere | `backend-host` (loopback: a 2,500-byte send arrives as 1,000, 1,000 and 500; with GRO, coalesced with segment size 1,000) |
 | MPTCP: `neura.net.mptcp.listen`, `neura.net.mptcp.connect`, option 15 `SO_PROTOCOL` | implemented on Linux 5.6 and later; 13 when the kernel has none or `net.mptcp.enabled` is 0 | `backend-host` (262 read back on this kernel) |
@@ -102,21 +105,24 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 
 ### Budgets measured
 
-`scripts/bench-server.py` measured the budgets of [the overview](Apps030.md#budgets) on 2026-11-17 on this machine (Linux 7.1, x86-64, 8 cores), with `tests/server/fixtures/test-server.nra` answering `GET /info` (JSON, no database), 32 keep-alive connections and 8 workers unless noted. Other agents' builds ran throughout (load average 5 to 14), so every figure is indicative; none of the budgets was changed to fit. The loader's own ceiling, against a Python echo server with Nagle's algorithm off, is about 15,000 requests per second, well above every result, so the results measure the host.
+`scripts/bench-server.py` measured the budgets of [the overview](Apps030.md#budgets) on this machine (Linux 7.1, x86-64, 8 cores), with `tests/server/fixtures/test-server.nra` answering `GET /info` (JSON, no database), 32 keep-alive connections and 8 workers unless noted. Other agents' builds and tests ran throughout (load average 6 to 16), so every figure is indicative; none of the budgets was changed to fit. The loader's own ceiling, against a Python echo server with Nagle's algorithm off, is 13,800 to 15,400 requests per second, above every result, so the results measure the host. The table is the 2026-11-18 run with workers started from the zygote (`runtime-services` e2618d7b); the evidence is under the lane's `runtime-r3/` directory.
 
 | Budget | Workload | Result | Met |
 | --- | --- | --- | --- |
-| B-S1 latency, fresh worker | 200 requests per second fixed, 60 s after 10 s | median 1.10 ms, 95th 2.17 ms, 99th 3.03 ms; 12,000 of 12,000 answered 200 | yes |
-| B-S2 throughput | closed loop, 60 s after 10 s | 929 requests per second, no 503 (725 before the reaper fix below) | no: 1,500 is the budget |
-| B-S4 saturation | twice the B-S2 rate (1,858 per second), 64 connections, `--max-queue 8`, 30 s | 503 within 1.98 ms at the 95th percentile (22,576 of 55,745 answered 503); peak process tree 22, of which 12 zombies, against a limit of 12 | 503 latency yes; process count no |
-| B-S5 drain | `SIGTERM` under 200 requests per second | exit in 0.02 s with status 0 | exit time yes; that every request in flight completes rests on `test_drain_completes_responses`, because the loader cannot tell a request in flight from one refused after the listener closed (407 such errors, on idle keep-alive connections) |
-| B-S6 sustained | half the B-S2 rate (363 per second) for 600 s, one request in 1,000 trapping | resident size slope 0.02% per minute after minute 2 (7.5 MiB at start, 8.3 MiB at the end); 217 traps answered 500; afterwards 6 descriptors and 3 processes (the host and 2 ready workers) | yes |
+| B-S1 latency, fresh worker | 500 requests per second fixed, 60 s after 10 s | median 1.01 ms, 95th 1.14 ms, 99th 1.69 ms; 30,000 of 30,000 answered 200 | yes |
+| B-S2 throughput | closed loop, 30 s after 10 s, three pairs alternating with the 686c8194 host | zygote: 4,872, 3,677 and 3,217 requests per second (mean 3,922), no 503; 686c8194: 1,617, 1,435 and 1,199 (mean 1,417). A 60 s run gave 3,950. | yes |
+| B-S2 CPU per request | host and reaped workers (`utime`, `stime`, `cutime`, `cstime` of the host) over the B-S2 runs | 1.01 to 1.03 ms with the zygote; 3.74 to 3.77 ms with 686c8194 | |
+| B-S4 saturation | twice the B-S2 rate (7,901 per second), 64 connections, `--max-queue 8`, 30 s | 503 within 1.75 ms at the 95th percentile (134,229 of 237,024 answered 503); peak process tree 12, of which 8 zombies holding their slots, against a limit of 12 (host, zygote, S-1, S-2) | yes |
+| B-S5 drain | `SIGTERM` under 500 requests per second | exit in 0.16 s with status 0 | exit time yes; that every request in flight completes rests on `test_drain_completes_responses`, because the loader cannot tell a request in flight from one refused after the listener closed (963 such errors) |
+| B-S6 sustained | half the B-S2 rate (1,975 per second) for 600 s, one request in 1,000 trapping | resident size slope 0.015% per minute after minute 2; 1,185 traps answered 500; afterwards 9 descriptors and 4 processes (the host, the zygote and 2 ready workers) | yes (the run's own check counted the zygote as a leftover; the script now allows it) |
 | B-S3 latency with SQL | | not measured here: SQL is the `sql-providers` change | |
 
-What the misses show:
+Each pair ran the same loader for the two hosts within two minutes of each other; the load average at each run is in the reports. The B-S2 loads were 11 to 16, so the absolute rates move by a third between pairs while the ratio stays between 2.6 and 3.0.
 
-1. **B-S2.** Each request costs a process start, an image load and verification, a run and an exit. With 8 workers on a loaded machine that is about 9 ms of wall time per request per slot. The host's reaper thread spun on a core while any finished worker had not yet exited; it now looks again every 2 ms, which raised the result from 725 to 929 per second. Reaching 1,500 needs cheaper worker starts (a zygote that forks a loaded image instead of exec, which approved decision 1 allows since nothing has run), measured on an idle machine.
-2. **B-S4 process count.** At the peak, 12 of the 22 processes were zombies: workers that had answered and exited and were not yet reaped. The S-1 slot is released when the response is written, not when the worker is reaped, so the tree can hold S-1 running workers, S-2 ready ones, and every worker still exiting. Holding the slot until the reap would meet the bound at a cost in throughput; reaping on `SIGCHLD` instead of polling would shrink the excess. Neither is done in this change.
+What changed since the 2026-11-17 run (B-S2 929 per second, B-S4 peak 22 processes against 12):
+
+1. **B-S2.** Profiling the 686c8194 worker put about 2.6 ms of its 4 ms of CPU per request in startup: the exec (0.4 ms), reading the image (0.42), its SHA-256 (1.16), and loading and verifying it (0.6); the run itself took 0.95 ms, and the reaper's polling about 2 ms of wall time. Workers now fork from a zygote that did that startup once (departure 13), and the reaper waits on `pidfd`s instead of polling, which cut the CPU per request to about 1 ms.
+2. **B-S4 process count.** A worker now holds its S-1 slot until the host has reaped it, so exited workers count against S-1 and the tree never exceeds S-1 + S-2 + 2. `test_process_bound` checks the bound in both start modes.
 
 **Worker tier policy.** For this route the tier makes no measurable difference: sequential `GET /info` on one connection, 400 requests, median 1.35 ms by default (tier 2 with tier 3 on x86-64), 0.77 ms at `--worker-tier 0`, 1.08 ms at tier 1, 1.10 ms with `--worker-jit off`, 1.30 ms with `NEURA_TIER3=off`, with 95th percentiles from 2.7 to 3.9 ms. The default stays; `--worker-tier` and `--worker-jit` let an operator choose for a heavier route, which this measurement does not cover.
 
@@ -141,14 +147,35 @@ Measured on this machine with a standalone loopback benchmark (2 GiB per run, th
 
 ### HTTP/2 and decision 9
 
-Approved decision 9 reads "No WebSocket, HTTP/2 or connection upgrade in 0.3.0". It names no configuration under which HTTP/2 may be offered, so this branch does not offer it, not even behind a build option or a host flag: an option that turns it on would ship HTTP/2 in 0.3.0. The TLS listener's ALPN callback selects `http/1.1` only; a client that offers only `h2` gets no ALPN answer and either speaks HTTP/1.1 or gives up. `curl --http2` against the host negotiates HTTP/1.1, which `server-host` checks. Operators who need HTTP/2 or HTTP/3 terminate it in a reverse proxy, as the HTTP table says.
+*Status:* decision 9 amended by the owner on 2026-11-17 ("Yes, add HTTP/2"); implemented by autonomous agents on the `http2-server` branch, awaiting owner confirmation of the scope below.
 
-What changing it needs, in order:
+Decision 9 now reads: no WebSocket and no connection upgrade in 0.3.0; HTTP/2 is in 0.3.0. The scope:
 
-1. The owner amends decision 9, here, with the scope: HTTP/2 over TLS (ALPN `h2`) only, or also cleartext h2c (prior knowledge, or the `Upgrade: h2c` that decision 9 also excludes); and whether it is on by default.
-2. A pinned HTTP/2 framing library in [the server component lock](../../packaging/server-components.lock.toml), with its digest, signature and license, linked statically like OpenSSL. nghttp2 1.64 is what this machine's curl uses; a hand-written HPACK and frame layer is not reasonable to qualify for this release.
-3. In the host: the ALPN callback selects `h2` when it is enabled; an HTTP/2 connection maps each stream to the same `Responder` the HTTP/1.1 loop calls (request head at `HEADERS`, body by `DATA`, response through a `ResponseWriter` whose chunks become `DATA` frames with flow control as backpressure). S-4 counts connections, and a new limit bounds concurrent streams per connection (`SETTINGS_MAX_CONCURRENT_STREAMS`), each stream still admitted by S-1 and S-3. Header limits S-5 apply to the decoded header list; HPACK table size is bounded.
-4. Tests: an HTTP/2 wire suite with `curl --http2` and `nghttp`, interleaved streams, flow-control stalls, `RST_STREAM` cancelling a worker, and the existing host suite over both protocols.
+| Rule | Status |
+| --- | --- |
+| HTTP/2 over TLS through ALPN: a TLS listener offers `h2` before `http/1.1`, by default, whenever the build has HTTP/2. `--no-http2` offers `http/1.1` only. A client that offers neither is served HTTP/1.1. | implemented |
+| Cleartext h2c with prior knowledge only, off by default, enabled by `--h2c` (for use behind a reverse proxy). A plain connection that starts with the HTTP/2 client preface is HTTP/2; any other is HTTP/1.1 on the same listener. | implemented |
+| No `Upgrade: h2c` (RFC 9113 deprecates it): such a request is served as HTTP/1.1. No server push (the host never sends `PUSH_PROMISE`). WebSocket and other upgrades stay excluded. | implemented |
+| The framing library is nghttp2 1.71.0, pinned in [the server component lock](../../packaging/server-components.lock.toml) with its digest, signature and license, and linked statically. The build option is `NEURA_ENABLE_SERVER_HTTP2`, with `NEURA_NGHTTP2_ROOT`; configure refuses a version other than the locked one. Without the option the host is HTTP/1.1 only and refuses `--h2c`. | implemented |
+| Each stream maps to the `Responder` the HTTP/1.1 loop calls, on a thread of its own: the request head at `HEADERS`, checked by the HTTP/1.1 decoder's rules (`check_request_head`: at most 100 fields, one `host`, which `:authority` stands for, a known method, an origin-form target, `Content-Length`, `Expect`); the body from `DATA`, streamed to the worker, with the stream's window reopened only as the responder reads (flow control is the backpressure); the response through a `ResponseWriter` whose writes become `DATA` frames sent as the client's window allows. A buffered response of at most 64 KiB leaves with its head. | implemented |
+| S-4 counts connections. S-14 (`--max-streams`) bounds concurrent streams per connection and is sent as `SETTINGS_MAX_CONCURRENT_STREAMS`; a stream past it, counting responders still running after a reset, gets `RST_STREAM(REFUSED_STREAM)`. Each stream is still admitted by S-1 and S-3: 503 with `Retry-After: 1` as an HTTP/2 response. | implemented |
+| S-5 applies to the decoded header list, measured as `SETTINGS_MAX_HEADER_LIST_SIZE` measures it (name, value and 32 bytes per field), and is advertised as that setting; past it the answer is 431. The HPACK dynamic table is 4,096 bytes in both directions. | implemented |
+| `RST_STREAM` from the client, or the end of the connection, cancels the stream: the host kills its worker at once (the `ResponseWriter::on_cancel` hook) and does not retry it. | implemented |
+| On drain (`SIGTERM`) each HTTP/2 connection sends `GOAWAY` with the last stream it accepted; those streams finish, later ones are refused. An idle connection gets `GOAWAY` after the keep-alive time and is closed. | implemented |
+| `SIGHUP` TLS reload keeps offering `h2`. The admin listener stays HTTP/1.1. | implemented |
+
+Load over HTTP/2 (2026-11-18, `GET /info`, 8 workers, the host started with `--h2c`; script `http2/h2bench.sh` in the lane's evidence): the `load` scenario of `neura_http2_test_client`, four connections with 8 streams in flight each (32 requests in flight, as B-S2's 32 connections), 30 s after 10 s, answered 4,316 and 3,023 requests per second with no failure (median 6.9 and 10.3 ms, 99th percentile 22 and 28 ms; load average 11.3 and 14.8). B-S2 over HTTP/1.1 against the same host, run alternately, gave 3,682 and 2,361 (load 10.7 and 13.4). The two loaders differ (Python threads for HTTP/1.1, a C++ nghttp2 client for HTTP/2), so the two rates show that HTTP/2 meets the B-S2 rate, not that one protocol is faster. TLS h2 was not put under load; it is covered by the `curl` tests only.
+
+Decisions taken without the owner, within the owner's yes:
+
+1. nghttp2 1.71.0, the current release, rather than the 1.64 the system curl uses.
+2. S-14 is 100 by default and at most 1,000; it counts responders that still run, so streams reset at once cannot pile up threads (the "rapid reset" attack).
+3. S-5 counts name + value + 32 per field, the same measure the setting uses, and is the value of `SETTINGS_MAX_HEADER_LIST_SIZE`.
+4. The HPACK table is the protocol default, 4,096 bytes.
+5. An idle HTTP/2 connection is closed after the HTTP/1.1 keep-alive time, with `GOAWAY`.
+6. Request trailers are discarded, as the HTTP/1.1 decoder discards them; responses have no trailers (`Std.App` has none).
+7. The TLS 1.2 cipher suites RFC 9113 (9.2.2 and Appendix A) prohibits for HTTP/2 are not refused: the TLS context keeps OpenSSL's default TLS 1.2 list, which still contains some of them (CBC suites, for example), so a TLS 1.2 client that negotiates one of them together with `h2` may end the connection with `INADEQUATE_SECURITY`. TLS 1.3 is unaffected. Restricting the TLS 1.2 list would also change HTTP/1.1 clients and is left to the owner; it is listed as a gap.
+8. A response that completes before the request body has arrived ends the request stream with `RST_STREAM(NO_ERROR)` (RFC 9113, 8.1), and the rest of the body is discarded.
 
 ### Handler interface for `Std.Net.Http`
 
@@ -200,7 +227,7 @@ The host sends `Assign` at the end of the request head, then the request body as
 | Each request is executed by one worker: an operating-system process that loads the server image into a fresh NVM, runs the whole program from its startup, handles that one request, and exits, whether it answers, fails or traps. | implemented (`neura-server-host`) |
 | `context.serve(router)` takes the one request the host assigned, dispatches it, sends the response and returns. The program is written without a loop and holds nothing between requests. Data that must outlive a request is in the database. | implemented: `Context.serve` takes an `app.Handler`, which the router implements |
 | The host keeps `S-2` ready workers that have loaded and verified the image and bound its services and have executed nothing: no global initializer, no `static scope`, no entry. A request is given to a ready worker, or to a new one, up to `S-1`; beyond that it waits, up to `S-3`. | implemented |
-| A worker is never reused. A reuse would need a proved reset of the NVM, which 0.3.0 does not have; startup cost is measured (budget B-S1), not hidden. | implemented; B-S1 not yet measured |
+| A worker is never reused. A reuse would need a proved reset of the NVM, which 0.3.0 does not have; startup cost is measured (budget B-S1), not hidden. | implemented; B-S1 measured (see "Budgets measured"); workers start from a zygote on Linux (departure 13) |
 | A worker is the runner (`src/runner/runner.cpp`) with a host registry whose services forward to the host over one inherited channel. It has no listener, no database connection and no file or network capability of its own beyond what the manifest grants the target. | implemented: `neura-server-host --worker` over a socket pair |
 | A trap ends that worker and every task in it. The host answers 500 with the framework envelope if no byte of the response was sent, and otherwise closes the connection. It revokes the worker's leases, logs the request identifier and the trap, and starts a ready worker for later requests. Other requests are unaffected. | implemented; no leases exist yet |
 | Nothing is replayed: not a request whose worker died, not a statement, not a commit. | implemented; a ready worker that ended before it took its assignment is replaced (departure 9) |
@@ -247,7 +274,7 @@ Calls may overlap. Each `Return` requires an outstanding `Call`, and call and re
 
 | Rule | Status |
 | --- | --- |
-| The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS. HTTP/2 and HTTP/3 are terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | implemented for HTTP/1.1 over TCP and TLS |
+| The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS, and HTTP/2 (decision 9 as amended; see "HTTP/2 and decision 9"). HTTP/3 is terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | implemented for HTTP/1.1 over TCP and TLS, and for HTTP/2 over TLS (ALPN) and h2c in builds with `NEURA_ENABLE_SERVER_HTTP2` |
 | The host rejects before any worker: a head over `S-5` (431), more than 100 header fields (431), a body over `S-6` (413), both `Content-Length` and `Transfer-Encoding` (400), a transfer coding other than `chunked` (501), a folded header line, a missing or repeated `Host` (400), and a method it does not know (501). A head that takes more than 10 s is closed. | implemented (A4 decoder) and tested through the host |
 | Requests on one connection are served one at a time, in order. | implemented |
 | `http.Request` is immutable: `method`, `path`, `query`, `headers`, `client`, `scheme`, `request_id`, and the body, which is read whole within `S-6` (`body()`) or in chunks under a `using` owner (`open_body()`). | proposed for `Std.Net.Http`; the host side and `Std.App` (`serve_streamed`, `BodyReader`) are implemented |
@@ -441,7 +468,7 @@ Each step is one commit with its targeted tests. None changes the image of a pro
 
 - HTTP and HTTPS both serve the reference application's contract, with SQLite and with PostgreSQL.
 - With 8 requests in flight and one trapping, the other 7 complete, the trapped one is answered or closed once, its leases are revoked, a new worker serves only later requests, startup runs in each worker, and no request is executed twice. The same holds with a commit of unknown outcome, and with the host killed.
-- Every limit `S-1` to `S-13` has a test at the limit and one past it.
+- Every limit `S-1` to `S-14` has a test at the limit and one past it.
 - Denied capabilities answer 14; a forged handle is refused; no secret appears in any bundle file or log.
 - Cancellation reaches a running statement on both databases.
 - The budgets B-S1 to B-S6 are met on the machine and commands [the overview](Apps030.md#budgets) names.
@@ -461,5 +488,5 @@ A 0.2 server built on `TcpListener` and hand-written parsing keeps working uncha
 6. Migrations are forward-only SQL files, manual by default, and a changed checksum refuses the start.
 7. Health and metrics are served by the host on a loopback admin listener.
 8. There is no shutdown callback in application code: a request sees its own cancellation only.
-9. No WebSocket, HTTP/2 or connection upgrade in 0.3.0.
+9. No WebSocket or connection upgrade in 0.3.0. HTTP/2 is in 0.3.0 (amended by the owner on 2026-11-17; scope in "HTTP/2 and decision 9").
 10. `PendingOperation` gains a platform-neutral wait source; nothing else in the host interface changes.

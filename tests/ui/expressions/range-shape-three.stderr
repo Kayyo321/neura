@@ -1,0 +1,10 @@
+error[E0263]: a range has exactly two bounds
+ --> $DIR/range-shape-three.nra:3:39
+  |
+3 | let range = func() -> int[] => 1 .. 2 .. 3;
+  |                                       ^^ a third bound starts here
+  |
+  = note: only text is joined by a chain 'a .. b .. c'; an integer range has a start, a stop and an optional step
+  = help: write 'start .. stop', 'start ..= stop', or either with ': step'
+
+For more information about this error, try `neura explain E0263`.

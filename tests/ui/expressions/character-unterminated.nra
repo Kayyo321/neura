@@ -1,0 +1,4 @@
+// A character literal that the line ends in is E0261 (docs/design/Expressions030.md,
+// edge case 26), and the rest of the line is skipped.
+let open = 'a;
+let after = 1;

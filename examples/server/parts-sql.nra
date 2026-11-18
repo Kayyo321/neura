@@ -283,42 +283,29 @@ let PartsSql = module:program.Entry (
     let fields_of = func(members: [string, json.JsonValue][list]) -> Optional<[string, int64, Optional<string>]> {
         last code = text_member(members, "code");
         last note = text_member(members, "note");
-        let quantity: int64 = -1;
-        match (json.member(members, "quantity")) {
-            Optional.Some(value) => {
-                match (value) {
-                    json.JsonValue.Number(digits) => {
-                        if (digits == "0") {
-                            quantity = 0;
-                        } else {
-                            quantity = optional.value_or<int64>(parse_id(digits), -1);
-                        }
-                    },
-                    _ => {},
-                }
+        last quantity = match (json.member(members, "quantity")) {
+            Optional.Some(value) => match (value) {
+                json.JsonValue.Number(digits) => digits == "0" ? Optional<int64>.Some(0) : parse_id(digits),
+                _ => Optional<int64>.None,
             },
-            Optional.None => {},
-        }
-        if (quantity < 0) {
-            return Optional<[string, int64, Optional<string>]>.None;
-        }
-        return Optional<[string, int64, Optional<string>]>.Some([optional.value_or<string>(code, ""), quantity, note]);
+            Optional.None => Optional<int64>.None,
+        };
+        return match (quantity) {
+            Optional.Some(count) => Optional<[string, int64, Optional<string>]>.Some([optional.value_or<string>(code, ""),
+                count, note]),
+            Optional.None => Optional<[string, int64, Optional<string>]>.None,
+        };
     };
 
     /// @brief The text of a member, or None when it is absent or not text.
     let text_member = func(members: [string, json.JsonValue][list], name: string) -> Optional<string> {
-        match (json.member(members, name)) {
-            Optional.Some(value) => {
-                match (value) {
-                    json.JsonValue.Text(text) => {
-                        return Optional<string>.Some(text);
-                    },
-                    _ => {},
-                }
+        return match (json.member(members, name)) {
+            Optional.Some(value) => match (value) {
+                json.JsonValue.Text(text) => Optional<string>.Some(text),
+                _ => Optional<string>.None,
             },
-            Optional.None => {},
-        }
-        return Optional<string>.None;
+            Optional.None => Optional<string>.None,
+        };
     };
 
     /// @brief POST /parts.

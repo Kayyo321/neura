@@ -1,0 +1,1 @@
+const Page = css { @import url(https://cdn.example/x.css); };

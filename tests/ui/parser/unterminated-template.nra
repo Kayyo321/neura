@@ -1,0 +1,2 @@
+let ready = html() {
+    <p>Ready</p>

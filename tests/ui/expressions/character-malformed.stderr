@@ -1,0 +1,39 @@
+error[E0261]: empty character literal
+ --> $DIR/character-malformed.nra:3:13
+  |
+3 | let empty = '';
+  |             ^^ a character literal holds one character
+  |
+  = help: write one character or one escape, such as 'a' or '\0'
+
+error[E0261]: empty character literal
+ --> $DIR/character-malformed.nra:4:13
+  |
+4 | let quote = ''';
+  |             ^^^ the first two quotes enclose nothing
+  |
+help: escape the quote character
+  |
+4 | let quote = '\'';
+  |             ~~~~
+
+error[E0261]: character literal holds more than one character
+ --> $DIR/character-malformed.nra:5:12
+  |
+5 | let word = 'ab';
+  |            ^^^^ a character literal holds one character
+  |
+help: use double quotes for a string
+  |
+5 | let word = "ab";
+  |            ~~~~
+
+error[E0261]: character literal holds more than one character
+ --> $DIR/character-malformed.nra:6:15
+  |
+6 | let escaped = '\nb';
+  |               ^^^^^ a character literal holds one character
+  |
+  = help: use a string literal, in double quotes, for text
+
+For more information about this error, try `neura explain E0261`.

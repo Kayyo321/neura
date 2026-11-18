@@ -1,0 +1,68 @@
+// The 0.3.0 expression forms (docs/design/Expressions030.md): `not` and
+// `is not`, `typeof`, character literals and escapes, inclusive ranges,
+// string chains and `..=`, `!==`, `return if` and `return ... unless`.
+// Narrowing in `if` is shown in docs/lang/Types.md: it lowers as `match.is`
+// does, which the optimizer simplifies, and the examples hold only code the
+// structural passes leave alone (ir-optimization-structure).
+let reflect = import:Std.Reflect.Core.TypeInfo;
+
+let Expressions = module (
+    export let Shape = class (
+        export let sides: int32 = 0;
+    );
+
+    export let Circle = class:Shape (
+        export let radius: int32 = 1;
+    );
+
+    /// @brief Whether a shape is present.
+    export let present = func(value: Shape) -> bool => value != nil;
+
+    /// @brief Describes a shape.
+    /// @param value The shape to describe, or nil.
+    /// @return A short description.
+    export let describe = func(value: Shape) -> string {
+        return "nothing" unless present(value);
+        if (value is Circle) {
+            return "circle of radius " .. (value as Circle).radius.to_string();
+        }
+        return if (value.sides > 4) -> "polygon";
+        else -> typeof(value).name;
+    };
+
+    /// @brief Whether the value is not a circle, written with `is not`.
+    export let is_plain = func(value: Shape) -> bool => value is not Circle;
+
+    /// @brief Appends an exclamation mark with one allocation.
+    export let shout = func(text: string) -> string {
+        let result = text;
+        result ..= "!";
+        return result;
+    };
+
+    /// @brief Counts the bytes of `text` that are ASCII digits.
+    export let digits = func(text: string) -> int32 {
+        let count = 0;
+        for (let value: byte in text.to_bytes()) {
+            if (not (value < '0' || value > '9')) {
+                count += 1;
+            }
+        }
+        return count;
+    };
+
+    /// @brief The squares of 0 through `last`, with an inclusive range.
+    export let squares = func(last: int32) -> int32[list] {
+        let result: int32[list] = new();
+        for (let value in 0 ..= last) {
+            result.append(value * value);
+        }
+        return result;
+    };
+
+    /// @brief Whether two descriptions differ by value.
+    export let differ = func(left: reflect.TypeInfo, right: reflect.TypeInfo) -> bool => left !== right;
+
+    /// @brief A greeting with a code point escape.
+    export let wave = func(name: string) -> string => "Hello, " .. name .. " \u{1F44B}";
+);

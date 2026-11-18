@@ -1,0 +1,3 @@
+// Edge case 36 of docs/design/Expressions030.md: an integer first operand
+// followed by a string is E1100 at the integer.
+let turn = func() -> string => 3 .. "turn";

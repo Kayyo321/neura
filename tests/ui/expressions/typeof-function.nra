@@ -1,0 +1,5 @@
+// typeof needs a value or a type (docs/design/Expressions030.md, typeof,
+// edge case 23): a function name without a call is E0267 at the operand.
+let work = func -> int => 1;
+
+let function_name = func { let t = typeof(work); };

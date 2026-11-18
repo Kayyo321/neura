@@ -1,0 +1,3 @@
+// Edge case 34 of docs/design/Expressions030.md: `..=` does not combine
+// with `..`; the error is E0263 at the second operator.
+let range = func() -> int[] => 0 ..= 2 .. 4;

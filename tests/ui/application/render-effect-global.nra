@@ -1,0 +1,9 @@
+// A hole that assigns a module binding (E1010).
+let renders = 0;
+
+let count_render = func() -> int {
+    renders = renders + 1;
+    return renders;
+};
+
+let badge = html() { <span>{ count_render() }</span> };

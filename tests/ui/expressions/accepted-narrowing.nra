@@ -1,0 +1,53 @@
+// Edge cases 6, 8, 10, 13, 16 and 17 of docs/design/Expressions030.md: accepted narrowings.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let Box = class<T> (
+    export let count: int = 0;
+);
+let Iterator = interface<T> (
+    let next = func -> T;
+);
+let take = func(flag: bool, scale: int) -> bool => flag;
+let first = func(a: Shape, b: Shape, ready: bool) -> int {
+    if (ready && a is p: Circle && b is q: Circle && p.radius == q.radius) {
+        return p.radius + q.radius;
+    } else if (a is c: Circle) {
+        return c.radius;
+    }
+    return 0;
+};
+let second = func(value: class, text: string, held: any) -> int {
+    if (value is boxed: Box<Iterator<int>>) {
+        return boxed.count;
+    }
+    if (text is copy: string) {
+        return copy == "" ? 0 : 1;
+    }
+    if (held is number: int64) {
+        return number as int;
+    }
+    return 0;
+};
+let third = func(shape: Shape, c: bool) -> bool {
+    if (c ? shape is Circle : false) {
+        return take(flag: shape is Circle, scale: 1);
+    }
+    if (shape is not circle: Circle) {
+        return false;
+    } else {
+        return circle.radius > 0;
+    }
+};
+let fourth = func(shape: Shape) -> int {
+    if (shape is not circle: Circle) {
+        return 0;
+    }
+    return circle.radius;
+};

@@ -1,0 +1,3 @@
+const Local = css.module { @keyframes fade { from { opacity: 0; } } };
+
+let name = Local.keyframes_name("row");

@@ -1,0 +1,8 @@
+error[E0243]: template nesting a browser would repair
+ --> $DIR/template-paragraph-repair.nra:1:24
+  |
+1 | let view = html() { <p><div></div></p> };
+  |                        ^^^^^ this element would close the enclosing '<p>'
+  |                     --- enclosing element starts here
+
+For more information about this error, try `neura explain E0243`.

@@ -1,0 +1,7 @@
+error[E0251]: not allowed in a template
+ --> $DIR/template-doctype.nra:1:21
+  |
+1 | let view = html() { <!doctype html> };
+  |                     ^^^^^^^^^^^^^^^ use a static element name or an HTML comment
+
+For more information about this error, try `neura explain E0251`.

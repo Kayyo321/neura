@@ -1,0 +1,4 @@
+// A list is not deeply immutable (E0580).
+let frozen = import:Std.Collections.Frozen;
+
+let rows = frozen.empty<int32[list]>();

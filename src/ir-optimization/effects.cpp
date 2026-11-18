@@ -250,6 +250,7 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
     case IrOp::ReinterpretFloat:
     case IrOp::AnyPack:
     case IrOp::AnyTag:
+    case IrOp::TypeOf:
     case IrOp::AnyUnpack:
     case IrOp::ShortCircuit:
     case IrOp::ComparisonChain:
@@ -353,6 +354,7 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
         break;
     case IrOp::TextSlice:
     case IrOp::TextFromUtf8:
+    case IrOp::ConcatText:
         effects.element_reads = true;
         effects.allocates = true;
         effects.may_trap = true;

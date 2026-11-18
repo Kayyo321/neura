@@ -1,0 +1,9 @@
+error[E0581]: #Frozen is reserved for the standard library
+ --> $DIR/user-tag.nra:2:1
+  |
+2 | #Frozen
+  | ^^^^^^^ used outside Std.Collections.Frozen and Std.Ui
+  |
+  = help: use frozen.FrozenList, which holds its own frozen storage
+
+For more information about this error, try `neura explain E0581`.

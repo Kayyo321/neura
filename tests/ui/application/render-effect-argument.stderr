@@ -1,0 +1,13 @@
+error[E1010]: effect not allowed while rendering: it reaches 'bump', which assigns the field 'value' of an object it did not allocate
+  --> $DIR/render-effect-argument.nra:11:46
+   |
+ 7 |     counter.value += 1;
+   |     ------------- assigns the field 'value' of an object it did not allocate here
+...
+11 | let badge = html(counter: Counter) { <span>{ bump(counter) }</span> };
+   |                                              ^^^^^^^^^^^^^ calls 'bump' while the view is built
+   |
+   = note: a template may allocate and read, but it may not write what it did not create, assign a binding, make a host request, start or wait for tasks, or call a function value
+   = help: do it in a handler or a command, and pass the result to the factory
+
+For more information about this error, try `neura explain E1010`.

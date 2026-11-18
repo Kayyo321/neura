@@ -144,6 +144,10 @@ let App = module:program.Entry (
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'true || missing == 0'})['result'], 'true')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && missing.field[999] == 0 || true'})['result'], 'true')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'true || (false && missing.field[999] == 0)'})['result'], 'true')
+        # A character literal is the integer of its byte (docs/design/Expressions030.md).
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': "'A'"})['result'], '65')
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': "counter < '\\x02' && '\\n' == 10"})['result'], 'true')
+        self.client.request('evaluate', {'frameId': frame['id'], 'expression': "'ab'"}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && (counter = 9)'}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter = 9'}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter()'}, success=False)

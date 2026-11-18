@@ -1,0 +1,2 @@
+let ui = import:Std.Ui;
+let view = html(receive: func(ui.KeyEvent) -> void) { <button on:click={receive}>Save</button> };

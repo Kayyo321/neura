@@ -6,6 +6,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/nominal.hpp"
 #include "neura-ir/tags.hpp"
+#include "parser/html_template.hpp"
 
 #include <algorithm>
 #include <array>
@@ -200,6 +201,24 @@ std::string signature(const Declaration &d) {
         text += d.name;
         if (d.type)
             text += ": " + syntax_type(*d.type);
+        // A factory or stylesheet (Html030.md): its kind and parameters, never its body.
+        if (!d.type && d.initializer && d.initializer->html_factory) {
+            const auto &factory = *d.initializer->html_factory;
+            text += factory.retained ? " = new html(" : " = html(";
+            for (std::size_t i = 0; i < factory.parameters.size(); ++i) {
+                if (i)
+                    text += ", ";
+                text += factory.parameters[i].name + ": " + syntax_type(factory.parameters[i].type);
+            }
+            text += ") -> ui.View";
+            if (const auto *path = std::get_if<Token>(&factory.source))
+                text += " from " + path->text;
+        } else if (!d.type && d.initializer && d.initializer->stylesheet) {
+            const auto &sheet = *d.initializer->stylesheet;
+            text += sheet.module ? " = css.module" : " = css";
+            if (sheet.source.kind != TokenKind::CssIsland)
+                text += " from " + sheet.source.text;
+        }
     }
     if (!d.accessors.empty()) {
         text += " { ";
@@ -1597,8 +1616,21 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             for (const auto &member : candidate.members) declaration(member, candidate.span);
             statements(candidate.body, candidate.span);
         };
+        // docs/design/Expressions030.md, Narrowing: `x is name: T` in an `if`
+        // condition binds `name` as a constant of type T within the `if`.
+        std::function<void(const Expr &, const Span &)> narrowings;
+        narrowings = [&](const Expr &value, const Span &scope) {
+            if (value.kind == Expr::Kind::TypeTest && value.binding == name && value.narrowing && value.type &&
+                contains(scope, at) && value.narrowing->offset <= at && scope.length <= scope_size) {
+                result = {nullptr, &context, nullptr, &*value.type, false};
+                scope_size = scope.length;
+            }
+            for (const auto &operand : value.operands) narrowings(operand, scope);
+        };
         statements = [&](const std::vector<Statement> &body, const Span &scope) {
             for (const auto &statement : body) {
+                if (statement.kind == Statement::Kind::If && statement.constant_bindings)
+                    for (const auto &condition : statement.expressions) narrowings(condition, statement.span);
                 if (statement.declaration) declaration(*statement.declaration, scope);
                 const auto nested = statement.kind == Statement::Kind::Block ? statement.span : scope;
                 statements(statement.body, nested);
@@ -2037,7 +2069,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 return expression_type(value.operands.front(), context, depth + 1);
             TypeSyntax type;
             switch (value.kind) {
-            case Expr::Kind::Integer: type.name = "int32"; break;
+            case Expr::Kind::Integer: type.name = value.character ? "byte" : "int32"; break;
             case Expr::Kind::Float: type.name = "float64"; break;
             case Expr::Kind::String: type.name = "string"; break;
             case Expr::Kind::Boolean: type.name = "bool"; break;

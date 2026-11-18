@@ -1,0 +1,13 @@
+error[E0580]: type Optional is not deeply immutable
+ --> $DIR/generic-enum.nra:9:26
+  |
+5 | let Draft = class (
+  | -------------------... class 'Draft' is not #Immutable
+...
+9 | let draft = new ui.State<optional.Optional<Draft>>(optional.Optional<Draft>.None);
+  |                          ^^^^^^^^^^^^^^^^^^^^^^^^ given for 'T', which must be deeply immutable
+  |
+  = note: deeply immutable types are bool, numbers, string, tuples and enums of such types, #Immutable classes whose fields are too, and FrozenList of them
+  = help: make the class #Immutable, or replace a list with a FrozenList
+
+For more information about this error, try `neura explain E0580`.

@@ -1,0 +1,8 @@
+error[E0247]: malformed template hole
+ --> $DIR/template-multiple-expressions.nra:1:24
+  |
+1 | let view = html() { <p>{a; b}</p> };
+  |                        ^^^^^^ write one Neura expression inside the braces
+  |                          - expected the end of the expression
+
+For more information about this error, try `neura explain E0247`.

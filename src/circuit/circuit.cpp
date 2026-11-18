@@ -195,7 +195,12 @@ Signal Circuit::choose(const Signal& select, const Signal& when_true, const Sign
             return logical_not(select);
         }
     }
-    return logical_and(select, when_true) + logical_and(logical_not(select), when_false);
+    // Each gadget below adds neurons, so the two are built in a fixed order:
+    // the operands of `+` are unsequenced, and a compiler that evaluated them
+    // in the other order would build a different graph from the same source.
+    const auto otherwise = logical_and(logical_not(select), when_false);
+    const auto chosen = logical_and(select, when_true);
+    return chosen + otherwise;
 }
 
 Signal Circuit::all(const std::vector<Signal>& bits) {
@@ -252,7 +257,10 @@ Signal Circuit::at_least(const Signal& value, std::int64_t threshold) {
     if (value.is_constant()) {
         return Signal::of(value.constant >= threshold ? 1 : 0);
     }
-    return relu(value - Signal::of(threshold - 1)) - relu(value - Signal::of(threshold));
+    // Built in a fixed order, as in choose().
+    const auto above = relu(value - Signal::of(threshold));
+    const auto reached = relu(value - Signal::of(threshold - 1));
+    return reached - above;
 }
 
 std::uint32_t Circuit::output(const Signal& value) {
@@ -582,8 +590,10 @@ Checked multiply(Circuit& circuit, const Word& a, const Word& b, bool is_signed)
     const auto width = a.size();
     const auto& sign_a = a.back();
     const auto& sign_b = b.back();
-    const auto product = unsigned_multiply(circuit, conditional_negate(circuit, a, sign_a),
-                                           conditional_negate(circuit, b, sign_b));
+    // The second magnitude first: both add neurons, and the arguments of
+    // one call are unsequenced (see choose()).
+    const auto magnitude_b = conditional_negate(circuit, b, sign_b);
+    const auto product = unsigned_multiply(circuit, conditional_negate(circuit, a, sign_a), magnitude_b);
     const auto negative = circuit.logical_xor(sign_a, sign_b);
     // A negative result may reach -2^(width-1); a positive one stays below
     // 2^(width-1).
@@ -605,8 +615,10 @@ Checked divide(Circuit& circuit, const Word& a, const Word& b, bool is_signed) {
     const auto width = a.size();
     const auto& sign_a = a.back();
     const auto& sign_b = b.back();
-    auto division = unsigned_divide(circuit, conditional_negate(circuit, a, sign_a),
-                                    conditional_negate(circuit, b, sign_b));
+    // The divisor's magnitude first: both add neurons, and the arguments of
+    // one call are unsequenced (see choose()).
+    const auto magnitude_b = conditional_negate(circuit, b, sign_b);
+    auto division = unsigned_divide(circuit, conditional_negate(circuit, a, sign_a), magnitude_b);
     const auto negative = circuit.logical_xor(sign_a, sign_b);
     const auto overflow = circuit.logical_and(Circuit::logical_not(negative), division.quotient[width - 1]);
     return {conditional_negate(circuit, division.quotient, negative), circuit.logical_or(zero_divisor, overflow)};
@@ -622,8 +634,10 @@ Checked remainder(Circuit& circuit, const Word& a, const Word& b, bool is_signed
     // dividend's sign.
     const auto& sign_a = a.back();
     const auto& sign_b = b.back();
-    auto division = unsigned_divide(circuit, conditional_negate(circuit, a, sign_a),
-                                    conditional_negate(circuit, b, sign_b));
+    // The divisor's magnitude first: both add neurons, and the arguments of
+    // one call are unsequenced (see choose()).
+    const auto magnitude_b = conditional_negate(circuit, b, sign_b);
+    auto division = unsigned_divide(circuit, conditional_negate(circuit, a, sign_a), magnitude_b);
     return {conditional_negate(circuit, division.remainder, sign_a), zero_divisor};
 }
 

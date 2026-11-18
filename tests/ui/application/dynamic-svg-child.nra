@@ -1,0 +1,1 @@
+let view = html() { <svg><g>{"text"}</g></svg> };

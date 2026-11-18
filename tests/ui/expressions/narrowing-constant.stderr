@@ -1,0 +1,9 @@
+error[E0440]: cannot assign twice to 'shape'
+  --> $DIR/narrowing-constant.nra:13:9
+   |
+12 |     if (shape is shape: Circle) {
+   |                  ----- declared here
+13 |         shape = new Circle();
+   |         ^^^^^ second assignment
+
+For more information about this error, try `neura explain E0440`.

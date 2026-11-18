@@ -1,0 +1,29 @@
+// status: 134
+// stderr: a command needs Std\.Ui\.Commands\.run\(root\)
+// A command started on a root that runs with run() instead of Std.Ui.Commands.run(root) traps.
+let commands = import:Std.Ui.Commands;
+let error = import:Std.Core.Error;
+let model = import:Std.Ui.ModelHost;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+let status_view = html(text: string) {
+    <output>{text}</output>
+};
+
+let double = func(value: int32) -> result.Result<int32> => result.Result<int32>.Ok(value * 2);
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let command = new commands.Command<int32, int32>(double);
+        let top = ui.component<commands.CommandState<int32>>(command.state,
+            new func(state: commands.CommandState<int32>) -> ui.View => status_view("status"));
+        command.bind(top);
+        let host = new model.Host();
+        let root = result.expect<ui.Root>(ui.mount(host, "#app", top), "mount");
+        command.run(1);
+        root.run();
+        return program.ExitCode.Ok;
+    };
+);

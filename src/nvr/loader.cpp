@@ -1319,6 +1319,12 @@ void Validator::state(const Function& function, const Exit& exit,
             invalid(where + ": argument 1 must be a class reference");
         no_result();
         break;
+    case StateOp::ConcatText:
+        if (args.size() < 2) invalid(where + ": a text concatenation takes at least two arguments");
+        zero_immediate();
+        for (std::size_t i = 0; i < args.size(); ++i) require_kind(i, {TypeKind::Text});
+        require_slot_type([&](std::uint32_t slot) { return image_.types[slot].kind == TypeKind::Text; }, "text");
+        break;
     case StateOp::HookLeave:
         arity(0);
         zero_immediate();

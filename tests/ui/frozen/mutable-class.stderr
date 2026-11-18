@@ -1,0 +1,13 @@
+error[E0580]: type Tally is not deeply immutable
+ --> $DIR/mutable-class.nra:8:28
+  |
+4 | let Tally = class (
+  | -------------------... class 'Tally' is not #Immutable
+...
+8 | let tallies = frozen.empty<Tally>();
+  |                            ^^^^^ given for 'T', which must be deeply immutable
+  |
+  = note: deeply immutable types are bool, numbers, string, tuples and enums of such types, #Immutable classes whose fields are too, and FrozenList of them
+  = help: make the class #Immutable, or replace a list with a FrozenList
+
+For more information about this error, try `neura explain E0580`.

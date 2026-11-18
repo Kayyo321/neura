@@ -1,0 +1,69 @@
+// `..=` as a statement (docs/design/Expressions030.md, `..=` as a
+// statement, edge cases 43 and 45): appending to a local, a field, an
+// element and a property, each place evaluated once and each accessor run
+// once; a right-side chain and a parenthesized one; the statement in a
+// `for` step; and, last, a trap in the right side, which skips the store.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Label = class (
+    export let text: string = "";
+        | get: {
+            console.print_line("get " + text);
+            return text;
+        };
+        | set: {
+            console.print_line("set " + value);
+            text = value;
+        };
+    export let plain: string = "p";
+);
+
+let calls = 0;
+let next = func() -> int {
+    calls = calls + 1;
+    console.print_line("next " + calls.to_string());
+    return 1;
+};
+
+let fail = func(items: string[]) -> string {
+    console.print_line("fail");
+    return items[3];
+};
+
+let label = func(value: Label) -> Label {
+    console.print_line("receiver");
+    return value;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let text = "a";
+        text ..= "b";
+        text ..= "c" .. "d" .. text;
+        let tail = "!";
+        text ..= (tail .. tail);
+        text ..= "";
+        console.print_line(text);
+
+        let items = ["x", "y", "z"];
+        items[next()] ..= "1" .. "2";
+        console.print_line(items[0] .. items[1] .. items[2] .. " " .. calls.to_string());
+
+        let box = new Label();
+        box.text = "t";
+        label(box).text ..= "u" .. "v";
+        label(box).plain ..= "q";
+        console.print_line(box.text .. " " .. box.plain);
+
+        let line = "";
+        for (let i = 0; i < 3; line ..= "#") {
+            i = i + 1;
+        }
+        console.print_line(line);
+
+        box.text ..= fail(items);
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

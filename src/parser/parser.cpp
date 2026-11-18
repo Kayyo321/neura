@@ -1,5 +1,6 @@
 #include "syntax.hpp"
 #include "util/source_map.hpp"
+#include "html_template.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -13,7 +14,30 @@ namespace {
 
 class Parser {
 public:
-    explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
+    explicit Parser(const std::vector<Token>& tokens, bool template_neura = false)
+        : tokens_(tokens), template_neura_(template_neura) {}
+
+    Expr template_expression() {
+        auto value = expression();
+        if (!at_end()) expected("the end of the expression");
+        return value;
+    }
+
+    TemplateForHead template_for_head() {
+        const bool constant = match("const");
+        if (!constant) expect("let");
+        const auto binding = identifier();
+        std::optional<TypeSyntax> annotation;
+        if (match(":")) annotation = type();
+        expect("in");
+        auto input = expression();
+        expect(";");
+        if (!at_contextual("key")) expected("'key'");
+        advance();
+        expect(":");
+        auto key = template_expression();
+        return {constant, binding, std::move(annotation), std::move(input), std::move(key)};
+    }
 
     ParsedFile file(std::vector<Diagnostic>* diagnostics = nullptr) {
         ParsedFile result;
@@ -40,6 +64,7 @@ public:
 
 private:
     const std::vector<Token>& tokens_;
+    bool template_neura_;
     std::size_t cursor_{};
     // Syntax errors found so far (Tooling.md, Diagnostics): the parser
     // records an error, skips to the end of the statement or member that
@@ -51,6 +76,12 @@ private:
     // Set when error_limit() errors have been recorded.
     bool stopped_ = false;
     unsigned block_depth_ = 0;
+    // Narrowing (docs/design/Expressions030.md): the cursor where the
+    // condition of the `if` being parsed starts, and whether the next cast
+    // operand may be the subject of a narrowing `x is y: T`. The flag is set
+    // at the start of the condition and after each `&&` of its top level.
+    std::size_t narrowing_root_ = static_cast<std::size_t>(-1);
+    bool narrowing_next_ = false;
     std::optional<Span> untyped_variadic_;
     // The function bodies being parsed, innermost last, and whether each is
     // a generator's (docs/design/Lifetime030.md): `yield` is a statement
@@ -89,8 +120,11 @@ private:
 
     // The span just after the previous token, where a missing token belongs.
     Span after_previous() const {
-        const auto& previous = tokens_[cursor_ - 1].span;
+        const auto& token = tokens_[cursor_ - 1];
+        const auto& previous = token.span;
         Span after{previous.file, previous.line, previous.column, previous.offset + previous.length, 0};
+        const bool island = token.kind == TokenKind::HtmlIsland || token.kind == TokenKind::CssIsland;
+        if (island) ++after.column;
         // Columns count code points, and lines end as the lexer ends them.
         const std::string_view text = tokens_[cursor_ - 1].text;
         for (std::size_t i = 0; i < text.size(); ++i) {
@@ -103,10 +137,13 @@ private:
                 ++after.column;
             }
         }
+        if (island && token.span.length == token.text.size() + 2) ++after.column;
         return after;
     }
 
     std::string found_text(const Token& token) const {
+        if (token.kind == TokenKind::HtmlIsland) return "found an HTML body";
+        if (token.kind == TokenKind::CssIsland) return "found a CSS body";
         return token.kind == TokenKind::End ? "found the end of the file" : "found '" + token.text + "'";
     }
 
@@ -175,7 +212,8 @@ private:
         // A keyword that begins a statement cannot continue this one, and a
         // ';' outside a for header ends it, even inside an unclosed
         // delimiter: stop there rather than skip the statements that follow.
-        if (cursor_ > start && current().kind == TokenKind::Keyword && statement_keyword(current().text)) return;
+        if (cursor_ > start && ((current().kind == TokenKind::Keyword && statement_keyword(current().text)) ||
+                               at_last_declaration())) return;
         if (cursor_ > start && at(";")) {
             bool header = false;
             for (auto i = start; i < cursor_ && !header; ++i)
@@ -203,7 +241,8 @@ private:
                     advance();
                     return;
                 }
-            } else if (depth == 0 && cursor_ > start && token.kind == TokenKind::Keyword && statement_keyword(token.text)) {
+            } else if (depth == 0 && cursor_ > start &&
+                       ((token.kind == TokenKind::Keyword && statement_keyword(token.text)) || at_last_declaration())) {
                 return;
             }
             advance();
@@ -243,8 +282,8 @@ private:
         throw error;
     }
 
-    const Token& identifier() {
-        if (current().kind != TokenKind::Identifier) {
+    const Token& identifier(bool allow_module = false) {
+        if (current().kind != TokenKind::Identifier && !((allow_module || template_neura_) && at("module"))) {
             if (current().kind == TokenKind::Keyword) {
                 throw Diagnostic(current().span, "expected an identifier").with_code("E0202")
                     .label("'" + current().text + "' is a keyword");
@@ -465,8 +504,9 @@ private:
     // once and copied into each parameter, so copies share an anonymous
     // class declaration (docs/lang/CoreLanguage.md, Grouped parameters).
     // With `untyped_list`, a list of names without any type, as a lambda
-    // may write it, gives parameters of type "[untyped]".
-    std::vector<Parameter> parameters(bool* untyped_list = nullptr) {
+    // may write it, gives parameters of type "[untyped]". A factory's
+    // parameters may be named `module` (Html030.md).
+    std::vector<Parameter> parameters(bool* untyped_list = nullptr, bool factory = false) {
         std::vector<Parameter> result;
         if (!match("(")) return result;
         if (!at(")")) {
@@ -479,7 +519,7 @@ private:
             };
             while (true) {
                 auto parameter_tags = tag_list();
-                const auto& name = declared_name();
+                const auto& name = factory ? identifier(true) : declared_name();
                 group.push_back({name.span, name.text, {}, false, std::move(parameter_tags)});
                 if (match(",")) {
                     if (at(")")) throw untyped(group.front());
@@ -510,7 +550,7 @@ private:
                         .label("'" + group.front().name + "' would take the variadic type")
                         .help("give '" + group.front().name + "' its own type, as in 'func(" +
                               group.front().name + ": <type>, " + group.back().name + ": ...<type>)'");
-                if (variadic && at(","))
+                if (variadic && at(",") && !(factory && next_is(1, ")")))
                     throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
                 // `= value` after the type is a default, checked in lowering.
                 std::shared_ptr<Expr> default_value;
@@ -543,7 +583,7 @@ private:
                     result.push_back(std::move(member));
                 }
                 group.clear();
-                if (!match(",")) break;
+                if (!match(",") || (factory && at(")"))) break;
             }
         }
         expect(")");
@@ -776,7 +816,10 @@ private:
         } else if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
             result.kind = token.kind == TokenKind::Integer ? TagArgumentSyntax::Kind::Integer
                                                            : TagArgumentSyntax::Kind::Float;
-            result.text = (negative ? "-" : "") + advance().text;
+            const bool character = is_character_literal(token);
+            result.text = advance().text;
+            if (character) result.text = std::to_string(decode_character_literal(result.text));
+            if (negative) result.text = "-" + result.text;
         } else if (!negative && (at("true") || at("false"))) {
             result.kind = TagArgumentSyntax::Kind::Boolean;
             result.text = advance().text;
@@ -1120,10 +1163,24 @@ private:
             } else if (next_is_word(0, "derive") && tokens_[cursor_ + 1].kind == TokenKind::End) {
                 advance();
                 expected("a generator or ';' after 'derive'");
+            } else if (result.constant && !result.last && block_depth_ == 0 &&
+                       (!owner || *owner == Declaration::Kind::Module) && at_stylesheet()) {
+                const auto initializer = cursor_;
+                result.initializer = stylesheet(initializer);
+                if (at("(") || at("[") || at(".") || at("as") || at("is") || at("?") || precedence() != 0)
+                    throw misplaced_stylesheet(span_from(initializer));
             } else if (!result.type && !result.last && record_initializer(result)) {
                 // A record (parser_records.inc).
             } else {
                 result.initializer = expression();
+                if (result.initializer->kind == Expr::Kind::HtmlFactory) {
+                    auto& alternatives = result.initializer->html_factory->overloads;
+                    while (at("or") && contextual_at(1, "html")) {
+                        advance();
+                        const auto factory = cursor_;
+                        alternatives.push_back(html_factory(factory, false));
+                    }
+                }
                 check_record_expression(result);
             }
         } else if (!result.type && result.last) {
@@ -1534,11 +1591,111 @@ private:
         return result;
     }
 
-    Expr condition() {
+    Expr condition(std::string_view keyword = {}) {
         expect("(");
-        auto result = expression();
-        expect(")");
-        return result;
+        try {
+            auto result = expression();
+            expect(")");
+            return result;
+        } catch (const Diagnostic&) {
+            misplaced_narrowing(keyword);
+        }
+    }
+
+    // The condition of an `if`, where narrowings may stand
+    // (docs/design/Expressions030.md, Narrowing).
+    Expr if_condition(Statement& statement) {
+        expect("(");
+        const auto saved_root = std::exchange(narrowing_root_, cursor_);
+        const auto saved_next = std::exchange(narrowing_next_, true);
+        std::optional<Expr> result;
+        try {
+            result = expression();
+        } catch (const Diagnostic&) {
+            narrowing_root_ = saved_root;
+            narrowing_next_ = saved_next;
+            misplaced_narrowing("if");
+        }
+        narrowing_root_ = saved_root;
+        narrowing_next_ = saved_next;
+        check_narrowings(*result, statement);
+        try {
+            expect(")");
+        } catch (const Diagnostic&) {
+            misplaced_narrowing("if");
+        }
+        return std::move(*result);
+    }
+
+    // Called while a condition's parse error propagates: when it failed at a
+    // ':' directly after `is name` or `is not name`, the source meant a
+    // narrowing where none may stand, and the error is E0265. Otherwise the
+    // error propagates unchanged.
+    [[noreturn]] void misplaced_narrowing(std::string_view keyword) const {
+        if (!keyword.empty() && at(":") && cursor_ >= 2 && tokens_[cursor_ - 1].kind == TokenKind::Identifier) {
+            const auto& before = tokens_[cursor_ - 2];
+            const bool test = before.kind == TokenKind::Keyword &&
+                (before.text == "is" || (before.text == "not" && cursor_ >= 3 &&
+                                         tokens_[cursor_ - 3].kind == TokenKind::Keyword &&
+                                         tokens_[cursor_ - 3].text == "is"));
+            if (test) throw misplaced_narrowing(tokens_[cursor_ - 1].span, tokens_[cursor_ - 1].text, keyword);
+        }
+        throw;
+    }
+
+    static Diagnostic misplaced_narrowing(const Span& name, const std::string& binding, std::string_view keyword) {
+        auto error = Diagnostic(name, "a narrowing binding is allowed only in the condition of an 'if'")
+            .with_code("E0265").label("'" + binding + "' cannot be bound here");
+        if (keyword == "if") {
+            error.note("a narrowing 'x is " + binding + ": T' must be the whole condition, or an operand of the "
+                       "'&&' chain that is the whole condition, outside parentheses");
+            error.help("move the narrowing to the top level of the condition, or test with 'is' here and "
+                       "narrow in an 'if' inside");
+        } else {
+            error.note("the condition of '" + std::string(keyword) + "' takes no narrowing binding");
+            error.help("test with 'is' in the condition and narrow with an 'if' inside the loop, as in "
+                       "'if (x is " + binding + ": T) { ... }'");
+        }
+        return error;
+    }
+
+    // Each narrowing must be a conjunct root of the condition; `is not` only
+    // the whole condition. Records the bound names on the statement.
+    void check_narrowings(const Expr& condition, Statement& statement) const {
+        std::vector<const Expr*> conjuncts;
+        const Expr* chain = &condition;
+        while (chain->kind == Expr::Kind::Binary && chain->text == "&&") {
+            conjuncts.insert(conjuncts.begin(), &chain->operands[1]);
+            chain = &chain->operands[0];
+        }
+        conjuncts.insert(conjuncts.begin(), chain);
+        std::vector<const Expr*> allowed;
+        for (const auto* conjunct : conjuncts) {
+            if (conjunct->kind == Expr::Kind::TypeTest && conjunct->narrowing) {
+                allowed.push_back(conjunct);
+            } else if (conjunct->kind == Expr::Kind::Unary && conjunct->is_not &&
+                       conjunct->operands.front().narrowing) {
+                const auto& test = conjunct->operands.front();
+                if (conjuncts.size() > 1)
+                    throw Diagnostic(*conjunct->operator_span, "an 'is not' narrowing inside an '&&' chain")
+                        .with_code("E0266").label("'" + test.binding + "' would be bound when the chain is false")
+                        .note("when the chain is false, any of its conjuncts may be the false one, so nothing "
+                              "proves that the type test failed")
+                        .help("make 'x is not " + test.binding + ": T' the whole condition, or test with 'is' and "
+                              "bind in the true branch");
+                allowed.push_back(&test);
+                statement.negated_narrowing = true;
+            }
+        }
+        const std::function<void(const Expr&)> visit = [&](const Expr& expr) {
+            if (expr.narrowing && std::ranges::find(allowed, &expr) == allowed.end())
+                throw misplaced_narrowing(*expr.narrowing, expr.binding, "if");
+            for (const auto& operand : expr.operands) visit(operand);
+        };
+        visit(condition);
+        for (const auto* test : allowed)
+            statement.bindings.push_back({TokenKind::Identifier, test->binding, *test->narrowing});
+        statement.constant_bindings = !allowed.empty();
     }
 
     Statement statement() {
@@ -1577,7 +1734,7 @@ private:
             result.body = block();
         } else if (match("if")) {
             result.kind = Statement::Kind::If;
-            result.expressions.push_back(condition());
+            result.expressions.push_back(if_condition(result));
             result.body = block();
             if (match("else")) {
                 if (at("if")) {
@@ -1590,13 +1747,13 @@ private:
             result = parse_match(false, start);
         } else if (match("while")) {
             result.kind = Statement::Kind::While;
-            result.expressions.push_back(condition());
+            result.expressions.push_back(condition("while"));
             result.body = block();
         } else if (match("do")) {
             result.kind = Statement::Kind::Do;
             result.body = block();
             if (match("while")) {
-                result.expressions.push_back(condition());
+                result.expressions.push_back(condition("do"));
                 expect(";");
             }
         } else if (match("for")) {
@@ -2006,9 +2163,15 @@ private:
             result.initializer.push_back(std::move(init));
         }
         if (!at(";")) {
-            result.expressions.push_back(expression());
+            try {
+                result.expressions.push_back(expression());
+                expect(";");
+            } catch (const Diagnostic&) {
+                misplaced_narrowing("for");
+            }
+        } else {
+            expect(";");
         }
-        expect(";");
         if (!at(")")) {
             const auto start = cursor_;
             auto step = simple_statement();
@@ -2020,12 +2183,111 @@ private:
         return result;
     }
 
+    // docs/design/Expressions030.md, `..=` as a statement: a statement whose
+    // whole expression is `place ..= right` stores `place .. right` into the
+    // place. An unparenthesized chain on the right, `s ..= a .. b;`, stays
+    // one chain whose operands follow the old value. The operator is kept in
+    // `keyword`; lowering checks the destination.
+    bool concatenation_statement(Statement& result) {
+        auto& top = result.expressions.front();
+        if (top.kind != Expr::Kind::Range || top.grouped || top.braced || top.range_inclusive.empty() ||
+            !top.range_inclusive.front())
+            return false;
+        const auto operator_span = top.range_operators.front();
+        if (top.step_colon)
+            throw Diagnostic(operator_span, "a '..=' statement takes no step").with_code("E0262")
+                .label("'..=' as a statement").label(*top.step_colon, "a step is written here")
+                .note("as a statement, 'place ..= text;' appends text to a string; "
+                      "in an expression, 'start ..= stop : step' is an inclusive range")
+                .help("to make a stepped range, use it as a value: 'let r = start ..= stop : step;'");
+        if (const auto* access = optional_access(top.operands.front()))
+            throw Diagnostic(*access->operator_span, "malformed optional access: '?.' is not an assignment target")
+                .with_code("E0233").label("an optional access gives a value, not a place")
+                .help("test the receiver for nil and assign through '.'");
+        auto place = std::move(top.operands.front());
+        Expr right = std::move(top.operands[1]);
+        if (top.operands.size() > 2) {
+            auto chain = make_expression(Expr::Kind::Range, right.span);
+            chain.range_operators.assign(top.range_operators.begin() + 1, top.range_operators.end());
+            chain.range_inclusive.assign(top.range_inclusive.begin() + 1, top.range_inclusive.end());
+            const auto& last = top.operands.back().span;
+            chain.span.length = last.offset + last.length - chain.span.offset;
+            chain.operands.push_back(std::move(right));
+            for (std::size_t i = 2; i < top.operands.size(); ++i) chain.operands.push_back(std::move(top.operands[i]));
+            right = std::move(chain);
+        }
+        result.kind = Statement::Kind::Assignment;
+        result.assignment_operator = "..=";
+        result.keyword = operator_span;
+        result.expressions.clear();
+        result.expressions.push_back(std::move(place));
+        result.expressions.push_back(std::move(right));
+        return true;
+    }
+
+    // docs/design/Expressions030.md, Return forms. `return if (c1) -> v1;
+    // else if (c2) -> v2; else -> v3` is the statement `if (c1) { return v1; }
+    // else if (c2) { return v2; } else { return v3; }`; the `;` after a
+    // non-final arm is optional. The current token is `if`.
+    Statement return_if(std::size_t start) {
+        const auto malformed = [&](const std::string& message, const std::string& label) {
+            return Diagnostic(current().span, message).with_code("E0264").label(label)
+                .help("write each arm as '-> value', as in 'return if (c) -> a; else -> b;'");
+        };
+        const auto arm_value = [&] {
+            if (at("{"))
+                throw malformed("a block arm of 'return if' is not available yet", "expected '->' and a value")
+                    .note("arms written as blocks that yield a value need the lifetime milestone's 'yield'; "
+                          "they are specified and pending");
+            if (!at("->")) throw malformed("expected '->' before the value of a 'return if' arm", "expected '->'");
+            advance();
+            Statement value{};
+            value.kind = Statement::Kind::Return;
+            value.expressions.push_back(expression());
+            value.span = span_from(start);
+            return value;
+        };
+        advance();
+        Statement arm{};
+        arm.kind = Statement::Kind::If;
+        arm.expressions.push_back(condition("if"));
+        arm.body.push_back(arm_value());
+        match(";");
+        if (!at("else"))
+            throw malformed("a 'return if' needs a final 'else'", "expected 'else -> value'");
+        advance();
+        if (at("if") && next_is(1, "(")) arm.alternative.push_back(return_if(start));
+        else arm.alternative.push_back(arm_value());
+        arm.span = span_from(start);
+        return arm;
+    }
+
     Statement simple_statement() {
         Statement result{};
         if (match("return")) {
+            const auto start = cursor_ - 1;
             result.kind = Statement::Kind::Return;
-            if (!at(";")) {
+            if (at("if") && next_is(1, "(")) {
+                result = return_if(start);
+            } else if (!at(";")) {
                 result.expressions.push_back(expression());
+            }
+            // docs/design/Expressions030.md, Return forms: `return v unless g;`
+            // is `if (!(g)) { return v; }`. `unless` is a guard only after a
+            // complete return value; elsewhere it is an ordinary name.
+            if ((result.kind != Statement::Kind::Return || !result.expressions.empty()) && at_contextual("unless")) {
+                result.span = span_from(start);
+                const auto guard_word = advance().span;
+                auto guard = expression();
+                auto negated = make_expression(Expr::Kind::Unary, guard.span, "!");
+                negated.implicit = true;
+                negated.operands.push_back(std::move(guard));
+                Statement guarded{};
+                guarded.kind = Statement::Kind::If;
+                guarded.keyword = guard_word;
+                guarded.expressions.push_back(std::move(negated));
+                guarded.body.push_back(std::move(result));
+                result = std::move(guarded);
             }
         } else if (match("break")) {
             result.kind = Statement::Kind::Break;
@@ -2037,6 +2299,7 @@ private:
         } else {
             result.kind = Statement::Kind::Expression;
             result.expressions.push_back(expression());
+            if (concatenation_statement(result)) return result;
             if (at("=") || at("+=") || at("-=") || at("*=") || at("/=") || at("%=") ||
                 at("&=") || at("^=") || at("|=") || at("<<=") || at(">>=")) {
                 if (const auto* access = optional_access(result.expressions.front()))
@@ -2067,7 +2330,7 @@ private:
     int precedence() const {
         if (at("||")) return 1;
         if (at("&&")) return 2;
-        if (at("==") || at("!=") || at("===")) return equality_precedence;
+        if (at("==") || at("!=") || at("===") || at("!==")) return equality_precedence;
         if (at_shift()) return 8;
         if (at("<") || at("<=") || at(">") || at(">=")) return ordering_precedence;
         if (at("|")) return 5;
@@ -2092,8 +2355,11 @@ private:
             if (shift) {
                 op += advance().text;
             }
+            // Each top-level conjunct of an `if` condition may narrow.
+            if (op == "&&" && start == narrowing_root_ && minimum_precedence == 1) narrowing_next_ = true;
             auto right = expression(priority + 1, true, branch_keyword);
-            if (op != "===" && (priority == equality_precedence || priority == ordering_precedence) &&
+            // `===` and `!==` form no comparison chain (docs/design/Expressions030.md).
+            if (op != "===" && op != "!==" && (priority == equality_precedence || priority == ordering_precedence) &&
                 at_comparison_connector(branch_keyword)) {
                 left = comparison_chain(start, std::move(op), std::move(left), std::move(right), branch_keyword);
                 continue;
@@ -2105,11 +2371,20 @@ private:
         }
         if (binary_only) return left;
         if (minimum_precedence == 1 && at("??")) left = coalesce(start, std::move(left), branch_keyword);
-        if (minimum_precedence == 1 && match("..")) {
+        if (minimum_precedence == 1 && (at("..") || at("..="))) {
+            // One node for `a .. b`, `a ..= b` and the chain `a .. b .. c`
+            // (docs/design/Expressions030.md); lowering checks the shape.
             auto range = make_expression(Expr::Kind::Range, left.span);
             range.operands.push_back(std::move(left));
-            range.operands.push_back(range_bound(branch_keyword));
-            if (range_step && match(":")) range.operands.push_back(range_bound(branch_keyword));
+            while (at("..") || at("..=")) {
+                range.range_inclusive.push_back(current().text == "..=");
+                range.range_operators.push_back(advance().span);
+                range.operands.push_back(range_bound(branch_keyword));
+            }
+            if (range_step && at(":")) {
+                range.step_colon = advance().span;
+                range.operands.push_back(range_bound(branch_keyword));
+            }
             range.span = span_from(start);
             left = std::move(range);
         }
@@ -2122,9 +2397,10 @@ private:
                     expect(":");
                 } catch (Diagnostic& error) {
                     // `r? - 1` is a conditional (docs/design/Matching030.md).
-                    if (after.kind == TokenKind::Symbol &&
-                        (after.text == "-" || after.text == "(" || after.text == "[" || after.text == "{" ||
-                         after.text == "++" || after.text == "--" || after.text == "!" || after.text == "~")) {
+                    if ((after.kind == TokenKind::Symbol &&
+                         (after.text == "-" || after.text == "(" || after.text == "[" || after.text == "{" ||
+                          after.text == "++" || after.text == "--" || after.text == "!" || after.text == "~")) ||
+                        (after.kind == TokenKind::Keyword && after.text == "not")) {
                         const auto operand = source_text(left.span);
                         const auto rest = source_text(when_true.span);
                         error.help("to return an error here, write '(" + operand.value_or("r") + "?) " +
@@ -2198,17 +2474,57 @@ private:
     // only `b`.
     Expr cast(std::string_view branch_keyword) {
         const auto start = cursor_;
-        return cast_tail(start, unary(branch_keyword));
+        const bool narrowing = std::exchange(narrowing_next_, false);
+        return cast_tail(start, unary(branch_keyword), narrowing);
     }
 
-    Expr cast_tail(std::size_t start, Expr result) {
+    // `is name :` or `is not name :` after a narrowing subject.
+    bool at_narrowing() const {
+        if (!at("is") || cursor_ + 3 >= tokens_.size()) return false;
+        if (tokens_[cursor_ + 1].kind == TokenKind::Identifier) return next_is(2, ":");
+        return next_is_keyword(1, "not") && tokens_[cursor_ + 2].kind == TokenKind::Identifier && next_is(3, ":");
+    }
+
+    Expr cast_tail(std::size_t start, Expr result, bool narrowing = false) {
+        if (narrowing && at_narrowing()) {
+            // `x is y: T` (docs/design/Expressions030.md, Narrowing).
+            advance();
+            std::optional<Span> negation;
+            if (at("not")) negation = advance().span;
+            const auto name = advance();
+            advance();
+            auto target = type();
+            auto test = make_expression(Expr::Kind::TypeTest, span_from(start));
+            test.type = std::move(target);
+            test.binding = name.text;
+            test.narrowing = name.span;
+            test.operands.push_back(std::move(result));
+            result = std::move(test);
+            if (negation) {
+                auto negated = make_expression(Expr::Kind::Unary, span_from(start), "!");
+                negated.spelled_not = negated.is_not = true;
+                negated.operator_span = negation;
+                negated.operands.push_back(std::move(result));
+                result = std::move(negated);
+            }
+        }
         while (at("as") || at("is")) {
             const bool test = advance().text == "is";
+            // `x is not T` is `!(x is T)` (docs/design/Expressions030.md).
+            std::optional<Span> negation;
+            if (test && at("not")) negation = advance().span;
             auto target = type();
             auto conversion = make_expression(test ? Expr::Kind::TypeTest : Expr::Kind::Cast, span_from(start));
             conversion.type = std::move(target);
             conversion.operands.push_back(std::move(result));
             result = std::move(conversion);
+            if (negation) {
+                auto negated = make_expression(Expr::Kind::Unary, span_from(start), "!");
+                negated.spelled_not = negated.is_not = true;
+                negated.operator_span = negation;
+                negated.operands.push_back(std::move(result));
+                result = std::move(negated);
+            }
         }
         return result;
     }
@@ -2225,10 +2541,17 @@ private:
             result.operands.push_back(std::move(operand));
             return result;
         }
-        if (at("!") || at("-") || at("~")) {
-            const auto op = advance().text;
+        if (at("!") || at("not") || at("-") || at("~")) {
+            // `not` is `!` spelled as a word (docs/design/Expressions030.md).
+            const auto& token = advance();
+            const bool word = token.text == "not";
+            const auto operator_span = token.span;
             auto operand = unary(branch_keyword);
-            auto result = make_expression(Expr::Kind::Unary, span_from(start), op);
+            auto result = make_expression(Expr::Kind::Unary, span_from(start), word ? std::string("!") : token.text);
+            if (word) {
+                result.spelled_not = true;
+                result.operator_span = operator_span;
+            }
             result.operands.push_back(std::move(operand));
             return result;
         }
@@ -2345,7 +2668,7 @@ private:
             return true;
         case TokenKind::Keyword:
             return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
-                   token.text == "true" || token.text == "false" || token.text == "nil";
+                   token.text == "true" || token.text == "false" || token.text == "nil" || token.text == "not";
         case TokenKind::Symbol:
             return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
                    token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";
@@ -2438,6 +2761,136 @@ private:
         }
     }
 
+    bool contextual_at(std::size_t offset, std::string_view word) const {
+        return cursor_ + offset < tokens_.size() && tokens_[cursor_ + offset].kind == TokenKind::Identifier &&
+               tokens_[cursor_ + offset].text == word;
+    }
+
+    bool kind_at(std::size_t offset, TokenKind kind) const {
+        return cursor_ + offset < tokens_.size() && tokens_[cursor_ + offset].kind == kind;
+    }
+
+    // `html(x)` remains a call. A top-level parameter annotation cannot
+    // begin an argument in the ordinary call grammar on this compiler line.
+    bool at_html_factory() const {
+        if (!at_contextual("html")) return false;
+        if (kind_at(1, TokenKind::HtmlIsland)) return true;
+        auto index = std::size_t{1};
+        if (next_is(index, "<")) {
+            std::size_t angles = 1;
+            for (++index; cursor_ + index < tokens_.size() && angles > 0; ++index) {
+                if (next_is(index, "<")) ++angles;
+                else if (next_is(index, ">")) --angles;
+                else if (next_is(index, ";")) return false;
+            }
+        }
+        if (!next_is(index, "(")) return false;
+        bool annotated = false;
+        bool conditional = false;
+        std::size_t depth = 1;
+        for (++index; cursor_ + index < tokens_.size(); ++index) {
+            if (next_is(index, "(") || next_is(index, "[") || next_is(index, "{")) ++depth;
+            else if (next_is(index, ")") || next_is(index, "]") || next_is(index, "}")) {
+                if (depth == 1 && !next_is(index, ")")) return false;
+                if (--depth == 0) {
+                    return annotated || kind_at(index + 1, TokenKind::HtmlIsland) ||
+                           contextual_at(index + 1, "from") || next_is(index + 1, "->");
+                }
+            } else if (depth == 1 && next_is(index, "?")) conditional = true;
+            else if (depth == 1 && next_is(index, ",")) conditional = false;
+            else if (depth == 1 && next_is(index, ":") && !conditional && index > 1 &&
+                     kind_at(index - 1, TokenKind::Identifier)) annotated = true;
+            else if (depth == 1 && next_is(index, ";")) return false;
+        }
+        return false;
+    }
+
+    bool at_stylesheet() const {
+        if (!at_contextual("css")) return false;
+        if (kind_at(1, TokenKind::CssIsland) || contextual_at(1, "from")) return true;
+        if (!next_is(1, ".")) return false;
+        return next_keyword(2, "module") || kind_at(3, TokenKind::CssIsland) || contextual_at(3, "from");
+    }
+
+    Span through(std::size_t first, const Token& last) const {
+        auto span = tokens_[first].span;
+        span.length = last.span.offset + last.span.length - span.offset;
+        return span;
+    }
+
+    Diagnostic malformed_factory(std::size_t first, std::string reason) const {
+        return Diagnostic(through(first, current()), "malformed html factory").with_code("E0240")
+            .label(std::move(reason)).help("write 'html(parameters) { ... }' or 'html(parameters) from \"path.html\"'");
+    }
+
+    Token form_path() {
+        advance(); // from
+        if (current().kind != TokenKind::String || current().text.find('\\') != std::string::npos)
+            throw Diagnostic(current().span, "malformed from clause").with_code("E0254")
+                .label("expected a literal path without escapes");
+        auto path = advance();
+        if (precedence() != 0)
+            throw Diagnostic(through(cursor_ - 1, current()), "malformed from clause").with_code("E0254")
+                .label("write the path as one string literal");
+        return path;
+    }
+
+    Expr html_factory(std::size_t start, bool retained) {
+        const auto word = cursor_;
+        advance(); // html
+        if (at("<")) throw malformed_factory(word, "an HTML factory has no type parameters");
+        if (!at("(")) throw malformed_factory(word, "the parameter list is required");
+        auto params = parameters(nullptr, true);
+        if (at("->")) throw malformed_factory(word, "an HTML factory has no result annotation");
+        std::variant<TemplateSyntax, Token> source;
+        if (at_contextual("from")) {
+            source = form_path();
+        } else if (current().kind == TokenKind::HtmlIsland) {
+            const auto& body = advance();
+            auto contents = body.span;
+            ++contents.column;
+            ++contents.offset;
+            contents.length = body.text.size();
+            source = parse_template(body.text, std::move(contents));
+        } else {
+            throw malformed_factory(word, "expected a body or 'from' after the parameter list");
+        }
+        auto result = make_expression(Expr::Kind::HtmlFactory, span_from(start));
+        result.html_factory = std::make_shared<HtmlFactorySyntax>(HtmlFactorySyntax{
+            retained, std::move(params), std::move(source)});
+        return result;
+    }
+
+    Diagnostic malformed_stylesheet(std::size_t start, std::string reason) const {
+        return Diagnostic(through(start, current()), "malformed css declaration").with_code("E0252")
+            .label(std::move(reason)).help("write 'css { ... }' or 'css.module { ... }'");
+    }
+
+    Expr stylesheet(std::size_t start, bool validate_body = true) {
+        advance(); // css
+        const bool module = match(".");
+        if (module && !match("module")) throw malformed_stylesheet(start, "only '.module' can follow 'css'");
+        if (current().kind != TokenKind::CssIsland && !at_contextual("from"))
+            throw malformed_stylesheet(start, "expected a body or 'from'");
+        auto source = at_contextual("from") ? form_path() : advance();
+        std::optional<StylesheetBody> body;
+        if (validate_body && source.kind == TokenKind::CssIsland) {
+            auto contents = source.span;
+            ++contents.column;
+            ++contents.offset;
+            contents.length = source.text.size();
+            body = parse_stylesheet(source.text, std::move(contents), module);
+        }
+        auto result = make_expression(Expr::Kind::Stylesheet, span_from(start));
+        result.stylesheet = std::make_shared<StylesheetSyntax>(StylesheetSyntax{module, std::move(source), std::move(body)});
+        return result;
+    }
+
+    static Diagnostic misplaced_stylesheet(const Span& span) {
+        return Diagnostic(span, "html or css form not allowed here").with_code("E0255")
+            .label("a stylesheet must be the whole initializer of a module-level 'const'");
+    }
+
     Expr primary(std::string_view branch_keyword) {
         if (next_is_word(0, "derive") && tokens_[cursor_ + 1].kind == TokenKind::Identifier)
             throw Diagnostic(current().span, "a derivation is a declaration, not an expression").with_code("E0202");
@@ -2458,6 +2911,7 @@ private:
             auto result = expression();
             expect(")");
             result.span = span_from(start);
+            result.grouped = true;
             return result;
         }
         if (match("[")) {
@@ -2472,9 +2926,19 @@ private:
                 throw Diagnostic(result.span, "braces in an expression must enclose a range").with_code("E0212");
             expect("}");
             result.span = span_from(start);
+            result.braced = true;
             return result;
         }
-        if (match("new")) return new_expression(start, branch_keyword);
+        if (match("new")) {
+            if (at_html_factory()) return html_factory(start, true);
+            if (at_stylesheet()) {
+                (void)stylesheet(cursor_, false);
+                throw misplaced_stylesheet(span_from(start));
+            }
+            return new_expression(start, branch_keyword);
+        }
+        if (at_html_factory()) return html_factory(start, false);
+        if (at_stylesheet()) throw misplaced_stylesheet(stylesheet(start, false).span);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&
@@ -2506,6 +2970,7 @@ private:
         }
 
         const auto& token = current();
+        if (at("typeof")) return type_of(start);
         // `nameof(path)` (docs/design/Calls030.md): recognized where an
         // expression starts and '(' follows; lowering checks the operand.
         if (at_contextual("nameof") && next_is(1, "(")) {
@@ -2530,7 +2995,16 @@ private:
         }
         if (at("true") || at("false")) return token_expression(Expr::Kind::Boolean);
         if (at("nil")) return token_expression(Expr::Kind::Nil);
-        if (token.kind == TokenKind::Identifier) return token_expression(Expr::Kind::Name);
+        if (token.kind == TokenKind::Identifier || (template_neura_ && at("module")))
+            return token_expression(Expr::Kind::Name);
+        if (is_character_literal(token)) {
+            // A character literal is the integer literal of its byte
+            // (docs/design/Expressions030.md, Character literals).
+            auto result = token_expression(Expr::Kind::Integer);
+            result.text = std::to_string(decode_character_literal(result.text));
+            result.character = true;
+            return result;
+        }
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
         if (token.kind == TokenKind::String && token.parts) return interpolated_string();
@@ -2538,6 +3012,55 @@ private:
         throw Diagnostic(token.span, "expected an expression").with_code("E0204")
             .label(token.kind == TokenKind::End ? std::string("expected an expression before the end of the file")
                                                 : "expected an expression, found '" + token.text + "'");
+    }
+
+    // `typeof(operand)` (docs/design/Expressions030.md, typeof). The operand
+    // is read as a type and as an expression, each where it parses up to the
+    // closing parenthesis; lowering decides which it names. When neither
+    // parses, the expression's error is reported.
+    Expr type_of(std::size_t start) {
+        const auto keyword = advance();
+        if (!at("("))
+            throw Diagnostic(keyword.span, "typeof takes its operand in parentheses").with_code("E0267")
+                .label("expected '(' after typeof")
+                .help("write 'typeof(value)' for the type of a value, or 'typeof(Type)' for a type");
+        advance();
+        auto result = make_expression(Expr::Kind::TypeOf, keyword.span, "typeof");
+        if (at(")"))
+            throw Diagnostic(current().span, "typeof needs an operand").with_code("E0267")
+                .label("expected a value or a type before ')'")
+                .help("write 'typeof(value)' for the type of a value, or 'typeof(Type)' for a type");
+        const auto operand = cursor_;
+        std::optional<std::size_t> type_end;
+        {
+            SpeculativeDiagnostics speculative;
+            try {
+                auto written = type();
+                if (at(")")) {
+                    result.type = std::move(written);
+                    type_end = cursor_;
+                }
+            } catch (const Diagnostic&) {
+            }
+        }
+        cursor_ = operand;
+        if (!type_end) {
+            result.operands.push_back(expression());
+        } else {
+            SpeculativeDiagnostics speculative;
+            try {
+                auto value = expression();
+                if (at(")")) {
+                    speculative.commit();
+                    result.operands.push_back(std::move(value));
+                }
+            } catch (const Diagnostic&) {
+            }
+            if (result.operands.empty()) cursor_ = *type_end;
+        }
+        expect(")");
+        result.span = span_from(start);
+        return result;
     }
 
     Expr lambda_expression(std::size_t start, std::string_view branch_keyword, bool owned = false) {
@@ -2713,6 +3236,14 @@ ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagno
     if (tokens.empty() || tokens.back().kind != TokenKind::End)
         throw std::invalid_argument("parser requires an end-of-file token");
     return Parser(tokens).file(&diagnostics);
+}
+
+Expr parse_template_expression(const std::vector<Token>& tokens) {
+    return Parser(tokens, true).template_expression();
+}
+
+TemplateForHead parse_template_for_head(const std::vector<Token>& tokens) {
+    return Parser(tokens, true).template_for_head();
 }
 
 } // namespace neura

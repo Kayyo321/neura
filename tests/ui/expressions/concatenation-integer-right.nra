@@ -1,0 +1,7 @@
+// Edge case 44 of docs/design/Expressions030.md: the right side of a `..=`
+// statement must be a string; E1100 at the operand.
+let append = func(text: string) -> string {
+    let result = text;
+    result ..= 5;
+    return result;
+};

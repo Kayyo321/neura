@@ -255,4 +255,10 @@ NEURA_TAG(HostEffects, 86, Resources, Function, implemented, false,
           "allocates:b=true,traps:b=true,scheduler:b=true,retains:b=true", "0.3.0",
           "what a call of this host binding may do; an omitted argument says it may (E0923)", "")
 
+// Immutable application data (docs/design/Components030.md, "FrozenList")
+NEURA_TAG(Frozen, 87, Correctness, Class | Field, implemented, false, "", "0.3.0",
+          "standard library only: on a class, its type arguments are deeply immutable (E0580); on a last list "
+          "field, storage assigned once from a list the constructor created and never exposed (E0581)",
+          "")
+
 #undef NEURA_TAG

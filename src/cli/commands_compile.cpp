@@ -17,6 +17,7 @@
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
 #include "tooling/formatter.hpp"
+#include "tooling/json.hpp"
 #include "util/source_map.hpp"
 
 #include <algorithm>
@@ -219,7 +220,33 @@ int emit_ir(const Options& options) {
 
 namespace {
 
-std::vector<std::uint8_t> build_image_bytes(const Options& options) {
+// The stylesheets and assets of a program built from source, written beside
+// the image at their bundle paths, with a canonical list of them and of the
+// stylesheet links in cascade order (Html030.md, Stylesheets). A bundle
+// writer takes the same lists from the program.
+void write_bundle_files(const fs::path& image, const std::vector<neura::IrBundleFile>& files,
+                        const std::vector<std::string>& links) {
+    using neura::tooling::Json;
+    const auto directory = image.parent_path();
+    Json::Array listed;
+    for (const auto& file : files) {
+        const auto target = directory / fs::path(file.path);
+        fs::create_directories(target.parent_path());
+        write_file(target, std::vector<std::uint8_t>(file.contents.begin(), file.contents.end()));
+        listed.emplace_back(Json::Object{{"bytes", static_cast<std::int64_t>(file.contents.size())},
+                                         {"path", file.path}, {"sha256", file.sha256}});
+    }
+    Json::Array ordered;
+    for (const auto& link : links) ordered.emplace_back(link);
+    const auto text = Json(Json::Object{{"files", std::move(listed)}, {"schema", 1},
+                                        {"stylesheets", std::move(ordered)}}).dump() + "\n";
+    auto manifest = image;
+    manifest += ".styles.json";
+    write_file(manifest, std::vector<std::uint8_t>(text.begin(), text.end()));
+}
+
+std::vector<std::uint8_t> build_image_bytes(const Options& options, std::vector<neura::IrBundleFile>* files = nullptr,
+                                            std::vector<std::string>* links = nullptr) {
     const bool nvr_input = std::ranges::any_of(options.files, [](const fs::path& file) { return file.extension() == ".nvr"; });
     if (nvr_input) {
         if (!options.native_executable) {
@@ -245,7 +272,10 @@ std::vector<std::uint8_t> build_image_bytes(const Options& options) {
     build_options.optimize = options.optimize;
     build_options.source_map = options.source_map;
     build_options.lift_hints = options.lift_hints;
-    const auto conversion = neura::backend::build(load_program(options), build_options);
+    auto program = load_program(options);
+    if (files) *files = program.bundle_files;
+    if (links) *links = program.stylesheet_links;
+    const auto conversion = neura::backend::build(std::move(program), build_options);
     return neura::nvr::encode(conversion.image);
 }
 
@@ -329,7 +359,9 @@ void package_native(const Options& options, std::span<const std::uint8_t> bytes)
 } // namespace
 
 int build(const Options& options) {
-    const auto bytes = build_image_bytes(options);
+    std::vector<neura::IrBundleFile> files;
+    std::vector<std::string> links;
+    const auto bytes = build_image_bytes(options, &files, &links);
     if (options.native_executable) {
         package_native(options, bytes);
         return 0;
@@ -338,6 +370,7 @@ int build(const Options& options) {
     // converter fault cannot produce an executable the runtime rejects.
     neura::nvr::load(bytes);
     write_file(options.output.value(), bytes);
+    if (!files.empty()) write_bundle_files(options.output.value(), files, links);
     return 0;
 }
 

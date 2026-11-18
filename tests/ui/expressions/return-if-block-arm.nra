@@ -1,0 +1,5 @@
+// A block arm of `return if` waits for the lifetime milestone's `yield`
+// (docs/design/Expressions030.md, Return forms, edge case 49): E0264 at `{`.
+let pick = func(c: bool) -> int {
+    return if (c) -> 1 else { 2 };
+};

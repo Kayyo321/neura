@@ -1,0 +1,7 @@
+error[E1014]: invalid static document structure
+ --> $DIR/invalid-label-target.nra:1:32
+  |
+1 | let view = html() { <label for="unknown">Name</label><input id="known"> };
+  |                                ^^^^^^^^^ no element in this template has the static id 'unknown'
+
+For more information about this error, try `neura explain E1014`.

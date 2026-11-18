@@ -1,0 +1,9 @@
+error[E1002]: unknown attribute, property or event
+ --> $DIR/unknown-event.nra:1:29
+  |
+1 | let view = html() { <button on:clik={unresolved}></button> };
+  |                             ^^^^^^^ 'clik' cannot bind this element
+  |
+  = help: did you mean 'click'?
+
+For more information about this error, try `neura explain E1002`.

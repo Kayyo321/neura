@@ -1,0 +1,9 @@
+error[E0240]: malformed html factory
+ --> $DIR/html-no-source.nra:1:1
+  |
+1 | html(x: int);
+  | ^^^^^^^^^^^^^ expected a body or 'from' after the parameter list
+  |
+  = help: write 'html(parameters) { ... }' or 'html(parameters) from "path.html"'
+
+For more information about this error, try `neura explain E0240`.

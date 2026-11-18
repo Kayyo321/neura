@@ -1,0 +1,8 @@
+error[E1014]: invalid static document structure
+ --> $DIR/duplicate-id.nra:1:45
+  |
+1 | let view = html() { <p id="total"></p><p id="total"></p> };
+  |                                             ^^^^^^^ this static id is written more than once
+  |                           ------- first written here
+
+For more information about this error, try `neura explain E1014`.

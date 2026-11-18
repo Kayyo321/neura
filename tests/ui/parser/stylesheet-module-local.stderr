@@ -1,0 +1,9 @@
+error[E0256]: malformed CSS module construct
+ --> $DIR/stylesheet-module-local.nra:1:28
+  |
+1 | const Local = css.module { :local(.row) { } };
+  |                            ^^^^^^ CSS modules already make class names local
+  |
+  = help: write ':global(.name)' to keep a selector's global name
+
+For more information about this error, try `neura explain E0256`.

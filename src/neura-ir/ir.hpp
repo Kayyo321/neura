@@ -197,7 +197,19 @@ enum class IrOp {
     // carries, read and assigned only in a Cleanup's alternative. Yield is a
     // statement of a function that carries generator.resume; its text is
     // its suspension index, 1 to n.
-    Cleanup, Pending, Yield
+    Cleanup, Pending, Yield,
+    // NeuraIR nir_expressions_minor (docs/design/Expressions030.md, String
+    // chains). ConcatText is the text of its two or more string operands in
+    // written order, built with one allocation; it may trap (length limit,
+    // heap budget) and is never merged, split or reassociated.
+    ConcatText = 73,
+    // NeuraIR nir_expressions_minor (docs/design/Expressions030.md, typeof).
+    // TypeOf yields the parts [int32, string, string] (kind ordinal, name,
+    // qualified name) of a type: the dynamic type of its one operand, the
+    // load of a constant local, or with no operand the static type in
+    // type_arguments[0]. specialize() expands it into existing operations
+    // once types are concrete; none reaches conversion.
+    TypeOf = 74
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written
@@ -313,6 +325,15 @@ struct DerivedCodec {
     std::vector<std::pair<std::string, std::string>> schema_imports{};
 };
 
+// A file a build writes beside the image (Html030.md, Lowering and
+// artifacts): a stylesheet or an asset, by its path relative to the
+// directory that holds index.html.
+struct IrBundleFile {
+    std::string path;
+    std::string sha256;
+    std::string contents;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -334,6 +355,11 @@ struct IrProgram {
     // part of a .nir file.
     bool hooks_elaborated = false;
     std::vector<DerivedCodec> derived_codecs{};
+    // Stylesheets and assets of the program's stylesheet forms and templates,
+    // each once, and the stylesheets index.html links, in cascade order. Not
+    // part of a .nir file: a build from source writes them.
+    std::vector<IrBundleFile> bundle_files{};
+    std::vector<std::string> stylesheet_links{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

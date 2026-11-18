@@ -1,0 +1,11 @@
+error[E0580]: type int32[] is not deeply immutable
+ --> $DIR/generic-wrapper.nra:8:19
+  |
+8 | let total = count<int32[]>([[1], [2]]);
+  |                   ^^^^^^^ given for 'U', which must be deeply immutable
+  |
+  = note: int32[] is an array, whose elements can be assigned
+  = note: deeply immutable types are bool, numbers, string, tuples and enums of such types, #Immutable classes whose fields are too, and FrozenList of them
+  = help: make the class #Immutable, or replace a list with a FrozenList
+
+For more information about this error, try `neura explain E0580`.

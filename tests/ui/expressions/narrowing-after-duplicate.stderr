@@ -1,0 +1,9 @@
+error[E0301]: duplicate local binding 'circle'
+  --> $DIR/narrowing-after-duplicate.nra:13:22
+   |
+12 |     let circle = 3;
+   |         ------ first bound here
+13 |     if (shape is not circle: Circle) {
+   |                      ^^^^^^ bound again here
+
+For more information about this error, try `neura explain E0301`.

@@ -1,0 +1,10 @@
+error[E0261]: unterminated character literal
+ --> $DIR/character-end-of-file.nra:3:12
+  |
+3 | let open = '
+  |            ^ this character literal is not closed
+  |             - the file ends here
+  |
+  = note: a character literal is one character or one escape between single quotes, such as 'a' or '\n'
+
+For more information about this error, try `neura explain E0261`.

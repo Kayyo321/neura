@@ -46,6 +46,7 @@ Ada
 | `Std.Crypto` | Shared cryptography contracts and policy, secret hygiene, entropy and DRBGs, hashes, MACs, key derivation and symmetric encryption. The public-key packages include classical, post-quantum and hybrid schemes. Other packages provide PKI, token formats, enclave evidence verification and envelope encryption, and advanced schemes including Shamir, FROST, blind signatures, OPRF and Bulletproofs. The specification lists modules and their supported profiles. [Stdlib, section 21](Stdlib-Design#21-stdcrypto) |
 | `Std.Io` | `Console`, `Closeable`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer` |
 | `Std.Fs` | `Path`, `File`, `Fs` |
+| `Std.Desktop` | `Desktop`: `Registry`, `Dispatcher`, `Context`, `Window`, `Call`, `Event`, `run_application` (0.3.0) |
 | `Std.Net` | `TcpStream`, `TcpListener`; in 0.3.0 the contracts (`Endpoint`, `Listener`, `Connector`, `Transport`, `Service`, `Filter`) and the packages `Core`, `Socket`, `Dns`, `Tls`, `Quic`, `Http`, `Rpc`, `Realtime`, `Resilience` and `Mesh`, some of whose host calls are stubs ([Stdlib](Stdlib-Design#114-stdnet)) |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |

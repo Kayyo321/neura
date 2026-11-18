@@ -1,0 +1,1 @@
+let view = html() { <a href="/x"><button>Save</button></a> };

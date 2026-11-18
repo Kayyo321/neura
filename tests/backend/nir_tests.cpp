@@ -533,6 +533,49 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     conformance_bytes[6] = 12;
     expect_nir_error(conformance_bytes,
                      "invalid operation tag " + std::to_string(static_cast<int>(IrOp::ConformanceCall)));
+    // The 0.3.0 expression operations (docs/design/Expressions030.md) are
+    // written under 1.15, after the lifetime milestone's 1.14 (tags 70-72);
+    // a 1.13 file holds neither, and a 1.14 file cannot hold a concat text.
+    IrProgram chain = above;
+    chain.bodies.front().instructions.front().op = IrOp::ConcatText;
+    auto chain_bytes = write_nir(chain);
+    const auto at = static_cast<std::size_t>(difference.first - above_bytes.begin());
+    check_equal(static_cast<int>(chain_bytes[6]), static_cast<int>(nir_expressions_minor),
+                "a concat text is written under 1.15");
+    check_equal(static_cast<int>(chain_bytes[at]), 73, "the serialized ConcatText ordinal");
+    check(read_nir(chain_bytes, "chain").bodies.front().instructions.front().op == IrOp::ConcatText,
+          "a concat text reads back");
+    for (const auto lifetime : {70, 71, 72}) {
+        auto invalid = chain_bytes;
+        invalid[6] = static_cast<std::uint8_t>(nir_records_minor);
+        invalid[at] = static_cast<std::uint8_t>(lifetime);
+        expect_nir_error(invalid, "invalid operation tag " + std::to_string(lifetime));
+    }
+    {
+        auto older = chain_bytes;
+        older[6] = static_cast<std::uint8_t>(nir_lifetime_minor);
+        expect_nir_error(older, "invalid operation tag 73");
+    }
+    IrProgram both = chain;
+    both.bodies.front().instructions.push_back(conformance.bodies.front().instructions.front());
+    check_equal(static_cast<int>(write_nir(both)[6]), static_cast<int>(nir_expressions_minor),
+                "a conformance call beside a concat text keeps 1.15");
+    chain_bytes[6] = static_cast<std::uint8_t>(nir_records_minor);
+    expect_nir_error(chain_bytes, "invalid operation tag 73");
+    IrProgram described = chain;
+    described.bodies.front().instructions.front().op = IrOp::TypeOf;
+    auto described_bytes = write_nir(described);
+    check_equal(static_cast<int>(described_bytes[6]), static_cast<int>(nir_expressions_minor),
+                "a type of is written under 1.15");
+    check_equal(static_cast<int>(described_bytes[at]), 74, "the serialized TypeOf ordinal");
+    check(read_nir(described_bytes, "described").bodies.front().instructions.front().op == IrOp::TypeOf,
+          "a type of reads back");
+    described_bytes[6] = static_cast<std::uint8_t>(nir_records_minor);
+    expect_nir_error(described_bytes, "invalid operation tag 74");
+    auto beyond = described_bytes;
+    beyond[6] = static_cast<std::uint8_t>(nir_expressions_minor);
+    beyond[at] = 75;
+    expect_nir_error(beyond, "invalid operation tag 75");
 
     // A file that claims an older minor cannot use the task operations: 1.8
     // has neither the tags nor the poll bit.
@@ -850,6 +893,8 @@ Attributed attributed_fixture(const Environment& environment, bool attributes = 
         }
         check(variant_default, "the linked program has an enum parameter for a variant default");
         set_attribute(s[a.sum_to], AttributeId::FunctionExtension, attribute_bool(true));
+        // An HTML factory names the string constant that holds its descriptor.
+        set_attribute(s[a.sum_to], AttributeId::UiFactory, attribute_symbol(find_symbol(p, "Attributes.SumLabel")));
     }
     if (deferred) {
         for (const auto local : {a.step, a.point_local}) {
@@ -958,6 +1003,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false,
          "[t p]"},
         {AttributeId::GeneratorResume, 23, "generator.resume", on_function, false, "s"},
+        {AttributeId::UiFactory, 32, "ui.factory", on_function, false, "s"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {

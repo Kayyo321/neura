@@ -1,0 +1,14 @@
+// Edge cases 1 and 3 of docs/design/Expressions030.md: the accepted forms
+// of `not` and `is not`.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let first = func(a: bool, b: bool) -> bool => not a || not (a && b) || not not a || !not b;
+let second = func(shape: Shape, a: bool) -> bool => shape is not Circle && a;
+let third = func(shape: Shape) -> bool => shape is
+    // a comment between `is` and `not`
+    not Circle;
+let fourth = func(a: bool, b: bool) -> bool => a ? not b : b;

@@ -1,0 +1,4 @@
+// typeof takes its operand in parentheses (docs/design/Expressions030.md,
+// typeof, edge case 23): `typeof x` is E0267 at typeof.
+let x = 1;
+let t = typeof x;

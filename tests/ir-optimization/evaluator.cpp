@@ -1261,6 +1261,19 @@ private:
             result.text = bytes.substr(start.magnitude, end.magnitude - start.magnitude);
             return result;
         }
+        case IrOp::ConcatText: {
+            // Operands left to right, then the text of all of them.
+            std::string bytes;
+            Value result;
+            for (std::size_t i = 0; i < node.operands.size(); ++i) {
+                auto part = evaluate(node.operands[i], frame);
+                if (i == 0) result = part;
+                bytes += part.text;
+            }
+            if (bytes.size() > 0x7fffffffU) fault(node, "text exceeds the int32 byte length limit");
+            result.text = std::move(bytes);
+            return result;
+        }
         case IrOp::TextEqual: {
             const auto left = evaluate(node.operands.at(0), frame);
             const auto right = evaluate(node.operands.at(1), frame);

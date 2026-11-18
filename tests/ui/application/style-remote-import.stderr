@@ -1,0 +1,7 @@
+error[E1013]: stylesheet import or asset cannot be resolved
+ --> $DIR/style-remote-import.nra:1:28
+  |
+1 | const Page = css { @import url(https://cdn.example/x.css); };
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a remote stylesheet needs its origin listed under 'style' in a project manifest
+
+For more information about this error, try `neura explain E1013`.

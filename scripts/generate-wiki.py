@@ -67,6 +67,10 @@ GENERATED: dict[str, str] = {
     "docs/lang/Status.md": "Status",
     "docs/lang/Tags.md": "Tags",
     "docs/lang/Stdlib.md": "Stdlib-Design",
+    "docs/apps/Html.md": "HtmlFactories",
+    "docs/apps/Components.md": "StateAndComponents",
+    "docs/apps/Css.md": "Stylesheets",
+    "docs/apps/WebApp.md": "FirstWebApp",
     "docs/lang/Testing.md": "Testing",
     "docs/lang/Tooling.md": "Tooling",
     "docs/lang/Tutorial.md": "Tutorial",
@@ -77,6 +81,8 @@ GENERATED: dict[str, str] = {
     "docs/runtime/NVR.md": "NVR",
     "docs/runtime/ServerHost.md": "Server-Host",
     "docs/runtime/Sql.md": "Sql",
+    "docs/runtime/Providers.md": "Providers",
+    "docs/apps/Desktop.md": "Apps-Desktop",
     "docs/style/CodingStyle.md": "CodingStyle",
 }
 
@@ -109,6 +115,7 @@ REPOSITORY_ONLY = (
     "docs/design/Desktop030.md",
     "docs/design/Projects030.md",
     "docs/design/Net030.md",
+    "docs/design/Expressions030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )

@@ -1,0 +1,13 @@
+error[E0261]: control character in character literal
+ --> $DIR/character-tab.nra:3:11
+  |
+3 | let tab = '    ';
+  |           ^^^^^^ a tab is written \t
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits and a value up to FF
+help: write the escape
+  |
+3 | let tab = '\t';
+  |           ~~~~
+
+For more information about this error, try `neura explain E0261`.

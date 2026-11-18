@@ -1,0 +1,10 @@
+// A capturing render passed without new func (the retention rule, E0453;
+// Components030 case 28).
+let ui = import:Std.Ui;
+
+let view = html(count: int32) { <output>{count}</output> };
+
+let make = func(offset: int32) -> ui.Component {
+    let number = new ui.State<int32>(0);
+    return ui.component<int32>(number, func(value: int32) -> ui.View => view(value + offset));
+};

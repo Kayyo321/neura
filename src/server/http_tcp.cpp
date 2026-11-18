@@ -1,5 +1,8 @@
 #include "server/http_tcp.hpp"
 #include "server/http_socket.hpp"
+#ifdef NEURA_SERVER_HTTP2_ENABLED
+#include "server/http2_connection.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -72,6 +75,9 @@ private:
 ConnectionEnd serve_tcp_connection(int descriptor, const Responder& respond, const ConnectionLimits& limits) {
     TcpStream stream(descriptor);
     if (!socket_io::configure(descriptor)) return ConnectionEnd::StreamFailure;
+#ifdef NEURA_SERVER_HTTP2_ENABLED
+    if (limits.http2.cleartext) return serve_cleartext_connection(stream, respond, limits);
+#endif
     return serve_connection(stream, respond, limits);
 }
 

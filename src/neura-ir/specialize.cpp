@@ -2,6 +2,7 @@
 #include "any.hpp"
 
 #include "attributes.hpp"
+#include "type_of.hpp"
 #include "class_hooks.hpp"
 
 #include "monitors.hpp"
@@ -821,7 +822,7 @@ private:
             check_type(node.type, where);
             // A type test names its target, and a typed scheduler operation its
             // element type, as a concrete type argument.
-            if (node.op == IrOp::SchedulerCall) {
+            if (node.op == IrOp::SchedulerCall || node.op == IrOp::TypeOf) {
                 for (const auto& argument : node.type_arguments) check_type(argument, where);
             } else if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
                 throw std::logic_error("specialization left type arguments in " + where);
@@ -874,6 +875,9 @@ private:
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
     Specializer(program, limits).run();
+    // typeof (docs/design/Expressions030.md) needs the concrete types and
+    // the program's classes, which exist only now.
+    expand_type_of(program);
     // Polls are a property of the whole program, and the isolation rules of
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
@@ -883,6 +887,7 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // program is checked, so a function whose callee is a specialization, or
     // an implementation in another module, is checked with it too.
     check_pure_tags(program, {}, true);
+    check_render_factories(program, {}, true);
     // Synchronized methods take their receiver's guard only in a program that
     // spawns; the guard operations are then part of what the isolation
     // checks see.

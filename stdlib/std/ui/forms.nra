@@ -1,0 +1,346 @@
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let ui = import:Std.Ui;
+
+/// @brief Form fields with validation: a `Field<T>` pairs the text a person typed (its draft) with
+/// the function that parses it, and a `Form` validates its fields on submit and moves the focus to
+/// the first invalid one. Validation that a server shares is an ordinary function of a shared
+/// package; it never replaces the server's own. `Std.Ui.Controls` renders fields as real elements.
+#Since("0.3.0")
+export let Forms = module (
+    /// @brief What a field shows: the draft, whether the person has left it or submitted the form
+    /// (`touched`), and the parse error's message when the draft is not valid.
+    #[Final, Immutable]
+    export let FieldState = class (
+        export last draft: string;
+        export last touched: bool;
+        export last valid: bool;
+        export last message: string;
+
+        #Internal
+        export let init = func(draft: string, touched: bool, valid: bool, message: string) => set;
+
+        /// @brief Reports whether the field shows its error: it is touched and not valid.
+        export let shows_error = func -> bool => touched && !valid;
+
+        /// @brief `FieldState(` the draft, and `touched` and the message when they apply `)`.
+        export let.override to_string = func -> string {
+            let text = "FieldState(\"" + draft + "\"";
+            if (touched) {
+                text = text + ", touched";
+            }
+            if (!valid) {
+                text = text + ", " + message;
+            }
+            return text + ")";
+        };
+
+        /// @brief Another state with equal fields.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is FieldState)) {
+                return false;
+            }
+            last that = other as FieldState;
+            return draft == that.draft && touched == that.touched && valid == that.valid && message == that.message;
+        };
+
+        /// @brief Combines the hashes of the fields.
+        export let.override hash_code = func -> uint32 =>
+            draft.hash_code() ^ touched.hash_code() ^ valid.hash_code() ^ message.hash_code();
+    );
+
+    /// @brief What a form needs from each of its fields, whatever its value type.
+    export let Validated = interface (
+        /// @brief The `id` of the field's element, which the form focuses.
+        let element_id = func() -> string;
+        /// @brief Marks the field touched and reports whether its draft parses.
+        let validate = func() -> bool;
+        /// @brief Restores the initial draft, untouched.
+        let reset = func();
+    );
+
+    /// @brief One input: an element `id`, a label, the draft in a `ui.State<FieldState>`, and `parse`,
+    /// which turns the draft into a `T` or an error whose message the field shows. `parse` runs on
+    /// every change of the draft and must not keep state.
+    #[Final, NotThreadSafe]
+    export let Field = class<T> implements Validated (
+        last id: string;
+        last caption: string;
+        last initial: string;
+        last parse: func(string) -> result.Result<T>;
+        /// @brief The field's state, which its control renders.
+        export last state: ui.State<FieldState>;
+
+        /// @brief A field whose element has the `id` `id` (letters, digits, `-` and `_`), labelled
+        /// `label`, starting with the draft `initial`. `parse` is retained.
+        export let init = func(id: string, label: string, initial: string, parse: func(string) -> result.Result<T>) {
+            check_id(id);
+            instance.id = id;
+            caption = label;
+            instance.initial = initial;
+            instance.parse = parse;
+            state = new ui.State<FieldState>(new FieldState("", false, true, ""));
+            state.set(evaluate(initial, false));
+        };
+
+        export let element_id = func -> string => id;
+
+        /// @brief The label text.
+        export let label = func -> string => caption;
+
+        /// @brief The current draft.
+        export let draft = func -> string => state.get().draft;
+
+        /// @brief Replaces the draft, as typing does; the field keeps whether it was touched.
+        export let set_draft = func(text: string) {
+            state.set(evaluate(text, state.get().touched));
+        };
+
+        /// @brief Marks the field touched, as leaving it does, so that it shows its error.
+        export let touch = func {
+            if (!state.get().touched) {
+                state.set(evaluate(state.get().draft, true));
+            }
+        };
+
+        /// @brief The draft parsed: `Ok` with the value, or the parse error.
+        export let value = func -> result.Result<T> {
+            last read = parse;
+            return read(state.get().draft);
+        };
+
+        export let validate = func -> bool {
+            touch();
+            return state.get().valid;
+        };
+
+        export let reset = func {
+            state.set(evaluate(initial, false));
+        };
+
+        /// @brief A handler for the element's `input` event: it sets the draft to the element's value.
+        export let on_input = func -> func(ui.InputEvent) -> void {
+            last self = instance;
+            return new func(event: ui.InputEvent) {
+                self.set_draft(event.value);
+            };
+        };
+
+        /// @brief A handler for the element's `change` event (a `select`): it sets the draft and touches the field.
+        export let on_change = func -> func(ui.ChangeEvent) -> void {
+            last self = instance;
+            return new func(event: ui.ChangeEvent) {
+                self.set_draft(event.value);
+                self.touch();
+            };
+        };
+
+        /// @brief A handler for the element's `blur` event: it touches the field.
+        export let on_blur = func -> func(ui.FocusEvent) -> void {
+            last self = instance;
+            return new func(event: ui.FocusEvent) {
+                self.touch();
+            };
+        };
+
+        let evaluate = func(text: string, touched: bool) -> FieldState {
+            last read = parse;
+            match (read(text)) {
+                result.Result.Ok(_) => {
+                    return new FieldState(text, touched, true, "");
+                },
+                result.Result.Err(problem) => {
+                    return new FieldState(text, touched, false, error.message(problem));
+                },
+            }
+        };
+
+        /// @brief `Field(` the id and the state `)`.
+        export let.override to_string = func -> string => "Field(" + id + ", " + state.get().to_string() + ")";
+    );
+
+    /// @brief What a form has done: the submits attempted, those that were valid, and the `id` of the
+    /// first invalid field of the last attempt (empty when it was valid or none was made).
+    #[Final, Immutable]
+    export let FormState = class (
+        export last attempts: int32;
+        export last submitted: int32;
+        export last first_invalid: string;
+
+        #Internal
+        export let init = func(attempts: int32, submitted: int32, first_invalid: string) => set;
+
+        /// @brief `FormState(` the counts and the first invalid field `)`.
+        export let.override to_string = func -> string =>
+            "FormState(" + attempts.to_string() + " attempts, " + submitted.to_string() + " submitted, invalid '"
+            + first_invalid + "')";
+
+        /// @brief Another state with equal fields.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is FormState)) {
+                return false;
+            }
+            last that = other as FormState;
+            return attempts == that.attempts && submitted == that.submitted && first_invalid == that.first_invalid;
+        };
+
+        /// @brief Combines the hashes of the fields.
+        export let.override hash_code = func -> uint32 =>
+            attempts.hash_code() ^ submitted.hash_code() ^ first_invalid.hash_code();
+    );
+
+    /// @brief Fields that are submitted together. `submit` validates every field, so each shows its
+    /// error, and either calls the submit action or asks the root of the form's component to focus
+    /// the first invalid field after the turn's commit.
+    #[Final, NotThreadSafe]
+    export let Form = class (
+        let fields: Validated[list] = new;
+        let owner: ui.Component = nil;
+        /// @brief What the form has done.
+        export last state: ui.State<FormState> = new ui.State<FormState>(new FormState(0, 0, ""));
+
+        /// @brief Adds a field, after the ones added before; the first invalid field in this order gets the focus.
+        export let add = func(field: Validated) {
+            fields.append(field);
+        };
+
+        /// @brief The component whose root moves the focus. `Std.Ui.Controls.form` binds it.
+        export let bind = func(component: ui.Component) {
+            owner = component;
+        };
+
+        /// @brief Validates every field. When all are valid it records a submit and calls `action`;
+        /// otherwise it records the first invalid field and asks for the focus to move there. Returns
+        /// whether the form was valid.
+        export let submit = func(action: func() -> void) -> bool {
+            let first = "";
+            for (let i = 0; i < fields.length; i++) {
+                if (!fields[i].validate() && first == "") {
+                    first = fields[i].element_id();
+                }
+            }
+            last before = state.get();
+            if (first != "") {
+                state.set(new FormState(before.attempts + 1, before.submitted, first));
+                if (owner != nil && owner.is_mounted()) {
+                    owner.owner.request_focus(first);
+                }
+                return false;
+            }
+            state.set(new FormState(before.attempts + 1, before.submitted + 1, ""));
+            action();
+            return true;
+        };
+
+        /// @brief A handler for the form element's `submit` event, bound with `on:submit.prevent_default`.
+        /// `action` is retained and runs when the form is valid.
+        export let on_submit = func(action: func() -> void) -> func(ui.SubmitEvent) -> void {
+            last self = instance;
+            return new func(event: ui.SubmitEvent) {
+                self.submit(action);
+            };
+        };
+
+        /// @brief Resets every field and the counts.
+        export let reset = func {
+            for (let i = 0; i < fields.length; i++) {
+                fields[i].reset();
+            }
+            state.set(new FormState(0, 0, ""));
+        };
+
+        /// @brief The number of fields.
+        export let field_count = func -> int => fields.length;
+
+        /// @brief `Form(` the number of fields and the state `)`.
+        export let.override to_string = func -> string =>
+            "Form(" + fields.length.to_string() + " fields, " + state.get().to_string() + ")";
+    );
+
+    /// @brief A parser that accepts any text as it is.
+    export let any_text = func -> func(string) -> result.Result<string> =>
+        new func(text: string) -> result.Result<string> => result.Result<string>.Ok(text);
+
+    /// @brief A parser that accepts text with something other than spaces, trimmed; otherwise `message`.
+    export let required_text = func(message: string) -> func(string) -> result.Result<string> =>
+        new func(text: string) -> result.Result<string> {
+            last trimmed = strings.trim(text);
+            if (trimmed == "") {
+                return result.Result<string>.Err(error.custom("ui.required", message));
+            }
+            return result.Result<string>.Ok(trimmed);
+        };
+
+    /// @brief A parser of a whole decimal number from `min` to `max`, with optional spaces around it;
+    /// otherwise `message`.
+    export let integer = func(min: int64, max: int64, message: string) -> func(string) -> result.Result<int64> =>
+        new func(text: string) -> result.Result<int64> {
+            last trimmed = strings.trim(text);
+            let negative = false;
+            let start = 0;
+            if (trimmed.byte_length > 0 && trimmed.byte_at(0) == 45) {
+                negative = true;
+                start = 1;
+            }
+            if (trimmed.byte_length == start || trimmed.byte_length - start > 19) {
+                return result.Result<int64>.Err(error.custom("ui.integer", message));
+            }
+            let value: int64 = 0;
+            for (let i = start; i < trimmed.byte_length; i++) {
+                last byte = trimmed.byte_at(i);
+                if (byte < 48 || byte > 57) {
+                    return result.Result<int64>.Err(error.custom("ui.integer", message));
+                }
+                last digit = (byte - 48) as int64;
+                // Accumulate as a negative number, whose range includes the minimum.
+                if (value < (-9223372036854775807 - 1 + digit) / 10) {
+                    return result.Result<int64>.Err(error.custom("ui.integer", message));
+                }
+                value = value * 10 - digit;
+            }
+            if (!negative) {
+                if (value == -9223372036854775807 - 1) {
+                    return result.Result<int64>.Err(error.custom("ui.integer", message));
+                }
+                value = -value;
+            }
+            if (value < min || value > max) {
+                return result.Result<int64>.Err(error.custom("ui.integer", message));
+            }
+            return result.Result<int64>.Ok(value);
+        };
+
+    /// @brief A parser of an e-mail address by its shape only: one `@` with text before it, a domain
+    /// after it with a dot inside, and no spaces; trimmed. Otherwise `message`. Whether the address
+    /// exists is for the server to find out.
+    export let email = func(message: string) -> func(string) -> result.Result<string> =>
+        new func(text: string) -> result.Result<string> {
+            last trimmed = strings.trim(text);
+            last at = strings.index_of(trimmed, "@");
+            if (at <= 0 || strings.index_of_from(trimmed, "@", at + 1) >= 0 || strings.contains(trimmed, " ")) {
+                return result.Result<string>.Err(error.custom("ui.email", message));
+            }
+            last domain = trimmed.slice(at + 1, trimmed.byte_length);
+            last dot = strings.index_of(domain, ".");
+            if (dot <= 0 || strings.ends_with(domain, ".") || strings.contains(domain, "..")) {
+                return result.Result<string>.Err(error.custom("ui.email", message));
+            }
+            return result.Result<string>.Ok(trimmed);
+        };
+
+    // An element id the controls write: letters, digits, '-' and '_', starting with a letter.
+    let check_id = func(id: string) {
+        if (id.byte_length == 0) {
+            trap_with_message("invalid field id: an id is not empty");
+        }
+        for (let i = 0; i < id.byte_length; i++) {
+            last byte = id.byte_at(i);
+            last letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+            last other = (byte >= 48 && byte <= 57) || byte == 45 || byte == 95;
+            if (!letter && !(other && i > 0)) {
+                trap_with_message("invalid field id '" + id + "': use letters, digits, '-' and '_', starting with a letter");
+            }
+        }
+    };
+);

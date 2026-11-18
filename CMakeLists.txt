@@ -35,6 +35,19 @@ endif()
 
 project(Neura VERSION ${NEURA_VERSION_CORE} LANGUAGES CXX C)
 
+option(NEURA_WASM_RUNTIME "Build only the browser's wasm32 runtime" OFF)
+if(NEURA_WASM_RUNTIME)
+    if(NOT EMSCRIPTEN OR NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+        message(FATAL_ERROR "NEURA_WASM_RUNTIME requires the pinned wasm32 Emscripten toolchain")
+    endif()
+    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    get_filename_component(neura_emscripten_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+    get_filename_component(neura_emsdk_dir "${neura_emscripten_dir}/../.." ABSOLUTE)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-emsdk.py" "${neura_emsdk_dir}"
+        COMMAND_ERROR_IS_FATAL ANY)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fwasm-exceptions> -ffp-contract=off)
+endif()
+
 # The host target triple names launchers and release archives.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_host_arch)
 if(neura_host_arch MATCHES "^(x86_64|amd64)$")
@@ -80,9 +93,10 @@ option(NEURA_SDK "Build the SDK tools as well as the execution core" ON)
 # shared libraries of the tools. Calls within a translation unit stay direct
 # and inlinable (no semantic interposition), and thread-local variables use
 # the initial-exec model, valid because the shared libraries are always
-# loaded at program start, never with dlopen.
+# loaded at program start, never with dlopen. The browser runtime (Emscripten)
+# links statically and takes neither.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR (CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE))
+if(NOT EMSCRIPTEN AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR (CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE)))
     add_compile_options(-fno-semantic-interposition -ftls-model=initial-exec)
 endif()
 
@@ -104,6 +118,117 @@ add_library(neura_nvr STATIC
 )
 target_include_directories(neura_nvr PUBLIC src)
 neura_target_defaults(neura_nvr)
+
+# --- Kernels (docs/runtime/Kernels.md) ---------------------------------------
+# Deterministic, pure C functions that the runtime will call in place of
+# standard library code. They call no libm function (scripts/check-kernels.sh
+# checks the archive), so they add nothing to the release binaries' libc,
+# libm, and loader dependencies. Floating point keeps strict binary64
+# semantics: no contraction into fused multiply-add, no fast-math, and no
+# host-specific instruction selection. The image format links it, so the
+# loader checks an image's KERN table against the kernel table and the NVM
+# (neura_nvm and neura_nvm_static, hence every launcher) runs kernel exits;
+# the compiler checks kernel bindings against the same table.
+add_library(neura_kernels STATIC
+    src/kernels/neura_digest.c
+    src/kernels/neura_encoding.c
+    src/kernels/neura_hash.c
+    src/kernels/neura_integer_text.c
+    src/kernels/neura_kernel.c
+    src/kernels/neura_math.c
+    src/kernels/neura_sort.c
+    src/kernels/neura_text.c
+)
+target_include_directories(neura_kernels PUBLIC src/kernels)
+set_target_properties(neura_kernels PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(neura_kernels PRIVATE /W4 /WX /fp:strict)
+else()
+    target_compile_options(neura_kernels PRIVATE
+        -ffp-contract=off -fno-math-errno
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+target_link_libraries(neura_nvr PUBLIC neura_kernels)
+
+# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
+# and block assembly. The converter emits graphs with it and the lift
+# library regenerates them with it, so it depends only on the image format.
+add_library(neura_circuit STATIC
+    src/circuit/block_synth.cpp
+    src/circuit/circuit.cpp
+    src/circuit/float_circuit.cpp
+)
+target_link_libraries(neura_circuit PUBLIC neura_nvr)
+neura_target_defaults(neura_circuit)
+
+# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
+# expressions behind a block's graph, the structural and overflow proofs that
+# make them trustworthy, and their lowering to native 64-bit operations. It
+# depends on the circuit library and the image format only, so the runtime
+# can use it without compiler code. Float operations are lowered only where
+# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
+add_library(neura_lift STATIC
+    src/lift/expression.cpp
+    src/lift/hints.cpp
+    src/lift/lift.cpp
+    src/lift/lowered_block.cpp
+    src/lift/overflow.cpp
+    src/lift/proof.cpp
+    src/lift/recognize.cpp
+)
+target_link_libraries(neura_lift PUBLIC neura_circuit)
+if(NOT MSVC)
+    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
+endif()
+neura_target_defaults(neura_lift)
+
+if(NEURA_WASM_RUNTIME)
+    add_library(neura_nvm STATIC
+        src/nvm/host.cpp
+        src/nvm/layered.cpp
+        src/nvm/machine.cpp
+        src/nvm/scalar_text.cpp
+        src/nvm/tier1.cpp
+        src/nvm/tier2.cpp)
+    target_compile_definitions(neura_nvm PUBLIC NEURA_WASM_RUNTIME)
+    target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
+    target_link_options(neura_nvm INTERFACE -fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=0)
+    neura_target_defaults(neura_nvm)
+
+    option(NEURA_WASM_HOST "Link the portable browser NVM and its ES module loader" OFF)
+    if(NEURA_WASM_HOST)
+        add_executable(neura_wasm src/wasm/entry.cpp)
+        set_target_properties(neura_wasm PROPERTIES OUTPUT_NAME nvm SUFFIX .mjs)
+        target_link_libraries(neura_wasm PRIVATE neura_nvm)
+        set(neura_wasm_exports
+            _malloc _free _neura_wasm_interface _neura_wasm_open _neura_wasm_close _neura_wasm_error
+            _neura_wasm_advance _neura_wasm_respond _neura_wasm_deliver _neura_wasm_clock
+            _neura_wasm_has_proof _neura_wasm_prove_idle _neura_wasm_last_proof _neura_wasm_tier_stats)
+        list(JOIN neura_wasm_exports "','" neura_wasm_exports)
+        target_link_options(neura_wasm PRIVATE
+            --no-entry -sENVIRONMENT=web,node -sSTACK_SIZE=1048576 -sDYNAMIC_EXECUTION=0
+            -sMODULARIZE=1 -sEXPORT_ES6=1
+            "-sEXPORTED_FUNCTIONS=['${neura_wasm_exports}']"
+            "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','UTF8ToString']")
+        neura_target_defaults(neura_wasm)
+    endif()
+
+    option(NEURA_WASM_SMOKE "Link the portable runtime into a Node smoke fixture" OFF)
+    if(NEURA_WASM_SMOKE)
+        add_executable(neura_wasm_smoke tests/wasm/smoke.cpp)
+        target_link_libraries(neura_wasm_smoke PRIVATE neura_nvm)
+        target_link_options(neura_wasm_smoke PRIVATE
+            --no-entry -sENVIRONMENT=node -sSTACK_SIZE=1048576 -sMODULARIZE=1
+            "-sEXPORTED_FUNCTIONS=['_malloc','_free','_neura_smoke']"
+            "-sEXPORTED_RUNTIME_METHODS=['HEAPU8']")
+        neura_target_defaults(neura_wasm_smoke)
+    endif()
+    return()
+endif()
 
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
@@ -294,44 +419,13 @@ endif()
 # The data side of the install lifecycle (docs/Install.md): SHA-256, version
 # precedence, and the marker and release metadata formats. It has no
 # dependency on the rest of the tool, so the unit tests link only this.
-add_library(neura_lifecycle STATIC
-    src/cli/install_layout.cpp
-    src/util/sha256.cpp
-)
+add_library(neura_hash STATIC src/util/sha256.cpp)
+neura_target_defaults(neura_hash)
+
+add_library(neura_lifecycle STATIC src/cli/install_layout.cpp)
+target_link_libraries(neura_lifecycle PUBLIC neura_hash)
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
-
-# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
-# and block assembly. The converter emits graphs with it and the lift
-# library regenerates them with it, so it depends only on the image format.
-add_library(neura_circuit STATIC
-    src/circuit/block_synth.cpp
-    src/circuit/circuit.cpp
-    src/circuit/float_circuit.cpp
-)
-target_link_libraries(neura_circuit PUBLIC neura_nvr)
-neura_target_defaults(neura_circuit)
-
-# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
-# expressions behind a block's graph, the structural and overflow proofs that
-# make them trustworthy, and their lowering to native 64-bit operations. It
-# depends on the circuit library and the image format only, so the runtime
-# can use it without compiler code. Float operations are lowered only where
-# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
-add_library(neura_lift STATIC
-    src/lift/expression.cpp
-    src/lift/hints.cpp
-    src/lift/lift.cpp
-    src/lift/lowered_block.cpp
-    src/lift/overflow.cpp
-    src/lift/proof.cpp
-    src/lift/recognize.cpp
-)
-target_link_libraries(neura_lift PUBLIC neura_circuit)
-if(NOT MSVC)
-    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
-endif()
-neura_target_defaults(neura_lift)
 
 if(NEURA_SDK)
 add_library(neura_compiler STATIC
@@ -339,7 +433,10 @@ add_library(neura_compiler STATIC
     src/cli/diagnostic_render.cpp
     src/cli/source_loader.cpp
     src/cli/source_docs.cpp
+    src/lexer/island.cpp
     src/lexer/lexer.cpp
+    src/parser/css_stylesheet.cpp
+    src/parser/html_template.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
     src/neura-ir/derive_json.cpp
@@ -351,6 +448,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/scoped_resources.cpp
     src/neura-ir/event_guard.cpp
     src/neura-ir/specialize.cpp
+    src/neura-ir/type_of.cpp
     src/neura-ir/containment.cpp
     src/neura-ir/inline_limit.cpp
     src/neura-ir/hook_arguments.cpp
@@ -358,10 +456,12 @@ add_library(neura_compiler STATIC
     src/neura-ir/value_layout.cpp
     src/neura-ir/storage.cpp
     src/neura-ir/static_initialization.cpp
+    src/neura-ir/initialization_order.cpp
     src/neura-ir/task_analysis.cpp
     src/neura-ir/module_dispatch.cpp
     src/neura-ir/purity.cpp
     src/neura-ir/dispatch.cpp
+    src/neura-ir/frozen.cpp
     src/neura-ir/monitors.cpp
     src/neura-ir/kernel_signature.cpp
     src/neura-ir/verifier.cpp
@@ -392,7 +492,7 @@ add_library(neura_compiler STATIC
 )
 target_include_directories(neura_compiler PUBLIC src)
 target_include_directories(neura_compiler PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang)
+target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang neura_hash)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their
@@ -553,6 +653,59 @@ if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
             "${NEURA_LIBPQ_BUILD}/src/common/libpgcommon_shlib.a" "${NEURA_LIBPQ_BUILD}/src/port/libpgport_shlib.a"
             OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
     endif()
+endif()
+
+# HTTP/2 in the server host (docs/design/Backend030.md, "HTTP/2 and decision
+# 9"): ALPN h2 on the TLS listeners and h2c with prior knowledge, framed by
+# the static nghttp2 the server component lock pins. Off by default; the host
+# then speaks HTTP/1.1 only. NEURA_NGHTTP2_ROOT is the install prefix of that
+# build; the version must be the locked one, so a system libnghttp2 is never
+# linked by accident (NEURA_NGHTTP2_ALLOW_UNPINNED is for comparison builds).
+option(NEURA_ENABLE_SERVER_HTTP2 "Build HTTP/2 into the server host with the pinned nghttp2" OFF)
+set(NEURA_NGHTTP2_ROOT "" CACHE PATH "Install prefix of the pinned static nghttp2")
+option(NEURA_NGHTTP2_ALLOW_UNPINNED "Accept an nghttp2 other than the locked version (never for release)" OFF)
+if(NEURA_ENABLE_SERVER_HTTP2)
+    if(NOT UNIX OR EMSCRIPTEN)
+        message(FATAL_ERROR "The Neura server HTTP/2 transport requires POSIX sockets")
+    endif()
+    if(NOT NEURA_NGHTTP2_ROOT)
+        message(FATAL_ERROR "NEURA_ENABLE_SERVER_HTTP2 needs NEURA_NGHTTP2_ROOT, the install prefix of the "
+            "nghttp2 build packaging/server-components.lock.toml pins")
+    endif()
+    find_path(NEURA_NGHTTP2_INCLUDE_DIR nghttp2/nghttp2.h PATHS "${NEURA_NGHTTP2_ROOT}/include" NO_DEFAULT_PATH)
+    find_library(NEURA_NGHTTP2_LIBRARY NAMES libnghttp2.a
+        PATHS "${NEURA_NGHTTP2_ROOT}/lib" "${NEURA_NGHTTP2_ROOT}/lib64" NO_DEFAULT_PATH)
+    if(NOT NEURA_NGHTTP2_INCLUDE_DIR OR NOT NEURA_NGHTTP2_LIBRARY)
+        message(FATAL_ERROR "No static nghttp2 (include/nghttp2/nghttp2.h and lib/libnghttp2.a) under "
+            "${NEURA_NGHTTP2_ROOT}")
+    endif()
+    file(STRINGS "${NEURA_NGHTTP2_INCLUDE_DIR}/nghttp2/nghttp2ver.h" neura_nghttp2_version_line
+        REGEX "^#define NGHTTP2_VERSION \"")
+    string(REGEX REPLACE "^#define NGHTTP2_VERSION \"([^\"]*)\".*" "\\1" neura_nghttp2_version
+        "${neura_nghttp2_version_line}")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/packaging/server-components.lock.toml" neura_component_lock)
+    string(REGEX MATCH "\\[providers\\.nghttp2\\][^[]*version = \"([^\"]*)\"" neura_nghttp2_entry
+        "${neura_component_lock}")
+    set(neura_nghttp2_locked "${CMAKE_MATCH_1}")
+    if(NOT neura_nghttp2_version STREQUAL neura_nghttp2_locked)
+        if(NEURA_NGHTTP2_ALLOW_UNPINNED)
+            message(WARNING "nghttp2 ${neura_nghttp2_version} is not the locked ${neura_nghttp2_locked}: "
+                "this build is for comparison only")
+        else()
+            message(FATAL_ERROR "nghttp2 ${neura_nghttp2_version} under ${NEURA_NGHTTP2_ROOT} is not the "
+                "locked ${neura_nghttp2_locked}")
+        endif()
+    endif()
+    message(STATUS "Server HTTP/2: nghttp2 ${neura_nghttp2_version} (${NEURA_NGHTTP2_LIBRARY})")
+
+    find_package(Threads REQUIRED)
+    add_library(neura_nghttp2 STATIC IMPORTED)
+    set_target_properties(neura_nghttp2 PROPERTIES
+        IMPORTED_LOCATION "${NEURA_NGHTTP2_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NEURA_NGHTTP2_INCLUDE_DIR}")
+    target_sources(neura_server_http PRIVATE src/server/http2_connection.cpp)
+    target_link_libraries(neura_server_http PUBLIC neura_nghttp2 Threads::Threads)
+    target_compile_definitions(neura_server_http PUBLIC NEURA_SERVER_HTTP2_ENABLED)
 endif()
 
 # --- The Neura tools (docs/design/Products030.md) ------------------------------
@@ -837,6 +990,9 @@ neura_target_defaults(neura)
 
 install(TARGETS neura RUNTIME DESTINATION bin COMPONENT core)
 install(FILES LICENSE DESTINATION share/doc/neura COMPONENT core)
+# The WHATWG HTML entity table that the template lexer embeds (third_party/whatwg-html).
+install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura
+    RENAME LICENSE-WHATWG-HTML COMPONENT sdk)
 # The third install component, service, holds neurad when its target exists
 # (docs/design/Service030.md). Without it the component is empty, and
 # packaging/make-archive.sh still writes its manifest with no tool or file
@@ -865,40 +1021,6 @@ set(NEURA_LIBCLANG_TESTS ${BUILD_TESTING})
 add_subdirectory(third_party/neura-libclang)
 endif()
 
-# --- Kernels (docs/runtime/Kernels.md) ---------------------------------------
-# Deterministic, pure C functions that the runtime will call in place of
-# standard library code. They call no libm function (scripts/check-kernels.sh
-# checks the archive), so they add nothing to the release binaries' libc,
-# libm, and loader dependencies. Floating point keeps strict binary64
-# semantics: no contraction into fused multiply-add, no fast-math, and no
-# host-specific instruction selection. The image format links it, so the
-# loader checks an image's KERN table against the kernel table and the NVM
-# (neura_nvm and neura_nvm_static, hence every launcher) runs kernel exits;
-# the compiler checks kernel bindings against the same table.
-add_library(neura_kernels STATIC
-    src/kernels/neura_digest.c
-    src/kernels/neura_encoding.c
-    src/kernels/neura_hash.c
-    src/kernels/neura_integer_text.c
-    src/kernels/neura_kernel.c
-    src/kernels/neura_math.c
-    src/kernels/neura_sort.c
-    src/kernels/neura_text.c
-)
-target_include_directories(neura_kernels PUBLIC src/kernels)
-set_target_properties(neura_kernels PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-    POSITION_INDEPENDENT_CODE ON)
-if(MSVC)
-    target_compile_options(neura_kernels PRIVATE /W4 /WX /fp:strict)
-else()
-    target_compile_options(neura_kernels PRIVATE
-        -ffp-contract=off -fno-math-errno
-        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
-endif()
-target_link_libraries(neura_nvr PUBLIC neura_kernels)
 if(BUILD_TESTING)
     # Published vectors and boundary cases for each kernel family, plus the
     # math vectors of tests/stdlib/math/support/math-vectors.nra.
@@ -910,7 +1032,6 @@ if(BUILD_TESTING)
             COMMAND neura_kernel_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 endif()
-# --- End of kernels -----------------------------------------------------------
 
 # The server host (docs/design/Backend030.md): listeners, TLS when
 # NEURA_ENABLE_SERVER_TLS is on, and one request-worker process per request.
@@ -920,7 +1041,7 @@ endif()
 if(UNIX AND NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
     add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp
-        src/server/sql_channel.cpp src/server/sql_host.cpp)
+        src/server/worker_zygote.cpp src/server/sql_channel.cpp src/server/sql_host.cpp)
     target_include_directories(neura_server_worker PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(neura_server_worker PUBLIC neura_server_worker_wire)
     if(TARGET neura_sql)
@@ -975,6 +1096,13 @@ if(BUILD_TESTING AND NEURA_SDK)
         add_executable(neura_http_listener_foreground tests/server/http_listener_foreground.cpp)
         target_link_libraries(neura_http_listener_foreground PRIVATE neura_server_listeners Threads::Threads)
         neura_target_defaults(neura_http_listener_foreground)
+
+        if(NEURA_ENABLE_SERVER_HTTP2)
+            # The scripted HTTP/2 client of the server host tests.
+            add_executable(neura_http2_test_client tests/server/http2_test_client.cpp)
+            target_link_libraries(neura_http2_test_client PRIVATE neura_nghttp2)
+            neura_target_defaults(neura_http2_test_client)
+        endif()
     endif()
 
     if(TARGET neura_launcher)
@@ -1077,6 +1205,9 @@ if(BUILD_TESTING AND NEURA_SDK)
         if(NEURA_SERVER_TEST_CURL)
             list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
         endif()
+        if(TARGET neura_http2_test_client)
+            list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --http2-client "$<TARGET_FILE:neura_http2_test_client>")
+        endif()
         add_test(NAME server-host COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/server_host_test.py"
             --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
@@ -1111,6 +1242,15 @@ if(BUILD_TESTING AND NEURA_SDK)
                     ${NEURA_SQL_TEST_OPTIONS})
                 set_tests_properties(server-sql-postgres PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
             endif()
+        endif()
+        if(TARGET neura_http2_test_client)
+            # The same suite with request() over HTTP/2 (h2c, prior knowledge).
+            add_test(NAME server-host-h2c COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/server_host_test.py"
+                --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+                --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-host-h2c-test"
+                ${NEURA_SERVER_HOST_TEST_OPTIONS} --protocol h2c)
+            set_tests_properties(server-host-h2c PROPERTIES TIMEOUT 300)
         endif()
     endif()
     foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_hooks lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
@@ -1199,6 +1339,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/equivalence")
     set_tests_properties(records-equivalence PROPERTIES TIMEOUT 300)
+    # The 0.3.0 expression forms (docs/design/Expressions030.md) against the
+    # forms they are written out to, and programs that use them.
+    add_test(NAME expressions-equivalence COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/equivalence")
+    set_tests_properties(expressions-equivalence PROPERTIES TIMEOUT 300)
     add_test(NAME records-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/records.py" "$<TARGET_FILE:neura>")
     set_tests_properties(records-boundary PROPERTIES TIMEOUT 300)
@@ -1219,6 +1365,59 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME hook-references COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/hooks/references.py" "$<TARGET_FILE:neura>")
     set_tests_properties(hook-operations hook-references PROPERTIES TIMEOUT 300)
+
+    add_executable(neura_island_lexer_tests tests/lexer/html_island_tests.cpp)
+    target_link_libraries(neura_island_lexer_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_island_lexer_tests)
+    add_test(NAME lexer-islands COMMAND neura_island_lexer_tests)
+
+    add_executable(neura_html_template_tests tests/parser/html_template_tests.cpp)
+    target_link_libraries(neura_html_template_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_html_template_tests)
+    add_test(NAME parser-html-templates COMMAND neura_html_template_tests)
+
+    add_executable(neura_css_stylesheet_tests tests/parser/css_stylesheet_tests.cpp)
+    target_link_libraries(neura_css_stylesheet_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_css_stylesheet_tests)
+    add_test(NAME parser-css-stylesheets COMMAND neura_css_stylesheet_tests)
+
+    add_test(NAME app-html-typed COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/typed.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-html-typed PROPERTIES TIMEOUT 180)
+    add_test(NAME app-frozen-storage COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/frozen/storage.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-frozen-storage PROPERTIES TIMEOUT 180)
+    add_test(NAME app-ui-retained COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui/retained.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-retained PROPERTIES TIMEOUT 180)
+    add_test(NAME app-html-styles COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/styles.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-html-styles PROPERTIES TIMEOUT 180)
+    add_test(NAME app-ui-reconcile COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/reconcile.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 900)
+    add_test(NAME app-ui-trace COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/trace.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-trace PROPERTIES TIMEOUT 180)
+    # A Neura application in headless Chromium and Firefox through Std.Web.mount. It needs the browser
+    # runtime of the wasm-runtime preset (configure with -DNEURA_WASM_HOST=ON, build the neura_wasm target),
+    # Node, and the browsers. The two checks are registered only when that runtime exists when this build
+    # is configured, so that a build without it does not report them as skipped (CI refuses skipped tests);
+    # without Node or a browser they are still skipped.
+    set(NEURA_WEB_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/wasm-runtime" CACHE PATH
+        "Directory holding nvm.wasm and nvm.mjs for the browser checks")
+    if(EXISTS "${NEURA_WEB_RUNTIME_DIR}/nvm.wasm")
+        add_test(NAME app-web-browser COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/app-check.py" --neura "$<TARGET_FILE:neura>"
+            --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
+        set_tests_properties(app-web-browser PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+        # The front end of examples/apps/web-backend calling the server image of examples/server through a
+        # proxy; it also needs neura-server-host beside neura, and is skipped without it.
+        add_test(NAME app-web-backend COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/backend-check.py" --neura "$<TARGET_FILE:neura>"
+            --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
+        set_tests_properties(app-web-backend PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+    endif()
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.
@@ -1427,6 +1626,12 @@ if(BUILD_TESTING AND NEURA_SDK)
     foreach(suite IN ITEMS proof overflow execute corpus floats)
         add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+    # Graphs and proofs that do not depend on the C++ compiler (tests/lift/portable.cmake).
+    add_test(NAME lift-portable COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/lift-portable"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lift/portable.cmake")
 
     add_test(NAME backend-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"
@@ -1533,6 +1738,36 @@ if(BUILD_TESTING AND NEURA_SDK)
         )
         set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
     endforeach()
+
+    # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the
+    # pinned Electron 45.3.3 of hosts/desktop/engine.lock, Node and xvfb-run, so they are registered only when
+    # NEURA_DESKTOP_ENGINE names that Electron executable. Each starts X servers and Electron processes, so they
+    # run one at a time.
+    set(NEURA_DESKTOP_ENGINE "" CACHE FILEPATH
+        "The pinned Electron 45.3.3 executable; when set, the desktop tests are registered")
+    if(NEURA_DESKTOP_ENGINE)
+        if(NOT EXISTS "${NEURA_DESKTOP_ENGINE}")
+            message(FATAL_ERROR "NEURA_DESKTOP_ENGINE names no file: ${NEURA_DESKTOP_ENGINE}")
+        endif()
+        find_program(NEURA_DESKTOP_NODE node REQUIRED)
+        find_program(NEURA_DESKTOP_XVFB_RUN xvfb-run REQUIRED)
+        set(neura_desktop_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
+        add_test(NAME desktop-native-child COMMAND "${NEURA_DESKTOP_NODE}" --test
+            "${neura_desktop_tests}/native_child_test.js")
+        add_test(NAME desktop-shell COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_shell_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --case shell --case child-mismatch --case child-close --case child-quit
+            --case child-crash)
+        add_test(NAME desktop-app COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_app_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
+        add_test(NAME desktop-package COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_package_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
+        set_tests_properties(desktop-native-child desktop-shell desktop-app desktop-package PROPERTIES
+            RUN_SERIAL TRUE LABELS desktop WORKING_DIRECTORY "${neura_desktop_tests}")
+        set_tests_properties(desktop-app desktop-package PROPERTIES TIMEOUT 1200)
+    else()
+        message(STATUS "NEURA_DESKTOP_ENGINE is not set: the desktop tests are not registered "
+            "(desktop-native-child, desktop-shell, desktop-app, desktop-package)")
+    endif()
 
     add_test(NAME c-import COMMAND ${CMAKE_COMMAND}
         "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"

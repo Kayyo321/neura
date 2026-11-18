@@ -1,0 +1,2 @@
+// A hole that calls a function value, whose effects are unknown (E1010).
+let total = html(format: func(int) -> string, count: int) { <output>{ format(count) }</output> };

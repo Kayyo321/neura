@@ -38,12 +38,14 @@ static_assert(max_op_records == 69);
 constexpr std::uint8_t max_op_1_14 = static_cast<std::uint8_t>(IrOp::Yield);
 static_assert(static_cast<unsigned>(IrOp::Cleanup) == 70 && static_cast<unsigned>(IrOp::Pending) == 71 &&
               max_op_1_14 == 72);
+constexpr std::uint8_t max_op_expressions = static_cast<std::uint8_t>(IrOp::TypeOf);
+static_assert(static_cast<unsigned>(IrOp::ConcatText) == 73 && max_op_expressions == 74);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
-constexpr std::uint16_t newest_node_minor = nir_records_minor;
+constexpr std::uint16_t newest_node_minor = nir_expressions_minor;
 
 bool hook_attribute(const IrSymbol& symbol) {
     return has_attribute(symbol, AttributeId::HookGet) || has_attribute(symbol, AttributeId::HookSet) ||
@@ -127,7 +129,8 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (node.op == IrOp::ConformanceCall) return nir_records_minor;
+        if (node.op == IrOp::ConcatText || node.op == IrOp::TypeOf) return nir_expressions_minor;
+        if (node.op == IrOp::ConformanceCall) version = std::max(version, nir_records_minor);
         if (is_deferred_initialize(node)) {
             version = std::max(version, attribute_minor);
         } else if (op > max_op_1_7 || node.poll) {
@@ -528,7 +531,7 @@ private:
         // Events are derived on the linked program and never stored.
         if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
             throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
-        if (static_cast<std::uint8_t>(value.op) > max_op_1_14)
+        if (static_cast<std::uint8_t>(value.op) > max_op_expressions)
             throw NirError("invalid operation tag " + std::to_string(static_cast<unsigned>(value.op)));
         if (linked_argument_annotation(value)) throw NirError("argument transport is derived after linking");
         // Only bodies carry polls, and a body with one makes the file 1.9.
@@ -568,7 +571,8 @@ public:
         // no operation here.
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14,
+            max_op_expressions};
         static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;

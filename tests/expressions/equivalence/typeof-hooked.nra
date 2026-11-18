@@ -1,0 +1,31 @@
+// typeof of a reference to a class with a get hook (docs/design/
+// Expressions030.md, typeof): the hook runs once, when the operand is read,
+// however many class tests describe the value.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let reads = 0;
+
+let Session = class (
+    | get: {
+        reads = reads + 1;
+        return instance;
+    };
+    export let user: string = "";
+    export let init = func(user: string) => set;
+);
+let Admin = class : Session (
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let session: Session = new Admin("root");
+        let before = reads;
+        let info = typeof(session);
+        console.print_line(info.name + " " + (reads - before).to_string());
+        return program.ExitCode.Ok;
+    };
+);

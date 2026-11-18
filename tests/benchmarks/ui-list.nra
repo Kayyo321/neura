@@ -1,0 +1,56 @@
+// sizes: 10 20
+// scaling: 2.1
+// Budget B-W8 on the model host: a keyed list control of 1,000 rows, then n clicks that each
+// replace one row, render the list once and commit. The figures cover the Neura side of a turn
+// only: the model host does not reconcile views against a document.
+let console = import:Std.Io.Console;
+let controls = import:Std.Ui.Controls;
+let frozen = import:Std.Collections.Frozen;
+let int32s = import:Std.Core.Int32;
+let model = import:Std.Ui.ModelHost;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+#Immutable
+let Row = class (
+    export last key: string;
+    export last count: int32;
+
+    export let init = func(key: string, count: int32) => set;
+);
+
+let row_view = html(key: string, count: int32) {
+    <span data-key={key}>{count}</span>
+};
+
+export let UiListBenchmark = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let initial: Row[list] = new;
+        for (let i = 0; i < 1000; i = i + 1) {
+            initial.append(new Row("r" + i.to_string(), 0));
+        }
+        let rows = new ui.State<frozen.FrozenList<Row>>(frozen.copy_of_list<Row>(initial));
+        let listing = controls.list<Row>(rows, new func(row: Row) -> string => row.key,
+            new func(row: Row) -> ui.View => row_view(row.key, row.count));
+        let host = new model.Host();
+        let root = result.expect<ui.Root>(ui.mount(host, "#app", listing), "mount");
+        for (let i = 0; i < n; i = i + 1) {
+            last at = (i * 37) % 1000;
+            host.click(1, listing, new func(event: ui.ClickEvent) {
+                rows.update(func(all: frozen.FrozenList<Row>) -> frozen.FrozenList<Row> =>
+                    all.replaced(at, new Row(all.get(at).key, all.get(at).count + 1)));
+            });
+            host.end_batch();
+            root.turn();
+            host.clear_log();
+        }
+        if (listing.render_count() != (n as int64) + 1 || rows.get().get(37).count != 1) {
+            console.print_line("wrong rows");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

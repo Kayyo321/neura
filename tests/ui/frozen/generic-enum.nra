@@ -1,0 +1,9 @@
+// A generic enum is deeply immutable only when its type arguments are (E0580).
+let optional = import:Std.Core.Optional;
+let ui = import:Std.Ui;
+
+let Draft = class (
+    export let text: string = "";
+);
+
+let draft = new ui.State<optional.Optional<Draft>>(optional.Optional<Draft>.None);

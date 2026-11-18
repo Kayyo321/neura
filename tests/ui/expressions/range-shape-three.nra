@@ -1,0 +1,3 @@
+// Edge case 34 of docs/design/Expressions030.md: an integer range has two
+// bounds, so a third bound is E0263 at the second operator.
+let range = func() -> int[] => 1 .. 2 .. 3;

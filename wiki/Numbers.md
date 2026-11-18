@@ -18,7 +18,7 @@ This page specifies Neura's integer and floating-point types: their representati
 
 ### Integer literals
 
-A literal is a sequence of decimal digits. It takes the integer type that its context expects. With no expected type it is `int32`. A literal outside its type's range is a compile-time error at the literal. A leading `-` belongs to the literal, so `-128` is a valid `int8` and `-9223372036854775808` a valid `int64`. A minus applied to an unsigned literal other than zero is out of range.
+A literal is a sequence of decimal digits. It takes the integer type that its context expects. With no expected type it is `int32`. A [character literal](CoreLanguage#character-literals), such as `'A'`, is an integer literal of its byte's value with the same contextual typing, except that with no expected type it is `byte`. A literal outside its type's range is a compile-time error at the literal. A leading `-` belongs to the literal, so `-128` is a valid `int8` and `-9223372036854775808` a valid `int64`. A minus applied to an unsigned literal other than zero is out of range.
 
 ### Integer arithmetic
 

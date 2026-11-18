@@ -315,6 +315,10 @@ public:
                             policy_comment(args.at(0)) + ", " + a(1) + (args.size() == 3 ? ", " + a(2) : "") + ")";
                 break;
             case nvr::StateOp::HookLeave: operation = "hook_leave()"; break;
+            // A string chain: its operands in order, one allocation.
+            case nvr::StateOp::ConcatText:
+                operation = "concat_text(" + values(function, args, lifted, inputs) + ")";
+                break;
             case nvr::StateOp::Kernel: {
                 // A built-in C kernel: named by its KERN entry and opaque, as
                 // its behaviour is not in the circuit (Decompiler.md).
