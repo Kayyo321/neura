@@ -12,7 +12,7 @@ export let Storage = module (
 
     /// @brief Preserves a slot's ordinary Neura type, including a callable's signature.
     #NotThreadSafe
-    export let Payload = class<T> : Slot (
+    export let Payload = class<T>:Slot (
         export last value: T;
 
         export let init = func(index: uint32, value: T) {

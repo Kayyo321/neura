@@ -113,10 +113,10 @@ export let Ui = module (
     export let DiagnosticKind = enum (
         /// A view object appears twice in the committed tree, or is already mounted.
         ViewReused,
-        /// Two items of one `@for` have equal keys.
-        DuplicateKey,
-        /// A commit limit (`U-4` to `U-6`) is exceeded.
-        LimitExceeded
+            /// Two items of one `@for` have equal keys.
+            DuplicateKey,
+            /// A commit limit (`U-4` to `U-6`) is exceeded.
+            LimitExceeded
     );
 
     /// @brief A refused commit: what, which slot, and for a keyed item its position and key.
@@ -158,8 +158,8 @@ export let Ui = module (
     export let RenderOutcome = enum (
         /// The view is mounted.
         Committed,
-        /// The view was refused; the previous view stays mounted and live.
-        Invalid(Diagnostic)
+            /// The view was refused; the previous view stays mounted and live.
+            Invalid(Diagnostic)
     );
 
     /// @brief Returns a URL after checking that it is a reference or uses an allowed scheme.
@@ -694,7 +694,7 @@ export let Ui = module (
         export last overflow: uint32;
 
         export let init = func(listener: uint64, target: Component, generation: uint64, coalesce: bool,
-                               deliver: func() -> void, overflow: uint32) => set;
+            deliver: func() -> void, overflow: uint32) => set;
 
         /// @brief `QueuedEvent(` the listener, or the overflow count `)`.
         export let.override to_string = func -> string {
@@ -731,7 +731,7 @@ export let Ui = module (
         export let stopped: bool = false;
 
         export let init = func(id: uint64, launch: func(Launch, channels.Sender<uint64>) -> void,
-                               finish: func(uint64) -> bool, cancel: func() -> void) => set;
+            finish: func(uint64) -> bool, cancel: func() -> void) => set;
 
         /// Asks the run to cancel, once.
         export let stop = func {
@@ -806,7 +806,7 @@ export let Ui = module (
 
         #Internal
         export let init = func(components: int32, subscriptions: int32, queued: int32, turns: uint64, renders: uint64,
-                               commits: uint64, dropped: uint64, discarded: uint64) => set;
+            commits: uint64, dropped: uint64, discarded: uint64) => set;
 
         /// @brief Every count, by name.
         export let.override to_string = func -> string =>
@@ -1199,7 +1199,7 @@ export let Ui = module (
         /// applies its completion in a turn, and `stop` asks it to cancel.
         #Internal
         export let launch = func(start: func(Launch, channels.Sender<uint64>) -> void, finish: func(uint64) -> bool,
-                                 stop: func() -> void) -> uint64 {
+            stop: func() -> void) -> uint64 {
             ticket_count += 1;
             last ticket = new Ticket(ticket_count, start, finish, stop);
             tickets.append(ticket);
@@ -1253,7 +1253,6 @@ export let Ui = module (
             flush();
         };
 
-
         /// @brief Clears a fault: the host empties the root, every component renders again and the root takes events.
         export let reset = func {
             if (closed) {
@@ -1281,7 +1280,7 @@ export let Ui = module (
             last counts: int32[] = [0, 0];
             count_tree(top, counts);
             return new RootStats(counts[0], counts[1], queue.length, turn_total, render_total, commit_total,
-                                 dropped_total, discarded_total);
+                dropped_total, discarded_total);
         };
 
         #Internal
@@ -1483,11 +1482,11 @@ export let Ui = module (
     export let Wake = enum (
         /// The host posted events to the root.
         Events,
-        /// A command run finished; its ticket, received from the completions channel.
-        Completed(uint64),
-        /// No event is ready and none will be posted until a command completes: the root waits for
-        /// the next completion itself.
-        Idle
+            /// A command run finished; its ticket, received from the completions channel.
+            Completed(uint64),
+            /// No event is ready and none will be posted until a command completes: the root waits for
+            /// the next completion itself.
+            Idle
     );
 
     /// @brief A host that can wait for its own events and for command completions together. A root
@@ -1520,7 +1519,6 @@ export let Ui = module (
         /// @brief Focuses the element; false when the root has no element with that `id`.
         let focus = func(root: uint64, element_id: string) -> bool;
     );
-
 
     /// @brief Opens a root on `target` of `host`, renders `top` and commits it. `Err` when the host
     /// refuses the target (a second root on one element, more than U-9 roots) or `top` is mounted.

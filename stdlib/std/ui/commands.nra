@@ -32,8 +32,8 @@ export let Commands = module (
     // The task of one command run: it runs `work` in a scope of its own, so that stopping the run
     // cancels only that work, then reports the outcome and the ticket.
     let perform = func<I, O>(work: func(I) -> result.Result<O>, input: I, generation: uint64,
-                             results: channels.Sender<Finished<O>>, stop: channels.Receiver<int>,
-                             done: channels.Sender<uint64>, ticket: uint64) {
+        results: channels.Sender<Finished<O>>, stop: channels.Receiver<int>,
+        done: channels.Sender<uint64>, ticket: uint64) {
         scope (own) {
             let job = spawn work(input);
             select {
@@ -113,10 +113,10 @@ export let Commands = module (
                 new func(launch: ui.Launch, done: channels.Sender<uint64>) {
                     perform<I, O>(job, input, generation, results, stop, done, launch.ticket);
                 },
-                new func(id: uint64) -> bool => self.finish(id, outcomes),
-                new func() {
-                    stopping.close();
-                });
+                    new func(id: uint64) -> bool => self.finish(id, outcomes),
+                    new func() {
+                        stopping.close();
+                    });
             in_flight.append(ticket);
             running_root = root;
             state.set(CommandState<O>.Running);

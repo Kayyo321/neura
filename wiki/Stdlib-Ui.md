@@ -356,23 +356,23 @@ The following public declarations are taken from the module source; each links t
   Asks the run `id` to cancel. A run not started yet is dropped, never completes, and true is returned.
 - **Ui.Root** · [`export let complete = func(id: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1243)
   One turn: the completion of the run `id`.
-- **Ui.Root** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1258)
+- **Ui.Root** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1257)
   Clears a fault: the host empties the root, every component renders again and the root takes events.
-- **Ui.Root** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1269)
+- **Ui.Root** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1268)
   Unmounts the component tree and closes the root on the host.
-- **Ui.Root** · [`export let stats = func -> RootStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1280)
+- **Ui.Root** · [`export let stats = func -> RootStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1279)
   The root's counts.
-- **Ui.Root** · [`export let start = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1288)
-- **Ui.Root** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1436)
+- **Ui.Root** · [`export let start = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1287)
+- **Ui.Root** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1435)
   `Root(handle N)` with its state.
-- **Ui** · [`export let Wake = enum (  Events,  Completed(uint64),   Idle )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1483)
+- **Ui** · [`export let Wake = enum (  Events,  Completed(uint64),   Idle )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1482)
   What a root's `TaskHost.wait_with` saw first.
-- **Ui** · [`export let TaskHost = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1500)
+- **Ui** · [`export let TaskHost = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1499)
   A host that can wait for its own events and for command completions together. A root run by `Std.Ui.Commands.run`, with commands in flight and no event queued, calls `wait_with` instead of `wait`. The host returns `Events` after posting events, or `Completed` with a ticket it received from `completions`, whichever comes first; or `Idle` when it will post nothing until a command completes. A host may open a scope of its own for the wait, for example to race a cancellable host request against the channel, as long as every task it starts has finished when `wait_with` returns.
-- **Ui** · [`export let HistoryHost = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1507)
+- **Ui** · [`export let HistoryHost = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1506)
   A host that keeps the history of a document: the router reads and changes the location through it. Paths are absolute (`/parts/7`). The host reports a navigation the program did not make with `root.post_navigation(path)`.
-- **Ui** · [`export let FocusHost = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1519)
+- **Ui** · [`export let FocusHost = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1518)
   A host that can move the keyboard focus to an element of a root, named by its `id`.
-- **Ui** · [`export let mount = func(host: Host, target: string, top: Component) -> result.Result<Root>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1527)
+- **Ui** · [`export let mount = func(host: Host, target: string, top: Component) -> result.Result<Root>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui.nra#L1525)
   Opens a root on `target` of `host`, renders `top` and commits it. `Err` when the host refuses the target (a second root on one element, more than U-9 roots) or `top` is mounted.
 <!-- END SOURCE API -->

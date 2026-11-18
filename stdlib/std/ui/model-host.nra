@@ -90,7 +90,7 @@ export let ModelHost = module (
 
         /// @brief Adds a pointer move, which a root coalesces per listener, to the batch being scripted.
         export let pointer_move = func(listener: uint64, target: ui.Component, handler: func(ui.PointerEvent) -> void,
-                                       x: float64, y: float64) {
+            x: float64, y: float64) {
             last event = new ui.PointerEvent(x, y, 0, ui.PointerKind.Mouse, new ui.Modifiers(false, false, false, false));
             scripting.steps.append(new Step(listener, target, true, new func() {
                 handler(event);
@@ -99,7 +99,7 @@ export let ModelHost = module (
 
         /// @brief Adds an input event with `value` to the batch being scripted.
         export let input = func(listener: uint64, target: ui.Component, handler: func(ui.InputEvent) -> void,
-                                value: string) {
+            value: string) {
             last event = new ui.InputEvent(value, false, false);
             scripting.steps.append(new Step(listener, target, false, new func() {
                 handler(event);
@@ -108,7 +108,7 @@ export let ModelHost = module (
 
         /// @brief Adds a change event with `value` and `checked` to the batch being scripted.
         export let change = func(listener: uint64, target: ui.Component, handler: func(ui.ChangeEvent) -> void,
-                                 value: string, checked: bool) {
+            value: string, checked: bool) {
             last event = new ui.ChangeEvent(value, checked);
             scripting.steps.append(new Step(listener, target, false, new func() {
                 handler(event);
@@ -133,7 +133,7 @@ export let ModelHost = module (
 
         /// @brief Adds an input event that the host posts when a root resynchronizes after an overflow.
         export let input_on_resynchronize = func(listener: uint64, target: ui.Component,
-                                                 handler: func(ui.InputEvent) -> void, value: string) {
+            handler: func(ui.InputEvent) -> void, value: string) {
             last event = new ui.InputEvent(value, false, false);
             resync.steps.append(new Step(listener, target, false, new func() {
                 handler(event);
@@ -413,7 +413,7 @@ export let ModelHost = module (
             }
             last reconciler = reconcilers[index];
             return new ui.HostStats(reconciler.node_count() as int64, reconciler.handler_count() as int64,
-                                    reconciler.template_count() as int64, 0);
+                reconciler.template_count() as int64, 0);
         };
 
         export let wait = func(root: ui.Root) -> bool {

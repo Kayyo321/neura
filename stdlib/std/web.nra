@@ -513,7 +513,7 @@ export let Web = module (
                     }
                     last modifiers = reader.modifiers();
                     deliver<ui.PointerEvent>(root, mounted, handler, kind == 12,
-                                             new ui.PointerEvent(x, y, button, pointer, modifiers));
+                        new ui.PointerEvent(x, y, button, pointer, modifiers));
                 } else if (kind == 13) {
                     last top = reader.f64();
                     last left = reader.f64();

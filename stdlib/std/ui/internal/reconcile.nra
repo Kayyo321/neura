@@ -234,7 +234,7 @@ export let Reconcile = module (
                     result.attributes.append(["", "", number_of(optional.expect<json.JsonValue>(slot, "slot"))]);
                 } else {
                     result.attributes.append([text_of(required(fields, "name")), text_of(required(fields, "value")),
-                                              -1]);
+                        -1]);
                 }
             }
             for (let child in items_of(required(members, "children"))) {
@@ -367,7 +367,7 @@ export let Reconcile = module (
         export let touched: uint64 = 0;
 
         export let init = func(owner: class, key: string, nodes: VNode[list], views: ui.View[list], count: int,
-                               nested: Memo[list], pass: uint64) {
+            nested: Memo[list], pass: uint64) {
             instance.owner = owner;
             instance.key = key;
             instance.nodes = nodes;
@@ -397,7 +397,7 @@ export let Reconcile = module (
 
         export let.override to_string = func -> string =>
             (diagnostic == nil) ? "Plan(" + operations.length.to_string() + " operations)"
-                                : "Plan(invalid: " + diagnostic.message + ")";
+            : "Plan(invalid: " + diagnostic.message + ")";
     );
 
     // Thrown out of an expansion when the view is refused.
@@ -492,7 +492,7 @@ export let Reconcile = module (
         };
 
         let refuse = func(state: Expansion, kind: ui.DiagnosticKind, message: string, slot: uint32, index: int64,
-                          key: string) {
+            key: string) {
             if (state.refusal == nil) {
                 state.refusal = new ui.Diagnostic(kind, message, slot, index, key);
             }
@@ -508,7 +508,7 @@ export let Reconcile = module (
         let value_bytes = func(state: Expansion, text: string, slot: uint32) {
             if (text.byte_length > MaxValueBytes) {
                 refuse(state, ui.DiagnosticKind.LimitExceeded, "U-6: a text or attribute value holds at most 1 MiB",
-                       slot, -1, "");
+                    slot, -1, "");
             }
         };
 
@@ -520,7 +520,7 @@ export let Reconcile = module (
             last here = view.owner != nil && view.owner === instance;
             if (view.owner != nil &&
                 ((here && (view.pass == pass || (view.pass == mounted_pass && state.fresh))) ||
-                 (!here && view.owner is Reconciler && (view.owner as Reconciler).holds(view.pass)))) {
+                    (!here && view.owner is Reconciler && (view.owner as Reconciler).holds(view.pass)))) {
                 refuse(state, ui.DiagnosticKind.ViewReused, "a view appears once in one tree, in one root", 0, -1, "");
                 return false;
             }
@@ -565,7 +565,7 @@ export let Reconcile = module (
             state.fresh = outer_fresh;
             if (state.reuse && state.refusal == nil) {
                 last memo = new Memo(instance, key, slice_nodes(out, first_node), slice_views(state.claimed, first_view),
-                                     state.nodes - counted, slice_memos(state.memos, first_memo), pass);
+                    state.nodes - counted, slice_memos(state.memos, first_memo), pass);
                 child.reconciled = memo;
                 state.memos.append(memo);
             }
@@ -638,7 +638,7 @@ export let Reconcile = module (
         };
 
         let expand_nodes = func(fragment: TFragment, values: storage.Slot[list], nodes: TNode[list], origin: string,
-                                key: string, pass: uint64, state: Expansion, out: VNode[list]) {
+            key: string, pass: uint64, state: Expansion, out: VNode[list]) {
             let i = 0;
             while (i < nodes.length && state.refusal == nil) {
                 last node = nodes[i];
@@ -659,14 +659,14 @@ export let Reconcile = module (
                             element.attributes.append([attribute[0], attribute[1]]);
                         } else {
                             bind(fragment.slots[attribute[2] as int], attribute[2] as uint32,
-                                 values[attribute[2] as int], element, state);
+                                values[attribute[2] as int], element, state);
                         }
                     }
                     expand_nodes(fragment, values, node.children, where + ".", path, pass, state, element.children);
                     out.append(element);
                 } else {
                     expand_slot(fragment.slots[node.slot as int], node.slot, values[node.slot as int], where, path,
-                                pass, state, out);
+                        pass, state, out);
                 }
                 i += 1;
             }
@@ -717,7 +717,7 @@ export let Reconcile = module (
         };
 
         let expand_slot = func(slot: TSlot, index: uint32, value: storage.Slot, origin: string, key: string,
-                               pass: uint64, state: Expansion, out: VNode[list]) {
+            pass: uint64, state: Expansion, out: VNode[list]) {
             if (value == nil) {
                 return;
             }
@@ -742,17 +742,17 @@ export let Reconcile = module (
                     last item = ordered[position as int];
                     if (position == MaxItems as int64) {
                         refuse(state, ui.DiagnosticKind.LimitExceeded, "U-4: an @for commits at most 10000 items",
-                               index, position, item.key);
+                            index, position, item.key);
                         return;
                     }
                     if (seen.contains_key(item.key)) {
                         refuse(state, ui.DiagnosticKind.DuplicateKey,
-                               "two items of one @for have the key '" + item.key + "'", index, position, item.key);
+                            "two items of one @for have the key '" + item.key + "'", index, position, item.key);
                         return;
                     }
                     seen.set(item.key, true);
                     expand_view(item.view, key + "k" + item.key.byte_length.to_string() + ":" + item.key, pass, state,
-                                out);
+                        out);
                     position += 1;
                 }
             }
@@ -1004,7 +1004,7 @@ export let Reconcile = module (
 
         // A node reused in `pass` is its own old node, with its whole subtree: nothing in it changes.
         let changes = func(nodes: VNode[list], contents: Operation[list], listeners: Operation[list],
-                           properties: Operation[list], pass: uint64) {
+            properties: Operation[list], pass: uint64) {
             for (let node in nodes) {
                 if (node.reused == pass) {
                     continue;

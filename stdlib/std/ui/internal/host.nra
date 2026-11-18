@@ -26,6 +26,7 @@ export let Host = module (
     /// @brief Registers a template descriptor after the host checks its encoding and the limits U-1 to U-3.
     export let register_template = func(root: int64, descriptor: string) -> HandleOutcome
         host("neura.ui.template", 1);
+
     /// @brief Applies one encoded commit, all or nothing for a rejected batch.
     export let commit = func(root: int64, operations: uint8[list]) -> DoneOutcome host("neura.ui.commit", 1);
     /// @brief Waits for at least one event of the root and returns at most `max` of them, encoded.

@@ -19,8 +19,8 @@ const PageStyles = css {
 };
 
 let form_view = html(name: string, on_name: func(ui.InputEvent) -> void, message: string,
-                     on_message: func(ui.InputEvent) -> void, on_greet: func(ui.ClickEvent) -> void,
-                     on_send: func(ui.ClickEvent) -> void) {
+    on_message: func(ui.InputEvent) -> void, on_greet: func(ui.ClickEvent) -> void,
+    on_send: func(ui.ClickEvent) -> void) {
     <p>
         <label for="name">Name</label>
         <input type="text" id="name" prop:value={name} on:input={on_name}>
@@ -99,7 +99,7 @@ let send_call = func(call: Call) -> result.Result<string> {
             };
             if (!response.ok()) {
                 return result.Result<string>.Err(error.custom("example.status",
-                                                             "the server answered " + response.status.to_string()));
+                    "the server answered " + response.status.to_string()));
             }
             return result.Result<string>.Ok(text);
         },

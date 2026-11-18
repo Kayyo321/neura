@@ -11,7 +11,7 @@ let routing = import:Std.Ui.Routing;
 let ui = import:Std.Ui;
 
 let shell_view = html(home: ui.Url, go_home: func(ui.ClickEvent) -> void, contact: ui.Url,
-                      go_contact: func(ui.ClickEvent) -> void, page: ui.View) {
+    go_contact: func(ui.ClickEvent) -> void, page: ui.View) {
     <header>
         <nav>
             <a href={home} on:click.prevent_default={go_home}>Home</a>
@@ -37,13 +37,13 @@ let page = func(title: string, body: string) -> ui.Component =>
     ui.component<string>(new ui.State<string>(body), new func(text: string) -> ui.View => text_view(title, text));
 
 let contact_page = func(form: forms.Form, name: forms.Field<string>, email: forms.Field<string>,
-                        message: forms.Field<string>, send: func() -> void) -> ui.Component {
+    message: forms.Field<string>, send: func() -> void) -> ui.Component {
     last name_input = controls.text_input<string>(name, "text");
     last email_input = controls.text_input<string>(email, "email");
     last message_input = controls.text_area<string>(message);
     return controls.form(form, send, new func(state: forms.FormState) -> ui.View =>
         contact_view(ui.slot(name_input), ui.slot(email_input), ui.slot(message_input),
-                     controls.submit_button("Send"), state.submitted));
+            controls.submit_button("Send"), state.submitted));
 };
 
 let Main = module:program.Entry (
@@ -68,7 +68,7 @@ let Main = module:program.Entry (
         router.otherwise(new func(path: string) -> ui.Component => page("Not found", "Nothing lives at " + path + "."));
         let site = ui.component<bool>(new ui.State<bool>(true), new func(unused: bool) -> ui.View =>
             shell_view(router.link("/"), router.on_link("/"), router.link("/contact"), router.on_link("/contact"),
-                       ui.slot(router.component())));
+                ui.slot(router.component())));
 
         // The visitor opens a deep link, goes to the contact page, sends an empty form, fills it in,
         // and sends it again.

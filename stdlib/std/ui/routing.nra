@@ -266,7 +266,7 @@ export let Routing = module (
                 }
             }
             return new Location(target, query, best.pattern,
-                                new Params(frozen.copy_of_list<string>(names), frozen.copy_of_list<string>(best_values)));
+                new Params(frozen.copy_of_list<string>(names), frozen.copy_of_list<string>(best_values)));
         };
 
         /// @brief The number of routes.
@@ -371,7 +371,7 @@ export let Routing = module (
                 for (let j = 0; j < names.length; j++) {
                     if (names[j] == name) {
                         trap_with_message("invalid route pattern '" + pattern + "': the parameter '" + name
-                                          + "' appears twice");
+                            + "' appears twice");
                     }
                 }
                 names.append(name);
@@ -381,7 +381,7 @@ export let Routing = module (
                     if (byte <= 32 || byte == 127 || byte == 123 || byte == 125 || byte == 42 || byte == 63
                         || byte == 35 || byte == 37) {
                         trap_with_message("invalid route pattern '" + pattern + "': segment '" + piece
-                                          + "' has a character a literal segment cannot have");
+                            + "' has a character a literal segment cannot have");
                     }
                 }
             }
