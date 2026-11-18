@@ -87,16 +87,36 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | `epoll` and `io_uring` driver backends, `NEURA_IO_BACKEND` | implemented on Linux, feature-detected with fallback to `poll(2)`, which stays the default; completion order is the request sequence under every backend | `nvm-wait-source-epoll`, `nvm-wait-source-io-uring`; `concurrency-io` and `backend-concurrency` run under each |
 | `kqueue` driver backend | not provided: no BSD or macOS machine qualifies it in this release | |
 | kTLS | not provided on this machine, see "kTLS" below | |
-| Fork and VM-generation detection, `neura.process.generation` | implemented for `fork` (a change of process ID) and, on Linux with a vmgenid device, for a VM snapshot restore or clone (the `NEW_VMGENID=1` uevent) | `backend-host` for fork and the uevent parser; no vmgenid device on this machine, so a restore was not observed |
+| Fork and VM-generation detection, `neura.process.generation` | implemented for `fork` (a change of process ID) and, on Linux with a vmgenid device, for a VM snapshot restore or clone (the `NEW_VMGENID=1` uevent) | `backend-host` for fork and the uevent parser. Unverified here: the kernel has the driver (`CONFIG_VMGENID=y`) but this machine has no vmgenid device, so no restore was observed, and the `NEW_VMGENID=1` field is taken from the kernel driver's documented behavior, not from a captured uevent |
 | `RDSEED` and `RNDR`, `neura.entropy.hardware` | implemented on x86-64 and AArch64 Linux; 13 elsewhere or without the instruction | `backend-host` |
-| `mlock`, core-dump exclusion and zeroization: `neura.memory.lock.create`, `write`, `read`, `equal`, `release`, bound by `Std.Crypto.Internal.LockedMemory` | implemented on POSIX for a host buffer addressed by handle, outside the NVM heap, which the collector still moves and copies: bytes passed in or read out are ordinary heap copies. A recorded run cannot create a buffer. 13 on Windows | `backend-host` (the kernel's `Locked`, `dd` and `wf` flags of the mapping read from `/proc/self/smaps`) |
+| `mlock`, core-dump exclusion and zeroization: `neura.memory.lock.create`, `write`, `read`, `equal`, `release`, bound by `Std.Crypto.Internal.LockedMemory` | implemented on Linux for a host buffer addressed by handle, outside the NVM heap, which the collector still moves and copies: bytes passed in or read out are ordinary heap copies. A recorded run cannot create a buffer. 13 elsewhere (no `MADV_DONTDUMP` and `MADV_WIPEONFORK`) | `backend-host` (the kernel's `Locked`, `dd` and `wf` flags of the mapping read from `/proc/self/smaps`) |
+
+### Budgets measured
+
+`scripts/bench-server.py` measured the budgets of [the overview](Apps030.md#budgets) on 2026-11-17 on this machine (Linux 7.1, x86-64, 8 cores), with `tests/server/fixtures/test-server.nra` answering `GET /info` (JSON, no database), 32 keep-alive connections and 8 workers unless noted. Other agents' builds ran throughout (load average 5 to 14), so every figure is indicative; none of the budgets was changed to fit. The loader's own ceiling, against a Python echo server with Nagle's algorithm off, is about 15,000 requests per second, well above every result, so the results measure the host.
+
+| Budget | Workload | Result | Met |
+| --- | --- | --- | --- |
+| B-S1 latency, fresh worker | 200 requests per second fixed, 60 s after 10 s | median 1.10 ms, 95th 2.17 ms, 99th 3.03 ms; 12,000 of 12,000 answered 200 | yes |
+| B-S2 throughput | closed loop, 60 s after 10 s | 929 requests per second, no 503 (725 before the reaper fix below) | no: 1,500 is the budget |
+| B-S4 saturation | twice the B-S2 rate (1,858 per second), 64 connections, `--max-queue 8`, 30 s | 503 within 1.98 ms at the 95th percentile (22,576 of 55,745 answered 503); peak process tree 22, of which 12 zombies, against a limit of 12 | 503 latency yes; process count no |
+| B-S5 drain | `SIGTERM` under 200 requests per second | exit in 0.02 s with status 0 | exit time yes; that every request in flight completes rests on `test_drain_completes_responses`, because the loader cannot tell a request in flight from one refused after the listener closed (407 such errors, on idle keep-alive connections) |
+| B-S6 sustained | half the B-S2 rate (363 per second) for 600 s, one request in 1,000 trapping | resident size slope 0.02% per minute after minute 2 (7.5 MiB at start, 8.3 MiB at the end); 217 traps answered 500; afterwards 6 descriptors and 3 processes (the host and 2 ready workers) | yes |
+| B-S3 latency with SQL | | not measured here: SQL is the `sql-providers` change | |
+
+What the misses show:
+
+1. **B-S2.** Each request costs a process start, an image load and verification, a run and an exit. With 8 workers on a loaded machine that is about 9 ms of wall time per request per slot. The host's reaper thread spun on a core while any finished worker had not yet exited; it now looks again every 2 ms, which raised the result from 725 to 929 per second. Reaching 1,500 needs cheaper worker starts (a zygote that forks a loaded image instead of exec, which approved decision 1 allows since nothing has run), measured on an idle machine.
+2. **B-S4 process count.** At the peak, 12 of the 22 processes were zombies: workers that had answered and exited and were not yet reaped. The S-1 slot is released when the response is written, not when the worker is reaped, so the tree can hold S-1 running workers, S-2 ready ones, and every worker still exiting. Holding the slot until the reap would meet the bound at a cost in throughput; reaping on `SIGCHLD` instead of polling would shrink the excess. Neither is done in this change.
+
+**Worker tier policy.** For this route the tier makes no measurable difference: sequential `GET /info` on one connection, 400 requests, median 1.35 ms by default (tier 2 with tier 3 on x86-64), 0.77 ms at `--worker-tier 0`, 1.08 ms at tier 1, 1.10 ms with `--worker-jit off`, 1.30 ms with `NEURA_TIER3=off`, with 95th percentiles from 2.7 to 3.9 ms. The default stays; `--worker-tier` and `--worker-jit` let an operator choose for a heavier route, which this measurement does not cover.
 
 ### kTLS
 
 Kernel TLS moves record encryption into the kernel after OpenSSL's handshake (`SSL_OP_ENABLE_KTLS`, then `setsockopt(TCP_ULP, "tls")` and the key material). It is not provided, for two reasons found on this machine (Linux 7.1, x86-64):
 
 1. The pinned OpenSSL 3.5.9 of the server component is configured `no-ktls` (`OPENSSL_NO_KTLS` in its `configuration.h`), so OpenSSL cannot hand a connection to the kernel. Changing that is a change of the locked component's build configuration.
-2. The kernel's `tls` module is present (`tls.ko.xz`) but not loaded, and only a process with `CAP_NET_ADMIN` makes the kernel load it on `TCP_ULP`. The server host runs unprivileged, so on a default system the offload is unavailable whatever OpenSSL does.
+2. The kernel's `tls` module is present (`tls.ko.xz`) but not loaded, and only a process with `CAP_NET_ADMIN` makes the kernel load it on `TCP_ULP`. Observed: `setsockopt(TCP_ULP, "tls")` on a connected loopback socket, from an unprivileged process, fails with `ENOENT`. The server host runs unprivileged, so on a default system the offload is unavailable whatever OpenSSL does.
 
 What providing it needs: rebuild the pinned OpenSSL with `enable-ktls` and record it in the lock; set `SSL_OP_ENABLE_KTLS` in the host's and the providers' contexts; detect the offload per connection with `BIO_get_ktls_send` and `BIO_get_ktls_recv` and report it (a metric); qualify on a machine where `tls` is loaded, comparing throughput and checking `SIGHUP` reload, `close_notify` and renegotiation-free TLS 1.3 key updates, which kTLS handles differently.
 
@@ -144,7 +164,7 @@ All integers are little-endian; a *text* is a `uint32` byte count and the bytes.
 | --- | --- |
 | `Assign` | `uint32` kind (1 request, 2 startup check), text request identifier, `int64` deadline (Unix nanoseconds), text peer, text scheme, text method, text target, `uint32` field count and that many (text name, text value), `int64` body length, `uint32` lease count (0) |
 | `Head` | `uint32` status, `uint32` field count and that many (text name, text value), `int64` body length: the exact length of a complete body, or -1 for a streamed body |
-| `Call` | `uint32` call identifier, `uint32` operation, and its arguments: operation 1, configuration: text key; operation 2, metric: `uint32` kind (1 counter, 2 gauge), `int64` value, text name |
+| `Call` | `uint32` call identifier, `uint32` operation, and its arguments: operation 1, configuration: text key; operation 2 is reserved for SQL (the `sql-providers` change); operation 3, metric: `uint32` kind (1 counter, 2 gauge), `int64` value, text name |
 | `Return` | `uint32` call identifier, `uint32` error code (0 for success); for a configuration, `uint8` found and text value |
 
 The host sends `Assign` at the end of the request head, then the request body as `BodyChunk` frames of at most 64 KiB as the client sends it, and `BodyEnd`. The worker runs the image as soon as it has the `Assign`; `body.read` waits for the next chunk. The worker sends `Head`, its body chunks, `BodyEnd` and `Done` as the image responds. Both sides check every frame with `ChannelSequence`.

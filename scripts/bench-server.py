@@ -174,6 +174,17 @@ class Host:
                 pass
         return 1 + len(children)
 
+    def zombies(self):
+        count = 0
+        for task in Path(f"/proc/{self.process.pid}/task").glob("*"):
+            try:
+                for pid in (task / "children").read_text().split():
+                    if Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                        count += 1
+            except (OSError, IndexError):
+                pass
+        return count
+
     def resident_kib(self):
         try:
             for line in Path(f"/proc/{self.process.pid}/status").read_text().splitlines():
@@ -198,7 +209,10 @@ class Host:
 
 def sample_tree(host, stop_event, peak):
     while not stop_event.is_set():
-        peak[0] = max(peak[0], host.tree())
+        total = host.tree()
+        if total > peak[0]:
+            peak[0] = total
+            peak[1] = host.zombies()
         time.sleep(0.01)
 
 
@@ -228,7 +242,7 @@ def budget_s2(args, image):
 
 def budget_s4(args, image, rate):
     host = Host(args, image)
-    peak = [0]
+    peak = [0, 0]
     stop_event = threading.Event()
     sampler = threading.Thread(target=sample_tree, args=(host, stop_event, peak))
     sampler.start()
@@ -241,9 +255,13 @@ def budget_s4(args, image, rate):
     limit = args.workers + 2 + 1 + 1  # S-1 + S-2 + 1, and the host itself.
     result["rate"] = rate
     result["peak_processes"] = peak[0]
+    result["zombies_at_peak"] = peak[1]
     result["budget"] = f"503 within 5 ms at p95; processes never above {limit} (host included)"
     rejected = result["rejected_p95_ms"]
-    result["met"] = (rejected is None or rejected <= 5) and peak[0] <= limit
+    # Without a 503 the host was not saturated and the first leg is unmeasured:
+    # raise the rate or the connections past S-1 plus S-3.
+    result["saturated"] = rejected is not None
+    result["met"] = rejected is not None and rejected <= 5 and peak[0] <= limit
     return result
 
 

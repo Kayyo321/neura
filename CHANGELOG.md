@@ -75,6 +75,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- `neura-server-host` no longer spins a core while a finished worker exits, and its worker channel never blocks inside `send(2)`, so the request deadline also bounds a write to a worker and a worker that streams a large response before it reads a large request body cannot block the host.
 - `neura-server-host` sends each response without waiting about 40 ms for the client's delayed acknowledgement: accepted connections set `TCP_NODELAY`, and a head with a body of at most 64 KiB leaves in one write with it.
 - `neura run --task-dump` wrote the dump twice, the first time naming a block the task had already left, when a check failed inside a tier 2 region (an index out of bounds, for example) and tier 1 ran the block again and trapped. The dump is now written once, when the failure becomes the run's trap, as at tier 0.
 - Editor tooling in 0.2.1-rc.2: readable documentation hovers, valid outline names and ranges, completion for declaration modifiers, eligible inherited overrides, promoted exports, import paths and typed/primitive/collection receivers, and quiet formatting of incomplete editor buffers. CLI formatting continues to reject invalid source.
