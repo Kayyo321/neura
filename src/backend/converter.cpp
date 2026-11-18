@@ -1917,7 +1917,10 @@ Values FunctionCompiler::slot_values(std::uint32_t first, std::size_t count) {
 }
 
 Operand FunctionCompiler::resolve(const Operand& operand) const {
-    if (operand.kind == Operand::Kind::Bits && operand.generation != generation_) {
+    // A Bits operand, or a slot operand that spill gave a home, names its
+    // home once the block that computed it has closed.
+    const bool homed_slot = operand.kind == Operand::Kind::Slot && operand.home != absent;
+    if ((operand.kind == Operand::Kind::Bits || homed_slot) && operand.generation != generation_) {
         if (operand.home == absent) {
             throw std::logic_error("a graph value was used after its block closed");
         }
@@ -1970,6 +1973,27 @@ Word FunctionCompiler::lanes(const Operand& original) {
 }
 
 void FunctionCompiler::spill(Operand& operand) {
+    if (operand.kind == Operand::Kind::Slot) {
+        // A slot operand reads its slot's value at block entry. `let copy =
+        // source;` leaves `copy` pending as that operand, so after a store to
+        // `source` in the same block, a read of `copy` still yields it. Once
+        // the block closes, the store is committed and the operand would read
+        // the new value of `source`, so a held operand is copied to a home
+        // first. A slot this block has not assigned keeps its value and needs
+        // no copy.
+        if (operand.home != absent || !block_) return;
+        const auto& pending = current().synth.pending();
+        const auto written = pending.find(operand.index);
+        if (written == pending.end() ||
+            (written->second.kind == Operand::Kind::Slot && written->second.index == operand.index)) {
+            return;
+        }
+        auto copy = operand;
+        operand.generation = generation_;
+        operand.home = new_slot(operand.type);
+        current().synth.pending()[operand.home] = std::move(copy);
+        return;
+    }
     if (operand.kind != Operand::Kind::Bits || operand.generation != generation_ || operand.home != absent) {
         return;
     }
