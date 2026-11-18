@@ -43,7 +43,8 @@ PG_PASSWORD = "neura-sql-test-secret"
 # seconds without the JIT on a slow runner (a 504 on x86_64 macOS, release
 # trial 16). NEURA_TEST_TIMEOUT_SCALE comes from CMake (docs/ContinuousIntegration.md).
 TIMEOUT_SCALE = int(os.environ.get("NEURA_TEST_TIMEOUT_SCALE", "1"))
-PROBE_DEADLINE = 2 * TIMEOUT_SCALE
+# At most 10 s: /slow's answer must come well inside call()'s 30 s.
+PROBE_DEADLINE = min(2 * TIMEOUT_SCALE, 10)
 
 
 def check(condition, message):
@@ -204,7 +205,7 @@ def http_call(port, method, path, body=None, timeout=60):
     return response.status, None
 
 
-def probe_journey(args, port, label):
+def probe_journey(args, port, label, host=None):
     status, body = call(args, port, "POST", "/setup")
     check(status == 200, f"{label} setup: {status} {body!r}")
     status, body = call(args, port, "POST", "/insert?a")
@@ -223,7 +224,8 @@ def probe_journey(args, port, label):
     status, body = call(args, port, "GET", "/slow")
     elapsed = time.time() - started
     check(status == 504 and elapsed < PROBE_DEADLINE + 8,
-          f"{label} a statement past the deadline: {status} {elapsed:.1f}s {body!r}")
+          f"{label} a statement past the deadline: {status} {elapsed:.1f}s {body!r}"
+          + ("" if status == 504 or host is None else f"\nhost log:\n{host.stderr()}"))
     status, body = call(args, port, "GET", "/count")
     check(status == 200 and body == b"1", f"{label} the connection is usable after the interrupt: {status} {body!r}")
     status, body = call(args, port, "GET", "/config?sql.main.url")
@@ -281,7 +283,7 @@ def test_sqlite_probes(args):
                 "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=1",
                 "--config-env-prefix", "SQLPROBE_", env=env)
     try:
-        probe_journey(args, host.port, "sqlite")
+        probe_journey(args, host.port, "sqlite", host)
         started = time.time()
         status, body = call(args, host.port, "GET", "/two")
         elapsed = time.time() - started
@@ -517,7 +519,7 @@ def test_postgres(args):
                         "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=1",
                         "--config", "probe.db=postgresql", env=env)
             try:
-                probe_journey(args, host.port, label)
+                probe_journey(args, host.port, label, host)
                 sleeping = server.psql("SELECT count(*) FROM pg_stat_activity WHERE query LIKE 'SELECT pg_sleep%'")
                 check(sleeping.stdout.strip() == "0", f"{label}: PQcancel ended the statement: {sleeping.stdout!r}")
             finally:
