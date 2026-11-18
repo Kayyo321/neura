@@ -5,6 +5,7 @@ guarded: 5
 chain: 0 1
 parameter: 3
 field: 4
+tuple: 10 12
 branch: 0 1
 unchanged: 9
 call 7

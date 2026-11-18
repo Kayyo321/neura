@@ -116,6 +116,18 @@ export let CopiedLocals = module:program.Entry (
         fielded.append(new func() -> int => counted);
         print_all("field", fielded);
 
+        // A copy of a tuple, one word per slot.
+        let tupled: (func() -> int)[list] = new;
+        let index = 0;
+        while (index < 2) {
+            let pair: [int, int] = [index, index + 10];
+            let snapshot = pair;
+            index = index + 1;
+            pair = [index * 100, index * 100];
+            tupled.append(new func() -> int => snapshot[0] + snapshot[1]);
+        }
+        print_all("tuple", tupled);
+
         // The source is reassigned in one branch or the other.
         let branched: (func() -> int)[list] = new;
         let choice = 0;
