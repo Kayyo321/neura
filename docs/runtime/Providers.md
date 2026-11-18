@@ -2,7 +2,7 @@
 
 This page owns the host services and protocols of the application hosts that [the application platform](../design/Apps030.md#owning-pages) adds in 0.3.0. It starts with the browser: the interface between `nvm.wasm` and its adapter `hosts/web/nvm.js`, the services a browser binds, how a browser run waits, and the byte encodings of the UI services. The services every host shares, and the overlap and cancellation rules they follow, stay in [the NVM page](NVM.md#host-services) and [Concurrency](../lang/Concurrency.md#104-host-io).
 
-*Status: implemented in the browser runtime on 2026-11-17 by autonomous agents, awaiting owner confirmation.* The model host of `neura run --ui-host=model`, the desktop and server hosts, and `neura.http.fetch` are not implemented yet; their sections are added with them.
+*Status: implemented in the browser runtime on 2026-11-17 by autonomous agents, awaiting owner confirmation.* The model host of `neura run --ui-host=model` and the desktop and server hosts are not implemented yet; their sections are added with them. `neura.http.fetch` is served in the browser only.
 
 ## Browser adapter interface
 
@@ -65,11 +65,12 @@ All have a `uint32` error. The adapter key is the `host` member of `new NvmExecu
 | `neura.history.current` | 1 | none | path text | no | `history` |
 | `neura.history.push`, `replace` | 1 | path text | the current path | no | `history` |
 | `neura.history.next` | 1 | none | path text | yes, can be cancelled | `history` |
+| `neura.http.fetch` | 1 | method text, URL text, headers (text list), body (`uint8[list]`), `int64` timeout in nanoseconds, `uint32` credentials | `[uint32 status, text list headers, uint8[list] body]` | yes, can be cancelled | `http` |
 
 The runtime answers two kinds of service itself, without reporting a request to the adapter:
 
 - `neura.process.exit` version 1 ends the run with its status, as on every host.
-- A service of the table that the embedder does not grant, and a standard service of a group a browser never grants (`neura.console.read`, `neura.env.get`, `neura.fs.*`, `neura.net.*`, `neura.ffi.*`, `neura.http.*`, `neura.bridge.call`, `neura.sql.*`, `neura.app.*`, `neura.desktop.*`), binds and answers error 14. An image that reaches one runs and fails locally, as [Apps030](../design/Apps030.md#capability-groups) requires. A service of the second kind binds with the image's own parameter and result types; its error type must be `uint32`, because error 14 is the only value that crosses. An overlapping request among them is answered at the next scheduling point, like any other.
+- A service of the table that the embedder does not grant, and a standard service of a group a browser never grants (`neura.console.read`, `neura.env.get`, `neura.fs.*`, `neura.net.*`, `neura.ffi.*`, `neura.http.server.*`, `neura.bridge.call`, `neura.sql.*`, `neura.app.*`, `neura.desktop.*`), binds and answers error 14. An image that reaches one runs and fails locally, as [Apps030](../design/Apps030.md#capability-groups) requires. A service of the second kind binds with the image's own parameter and result types; its error type must be `uint32`, because error 14 is the only value that crosses. An overlapping request among them is answered at the next scheduling point, like any other.
 
 Any other import fails the open with the import's name and version. `src/wasm/entry.cpp` holds the table; `hosts/web/nvm.js` holds the argument and result conversions.
 
@@ -91,6 +92,8 @@ The slice and proof rules of the [browser runtime](../design/Apps030.md#executio
 ### Idle proofs
 
 A browser run proves blocks only on idle callbacks, one attempt at a time, and each attempt is bounded so that it stays a short task on the page's main thread (budget B-W7). The overflow analysis of one attempt gets at most 2^19 work units, about 8 ms of native work, and a search at most 8 ms of wall time. A block whose proof needs more work than one attempt allows stays on tier 0 for the rest of the run; a search cut short is tried again while the image's search budget of 250 ms lasts. These bounds change which blocks are lifted, never what a run does. Native hosts keep their unbounded attempts.
+
+A function program formed while some of its blocks wait for a proof runs those blocks by reference. A native host forms it again at four times its arrivals, at most four times. A browser forms it again once an idle proof has settled one of the function's blocks since it was formed, with no cap, and looks for one at arrivals that grow by an eighth (at least 16), so a proof that an idle callback finishes late is still used. The number of programs a function can have is then bounded by its blocks, not by four.
 
 ## UI services
 
@@ -157,6 +160,69 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 | An event batch: one `click` on node 1, handler 7, button 0, x 2.5, y 4, ctrl and shift, detail 1 | `01010000000101000000070000000000000000000000000000044000000000000010400a01000000` |
 | An event batch: one input overflow of 3 | `01010000001000000000000000000000000003000000` |
 
+## HTTP fetch
+
+`hosts/web/fetch.mjs` implements the `http_client` group ([Apps030](../design/Apps030.md#capability-groups)) with the browser's `fetch`: `new FetchHost({ origins })` is the `http` member of `browserHost`. The service is the one [Components](../design/Components030.md#http-clients) names. Two choices are recorded here: headers cross as one text list of alternating names and values, because the converter cannot pass a list of tuples to a host call (`E0801`), and the fourth argument is a timeout relative to the start of the request, not a deadline on a clock, because the page's monotonic clock is not the program's to share. `Std.Net.Http.Fetch` is the library binding ([below](#fetch-in-neura)).
+
+| Argument | Meaning |
+| --- | --- |
+| method | An HTTP token. `DELETE`, `GET`, `HEAD`, `OPTIONS`, `POST` and `PUT` are sent in upper case whatever their case; `CONNECT`, `TRACE` and `TRACK` answer 4 |
+| URL | Absolute, or relative to the page's address; `http` or `https` only. A URL with a user name or password answers 4 |
+| headers | Names are HTTP tokens and values Latin-1 text without NUL, CR, LF, or surrounding spaces; the browser drops the headers the Fetch standard forbids (`Cookie`, `Host`, `Origin` and others) without an error |
+| body | Empty for none; a body on a `GET` or `HEAD` answers 4 |
+| timeout | Nanoseconds from the start of the request to the end of the response body; 0 for none, negative answers 4 |
+| credentials | 0 `omit`, 1 `same-origin` (the browser's default), 2 `include` |
+
+The answer is the response's status, its headers in the browser's order (lowercase names; for a cross-origin response only the CORS-safelisted ones and those the server lists in `Access-Control-Expose-Headers`), and its body after redirects. Any status is a success, 404 and 500 included: an error means there is no response.
+
+| Code | When |
+| ---: | --- |
+| 4 | The request is malformed, as in the table above |
+| 12 | The timeout passed; the exchange is aborted |
+| 13 | The scheme is not `http` or `https` |
+| 14 | The page does not grant the group, or the URL's origin is neither the page's nor one of the bundle's connect origins |
+| 15 | The calling task's scope was cancelled; the exchange is aborted |
+| 16 | `TooLarge`: the request body, or the response body as it streams in, exceeds W-3 (8 MiB); the exchange is aborted |
+| 17 | `Busy`: W-4 (16) fetches are in flight |
+| 18 | `OutcomeUnknown`: the browser reports a network failure, a CORS refusal, a policy refusal, or a body that ended early. It does not say which, nor whether the server acted on the request |
+
+The host's promise never rejects, so a failed exchange fails the call, never the run. `FetchHost` takes `body` and `inFlight` to change W-3 and W-4 within their maxima (256 MiB and 256), `origins: null` to leave the origin check to the browser and the page's policy, and `fetch` to substitute the function. Requests go out with `mode: "cors"` and `redirect: "follow"`; the browser's cache rules apply as for any `fetch`. Requests for the same URL may not overlap: Chromium holds a second request for a URL until the first has finished, so three tasks fetching one URL take three times as long as three fetching three URLs. A bundle grants the group with `--http-client` or `--connect ORIGIN` ([Web bundles](#web-bundles)).
+
+The browser enforces CORS: a cross-origin backend must answer the request (and its preflight, for a method other than `GET`, `HEAD` or `POST`, or a header outside the safelisted ones, such as `Content-Type: application/json`) with `Access-Control-Allow-Origin` naming the page's origin, and, for credentials `include`, `Access-Control-Allow-Credentials: true`. Without them the call answers 18. A response the page cannot read is never delivered in part.
+
+### Fetch in Neura
+
+`import:Std.Net.Http.Fetch` is the binding. `request(method, url)` makes a `Request` with no headers or body, a 30-second timeout and `SameOrigin` credentials; `with_header`, `with_body`, `with_text`, `with_timeout` and `with_credentials` return changed copies, and `send()` returns `Result<Response>`. `get(url)` and `post_text(url, content_type, text)` are shorthands. A `Response` has `status`, `body`, `ok()`, `header(name)` (ASCII case-insensitive), `headers()` and `text()`.
+
+<!-- example: check -->
+```neura
+let http = import:Std.Net.Http.Fetch;
+let result = import:Std.Core.Result;
+
+let load_projects = func -> string {
+    return match (http.request("GET", "https://api.example.com/projects")
+            .with_header("Accept", "application/json").send()) {
+        result.Result.Ok(response) => response.ok() ? result.value_or<string>(response.text(), "") : "",
+        result.Result.Err(problem) => "failed: " + http.failure_of(problem).to_string(),
+    };
+};
+```
+
+Errors with codes 1 to 15 are I/O errors of the same kind, as for every host service; 16, 17 and 18 are custom errors whose codes are `http.TooLarge`, `http.Busy` and `http.OutcomeUnknown`. `failure_of(error)` classifies either as a `FetchFailure`. In a program with tasks a fetch overlaps: the calling task waits and the other tasks run, and cancelling its scope aborts the exchange.
+
+A native `neura run` does not serve `neura.http.fetch` yet; an image that calls it fails to bind there ([Not provided](#not-provided-in-the-browser-yet)). `tests/apps/web/fetch-check.py` runs the cases above from a bundle in headless Chromium and Firefox against a page origin and a second, CORS-enabled origin.
+
+## Gesture actions (proposed)
+
+*Proposed 2026-11-17 by autonomous agents, not implemented; awaiting owner confirmation and the `Std.Web` side.* [Components](../design/Components030.md#events) binds a prepared `web.GestureAction` with `on:click={ web.with_gesture(action, then) }`; the browser allows a clipboard write, a download or a file picker only inside the user's event. The host side extends the encodings to version 2, which a host accepts beside version 1; a batch that uses none of the additions keeps version 1 and its bytes.
+
+| Addition | Encoding |
+| --- | --- |
+| Commit operation 10, `gesture` | The node, event text, `uint64` handler (the `then` handler; 0 detaches), `uint8` action, then its fields: 1 copy, the text; 2 download, the file name text, the media type text, and a `uint32` byte count and the bytes; 3 pick files, the `accept` text and a `uint8` multiple flag. Only in a version 2 batch |
+| Event kind 17, gesture result | Its node and handler as for every record, then the `uint8` action, a `uint8` status (0 done, 1 refused by the browser, 2 cancelled, 3 too large), and for a picked file a `uint32` file count and, per file, its name text, media type text, and a `uint32` byte count and the bytes. Written in a version 2 batch; the host writes version 1 when a batch holds no such record |
+
+The adapter performs the action synchronously inside the DOM listener of the bound event, before it queues anything, and queues the result record when the action ends: at once for a download, when the clipboard's promise settles for a copy, and when the files are read for a pick. Picked files count against W-3 together; above it the status is 3 and no bytes are sent. No action runs outside a user event, and no result is promised within the event.
+
 ## History services
 
 `HistoryHost` in `ui.mjs` implements the `history` group. A path is absolute (it starts with `/`), at most 8 KiB, without control characters; another path answers error 4. With `mode: "hash"`, the default, the path is kept in the fragment (`#/parts/7`), so any static file host serves the page. With `mode: "history"` it is the URL's path and query, and the host must serve `index.html` for unknown paths.
@@ -169,16 +235,20 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 
 | File | Content |
 | --- | --- |
-| `index.html` | The content-security policy as a `meta` element, the mount element (`--mount`, default `app`), a JSON data block naming the image and `nvm.wasm` with their SHA-256, the boot module with its `integrity`, a message for browsers without WebAssembly exception handling, and a failure banner |
+| `index.html` | The content-security policy as a `meta` element, the mount element (`--mount`, default `app`), a JSON data block naming the image and `nvm.wasm` with their SHA-256, an import map whose `integrity` table gives the SHA-256 of every module the boot module imports, directly or not, the boot module with its `integrity`, a message for browsers without WebAssembly exception handling, and a failure banner |
 | `bundle.json` | Canonical JSON (sorted keys, no whitespace): `schema` 1, `kind` `web`, `id`, `name`, `version`, `image`, `files` (path, SHA-256, byte length, media type, `initial`), `requires` (`browser_adapter` 1, `ui_host` 1), `capabilities`, `origins`, `limits` (`W-1`), `contracts`, `csp`, `routing` |
-| `boot.<sha256>.mjs`, `nvm.<sha256>.js`, `ui.<sha256>.mjs`, `dom.<sha256>.mjs`, `ui-wire.<sha256>.mjs`, `nvm.<sha256>.mjs` | The browser host, with each import renamed to the file's digest name |
+| `boot.<sha256>.mjs`, `nvm.<sha256>.js`, `ui.<sha256>.mjs`, `dom.<sha256>.mjs`, `ui-wire.<sha256>.mjs`, `fetch.<sha256>.mjs`, `nvm.<sha256>.mjs` | The browser host, with each import renamed to the file's digest name |
 | `nvm.<sha256>.wasm`, `app.<sha256>.nvr` | The runtime and the image |
 
-The policy is `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`, and the same text is the `csp` field. The boot module fetches the image and `nvm.wasm` with their `integrity`, so a changed file stops the start. It compiles `nvm.wasm` by streaming when the host sends `application/wasm` and from bytes otherwise, runs the image with `browserHost` and a `UiHost` and `HistoryHost`, and sets `data-neura-state` on the root element to `running`, `completed`, `failed` or `unsupported`. A trap shows the failure banner with the trap's diagnostic. With `--routing history` the script writes `404.html` and says that the host must serve it for unknown paths.
+The policy is `default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-…'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`, where the hash allows the inline import map and nothing else, and the same text is the `csp` field. `--connect ORIGIN` (repeatable) adds an origin, a scheme, host and optional port, to `connect-src`, to `origins.connect` of `bundle.json`, and to the origins the page's `FetchHost` allows; it grants `http_client`, which `--http-client` grants for the page's own origin alone. Without either, `neura.http.fetch` answers 14, and the script says so when the image imports it.
 
-The script does not yet refuse an image whose imports fall outside the groups a web target may have, and it does not name module imports with `integrity`, which only the boot module carries.
+The script reads the image's import table before it writes anything and refuses an image that imports a service outside the groups a `web` target may have ([Apps030](../design/Apps030.md#capability-groups)): only `neura.console.*`, `neura.process.exit`, `neura.clock.*`, `neura.entropy.fill`, `neura.ui.*`, `neura.history.*`, `neura.http.fetch` and `neura.bridge.call` pass, and an image with native code or callbacks (`NATV`, `CALB`) is refused too. The compiler's own check of reachable services, `E1027`, belongs to `neura build` of a `web` target and is not part of this script.
+
+The boot module fetches the image and `nvm.wasm` with their `integrity`, and the import map makes the browser check every module it imports, so a changed file stops the start before any of it runs. It compiles `nvm.wasm` by streaming when the host sends `application/wasm` and from bytes otherwise, runs the image with `browserHost`, a `UiHost`, a `HistoryHost` and, when the bundle grants `http_client`, a `FetchHost`, and sets `data-neura-state` on the root element to `running`, `completed`, `failed` or `unsupported`. A trap shows the failure banner with the trap's diagnostic. A changed module fails before the boot module runs, so the page shows no state. With `--routing history` the script writes `404.html` and says that the host must serve it for unknown paths.
+
+`tests/apps/web/bundle-check.py` loads a bundle in headless Chromium and Firefox through `tests/apps/web/load-page.mjs`, which drives Chromium over the DevTools protocol and Firefox over WebDriver BiDi, with no package dependency. It waits in real time for a condition in the page, up to a deadline, and starts a browser that does not come up again after 2, 4 and 8 seconds, so a loaded machine slows the check instead of failing it.
 
 ## Not provided in the browser yet
 
-- Recording and replaying a browser run. The services' requests and answers are explicit on the wire, so a trace can be written by the adapter; no trace format for the browser exists yet.
-- `neura.http.fetch`, gesture actions, and a model host for `neura run`: the UI services are not registered by the native runner, so a native run of an image that imports them fails to bind.
+- Recording and replaying a browser run. The design, a native trace file written by `nvm.wasm`, is in [Apps030](../design/Apps030.md#browser-traces-design-not-implemented).
+- Gesture actions ([proposed above](#gesture-actions-proposed)), and a model host for `neura run`: the UI services and `neura.http.fetch` are not registered by the native runner, so a native run of an image that imports them fails to bind.

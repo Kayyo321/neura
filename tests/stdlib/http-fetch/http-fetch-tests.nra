@@ -1,0 +1,75 @@
+let durations = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let http = import:Std.Net.Http.Fetch;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Std.Net.Http.Fetch without the host: requests, responses and the classification of errors. Sending needs a
+// host that serves neura.http.fetch, which a native run does not (traps/native-send.nra); the browser cases are
+// tests/apps/web/fetch-check.py.
+let FetchTests = module (
+    export let test_request_defaults = func() -> void {
+        let request = http.request("GET", "https://api.example.com/items");
+        test.assert_equal_string("GET", request.method);
+        test.assert_equal_string("https://api.example.com/items", request.url);
+        test.assert_equal_string("GET https://api.example.com/items", request.to_string());
+        test.assert_equal_int32(0, request.headers().length);
+        test.assert_equal_int32(0, request.body.length);
+        test.assert_equal_int64(30000000000, request.timeout.to_nanos());
+        test.assert(request.credentials == http.Credentials.SameOrigin);
+    };
+
+    export let test_with_members_copy = func() -> void {
+        let base = http.request("POST", "/api/items");
+        let changed = base.with_header("Accept", "application/json").with_text("text/plain", "café")
+            .with_timeout(durations.of_millis(250)).with_credentials(http.Credentials.Include);
+        test.assert_equal_int32(0, base.headers().length);
+        test.assert_equal_int32(0, base.body.length);
+        let headers = changed.headers();
+        test.assert_equal_int32(2, headers.length);
+        test.assert_equal_string("Accept", headers[0][0]);
+        test.assert_equal_string("application/json", headers[0][1]);
+        test.assert_equal_string("Content-Type", headers[1][0]);
+        test.assert_equal_string("text/plain", headers[1][1]);
+        test.assert_equal<uint8[list]>(strings.to_bytes("café"), changed.body);
+        test.assert_equal_int64(250000000, changed.timeout.to_nanos());
+        test.assert(changed.credentials == http.Credentials.Include);
+    };
+
+    export let test_response_members = func() -> void {
+        let pairs: [string, string][list] = new;
+        pairs.append(["content-type", "text/plain"]);
+        pairs.append(["x-count", "2"]);
+        pairs.append(["X-Count", "3"]);
+        let response = new http.Response(404, pairs, strings.to_bytes("missing"));
+        test.assert(!response.ok());
+        test.assert_equal_string("missing", test.assert_ok<string>(response.text()));
+        test.assert_equal_string("2", test.assert_some<string>(response.header("X-COUNT")));
+        test.assert_none<string>(response.header("etag"));
+        test.assert_equal_int32(3, response.headers().length);
+        test.assert_equal_string("Response(404, 7 bytes)", response.to_string());
+        let empty: [string, string][list] = new;
+        test.assert(new http.Response(204, empty, new).ok());
+    };
+
+    export let test_text_of_invalid_utf8_is_an_error = func() -> void {
+        let bytes: uint8[list] = new;
+        bytes.append(255);
+        let empty: [string, string][list] = new;
+        test.assert_err<string>(new http.Response(200, empty, bytes).text());
+    };
+
+    export let test_failure_classification = func() -> void {
+        test.assert(http.failure_of(error.custom("http.TooLarge", "x")) == http.FetchFailure.TooLarge);
+        test.assert(http.failure_of(error.custom("http.Busy", "x")) == http.FetchFailure.Busy);
+        test.assert(http.failure_of(error.custom("http.OutcomeUnknown", "x")) == http.FetchFailure.OutcomeUnknown);
+        test.assert(http.failure_of(error.custom("other", "x")) == http.FetchFailure.Other);
+        let io = func(kind: error.IoErrorKind) -> error.Error => error.Error.Io { kind: kind, message: "m", path: "p" };
+        test.assert(http.failure_of(io(error.IoErrorKind.TimedOut)) == http.FetchFailure.TimedOut);
+        test.assert(http.failure_of(io(error.IoErrorKind.Cancelled)) == http.FetchFailure.Cancelled);
+        test.assert(http.failure_of(io(error.IoErrorKind.CapabilityDenied)) == http.FetchFailure.CapabilityDenied);
+        test.assert(http.failure_of(io(error.IoErrorKind.InvalidInput)) == http.FetchFailure.InvalidInput);
+        test.assert(http.failure_of(io(error.IoErrorKind.Unsupported)) == http.FetchFailure.Unsupported);
+        test.assert(http.failure_of(io(error.IoErrorKind.NotFound)) == http.FetchFailure.Other);
+    };
+);

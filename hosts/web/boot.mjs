@@ -2,6 +2,7 @@
 // configuration as a JSON data block, which a content-security policy without inline scripts allows.
 import createNvm from './nvm.mjs';
 import { NvmExecution, browserHost } from './nvm.js';
+import { FetchHost } from './fetch.mjs';
 import { HistoryHost, UiHost } from './ui.mjs';
 
 const page = globalThis.document;
@@ -52,7 +53,9 @@ async function start() {
     ]);
     const ui = new UiHost();
     const history = new HistoryHost({ mode: config.routing });
-    const execution = new NvmExecution(module, new Uint8Array(image), { host: browserHost({ ui, history }) });
+    // The http_client group, when the bundle lists it: the page's origin and the bundle's connect origins.
+    const http = config.http ? new FetchHost({ origins: config.http.origins }) : undefined;
+    const execution = new NvmExecution(module, new Uint8Array(image), { host: browserHost({ ui, history, http }) });
     page.documentElement.dataset.neuraState = 'running';
     try {
         const event = await execution.run({ hasPendingEvents: () => ui.queued > 0 });

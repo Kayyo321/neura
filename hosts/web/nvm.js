@@ -85,7 +85,17 @@ const argument = {
     },
     int32: value => Number(BigInt.asIntN(32, value.bits)),
     int64: value => BigInt.asIntN(64, value.bits),
+    uint32: value => Number(BigInt.asUintN(32, value.bits)),
     bytes: value => value.bytes,
+    // A text list of alternating header names and values, as [name, value] pairs.
+    pairs: value => {
+        if (value.elements.length % 2) throw new TypeError('header names and values must alternate');
+        const pairs = [];
+        for (let i = 0; i < value.elements.length; i += 2) {
+            pairs.push([argument.text(value.elements[i]), argument.text(value.elements[i + 1])]);
+        }
+        return pairs;
+    },
 };
 
 const result = {
@@ -110,6 +120,18 @@ const result = {
             throw new TypeError('a wall clock must return integral nanos within a second');
         }
         return { elements: [{ bits: BigInt.asUintN(64, int64(value.seconds)) }, { bits: BigInt(value.nanos) }] };
+    },
+    // neura.http.fetch: [uint32 status, text list of alternating header names and values, uint8[list] body].
+    response: value => {
+        if (!value || !Number.isInteger(value.status) || value.status < 0 || value.status > 0xffffffff ||
+            !Array.isArray(value.headers) || !(value.body instanceof Uint8Array)) {
+            throw new TypeError('a fetch result is { status, headers, body }');
+        }
+        const headers = value.headers.flatMap(pair => {
+            if (!Array.isArray(pair) || pair.length !== 2) throw new TypeError('a header is a [name, value] pair');
+            return pair.map(text => result.text(text));
+        });
+        return { elements: [{ bits: BigInt(value.status) }, { elements: headers }, { bytes: value.body }] };
     },
     stats: value => {
         if (!Array.isArray(value) || value.length !== 4) throw new TypeError('UI stats are four counts');
@@ -150,6 +172,9 @@ service('neura.history.current/1', 'history', [], 'text', (host, _, c) => host.h
 service('neura.history.push/1', 'history', ['text'], 'text', (host, [path], c) => host.history.push(path, c));
 service('neura.history.replace/1', 'history', ['text'], 'text', (host, [path], c) => host.history.replace(path, c));
 service('neura.history.next/1', 'history', [], 'text', (host, _, c) => host.history.next(c));
+service('neura.http.fetch/1', 'http', ['text', 'text', 'pairs', 'bytes', 'int64', 'uint32'], 'response',
+    (host, [method, url, headers, body, timeout, credentials], c) =>
+        host.http.fetch({ method, url, headers, body, timeout, credentials }, c));
 
 function completionFor(adapter, value) {
     if (value && typeof value === 'object' && 'error' in value && Object.keys(value).length === 1) {
@@ -285,8 +310,8 @@ function delay(milliseconds, signal) {
 }
 
 // The default services of a browser page. `ui` and `history` are optional
-// UiHost and HistoryHost instances (ui.mjs).
-export function browserHost({ output = globalThis.console, ui, history } = {}) {
+// UiHost and HistoryHost instances (ui.mjs), `http` a FetchHost (fetch.mjs).
+export function browserHost({ output = globalThis.console, ui, history, http } = {}) {
     // Bytes of neura.console.write wait for their LF, per stream, as the page's console takes whole lines.
     const pending = [null, [], []];
     const stdout = new TextDecoder('utf-8');
@@ -331,6 +356,7 @@ export function browserHost({ output = globalThis.console, ui, history } = {}) {
     };
     if (ui) host.ui = ui;
     if (history) host.history = history;
+    if (http) host.http = http;
     return host;
 }
 
