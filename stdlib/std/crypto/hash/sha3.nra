@@ -10,7 +10,7 @@ let words = import:Std.Crypto.Internal.Words;
 
 /// @brief SHA-3 and its extendable-output functions: SHA3-224, SHA3-256, SHA3-384 and SHA3-512, SHAKE128 and
 /// SHAKE256 (FIPS 202), cSHAKE128 and cSHAKE256 (SP 800-185), and TurboSHAKE128 and TurboSHAKE256 (RFC 9861)
-/// (Stdlib.md section 20.4).
+/// (Stdlib.md section 21.4).
 ///
 /// Every function is the Keccak-p[1600] sponge in Neura code, with no hardware acceleration. Each digest checks the
 /// current Std.Crypto.Core.CryptoPolicy when it is created.

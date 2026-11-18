@@ -76,8 +76,7 @@ NEURA_ATTRIBUTE(HookSet, 16, "hook.set", on_class, false, "s")
 // getter or 1 for a setter].
 NEURA_ATTRIBUTE(HookOf, 17, "hook.of", on_function, false, "[s u1]")
 // Records, property contracts, static requirements and derivation
-// (docs/design/Records030.md). The milestone's identifiers start at 18 and
-// are renumbered when it merges.
+// (docs/design/Records030.md), identifiers 18 to 22.
 //
 // A record class: its generated constructor.
 NEURA_ATTRIBUTE(ClassRecord, 18, "class.record", on_class, false, "s")
@@ -94,3 +93,7 @@ NEURA_ATTRIBUTE(StaticImplements, 21, "static.implements", on_function, true, "[
 // "property.adapter" or "derive:json.codec", and the span of the declaration
 // that caused it].
 NEURA_ATTRIBUTE(Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false, "[t p]")
+// On the `$resume` method of a generator's state class (docs/design/
+// Lifetime030.md, Generators): the field that holds its resume index. Only
+// such a function may contain Yield.
+NEURA_ATTRIBUTE(GeneratorResume, 23, "generator.resume", on_function, false, "s")

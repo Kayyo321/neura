@@ -119,6 +119,9 @@ std::string_view spelling(IrOp op) {
     case IrOp::HookRead: return "hook_read";
     case IrOp::HookAdmit: return "hook_admit";
     case IrOp::ConformanceCall: return "conformance_call";
+    case IrOp::Cleanup: return "cleanup";
+    case IrOp::Pending: return "pending";
+    case IrOp::Yield: return "yield";
     }
     return "<invalid>";
 }

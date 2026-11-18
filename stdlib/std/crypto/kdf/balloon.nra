@@ -4,7 +4,7 @@ let.promote _ = import:Std.Crypto.StreamingDigest;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Balloon hashing (Boneh, Corrigan-Gibbs and Schechter, 2016, Algorithm 1) over any digest, with
-/// delta = 3 (Stdlib.md section 20.6).
+/// delta = 3 (Stdlib.md section 21.6).
 ///
 /// The paper leaves the byte encoding open; this module fixes it: every integer (the counter, and t, m and i
 /// of the index block) is 8 bytes little-endian, a hash of several values hashes their concatenation, and

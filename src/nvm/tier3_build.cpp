@@ -1,4 +1,5 @@
 #include "tier3.hpp"
+#include "environment.hpp"
 
 #include "heap.hpp"
 #include "nvr/format.hpp"
@@ -1829,6 +1830,7 @@ bool verify_enabled() {
 #ifndef NDEBUG
         return true;
 #else
+        require_bound_environment("NEURA_TIER3_VERIFY");
         const char* text = std::getenv("NEURA_TIER3_VERIFY");
         return text && std::strcmp(text, "1") == 0;
 #endif

@@ -5,6 +5,7 @@
 #include "conformance.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
+#include "derive_json.hpp"
 #include "float.hpp"
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
@@ -12,12 +13,15 @@
 #include "scheduler_ops.hpp"
 #include "integer.hpp"
 #include "ir.hpp"
+#include "lifetime.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 #include "reference_initialization.hpp"
 #include "reference_storage.hpp"
+#include "scoped_resources.hpp"
+#include "event_guard.hpp"
 #include "static_initialization.hpp"
 #include "tags.hpp"
 #include "parser/syntax.hpp"
@@ -35,6 +39,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -253,6 +258,7 @@ private:
     std::vector<SymbolId> file_ids_;
     Names linked_files_;
     Names library_files_;
+    std::map<SymbolId, std::string> artifact_origins_;
     std::map<std::string, SymbolId, std::less<>> reference_layouts_;
     std::set<const Statement*> reference_field_bindings_;
     // The single assignments of deferred `last` bindings (definite_assignment.hpp).
@@ -491,6 +497,36 @@ private:
     Diagnostic any_boundary(const Span& span, const std::string& what) const;
     std::string shown(const IrType& type) const;
     bool lowers_to_any(const Expr& expr, Context& context);
+    // defer, using and generators (lowering_lifetime.inc).
+    void lower_defer(std::vector<IrNode>& instructions, const Statement& stmt, Context& context);
+    void require_function_block(const Span& keyword, std::string_view word, const Context& context);
+    void hoist_operands(IrNode& call, std::vector<IrNode>& saved, std::size_t number, const Context& context);
+    IrNode lower_using(const Statement& stmt, Context& context);
+    std::size_t lifetime_statements_ = 0;
+    // A generator's state class and the `$resume` method that runs its body.
+    struct GeneratorState {
+        SymbolId cls = no_symbol;
+        SymbolId index = no_symbol;
+        SymbolId buffer = no_symbol;
+        SymbolId buffered = no_symbol;
+        SymbolId finished = no_symbol;
+        SymbolId running = no_symbol;
+        std::size_t yields = 0;
+        // The locals that stand for the parameters, and each moved local's
+        // field.
+        std::vector<SymbolId> parameters;
+        std::map<SymbolId, SymbolId> moved;
+    };
+    std::map<SymbolId, GeneratorState> generator_states_;
+    std::size_t generator_count_ = 0;
+    IrType generator_sequence(const IrType& element, const Span& span, const Context& context);
+    IrNode generator_lambda(const Declaration& declaration, Context& context);
+    std::vector<IrNode> generator_factory(const Declaration& declaration, Context& context, SymbolId factory);
+    IrNode lower_yield(const Statement& stmt, Context& context);
+    IrNode generator_return(const Statement& stmt);
+    void lower_generator_body(SymbolId resume, std::vector<IrNode>& instructions);
+    // The `$resume` methods of generators, whose bodies hold no `using`.
+    std::set<SymbolId> generator_bodies_;
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
@@ -625,6 +661,15 @@ private:
     bool record_class(SymbolId cls) const;
     void check_record_syntax(const Declaration& decl) const;
     void declare_record(SymbolId id, const Declaration& decl);
+    std::vector<SymbolId> derivations_;
+    std::map<SymbolId, std::vector<SymbolId>> derived_members_;
+    void expand_derivation(SymbolId id);
+    using CodecImports = std::map<SymbolId, std::pair<std::string, std::string>>;
+    std::string codec_source_name(SymbolId id, const Context& ctx, const Declaration& decl, CodecImports& imports);
+    std::size_t codec_shape(const IrType& type, const Span& at, const std::string& path,
+                            std::vector<IrType>& active, std::vector<CodecShape>& shapes);
+    void codec_mappings(std::vector<CodecShape>& shapes, const DeriveSyntax& syntax, const Context& ctx);
+
     void lower_record_members(SymbolId id);
     std::vector<TagSyntax> record_tags(const Declaration& decl) const;
     std::optional<std::string> record_ineligible(const IrType& type, IrType& inner, std::vector<IrType> path = {}) const;
@@ -1008,6 +1053,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         declare(child, id, property ? SymbolKind::Field : member_kind);
     }
     if (decl.record) declare_record(id, decl);
+    if (decl.derive) derivations_.push_back(id);
     return id;
 }
 
@@ -1329,6 +1375,9 @@ IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
                 throw Diagnostic(part.span, "a tuple element cannot have type void").with_code("E0416");
             result.arguments.push_back(std::move(element));
         }
+    } else if (syntax.name == "[generator]") {
+        // A generator's result (docs/design/Lifetime030.md): Sequence<T>.
+        result = generator_sequence(type(syntax.arguments.front(), context), syntax.span, context);
     } else if (syntax.name == "[function]") {
         std::vector<IrType> signature;
         for (const auto& part : syntax.arguments) signature.push_back(type(part, context));
@@ -3521,6 +3570,11 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         if (expr.text == "new") result.text = owned_lambda;
         return result;
     }
+    case ExprKind::Generator: {
+        auto result = generator_lambda(*expr.lambda, context);
+        result.text = expr.text == "new" ? owned_lambda : generator_closure;
+        return result;
+    }
     case ExprKind::Interpolation:
         return interpolation(expr, context);
     case ExprKind::NameOf:
@@ -3542,6 +3596,9 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             auto error = Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304")
                 .label("not found in this scope");
             suggest_name(error, expr.span, expr.text, visible_names(context), "a binding");
+            if (expr.text == "defer")
+                error.help("to defer a call, write 'defer f();' without parentheses around the call; "
+                           "a callee in parentheses is bound to a name first");
             throw error;
         }
         if (symbol(id).kind == SymbolKind::Function &&
@@ -4487,6 +4544,13 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return lower_match(stmt, context, false);
     case StmtKind::Destructure:
         throw Diagnostic(stmt.span, "destructuring requires a statement list").with_code("E0899");
+    case StmtKind::Defer:
+        require_function_block(stmt.keyword, "defer", context);
+        throw Diagnostic(stmt.span, "'defer' requires a statement list").with_code("E0899");
+    case StmtKind::Using:
+        return lower_using(stmt, context);
+    case StmtKind::Yield:
+        return lower_yield(stmt, context);
     case StmtKind::While: {
         auto result = node(IrOp::Loop, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
@@ -4506,6 +4570,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         if (context.function == no_symbol) {
             throw Diagnostic(stmt.span, "return is only allowed inside a function").with_code("E0431");
         }
+        if (generator_bodies_.contains(context.function)) return generator_return(stmt);
         const auto expected = symbol(context.function).type;
         const auto result_span = result_spans_.find(context.function);
         auto result = node(IrOp::Return, stmt.span);
@@ -4826,6 +4891,8 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
     if (stmt.kind == StmtKind::Destructure) {
         destructure(instructions, stmt, context);
+    } else if (stmt.kind == StmtKind::Defer) {
+        lower_defer(instructions, stmt, context);
     } else {
         instructions.push_back(statement(stmt, context));
     }
@@ -5162,7 +5229,7 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
         check_definite_assignment(declaration, id);
-        auto instructions = body(declaration.body, ctx);
+        auto instructions = declaration.generator ? generator_factory(declaration, ctx, id) : body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
             throw missing_return(declaration.span, id, declaration);
         program_.bodies.push_back({id, std::move(instructions)});
@@ -5170,6 +5237,8 @@ void Lowering::lower_declaration(SymbolId id) {
         for (const auto branch : branches) lower_declaration(branch);
     } else if (declaration.kind == DeclKind::Module || class_or_interface(symbol(id).kind)) {
         if (declaration.record) check_record(id);
+        if (declaration.derive)
+            for (const auto child : derived_members_.at(id)) lower_declaration(child);
         // A companion's conformance is checked when a bound needs it
         // (satisfies_by_conformance); any other module's is rejected here.
         if (declaration.kind == DeclKind::Module && !companion_primitive(id)) check_module_conformance(id);
@@ -5284,6 +5353,7 @@ void Lowering::lower_declaration(SymbolId id) {
 void Lowering::seed(LinkedImports linked) {
     program_ = std::move(linked.program);
     linked_modules_ = std::move(linked.modules);
+    artifact_origins_ = std::move(linked.artifact_origins);
     entries_.resize(program_.symbols.size());
 
     // A singleton's class and value share their source name. Older files
@@ -5409,6 +5479,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             if (stmt.kind == StmtKind::Binding) prepare_promotions(*stmt.declaration, file_ids_[i]);
         }
     }
+    for (const auto id : derivations_) expand_derivation(id);
     for (std::size_t i = 0; i < files.size(); ++i) {
         const auto id = file_ids_[i];
         auto ctx = context(id);
@@ -5471,11 +5542,17 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
         }
     }
     check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    // A `using` resource does not escape its block (Lifetime030.md), judged
+    // with the retention summaries of the linked program.
+    check_scoped_resources(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    // No event is emitted under a monitor guard (Lifetime030.md, Events).
+    check_event_guards(program_);
     return std::move(program_);
 }
 
 #include "lowering_accessors.inc"
 #include "lowering_records.inc"
+#include "lowering_derive.inc"
 #include "lowering_properties.inc"
 #include "lowering_static.inc"
 #include "lowering_calls.inc"
@@ -5484,6 +5561,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 #include "lowering_any.inc"
 #include "lowering_startup.inc"
 #include "lowering_hooks.inc"
+#include "lowering_lifetime.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

@@ -1,0 +1,22 @@
+// A trap in a deferred call ends the run; the deferred calls registered
+// before it do not run (docs/design/Lifetime030.md, edge case 21).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let say = func(text: string) -> void {
+    console.print_line(text);
+};
+
+let fail = func(divisor: int) -> void {
+    console.print_line((10 / divisor).to_string());
+};
+
+let DeferTrap = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        defer say("never runs");
+        defer fail(0);
+        defer say("runs first");
+        say("body");
+        return program.ExitCode.Ok;
+    };
+);

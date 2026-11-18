@@ -5,7 +5,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let.promote _ = import:Std.Crypto.StreamingDigest;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief HMAC (FIPS 198-1, RFC 2104) over any StreamingDigest (Stdlib.md section 20.5).
+/// @brief HMAC (FIPS 198-1, RFC 2104) over any StreamingDigest (Stdlib.md section 21.5).
 /// @see [Std.Crypto.Mac.Hmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hmac)
 #Since("0.3.0")
 export let Hmac = module (

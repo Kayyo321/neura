@@ -169,6 +169,17 @@ std::string signature(const Declaration &d) {
             text += " -> " + syntax_type(*d.type);
         else
             text += " -> void";
+    } else if (d.record) {
+        // A record by its components (docs/design/Records030.md, Language server).
+        text += "record " + d.name + " (";
+        bool first = true;
+        for (const auto &member : d.members) {
+            if (member.kind != Declaration::Kind::Binding || member.static_member)
+                continue;
+            text += (first ? "" : ", ") + member.name + ": " + (member.type ? syntax_type(*member.type) : "");
+            first = false;
+        }
+        text += ")";
     } else {
         switch (d.kind) {
         case Declaration::Kind::Class:
@@ -1251,7 +1262,9 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
     statement = [&](const Statement &s) {
         if (s.declaration)
             declaration(*s.declaration);
-        if (s.kind == Statement::Kind::Scope || s.kind == Statement::Kind::Select)
+        if (s.kind == Statement::Kind::Scope || s.kind == Statement::Kind::Select ||
+            s.kind == Statement::Kind::Defer || s.kind == Statement::Kind::Using ||
+            s.kind == Statement::Kind::Yield)
             put(s.keyword, 14, 0, 2);
         if (s.binding_type)
             type(*s.binding_type);
@@ -1276,8 +1289,10 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
         }
     };
     declaration = [&](const Declaration &d) {
+        if (d.generator && d.generator_keyword)
+            put(*d.generator_keyword, 14, 0, 2);
         if (d.type)
-            type(*d.type);
+            type(d.generator && !d.type->arguments.empty() ? d.type->arguments.front() : *d.type);
         if (d.base)
             type(*d.base);
         for (const auto &t : d.interfaces)
@@ -1426,6 +1441,45 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         add("get", 14, "class hook or accessor clause", "`| get: instance;` runs when a reference is read.");
         add("set", 14, "class hook or accessor clause", "`| set: value;` runs when a reference is stored or passed.");
         return Json{{"isIncomplete", false}, {"items", items}};
+    }
+    // After `| get.` or `| set.`, the dispatch word of an accessor clause:
+    // `override:` under `let.override`, `virtual:` under any other member
+    // (docs/design/Records030.md, edge case 144).
+    if (before != std::string::npos && doc.source[before] == '.') {
+        std::optional<std::size_t> dot;
+        for (std::size_t i = doc.tokens.size(); i > 0;) {
+            const auto &t = doc.tokens[--i];
+            if (t.kind == TokenKind::End || t.span.offset >= start)
+                continue;
+            if (t.span.offset == before)
+                dot = i;
+            break;
+        }
+        if (dot && *dot >= 2 && (doc.tokens[*dot - 1].text == "get" || doc.tokens[*dot - 1].text == "set") &&
+            doc.tokens[*dot - 2].text == "|") {
+            // The member is the declaration that ends at the ';' before the
+            // clause; it begins after the ';', '(' or '{' before that.
+            std::size_t first = *dot - 2;
+            while (first > 0 && doc.tokens[first - 1].text != ";")
+                --first;
+            // Earlier clauses of the same member are skipped.
+            std::size_t begin = first;
+            do {
+                begin = begin > 0 ? begin - 1 : 0;
+                while (begin > 0 && doc.tokens[begin - 1].text != ";" && doc.tokens[begin - 1].text != "(" &&
+                       doc.tokens[begin - 1].text != "{")
+                    --begin;
+            } while (begin > 0 && doc.tokens[begin].text == "|" && doc.tokens[begin - 1].text == ";");
+            bool overriding = false;
+            for (std::size_t i = begin; i + 2 < first; ++i)
+                overriding = overriding || (doc.tokens[i].text == "let" && doc.tokens[i + 1].text == "." &&
+                                            doc.tokens[i + 2].text == "override");
+            if (overriding)
+                add("override:", 14, "accessor clause", "`| get.override:` replaces the inherited accessor.");
+            else
+                add("virtual:", 14, "accessor clause", "`| get.virtual:` lets a subclass override the accessor.");
+            return Json{{"isIncomplete", false}, {"items", items}};
+        }
     }
     if (before != std::string::npos && doc.source[before] == '#') {
         for (const auto &tag : tag_registry()) {
@@ -1851,6 +1905,90 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             }
         }
     }
+    // Inside the braces of a copy, `new with(source) { `, the fields of the
+    // source's record that are not replaced yet, also while the copy is
+    // unfinished (docs/design/Records030.md, Language server; edge case 57).
+    if (!member && before != std::string::npos && (doc.source[before] == '{' || doc.source[before] == ',')) {
+        int depth = 0;
+        std::optional<std::size_t> brace;
+        std::set<std::string> written;
+        for (std::size_t i = doc.tokens.size(); i > 0;) {
+            const auto &t = doc.tokens[--i];
+            if (t.kind == TokenKind::End || t.span.offset >= start)
+                continue;
+            if (t.text == ")" || t.text == "]" || t.text == "}")
+                ++depth;
+            else if (t.text == "(" || t.text == "[" || t.text == "{") {
+                if (depth) {
+                    --depth;
+                    continue;
+                }
+                if (t.text == "{")
+                    brace = i;
+                break;
+            } else if (!depth && t.text == ":" && i > 1 && doc.tokens[i - 1].kind == TokenKind::Identifier &&
+                       (doc.tokens[i - 2].text == "," || doc.tokens[i - 2].text == "{"))
+                written.insert(doc.tokens[i - 1].text);
+        }
+        // The '(' that matches the ')' before the brace, after `new with`.
+        std::optional<std::size_t> open;
+        if (brace && *brace > 0 && doc.tokens[*brace - 1].text == ")") {
+            int nested = 0;
+            for (std::size_t j = *brace - 1; j > 0;) {
+                const auto &t = doc.tokens[--j];
+                if (t.text == ")")
+                    ++nested;
+                else if (t.text == "(" && nested-- == 0) {
+                    if (j >= 2 && doc.tokens[j - 1].text == "with" && doc.tokens[j - 2].text == "new")
+                        open = j;
+                    break;
+                }
+            }
+        }
+        std::string record_name;
+        if (open && *open + 3 == *brace && doc.tokens[*open + 1].kind == TokenKind::Identifier) {
+            // A name: its declared or inferred type, else the type written
+            // after it in a parameter or binding of the buffer.
+            const auto &name = doc.tokens[*open + 1];
+            if (const auto *source = symbol_at(doc, name.span.offset)) {
+                if (program && source->compiler_id != no_symbol) {
+                    const auto &type = program->symbols[source->compiler_id].type;
+                    if (type.kind == TypeKind::Object && type.symbol != no_symbol)
+                        record_name = program->symbols[type.symbol].name;
+                }
+                if (record_name.empty())
+                    record_name = source->type_name;
+            }
+            for (std::size_t j = 0; record_name.empty() && j + 2 < *open; ++j) {
+                if (doc.tokens[j].text == name.text && doc.tokens[j + 1].text == ":" &&
+                    doc.tokens[j + 2].kind == TokenKind::Identifier)
+                    record_name = doc.tokens[j + 2].text;
+            }
+        } else if (open && *open + 3 < *brace && doc.tokens[*open + 1].text == "new" &&
+                   doc.tokens[*open + 2].kind == TokenKind::Identifier) {
+            record_name = doc.tokens[*open + 2].text;
+        }
+        if (const auto dot = record_name.rfind('.'); dot != std::string::npos)
+            record_name.erase(0, dot + 1);
+        if (open && !record_name.empty()) {
+            for (const auto &candidate : symbols) {
+                if (candidate.name != record_name || !candidate.declaration || !candidate.declaration->record)
+                    continue;
+                for (const auto &field : candidate.declaration->members) {
+                    if (field.kind != Declaration::Kind::Binding || field.static_member || written.contains(field.name) ||
+                        !field.name.starts_with(prefix) || !seen.insert(field.name + ":").second)
+                        continue;
+                    items.emplace_back(Json{{"label", field.name + ":"}, {"kind", 5},
+                                            {"detail", field.name + ": " + (field.type ? syntax_type(*field.type) : "")},
+                                            {"sortText", "0" + field.name},
+                                            {"textEdit", Json{{"range", replacement_range},
+                                                              {"newText", field.name + ": "}}}});
+                }
+                break;
+            }
+            return Json{{"isIncomplete", false}, {"items", items}};
+        }
+    }
     if (member) {
         std::size_t end = receiver_end(before);
         std::size_t begin = end;
@@ -2086,7 +2224,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             add_declaration(candidates.front());
         }
         for (const auto &word : {"let", "last", "const", "func", "class", "interface", "module", "enum", "if", "else",
-                                 "while", "for", "return", "match", "scope", "spawn", "select", "new", "nil", "true",
+                                 "while", "for", "return", "match", "scope", "spawn", "select", "defer", "using", "iterator", "yield", "new", "nil", "true",
                                  "false", "export", "import"}) add(word, 14);
     }
     return Json{{"isIncomplete", false}, {"items", items}};

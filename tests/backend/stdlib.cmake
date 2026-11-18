@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE "${TEST_DIR}")
 file(MAKE_DIRECTORY "${TEST_DIR}/package/bin")
-file(COPY "${NEURA}" DESTINATION "${TEST_DIR}/package/bin")
+include("${CMAKE_CURRENT_LIST_DIR}/../tools.cmake")
+neura_copy_tools("${NEURA}" "${TEST_DIR}/package/bin")
 get_filename_component(binary "${NEURA}" NAME)
 set(tool "${TEST_DIR}/package/bin/${binary}")
 set(library "${TEST_DIR}/package/share/neura/stdlib/std")

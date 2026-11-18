@@ -2,7 +2,7 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
-/// @brief The contract of a key-encapsulation mechanism (Stdlib.md section 20.1).
+/// @brief The contract of a key-encapsulation mechanism (Stdlib.md section 21.1).
 /// @see [Std.Crypto.KeyEncapsulation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-KeyEncapsulation)
 #Since("0.3.0")
 export let KeyEncapsulation = module (

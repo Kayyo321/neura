@@ -1,0 +1,8 @@
+// Edge case 8: before '(' the word `defer` is a name, so this is a call of
+// an unknown `defer`; the help shows the statement form.
+let pick = func() -> func() -> void {
+    return func() -> void {};
+};
+let work = func() -> void {
+    defer (pick())();
+};

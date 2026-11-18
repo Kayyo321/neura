@@ -1,0 +1,12 @@
+error[E0219]: expected ';' after the deferred call
+ --> $DIR/defer-no-semicolon.nra:4:16
+  |
+4 |     defer log()
+  |                ^ expected ';' here
+  |
+help: add the missing ';'
+  |
+4 |     defer log();
+  |                +
+
+For more information about this error, try `neura explain E0219`.

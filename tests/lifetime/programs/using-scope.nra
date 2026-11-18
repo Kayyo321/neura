@@ -1,0 +1,55 @@
+// A `using` around a `scope` block closes only after the scope's children
+// are joined, and a deferred call inside the scope runs before the join
+// (docs/design/Lifetime030.md, "Exit order", edge case 45).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+#Synchronized
+let Log = class implements closeable.Closeable (
+    let lines: int = 0;
+    export let write = func(line: string) -> void {
+        lines = lines + 1;
+    };
+
+    export let count = func() -> int => lines;
+
+    export let close = func -> Result<Unit> {
+        console.print_line("closing the log after " + lines.to_string() + " lines");
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let fill = func(log: Log, count: int) -> void {
+    for (let index = 0; index < count; index++) {
+        log.write("line");
+    }
+};
+
+let UsingScope = module:program.Entry (
+    let work = func() -> Result<int> {
+        using (log = new Log()) {
+            scope {
+                defer console.print_line("deferred in the scope, before the join");
+                spawn fill(log, 300);
+                spawn fill(log, 200);
+            }
+            console.print_line("joined with " + log.count().to_string() + " lines");
+            return Result<int>.Ok(log.count());
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        match (work()) {
+            Result.Ok(count) => {
+                console.print_line("ok " + count.to_string());
+            },
+            Result.Err(_) => {
+                console.print_line("failed");
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

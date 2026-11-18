@@ -1,0 +1,12 @@
+{"low":-9223372036854775808,"high":9223372036854775807,"zero":0,"top":18446744073709551615,"small":-128}
+{"min":-9223372036854775808,"high":9223372036854775807,"zero":0,"max":18446744073709551615,"small":-128}
+round trip
+json.codec.missing $.min
+json.codec.range $.high
+json.codec.range $.zero
+json.codec.range $.small
+json.codec.range $.small
+parse Syntax 0
+json.codec.too_large $
+parse OutOfRange 512
+parse OutOfRange 512

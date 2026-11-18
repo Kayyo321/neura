@@ -1,0 +1,42 @@
+let json = import:Std.Encoding.Json;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+let User = record (id: uint64, name: string, active: bool);
+let Team = record (lead: Optional<User>, score: Optional<int>);
+let UserJson = derive json.Codec<User> { field User.name: "display_name"; };
+let TeamJson = derive json.Codec<Team>;
+let Event = enum (Idle, Moved(int, int), Named { user: User, flag: bool });
+let EventJson = derive json.Codec<Event> {
+    variant Event.Named: "member";
+    field Event.Named.flag: "enabled";
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last user = new User(18446744073709551615, "Ada", true);
+        match (UserJson.encode(user)) {
+            Result.Ok(text) => { console.print_line(text); },
+            Result.Err(_) => { return program.ExitCode.Failure; },
+        }
+        match (TeamJson.decode("{\"lead\":null,\"extra\":1,\"extra\":2}")) {
+            Result.Ok(team) => {
+                if (!(team.lead === Optional<User>.Some(nil)) || !(team.score === Optional<int>.None)) {
+                    return program.ExitCode.Failure;
+                }
+                match (TeamJson.encode(team)) {
+                    Result.Ok(text) => { console.print_line(text); },
+                    Result.Err(_) => { return program.ExitCode.Failure; },
+                }
+            },
+            Result.Err(_) => { return program.ExitCode.Failure; },
+        }
+        match (EventJson.encode(Event.Named { flag: false, user: user })) {
+            Result.Ok(text) => { console.print_line(text); },
+            Result.Err(_) => { return program.ExitCode.Failure; },
+        }
+        return program.ExitCode.Ok;
+    };
+);

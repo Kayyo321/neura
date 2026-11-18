@@ -312,9 +312,99 @@ Functions with the same parameter and result types have the same function type. 
 
 A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs.
 
-A noncapturing function value uses a static descriptor. A capturing lambda or bound method that stays in its creating block uses that block's region. Returning it, storing it in a collection or heap field, or passing it to a parameter that retains it requires `new func` or `new bound(receiver.method)`. The receiver of `new bound` is evaluated once when the environment is created. An owned environment cannot capture a frame array or a borrow of a frame binding. [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md) reports a capturing callable that escapes without explicit construction.
+A noncapturing function value uses a static descriptor. A capturing lambda or bound method that stays in its creating block uses that block's region. Returning it, storing it in a collection or heap field, or passing it to a parameter that retains it requires `new func` or `new bound(receiver.method)`. The receiver of `new bound` is evaluated once when the environment is created. An owned environment cannot capture a frame array or a borrow of a frame binding. [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md) reports a capturing callable that escapes without explicit construction. A capturing [generator](#generators) follows the same rule with `new iterator(...) -> T { ... }`, and [E0479](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0479.md) reports one that escapes without it.
 
 Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. A generic function is called with its type arguments written or [inferred](Polymorphism#type-argument-inference). Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
+
+### defer
+
+`defer call;` registers one call to run when the enclosing block is left ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). The callee, the receiver and the arguments are evaluated once, in written order, at the statement, and saved; later assignments to the bindings they were read from change nothing, while an object or array that was saved is the same instance when the call runs. The call runs once when its block is left by falling off its end, `return`, `break`, `continue`, or a propagating `?`. Calls deferred in one block run last in, first out, and a `defer` that is not reached registers nothing. A `defer` belongs to the innermost block that contains it, so a loop body runs its deferred calls at the end of each iteration and a branch of `if` at the end of the branch. A `return` evaluates its value first, holds it while the deferred calls run, and then returns it.
+
+The operand is one call of a function, a method, a static function, or a function value. A block, a `new` expression, `spawn`, an optional-chained call, and any other expression are [E0219](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0219.md), and the call's result type must be `void` ([E0471](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0471.md)), because nothing can read a deferred call's result. `defer` is written in a function body, a lambda, a constructor or a destructor; at file level it is [E0472](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0472.md). A trap in a deferred call ends the run, and the deferred calls registered before it do not run: nothing runs after a trap or `Process.exit`.
+
+`defer` is a keyword only at the start of a statement and before a name, `{`, `new` or `spawn`. Everywhere else it is an ordinary identifier, so `defer(x);` calls a function named `defer`.
+
+<!-- example: check -->
+```neura
+let console = import:Std.Io.Console;
+
+let Audit = class (
+    export let end_section = func(name: string) -> void {
+        console.print_line("end " + name);
+    };
+);
+
+let import_items = func(audit: Audit, count: int) -> int {
+    defer audit.end_section("import");
+    for (let index = 0; index < count; index++) {
+        defer console.print_line("item " + index.to_string() + " done");
+        if (index == 2) {
+            return index;
+        }
+    }
+    return count;
+};
+```
+
+### using
+
+`using (name = value) { body }` binds a resource for its block and closes it on every exit from the block ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). The value is evaluated once and bound to an immutable `name`, visible in the block only; its type implements `Std.Io.Closeable.Closeable` ([E0474](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0474.md)). A reference that is nil at run time fails with the nil-reference failure, and an acquisition that returns early through `?` or traps registers nothing. The bound reference is saved, and `close` is called exactly once on that object when the block is left, however it is left. Nested `using` blocks close in reverse order of acquisition, and a block's deferred calls and closes run last registered first, before the block's `scope`, if it is one, joins its tasks.
+
+A failed close is never ignored, so `using` is written in a function or lambda that returns `Result<T>` ([E0473](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0473.md)). On a `return`, the returned value is combined with the close by the rule of `Std.Io.Closeable.release`: a successful close leaves it unchanged; a failed close after `Ok` returns the close error; a failed close after `Err` returns a `Context` error whose cause is the original error and whose message is `closing the resource also failed: ` and the close error's message. Two nested blocks apply the rule innermost first. On falling off the end, `break` or `continue`, a failed close returns its error from the function, after the cleanups of the enclosing blocks; execution does not go on as if it had succeeded. The resource stays closed when `close` fails.
+
+The resource may not leave its block ([E0475](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0475.md)): it is not returned, stored outside the block, sent on a channel, captured by a function value that a callee retains, or passed to a parameter whose [retention summary](IrOptimization#effect-summaries) is "retained elsewhere" or unknown. A value that retains it, such as a reader built over it, is scoped with it. A `spawn` that captures it belongs in a `scope` inside the `using` block, which joins the task before the close. The form binds one resource, without a type annotation, and its block takes no `;` ([E0220](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0220.md)). `using` is a keyword only at the start of a statement before `(`, a name and `=`, or before a balanced `(...)` and `{`; elsewhere it is an ordinary identifier.
+
+<!-- example: check -->
+```neura
+let files = import:Std.Fs.File;
+let paths = import:Std.Fs.Path;
+let.promote _ = import:Std.Core.Result;
+
+let first_bytes = func(path: paths.Path) -> Result<int> {
+    using (source = files.open(path, files.OpenMode.Read)?) {
+        let data = source.read(16)?;
+        return Result<int>.Ok(data.length);
+    }
+};
+```
+
+### Generators
+
+`iterator(parameters) -> T { body }` is a generator: a function value of type `func(parameters) -> Sequence<T>`, with `Sequence` the class of `Std.Collections.Sequence` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). It is written wherever `func` is: as a binding's initializer, as a member of a class or module, where it may read `instance`, or as an argument; a named one may have type parameters. The element type is required ([E0221](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0221.md)), and the parameters follow the grouped-parameter rules. Calling a generator evaluates its arguments, allocates its state and returns a sequence; it runs none of the body. In the body, `yield value;` gives the next element, checked against `T`; `return;` and the end of the body finish the generator, and `return value;` is [E0478](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0478.md). `yield` is a statement only directly in a generator's body ([E0222](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0222.md)); there a binding named `yield` is [E0311](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0311.md).
+
+The sequence is lazy. The first `has_next()` with nothing buffered runs the body to its next `yield` or its end; further calls while a value is buffered run nothing. `next()` returns the buffered value, after running the body as `has_next()` does when nothing is buffered, and never runs past the `yield` it consumes. After the body ends, `has_next()` is false and `next()` traps with `no such element`. Advancing a generator from inside its own body traps with `invalid state: generator already running`, and separate calls give independent generators. The sequence is used once, as every `Sequence` is, and abandoning it, for example with `break` in the loop that consumes it, runs nothing more.
+
+A generator suspends at each `yield`, so the bindings in scope there live in its state. A `yield` is not inside a `scope` block and does not follow a `defer` in a block that encloses it ([E0476](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0476.md)), and no array, primitive reference, or tuple or enum that holds one is in scope at a `yield`, nor is a parameter of such a type ([E0477](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0477.md)); a list is the owned alternative, and an array in a block that ends before the next `yield` is accepted. A generator's body holds no `using`, since it returns no `Result` ([E0473](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0473.md)); a lambda inside it may.
+
+A generator that reads outer bindings keeps them in its state, which lives as long as its sequences. Like a capturing function value, one that leaves the call that creates it, by being returned, stored, or retained, is written `new iterator(...) -> T { ... }`, which owns its captures ([E0479](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0479.md)). A generator that captures nothing needs no `new`.
+
+`iterator` begins a generator only when it is followed by an optional `<...>`, a balanced `(...)`, and `->` or `{`, so `collection.iterator()`, `let iterator = ...` and a call `iterator(x)` keep their meaning.
+
+<!-- example: check -->
+```neura
+let sequence = import:Std.Collections.Sequence;
+
+let squares = iterator(count: int) -> int {
+    for (let index = 0; index < count; index++) {
+        yield index * index;
+    }
+};
+
+let small = func() -> int {
+    let total = 0;
+    for (let square: int in squares(10).filter(func(value: int) -> bool => value < 30)) {
+        total = total + square;
+    }
+    return total;
+};
+
+let counting_from = func(base: int) -> func() -> sequence.Sequence<int> {
+    return new iterator() -> int {
+        yield base;
+        yield base + 1;
+    };
+};
+```
 
 ## Loops
 

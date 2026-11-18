@@ -10,7 +10,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let poly1305 = import:Std.Crypto.Mac.Poly1305;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief ChaCha20-Poly1305 of RFC 8439, section 2.8, with 96-bit nonces (Stdlib.md section 20.7).
+/// @brief ChaCha20-Poly1305 of RFC 8439, section 2.8, with 96-bit nonces (Stdlib.md section 21.7).
 ///
 /// A nonce must never repeat under one key. For random nonces use XChaCha20Poly1305, whose 192-bit nonces do
 /// not collide in practice.

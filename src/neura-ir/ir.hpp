@@ -188,7 +188,16 @@ enum class IrOp {
     // argument the type the call goes through, a type parameter bounded by
     // the interface, and its operands the arguments. Specialization replaces
     // it with a direct call of the implementation; none remains after it.
-    ConformanceCall
+    ConformanceCall,
+    // NeuraIR 1.14 (docs/design/Lifetime030.md, lifetime.hpp). Cleanup is a
+    // direct statement of a block: from where it stands to every exit of
+    // that block it is registered, and each exit runs its body, or on a
+    // return its alternative when that is not empty, last registered first,
+    // before the block's task scope is joined. Pending is the value a return
+    // carries, read and assigned only in a Cleanup's alternative. Yield is a
+    // statement of a function that carries generator.resume; its text is
+    // its suspension index, 1 to n.
+    Cleanup, Pending, Yield
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written
@@ -196,6 +205,9 @@ enum class IrOp {
 // function; a bare bound value records the receiver form for diagnostics.
 inline constexpr std::string_view bound_closure = "$bound";
 inline constexpr std::string_view owned_lambda = "$new_func";
+// A bare generator expression (docs/design/Lifetime030.md): a capturing one
+// that escapes needs `new iterator` (E0479). `new iterator` is owned_lambda.
+inline constexpr std::string_view generator_closure = "$iterator";
 inline constexpr std::string_view owned_bound = "$new_bound";
 inline constexpr std::string_view task_closure = "$task_closure";
 inline constexpr std::string_view region_reference = "$region_reference";
@@ -281,6 +293,26 @@ struct IrNativeLibrary {
     bool operator==(const IrNativeLibrary&) const = default;
 };
 
+// Source-only derivation facts used by the compiler's expansion view and by
+// workspace rename. The emitted ordinary functions carry the execution data.
+struct DerivedWireMember {
+    SymbolId symbol = no_symbol;
+    std::string payload_field;
+    std::string path;
+    std::string wire;
+    bool variant{};
+    bool pinned{};
+};
+
+struct DerivedCodec {
+    SymbolId module = no_symbol;
+    Span declaration;
+    std::optional<Span> close_brace;
+    std::string source;
+    std::vector<DerivedWireMember> members;
+    std::vector<std::pair<std::string, std::string>> schema_imports{};
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -301,6 +333,7 @@ struct IrProgram {
     // Set by elaborate_class_hooks on a program whose events it derived; not
     // part of a .nir file.
     bool hooks_elaborated = false;
+    std::vector<DerivedCodec> derived_codecs{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

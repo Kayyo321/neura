@@ -1,0 +1,19 @@
+// Case 75: a returned capturing generator without new requires E0479.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let sequence = import:Std.Collections.Sequence;
+let make = func(base: int) -> func() -> sequence.Sequence<int> {
+    return new iterator() -> int {
+        yield base;
+        yield base + 1;
+    };
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let generate = make(7);
+        for (let value in generate()) {
+            console.println("{}", value);
+        }
+        return program.ExitCode.Ok;
+    };
+);

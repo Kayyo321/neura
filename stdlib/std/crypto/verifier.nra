@@ -1,6 +1,6 @@
 let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
-/// @brief The contract of a signature verifier (Stdlib.md section 20.1).
+/// @brief The contract of a signature verifier (Stdlib.md section 21.1).
 /// @see [Std.Crypto.Verifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Verifier)
 #Since("0.3.0")
 export let Verifier = module (

@@ -1,6 +1,6 @@
 let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
-/// @brief The contract of an incremental hash (Stdlib.md section 20.1).
+/// @brief The contract of an incremental hash (Stdlib.md section 21.1).
 /// @see [Std.Crypto.StreamingDigest](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-StreamingDigest)
 #Since("0.3.0")
 export let StreamingDigest = module (

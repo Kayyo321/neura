@@ -3,7 +3,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let.promote _ = import:Std.Crypto.ExtendableOutput;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief BLAKE3: hashing, keyed hashing, key derivation and extendable output (Stdlib.md section 20.4).
+/// @brief BLAKE3: hashing, keyed hashing, key derivation and extendable output (Stdlib.md section 21.4).
 ///
 /// This is the specification's serial reference algorithm (chunks of 1024 bytes, a stack of chaining values,
 /// 7-round compression) in Neura code. The SIMD and multi-threaded tree evaluation of the specification is not

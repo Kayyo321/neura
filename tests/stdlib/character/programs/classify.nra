@@ -1,0 +1,18 @@
+let character = import:Std.Core.Character;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let string = import:Std.Core.String;
+let unicode_script = import:Std.Core.UnicodeScript;
+
+// Prints the category, script, and case mappings of each character of a
+// mixed-script string.
+export let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let code_point in string.code_points("Aß ǅ٣€😀")) {
+            last c = character.of(code_point);
+            console.print_line($"{c} {character.category_code(c.get_type())} {unicode_script.of(code_point)} "
+                + $"{c.to_upper()}{c.to_lower()}{c.to_title()} {c.to_upper_string()} {c.numeric_value()}");
+        }
+        return program.ExitCode.Ok;
+    };
+);

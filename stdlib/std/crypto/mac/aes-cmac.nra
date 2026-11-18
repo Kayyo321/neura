@@ -5,7 +5,7 @@ let constant_time = import:Std.Crypto.Core.ConstantTime;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief AES-CMAC (NIST SP 800-38B, RFC 4493) with 128-, 192- and 256-bit keys (Stdlib.md section 20.5).
+/// @brief AES-CMAC (NIST SP 800-38B, RFC 4493) with 128-, 192- and 256-bit keys (Stdlib.md section 21.5).
 /// @see [Std.Crypto.Mac.AesCmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesCmac)
 #Since("0.3.0")
 export let AesCmac = module (

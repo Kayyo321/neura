@@ -41,6 +41,19 @@ struct RunOptions {
     // when unset, when run() begins) to the report.
     bool tier_stats = false;
     std::optional<std::chrono::steady_clock::time_point> started{};
+    // Receives how the run ended, when set: whether it trapped, and the
+    // class of the trap (docs/design/Service030.md, "States and records").
+    struct Ending {
+        // The image was decoded and validated (set by the caller), and when.
+        bool loaded = false;
+        std::chrono::steady_clock::time_point loaded_at{};
+        // The run began: its host bindings were made and it was entered.
+        bool started = false;
+        std::chrono::steady_clock::time_point started_at{};
+        bool trapped = false;
+        std::string trap_class;
+    };
+    Ending* ending = nullptr;
 };
 
 // Writes scheduler events as JSON lines (docs/lang/Concurrency.md section

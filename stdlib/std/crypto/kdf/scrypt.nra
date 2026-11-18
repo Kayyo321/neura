@@ -5,7 +5,7 @@ let salsa20 = import:Std.Crypto.Internal.Salsa20;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief The scrypt password-based key derivation function of RFC 7914 (Stdlib.md section 20.6).
+/// @brief The scrypt password-based key derivation function of RFC 7914 (Stdlib.md section 21.6).
 ///
 /// The working memory is 128 * r * N bytes, held as 32-bit words; a call whose memory would exceed 1 GiB traps
 /// before allocating.

@@ -1,0 +1,32 @@
+// Echoes each line of standard input in brackets until the end of input,
+// then prints "end". A service test keeps its input open to hold the run.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Echo = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        while (true) {
+            match (console.read_line()) {
+                result.Result.Ok(line) => {
+                    match (line) {
+                        optional.Optional.Some(text) => {
+                            console.print_line("[" + text + "]");
+                        },
+                        optional.Optional.None => {
+                            break;
+                        },
+                    }
+                },
+                result.Result.Err(failure) => {
+                    console.print_line(error.message(failure));
+                    break;
+                },
+            }
+        }
+        console.print_line("end");
+        return program.ExitCode.Ok;
+    };
+);

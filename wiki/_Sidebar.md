@@ -42,6 +42,7 @@
 - [NeuraIR format](NirFormat)
 - [NVR format](NVR)
 - [Neura Virtual Machine](NVM)
+- [Runtime service](Service)
 - [Kernels](Kernels)
 - [Wall-clock benchmarks](Benchmarks)
 - [Decompiler](Decompiler)

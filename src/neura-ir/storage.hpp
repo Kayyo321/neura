@@ -184,6 +184,7 @@ enum class EscapeKind : std::uint8_t {
     ArrayRetainedByCall,         // passed to a callee that may retain the value elsewhere
     ClosureNeedsOwnership,      // a capturing function value escapes its activation
     BoundNeedsOwnership,        // a bound receiver escapes its activation
+    GeneratorNeedsOwnership,    // a capturing generator escapes its activation (E0479)
 };
 
 std::string_view describe_escape_kind(EscapeKind kind);

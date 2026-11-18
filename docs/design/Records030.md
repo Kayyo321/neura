@@ -2,7 +2,7 @@
 
 This note fixes the grammar and rules of the 0.3.0 data-and-contracts milestone before it is implemented, as [the 0.3.0 baseline](Release030.md) requires: immutable record classes with copy construction, interface properties and virtual accessors, static interface requirements with a small set of generic-math contracts, and compiler-owned derivation of JSON codecs. It builds on [grouped parameters and `=> set`](Parameters030.md), [semantic facts](Representation030.md) and [storage and construction](Storage030.md). The rows move to [Types](../lang/Types.md), [Polymorphism](../lang/Polymorphism.md), [Object lifecycle](../lang/ObjectLifecycle.md), [the standard library](../lang/Stdlib.md) and [the NeuraIR format](../NirFormat.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch the same day for steps 2 to 8 of the [order of work](#order-of-work). The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; "proposed" stays until then, and a row marked "implemented, proposed" is in the compiler and still awaits it. Step 2 implements the value members of inline payload enums. Derivation in step 9 remains proposed. Changes to a row made in the implementation are listed, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation). A row the owner changes is changed here and on the page that owns it in one later change.
+Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch the same day for steps 2 to 9 of the [order of work](#order-of-work). The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; "proposed" stays until then, and a row marked "implemented, proposed" is in the compiler and still awaits it. Step 2 implements the value members of inline payload enums, and step 9 JSON derivation. Of the [tooling](#tooling) rows, rename pins, the documentation index and part of the language server's support are implemented; the rest, and the decompiler and debugger rows, remain proposed. Changes to a row made in the implementation are listed, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation). A row the owner changes is changed here and on the page that owns it in one later change.
 
 The milestone adds no NVR operation and changes no image of a program that uses none of its features. It adds one NeuraIR operation (the call of a static requirement through a type parameter), five symbol attributes, and value members for payload enums. The calls milestone's note was written beside this one: it fixes a named argument as `name: expression` and makes the parameter names of an exported declaration part of its signature. The notes of the hooks and matching milestones were not written yet; where a rule depends on them it says what it assumes.
 
@@ -83,8 +83,8 @@ mapping      = ( "field" | "variant" ) qualified-name ":" string ";"
 | `record<T> (...)` and `record: Base (...)` are therefore read as expressions and fail as such, at the first `:` (`E0202`) and at the `:` (`E0201`); when the initializer begins with `record <` or is the bare name `record`, the error carries the help `a record is not generic in this release` or `a record has no base class`. | implemented, proposed |
 | After the M5 named arguments, `let x = record(count: limit);` reads as a record with one field. A call of a function named `record` whose first argument is named, written as the whole initializer of an unannotated declaration, is written `(record)(count: limit)`. | implemented, proposed |
 | `new with` always begins copy construction. A class named `with` can no longer be constructed by `new with(...)`; no source in the repository does. The source expression is one expression in parentheses, the braces are required, and they may be empty. | implemented, proposed |
-| `derive` begins a derivation only as the first token of a declaration's initializer and only when an identifier follows it. Two adjacent identifiers begin no expression, so no accepted program changes. | proposed |
-| `field` and `variant` are words only at the start of a mapping inside a derivation's braces. A mapping's right side is one string literal: no concatenation, no constant name, no interpolation. | proposed |
+| `derive` begins a derivation only as the first token of a declaration's initializer and only when an identifier follows it. Two adjacent identifiers begin no expression, so no accepted program changes. | implemented, proposed |
+| `field` and `variant` are words only at the start of a mapping inside a derivation's braces. A mapping's right side is one string literal: no concatenation, no constant name, no interpolation. | implemented, proposed |
 | A clause belongs to the member whose `;` it follows. A clause before the first member of a class is not an accessor clause; the hooks milestone uses that position for class hooks, including its own `get.override` and `set.override`, and nothing in this note reads a clause there. | proposed |
 | An accessor clause's word may be followed by `.virtual` or `.override`. The three tokens may be separated by spaces or comments; `neura fmt` writes them joined. A bodyless clause `\| get;` is accepted only on an interface property, and a clause with a body only in a class. | implemented, proposed |
 | A record's components are not grouped (`record (x, y: float64)` is not a record), take no default value, and take no `export`, `let`, `last`, `const` or `static`. Tags and documentation comments before a component apply to its field. A trailing comma is allowed. | implemented, proposed |
@@ -224,12 +224,12 @@ The new companion functions are the operators: `add` is `left + right` and `mult
 
 | Rule | Status |
 | --- | --- |
-| `let Name = derive G<T>;` or `... { mappings };` asks a compiler-owned generator for a module named `Name`. `G` must resolve to a generator the compiler owns; the only one in 0.3.0 is `Std.Encoding.Json.Codec`, declared in the trusted library. Any other target is `E0579`. | proposed |
-| A derivation is a member of a file or a module. It is not written in a function body, a class or an interface, and is not an expression. `export` exports the module. | proposed |
-| The result is a module of ordinary checked functions. It is not an object: nothing is allocated to hold a codec, and `Name` is used as a module is (`UserJson.encode(user)`). | proposed |
-| Tags never cause generation. `#Serializable`, `#SerialName` and `#Skip` stay reserved and are not read by a derivation. | proposed |
-| A mapping `field Q.member: "wire";` pins the wire name of a record field, or of a named payload field written `Enum.Variant.field`; `variant Enum.Variant: "wire";` pins a variant's. `Q` is resolved like any type name. The member must exist, be accessible, and belong to a shape reachable from `T` (`E0318`). Two mappings for one member, an empty wire name, and two members of one record, one enum or one named payload with the same wire name after mapping are `E0319`. A mapping holds for every occurrence of the shape in this derivation and for no other derivation. | proposed |
-| Two derivations for one type are two independent modules. | proposed |
+| `let Name = derive G<T>;` or `... { mappings };` asks a compiler-owned generator for a module named `Name`. `G` must resolve to a generator the compiler owns; the only one in 0.3.0 is `Std.Encoding.Json.Codec`, declared in the trusted library. Any other target is `E0579`. | implemented, proposed |
+| A derivation is a member of a file or a module. It is not written in a function body, a class or an interface, and is not an expression. `export` exports the module. | implemented, proposed |
+| The result is a module of ordinary checked functions. It is not an object: nothing is allocated to hold a codec, and `Name` is used as a module is (`UserJson.encode(user)`). | implemented, proposed |
+| Tags never cause generation. `#Serializable`, `#SerialName` and `#Skip` stay reserved and are not read by a derivation. | implemented, proposed |
+| A mapping `field Q.member: "wire";` pins the wire name of a record field, or of a named payload field written `Enum.Variant.field`; `variant Enum.Variant: "wire";` pins a variant's. `Q` is resolved like any type name. The member must exist, be accessible, and belong to a shape reachable from `T` (`E0318`). Two mappings for one member, an empty wire name, and two members of one record, one enum or one named payload with the same wire name after mapping are `E0319`. A mapping holds for every occurrence of the shape in this derivation and for no other derivation. | implemented, proposed |
+| Two derivations for one type are two independent modules. | implemented, proposed |
 
 ### The JSON codec
 
@@ -237,40 +237,42 @@ The new companion functions are the operators: `add` is `left + right` and `mult
 
 | Function | Meaning | Status |
 | --- | --- | --- |
-| `to_json(value: T) -> Result<JsonValue>` | The value as a JSON tree | proposed |
-| `encode(value: T) -> Result<string>` | `Json.write` of `to_json` | proposed |
-| `from_json(value: JsonValue) -> Result<T>` | The value a JSON tree describes | proposed |
-| `decode(text: string) -> Result<T>` | `Json.parse`, then `from_json` | proposed |
+| `to_json(value: T) -> Result<JsonValue>` | The value as a JSON tree | implemented, proposed |
+| `encode(value: T) -> Result<string>` | `Json.write` of `to_json` | implemented, proposed |
+| `from_json(value: JsonValue) -> Result<T>` | The value a JSON tree describes | implemented, proposed |
+| `decode(text: string) -> Result<T>` | `Json.parse`, then `from_json` | implemented, proposed |
 
 `T`, the root, is a record or an enum other than `Optional`. The shapes a codec supports, each checked over everything reachable from the root (`E0590` at the derivation, naming the path to the unsupported type):
 
 | Shape | JSON | Status |
 | --- | --- | --- |
-| `bool` | `true`, `false` | proposed |
-| Integers of every width | A number written as an integer, exactly. Decoding accepts only a number with no fraction and no exponent that the type holds; it goes through the type's `parse`, never through a float. | proposed |
-| Floats of every width | The shortest round-trip text. Encoding a NaN or an infinity returns an error; decoding a number that rounds to an infinity does too. | proposed |
-| `string` | A string | proposed |
-| Record | An object with one member per field, in declaration order. A nil record is `null`. | proposed |
-| Tuple | An array of exactly the tuple's length | proposed |
-| Enum, fieldless or not | An object whose `"variant"` is the variant's wire name. A fieldless variant has no `"payload"`; positional payloads are a `"payload"` array in order; named payloads are a `"payload"` object. | proposed |
-| `Optional<U>` as the type of a record field | `None` omits the member; a missing member decodes as `None`; a present member decodes as `Some`. A present `null` is `Some(nil)` when `U` is a record and an error otherwise. | proposed |
-| `Optional` anywhere else (a tuple element, an enum payload, inside another `Optional`, the root) | Rejected (`E0590`) | proposed |
+| `bool` | `true`, `false` | implemented, proposed |
+| Integers of every width | A number written as an integer, exactly. Decoding accepts only a number with no fraction and no exponent that the type holds; it goes through the type's `parse`, never through a float. | implemented, proposed |
+| Floats of every width | The shortest round-trip text. Encoding a NaN or an infinity returns an error; decoding a number that rounds to an infinity does too. | implemented, proposed |
+| `string` | A string | implemented, proposed |
+| Record | An object with one member per field, in declaration order. A nil record is `null`. | implemented, proposed |
+| Tuple | An array of exactly the tuple's length | implemented, proposed |
+| Enum, fieldless or not | An object whose `"variant"` is the variant's wire name. A fieldless variant has no `"payload"`; positional payloads are a `"payload"` array in order; named payloads are a `"payload"` object. | implemented, proposed |
+| `Optional<U>` as the type of a record field | `None` omits the member; a missing member decodes as `None`; a present member decodes as `Some`. A present `null` is `Some(nil)` when `U` is a record and an error otherwise. | implemented, proposed |
+| `Optional` anywhere else (a tuple element, an enum payload, inside another `Optional`, the root) | Rejected (`E0590`) | implemented, proposed |
 | `FrozenList<U>` | An array, when the frozen-collection work lands with its element and size limits. Until then rejected. | proposed |
-| A shape that can reach itself (a record holding its own type, directly or through others) | Rejected (`E0590`): the first generator accepts only acyclic shapes. | proposed |
-| Anything not record-eligible | Rejected (`E0590`) | proposed |
+| A shape that can reach itself (a record holding its own type, directly or through others) | Rejected (`E0590`): the first generator accepts only acyclic shapes. | implemented, proposed |
+| Anything not record-eligible | Rejected (`E0590`) | implemented, proposed |
 
 Schema rules:
 
 | Rule | Status |
 | --- | --- |
-| A wire name is the declared name of the field or variant unless a mapping pins it. Renaming a declaration changes an unpinned wire name; the compiler keeps no memory of an earlier schema. | proposed |
-| Encoding reads each field once, in declaration order, as outside code reads it, and emits members in that order. | proposed |
-| Decoding an object: a member whose name is no field's is ignored; a field's name appearing twice is an error at the second; then, in declaration order, a missing required field is an error and each present field is decoded; then the record is built by its generated constructor, once. No field is written any other way. | proposed |
-| Decoding an enum: `"variant"` must be present once and name a variant; `"payload"` must be absent for a fieldless variant and present once, with the right kind, length and member names, for the others. Unknown members of a named payload are ignored as for a record; unknown members beside `"variant"` and `"payload"` are ignored. | proposed |
-| Expected failures are returned: a parse failure as `Json.parse` returns it, and every other one as `Error.custom(code, message)` with one of the codes `json.codec.type`, `json.codec.missing`, `json.codec.duplicate`, `json.codec.range`, `json.codec.variant`, `json.codec.payload`, `json.codec.not_finite`, `json.codec.too_large`, and a message that begins with the JSON path of the value, such as `$.owner.id`. The first failure in the order above is the one returned. A trap in a constructor or a hook is not caught. | proposed |
-| Bounds: `decode` returns `json.codec.too_large` for a text longer than 16,777,216 bytes, before parsing. Nesting is bounded by `Json.MaxDepth` and by the shape, which is finite because it is acyclic. The number of objects a decode constructs is at most the number of record positions in the shape. | proposed |
-| Wire names, error codes and paths are string constants of the generated functions. They are execution data and survive removal of `NAME` and `SMAP`. No type, layout or symbol identifier of an image appears in the JSON. | proposed |
-| The generated functions allocate with ordinary constructor and list operations, and their summaries report it. | proposed |
+| A wire name is the declared name of the field or variant unless a mapping pins it. Renaming a declaration changes an unpinned wire name; the compiler keeps no memory of an earlier schema. | implemented, proposed |
+| Encoding reads each field once, in declaration order, as outside code reads it, and emits members in that order. | implemented, proposed |
+| Decoding an object: a member whose name is no field's is ignored; a field's name appearing twice is an error at the second; then, in declaration order, a missing required field is an error and each present field is decoded; then the record is built by its generated constructor, once. No field is written any other way. | implemented, proposed |
+| Decoding an enum: `"variant"` must be present once and name a variant; `"payload"` must be absent for a fieldless variant and present once, with the right kind, length and member names, for the others. Unknown members of a named payload are ignored as for a record; unknown members beside `"variant"` and `"payload"` are ignored. | implemented, proposed |
+| Expected failures are returned: a parse failure as `Json.parse` returns it, and every other one as `Error.custom(code, message)` with one of the codes `json.codec.type`, `json.codec.missing`, `json.codec.duplicate`, `json.codec.range`, `json.codec.variant`, `json.codec.payload`, `json.codec.not_finite`, `json.codec.too_large`, and a message that begins with the JSON path of the value, such as `$.owner.id`. The first failure in the order above is the one returned. A trap in a constructor or a hook is not caught. | implemented, proposed |
+| Bounds: `decode` returns `json.codec.too_large` for a text longer than 16,777,216 bytes, before parsing. Nesting is bounded by `Json.MaxDepth` and by the shape, which is finite because it is acyclic. The number of objects a decode constructs is at most the number of record positions in the shape. | implemented, proposed |
+| Wire names, error codes and paths are string constants of the generated functions. They are execution data and survive removal of `NAME` and `SMAP`. No type, layout or symbol identifier of an image appears in the JSON. | implemented, proposed |
+| The generated functions allocate with ordinary constructor and list operations, and their summaries report it. | implemented, proposed |
+
+For text decoding, the codec uses the JSON parser's ordered member view so it can identify the second occurrence of a known key. The existing `Json.parse` API still keeps the last occurrence at the first key's position. `from_json` sees exactly the members supplied in the caller's tree. [Generated codec functions](../lang/Types.md#deriving-a-json-codec)
 
 **Expansion.** The generator runs in lowering, after declarations are resolved and before bodies are finalized. It builds a `Declaration` tree for the module, in which every type and callee is a `$`-prefixed name that no source can write and that lowering binds to the resolved symbol for this derivation only; the tree then goes through the ordinary lowering path, so visibility, construction, definite assignment and every other check apply to it. The module has the four functions and one private pair of helpers per reachable record and enum. Every generated node carries the span of the derivation, or of the mapping that named it, and every generated symbol carries `generated`. `neura check --show-derived[=Name] file.nra` prints the tree as Neura source with the bound names written as qualified names; the language server shows the same text.
 
@@ -308,10 +310,10 @@ Where the work goes. The lowering lane has one writer, so each feature lives in 
 
 | Rule | Status |
 | --- | --- |
-| Renaming a record field renames its component, the constructor's label, every replacement name in a copy, every use, and every mapping path that names it. A mapping's wire string is never changed. | proposed |
-| When the renamed field or variant is reachable from a derivation that does not pin it, the rename also inserts a mapping that pins the old name, so the schema does not change. The inserted mapping is a separately annotated edit where the client supports change annotations, so the author can leave it out; `neura` refactoring from the command line inserts it and says so. | proposed |
+| Renaming a record field renames its component, the constructor's label, every replacement name in a copy, every use, and every mapping path that names it. A mapping's wire string is never changed. | implemented in the language server, proposed |
+| When the renamed field or variant is reachable from a derivation that does not pin it, the rename also inserts a mapping that pins the old name, so the schema does not change. The inserted mapping is a separately annotated edit where the client supports change annotations, so the author can leave it out; `neura` refactoring from the command line inserts it and says so. | implemented in the language server for fields and variants, proposed; the command line has no rename yet |
 | Renaming a property renames the interface requirement, every satisfying field and every `let.override` of it together, or is refused when one of them is outside the workspace. | proposed |
-| The documentation index lists a record with its components and generated constructor, a property requirement with `get` or `get/set`, a static requirement as a static function of the interface, and a derived module with its four functions and its wire names. | proposed |
+| The documentation index lists a record with its components and generated constructor, a property requirement with `get` or `get/set`, a static requirement as a static function of the interface, and a derived module with its four functions and its wire names. | implemented, proposed: the index is built from syntax, so it shows the mappings as written and not the unpinned wire names |
 | The debugger shows a record's fields raw. It never calls a getter, an adapter or `to_string` to display a value, and it steps over functions marked `generated` unless asked to step into them. | proposed |
 
 ## Diagnostics
@@ -605,3 +607,11 @@ The standard library keeps its classes in this milestone. Converting library typ
 11. **An unknown replacement in a copy lists the record's fields** when no field name is close enough to suggest.
 12. **An accessor clause on an interface method is `E0518`**, as on any method, now that an interface may declare property clauses.
 
+13. **A derivation is a module declaration that carries its syntax.** The parser gives `let Name = derive G<T> { ... };` the kind `Module` with `Declaration::derive` (the generator, the type arguments and the mappings) rather than a separate `Declaration::Kind::Derive`, so name declaration, `export`, the outline and member lookup treat it as the module it becomes. `derive` in an expression position before a name is `E0202` (`a derivation is a declaration, not an expression`), and in a function body or class `E0579`, both from the parser.
+14. **The generator writes Neura source, which the ordinary parser and lowering read.** `json_codec_declaration` prints the module with placeholder names (`CodecJson`, `CodecType0`, ...) that lowering binds, as `$`-prefixed aliases no source can write, to the resolved symbols for this derivation; every generated token carries the generator's span. `--show-derived` prints the same text with the placeholders replaced by names visible at the derivation, plus the imports it needs, so it compiles in place of the derivation and gives the same output, steps and peak heap cells (`tests/records/codecs.py`).
+15. **The codec's runtime support is library code.** `Std.Encoding.JsonCodecSupport` holds the per-width scalar conversions and the 16 MiB bound, and `Json` gains two hidden internal functions, `parse_ordered_members` (a parser that keeps every member, repeated names included, in order) and `is_number_text`. The existing `Json.parse` is unchanged. A program that neither derives nor reaches them builds the same image: 25 programs, 12 of them `Json` importers, were byte-identical against the frozen pre-JSON compiler, mapped and stripped, so no `Json` importer changes.
+16. **The diagnostics' wording follows the implementation.** `E0318` says `'User.nick' names no member reachable from the codec root` for an unknown member and an unreachable shape alike, at the mapping's path, with a suggestion when a member's name is close. `E0319` is at the offending wire string: `a wire name must not be empty`, `this member already has a wire mapping`, `duplicate wire name 'id'`, without a second label. `E0590` is at the derivation's type argument and names the path and the reason: `'Json.Codec' cannot encode A.b.a: A reaches itself`, `... W.x: int32[] is outside the supported JSON shapes`, `a JSON codec root must be a record or an enum; got int32`. A tuple element is named by its index and a positional payload as `Enum.Variant.0`.
+17. **A copy's replacement name is a use of the field**, so go to definition and rename reach it, and renaming a record field renames its constructor labels and copy replacements with it.
+18. **`neura docs` lists from syntax.** A record is kind `record` with its components, followed by its generated `init`; a derivation shows its generator and mappings as written, followed by its four functions with the signatures of `Codec<T>`; a static function, including a static requirement, is written `static name = func...`. Generated members carry an empty documentation text.
+19. **Rename pins fields and variants in the language server only.** A named payload field is not a renamable symbol in the editor, so no pin is inserted for one, and `neura` has no command-line rename yet.
+20. **Completion in an unfinished copy reads the source's type from the buffer.** The recovering parser drops a declaration that ends inside a copy, so when the source is a name the editor no longer indexes, completion takes the type written after that name in a parameter or binding earlier in the buffer. A source the compiler or the index can type uses that type. Completion after `| get.` reads the member's tokens in the same way and offers `override:` under `let.override` and `virtual:` otherwise (edge case 144); `let P = record (id` at the end of the buffer declares nothing (edge case 142). Edge case 141, a record that the recovering parser keeps with the components read so far, is not implemented: the parser keeps no partial declaration.

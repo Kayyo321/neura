@@ -1,0 +1,9 @@
+error[E0401]: cannot assign to const 'source'
+  --> $DIR/using-reassign.nra:12:9
+   |
+11 |     using (source = open()) {
+   |            ------ declared constant here
+12 |         source = other;
+   |         ^^^^^^ cannot assign to a constant binding
+
+For more information about this error, try `neura explain E0401`.

@@ -1,0 +1,9 @@
+error[E0311]: 'yield' is a reserved name in a generator body
+ --> $DIR/generator-yield-binding.nra:3:9
+  |
+3 |     let yield = 1;
+  |         ^^^^^ 'yield' gives the generator's next value here
+  |
+  = help: choose another name
+
+For more information about this error, try `neura explain E0311`.

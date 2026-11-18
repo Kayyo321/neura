@@ -4,7 +4,7 @@ let hmac = import:Std.Crypto.Mac.Hmac;
 let.promote _ = import:Std.Crypto.StreamingDigest;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief HKDF of RFC 5869 over any digest: `extract` and `expand` (Stdlib.md section 20.6).
+/// @brief HKDF of RFC 5869 over any digest: `extract` and `expand` (Stdlib.md section 21.6).
 ///
 /// The `info` argument of `expand` carries the domain-separation label: give each use of a key its own
 /// label, such as the UTF-8 bytes of "myapp v1 file key", so that keys for different purposes never coincide.

@@ -2,7 +2,7 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
-/// @brief The contract of authenticated encryption with associated data (Stdlib.md section 20.1).
+/// @brief The contract of authenticated encryption with associated data (Stdlib.md section 21.1).
 /// @see [Std.Crypto.AeadCipher](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AeadCipher)
 #Since("0.3.0")
 export let AeadCipher = module (

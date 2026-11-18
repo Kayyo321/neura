@@ -455,6 +455,13 @@ private:
             return;
         }
         const auto& destination = node.operands.front();
+        if (destination.op == IrOp::Pending) {
+            // A cleanup's return list replaces the value being returned.
+            const auto value = eval(node.operands.back());
+            retain(out_.result, value, "returns it", node.span);
+            if (!value.empty() && !result_cause_) result_cause_ = Cause{"returns it", node.span, no_symbol};
+            return;
+        }
         if (destination.op == IrOp::Load) {
             const bool local = a_.valid(destination.symbol) &&
                                (a_.symbol(destination.symbol).kind == SymbolKind::Local ||
@@ -538,6 +545,12 @@ private:
         case IrOp::Continue:
         case IrOp::Return:
         case IrOp::Discard:
+        // A cleanup list runs at its block's exits; its operations are
+        // visited as children. Pending is the value a return carries, and a
+        // Yield suspends a generator's $resume, which returns true there.
+        case IrOp::Cleanup:
+        case IrOp::Pending:
+        case IrOp::Yield:
             break;
         case IrOp::Load:
             // A global that has not been initialized faults when read.
@@ -546,7 +559,7 @@ private:
         case IrOp::Store:
             if (node.operands.size() != 2) {
                 unknown_operation(node, "stores to an unknown place");
-            } else if (node.operands.front().op != IrOp::Load) {
+            } else if (node.operands.front().op != IrOp::Load && node.operands.front().op != IrOp::Pending) {
                 trap(node, "stores to a field or an element");
             }
             break;
@@ -929,6 +942,14 @@ public:
         case IrOp::Nil:
         case IrOp::Reference:
             return node.type.kind == TypeKind::Module ? unknown() : Roots{};
+        case IrOp::Cleanup:
+            children(node);
+            return {};
+        case IrOp::Yield:
+            return {};
+        case IrOp::Pending:
+            // What a return carries; the Return that set it retained it.
+            return typed(node.type, out_.result);
         default:
             children(node);
             return typed(node.type, unknown());

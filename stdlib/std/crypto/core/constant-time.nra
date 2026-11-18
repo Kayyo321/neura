@@ -1,4 +1,4 @@
-/// @brief Comparison and selection without secret-dependent branches (Stdlib.md section 20.2).
+/// @brief Comparison and selection without secret-dependent branches (Stdlib.md section 21.2).
 ///
 /// Each function is branch-free in source: it computes its result with masks, shifts and widening arithmetic,
 /// and loops only over public lengths. The runtime does not guarantee constant time: the interpreter, the

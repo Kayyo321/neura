@@ -8,7 +8,7 @@ let words = import:Std.Crypto.Internal.Words;
 let.promote _ = import:Std.Crypto.Algorithm;
 
 /// @brief Streaming authenticated encryption: the STREAM construction of Hoang, Reyhanitabar, Rogaway and Vizar
-/// over any AEAD with a nonce of at least 12 bytes (Stdlib.md section 20.7).
+/// over any AEAD with a nonce of at least 12 bytes (Stdlib.md section 21.7).
 ///
 /// A stream is a sequence of segments, each sealed separately by the AEAD with the nonce prefix ||
 /// big-endian uint32(segment index) || last-segment flag (0x01 on the last segment, 0x00 otherwise) and with

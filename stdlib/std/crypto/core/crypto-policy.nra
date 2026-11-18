@@ -1,7 +1,7 @@
 let atomics = import:Std.Concurrent.AtomicInt64;
 let.promote _ = import:Std.Crypto.Algorithm;
 
-/// @brief The process-wide policy that every primitive of Std.Crypto consults (Stdlib.md section 20.2).
+/// @brief The process-wide policy that every primitive of Std.Crypto consults (Stdlib.md section 21.2).
 ///
 /// A primitive calls `require` with its algorithm when it is created, so a denied algorithm traps with
 /// "denied: <Algorithm> is not allowed under the <Policy> policy" before it processes any data. Enforcement is

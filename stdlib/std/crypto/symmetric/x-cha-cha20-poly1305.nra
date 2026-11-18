@@ -11,7 +11,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief XChaCha20-Poly1305 of draft-irtf-cfrg-xchacha-03: ChaCha20-Poly1305 with 192-bit nonces (Stdlib.md
-/// section 20.7).
+/// section 21.7).
 ///
 /// The first 16 bytes of the nonce derive a subkey with HChaCha20; the last 8 form the ChaCha20 nonce. A nonce
 /// of 24 random bytes does not repeat in practice, so random nonces are safe.

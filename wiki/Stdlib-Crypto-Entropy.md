@@ -7,7 +7,7 @@ Import this module as `Std.Crypto.Random.Entropy`. Its [source](https://github.c
 ## API and shared contracts
 
 - [Exported declarations for `Std.Crypto.Random.Entropy`](#exported-declarations)
-- [`Std.Crypto` contracts and guarantees](Stdlib-Design#20-stdcrypto)
+- [`Std.Crypto` contracts and guarantees](Stdlib-Design#21-stdcrypto)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
 
 ## Exported declarations
@@ -29,4 +29,4 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The contract of this module is in [the standard library specification, section 20](Stdlib-Design#203-stdcryptorandom). What the runtime does not guarantee (constant time, locked memory, erasure of collector copies) is stated at the start of that section.
+The contract of this module is in [the standard library specification, section 21](Stdlib-Design#213-stdcryptorandom). What the runtime does not guarantee (constant time, locked memory, erasure of collector copies) is stated at the start of that section.

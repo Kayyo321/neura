@@ -1,0 +1,88 @@
+// What a deferred call evaluates at its statement and what it runs at the
+// exit (docs/design/Lifetime030.md, `defer`, edge cases 1, 3, 16, 22, 24).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Counter = class (
+    export let name: string;
+    export let init = func(label: string) -> void {
+        name = label;
+    };
+
+    export let report = func(value: int) -> void {
+        console.print_line(name + " reports " + value.to_string());
+    };
+
+    export let next = func(step: int) -> func(int) -> void {
+        console.print_line(name + " next " + step.to_string());
+        return new func(value: int) -> void {
+            console.print_line("step " +(step + value).to_string());
+        };
+    };
+);
+
+let Registry = class (
+    export static let clear = func() -> void {
+        console.print_line("registry cleared");
+    };
+);
+
+let trace = func(text: string, value: int) -> int {
+    console.print_line("evaluate " + text);
+    return value;
+};
+
+let sum = func(values: int[]) -> void {
+    let total = 0;
+    for (let value: int in values) {
+        total = total + value;
+    }
+    console.print_line("sum " + total.to_string());
+};
+
+let drop = func<T>(value: T) -> void {
+    console.print_line("drop " + value.to_string());
+};
+
+let DeferCalls = module:program.Entry (
+    // The receiver, the callee and the arguments are evaluated in written
+    // order at the statement; reassigning the receiver's binding later
+    // changes nothing.
+    let receivers = func() -> void {
+        let counter = new Counter("first");
+        defer counter.report(trace("argument", 1));
+        counter = new Counter("second");
+        counter.report(2);
+    };
+
+    // `a.b(c)(d)`: the inner call runs at the statement, the outer one at
+    // the exit.
+
+    let chained = func() -> void {
+        let counter = new Counter("chain");
+        defer counter.next(trace("inner", 10))(trace("outer", 5));
+        console.print_line("body of chained");
+    };
+
+    // A function value, a static function, a generic function with type
+    // arguments, and an array of the block.
+
+    let kinds = func(callback: func() -> void) -> void {
+        defer callback();
+        defer Registry.clear();
+        defer drop<int>(trace("generic", 7));
+        let values = [1, 2, 3];
+        defer sum(values);
+        values[0] = 10;
+        console.print_line("body of kinds");
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        receivers();
+        chained();
+        kinds(func() -> void {
+            console.print_line("callback");
+        });
+        return program.ExitCode.Ok;
+    };
+);

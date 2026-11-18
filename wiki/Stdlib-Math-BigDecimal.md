@@ -56,7 +56,7 @@ The following public declarations are taken from the module source; each links t
 - **BigDecimal.BigDecimal** · [`export let compare_to = func(other: BigDecimal) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L198)
   Compares numerical values independently of scale without aligning widely separated scales. Tagged `#Pure`.
 - **BigDecimal.BigDecimal** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L231)
-  Numeric equality: 2.0 equals 2.00. Tagged `#Pure`.
+  Numeric equality: 2.0 equals 2.00. Reading the argument can run its class hook.
 - **BigDecimal.BigDecimal** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L239)
   From 17, combines the hashes of the stripped form's unscaled value and scale.
 - **BigDecimal.BigDecimal** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-decimal.nra#L247)

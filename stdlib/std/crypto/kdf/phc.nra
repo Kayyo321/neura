@@ -3,7 +3,7 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 
-/// @brief The PHC string format for password hashes (Stdlib.md section 20.6):
+/// @brief The PHC string format for password hashes (Stdlib.md section 21.6):
 /// `$<id>[$v=<version>][$<name>=<value>(,<name>=<value>)*][$<salt>[$<hash>]]`, as in
 /// `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`.
 ///

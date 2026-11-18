@@ -62,6 +62,11 @@ public:
     // leaves eligibility to the wrapper's static analysis of the image.
     virtual std::span<const GraphShape> graph_shapes() const { return {}; }
     virtual std::string_view failure_reason() const { return {}; }
+    // True once the device declines every job it will ever be given: it has
+    // failed, or a wrapper has stopped using it for the rest of the process.
+    // A fleet then stops forming device rounds (docs/lang/GpuExecution.md,
+    // section 10.5).
+    virtual bool declines_every_job() const { return !failure_reason().empty(); }
 
 private:
     friend class Fleet;
@@ -94,6 +99,7 @@ public:
     GraphDeviceStatistics statistics() const override;
     std::span<const GraphShape> graph_shapes() const override;
     std::string_view failure_reason() const override;
+    bool declines_every_job() const override;
 
 private:
     GraphDevice& inner_;

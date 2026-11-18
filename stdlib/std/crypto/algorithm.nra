@@ -1,4 +1,4 @@
-/// @brief The identifiers of every algorithm that Std.Crypto names (Stdlib.md section 20).
+/// @brief The identifiers of every algorithm that Std.Crypto names (Stdlib.md section 21).
 ///
 /// A primitive reports its identifier through CryptographicPrimitive.algorithm, and the process-wide
 /// Std.Crypto.Core.CryptoPolicy decides by identifier whether the primitive may run. The list also names

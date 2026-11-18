@@ -1,0 +1,6 @@
+// Edge case 73: an array in scope at a yield belongs to the frame.
+let numbers = iterator() -> int {
+    let buffer = [1, 2, 3];
+    yield buffer[0];
+    yield buffer[1];
+};

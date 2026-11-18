@@ -1,0 +1,5 @@
+// Edge case 6: a deferred block is not supported.
+let cleanup = func() -> void {};
+let work = func() -> void {
+    defer { cleanup(); }
+};

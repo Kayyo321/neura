@@ -88,6 +88,11 @@ struct Hints {
     // and the ')' of a multiline record that needs a trailing ',' before it.
     std::set<std::size_t> record_bodies;
     std::set<std::size_t> trailing_commas;
+    // The '(' of a `using` statement, spaced like the one after `scope`;
+    // `using` is a contextual word, so its calls keep no space.
+    std::set<std::size_t> control_parens;
+    // The '(' that begins the value of a `yield`, which keeps its space.
+    std::set<std::size_t> keyword_operands;
 };
 
 class SyntaxHints {
@@ -242,6 +247,9 @@ private:
         if (value.cast_target) type(*value.cast_target);
         types(value.interfaces);
         if (value.initializer) expression(*value.initializer);
+        // `derive G<T> { ... }`: its mappings hold no '<' or '>', so every
+        // angle in the declaration belongs to the generator's type arguments.
+        if (value.derive) angle_span(value.span);
         for (const auto& generic : value.generics) types(generic.bounds);
         for (const auto& parameter : value.parameters) {
             type(parameter.type);
@@ -259,7 +267,8 @@ private:
         in_span(value.span, [&](const Token& token) {
             if (!head && (token.text == "class" || token.text == "module" || token.text == "interface" ||
                           token.text == "enum" || token.text == "singleton" || token.text == "func" ||
-                          (value.record && token.span.offset == value.record->keyword.offset))) head = true;
+                          (value.record && token.span.offset == value.record->keyword.offset) ||
+                          (value.generator && token.text == "iterator"))) head = true;
             else if (head && !found_body) {
                 if (token.text == "<" || token.text == ">") hints_.angles.insert(token.span.offset);
                 if (token.text == "(") {
@@ -341,6 +350,14 @@ private:
     }
 
     void statement(const Statement& value) {
+        if (value.kind == Statement::Kind::Yield && !value.expressions.empty())
+            hints_.keyword_operands.insert(value.expressions.front().span.offset);
+        if (value.kind == Statement::Kind::Using) {
+            in_span(value.span, [&, done = false](const Token& token) mutable {
+                if (!done && token.text == "(") hints_.control_parens.insert(token.span.offset);
+                done = done || token.text == "(";
+            });
+        }
         if (value.declaration) declaration(*value.declaration);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
@@ -501,10 +518,11 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             // `match.is (x) {` is written as `match (x) {` is.
             const bool match_is = before == "is" && i >= 3 && items[i - 2].text == "." && items[i - 3].text == "match";
             const bool control = before == "if" || before == "while" || before == "for" || before == "match" ||
-                                 before == "scope" || match_is;
+                                 before == "scope" || match_is || hints.control_parens.contains(item.offset);
             const bool body = hints.bodies.contains(item.offset);
             space = control || body || hints.record_bodies.contains(item.offset) || before == "module" ||
-                    before == "class" || before == "interface" || before == "enum" || before == "singleton";
+                    before == "class" || before == "interface" || before == "enum" || before == "singleton" ||
+                    hints.keyword_operands.contains(item.offset);
             out.text(text, indent(), space);
             const bool multiline = body && next != ")";
             delimiters.push_back({text, multiline, control});

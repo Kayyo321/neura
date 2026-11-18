@@ -33,6 +33,8 @@ The compiler derives [class hook](lang/Types.md#class-hooks) events after specia
 
 Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
 
+JSON derivation resolves the trusted generator, the root type and its reachable fields while lowering. The compiler emits ordinary checked functions. Their string constants hold wire names and error paths, so a compiled codec runs from a stripped executable image. Imported NeuraIR supplies the same record and enum metadata used by source callers. This expansion adds no NVR section or host service. [JSON codec contract](design/Records030.md#the-json-codec)
+
 Class static fields lower to global slots in a class-owned scope. NeuraIR
 expresses first-use initialization with a guarded function and a shared
 global state slot. Active uses reach the initializer through ordinary calls
@@ -65,6 +67,17 @@ Kernel bindings ([Kernels](runtime/Kernels.md)) change the stages' contracts as 
 | IR optimization | Keeps every kernel call, as it keeps every external call. | The same calls |
 | IRtoNeuronConversion | Turns each call into a kernel state exit and lists the kernel with its signature in `KERN`. | NVR 1.6 with the `KERN` table |
 | Output | The kernel exit and `KERN`; an image without a kernel call keeps its earlier version and bytes. | An image whose loader checks every kernel against the runtime's table |
+
+Cleanups, scoped resources and generators ([the lifetime design](design/Lifetime030.md)) change the stages' contracts as follows; the event library needs no stage of its own.
+
+| Stage | Contract for `defer`, `using` and generators | Hands on |
+| --- | --- | --- |
+| Lexer | None. `defer`, `using`, `iterator` and `yield` remain identifiers. | |
+| Parser | Reads each word as a form only by its fixed lookahead, and `yield` only directly in a generator's body (`E0219` to `E0222`). | Syntax nodes with the keyword's span; a generator is a function declaration with the result type `[generator]` of its element |
+| NeuraIR | Saves a deferred call's operands in hidden locals and registers a `cleanup`; binds a resource, its token and a `cleanup` whose return list combines the close with `pending`; builds a generator's state class with its `$resume` and `yield` operations. Checks `E0471` to `E0478`, and on the linked program the escape of a resource (`E0475`) and an emission under a guard (`E0550`). Written as `.nir` 1.14 only when used. | `cleanup`, `pending`, `yield` and `generator.resume`; no source-level rule after this point |
+| IR optimization | Leaves a body that holds one of the operations as lowering wrote it. | The same operations, in place |
+| IRtoNeuronConversion | Keeps one stack of the exit work of the blocks it is inside: each exit emits the cleanups, then the task scope's join, then the region's release of every block it leaves; starts a `$resume` with the comparison chain on its resume index, and releases and re-enters the open regions around a `yield`. | Ordinary blocks, calls and field operations; an image without the features keeps its bytes |
+| Output | Nothing new: no NVR version, exit kind or trap reason. | An image a compatible runtime runs without source |
 
 A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](lang/ForeignInterop.md#c-imports)).
 
@@ -133,6 +146,10 @@ The NVM traces initialized reference roots at allocation safepoints and reclaims
 A kernel call is the one place where a result is computed outside the circuit by code the runtime owns. **What stays in the circuit:** everything the calling Neura code does around the call, including the control flow that reaches it, the arguments it prepares, and every decision about the result, such as matching an outcome tuple into a `Result`. **What the kernel computes:** the function the kernel table names, from the argument values the exit passes, into a result or the arrays and lists it is given to write. The exit carries the kernel's name, ABI version, typed arguments, and result slot, and the runtime charges a declared number of steps before running it, so the circuit fixes where the call happens, with what values, and at what cost. The kernel cannot reach any other state: it is pure, deterministic, and allocation-free C compiled into the NVM, it makes no host request, and it needs no capability. Because its behaviour is not in the image, an image that calls a kernel runs only on a runtime that has that kernel at that ABI version, which the loader checks before execution, and the decompiler shows it as a named opaque operation.
 
 IRtoNeuronConversion, the NVR writer and loader, and a reference NVM are implemented for the whole language of this release: Booleans, integers, IEEE floating point, enums, control flow including loops, calls, generics after specialization, module dispatch, classes with dynamic dispatch, arrays, lists, text, program initialization, console output, and test assertions. [Neuron conversion and execution](Backend.md) lists the supported operations. It also describes the circuits and their measured costs, the semantics the compiler fixes where the language is open, and the tests that compare compiled graphs with the IR reference evaluator.
+
+### Tools and products
+
+The stages ship as separate executables ([design](design/Products030.md)). `neurac` runs the stages from the lexer to the output and writes images; `neura-run` loads an image and runs it on the NVM with no compiler code; the other SDK tools test, document, decompile, debug and edit; and `neura` starts the tool of each command from its own directory with an argument vector, checking that the tool comes from the same build. The image is the only thing that crosses from the compiler to the runner, so the boundary between the tools is the output stage's contract: an image that `neurac` writes runs on `neura-run` from any installation that reads its version. The tools share the stages' code through two libraries, `libneura-core` (format, runner and NVM) and `libneura-sdk` (the compiler's stages, the decompiler and the editor tools). The execution core (`neura`, `neura-run`, `neura-inspect`, the lifecycle tools and `libneura-core`) is a separate install component, and a build without the SDK defines no compiler target, so a runtime-only installation cannot compile source and needs none.
 
 ## Artifact and inspection
 

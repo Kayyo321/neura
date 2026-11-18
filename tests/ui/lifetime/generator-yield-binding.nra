@@ -1,0 +1,4 @@
+// Edge case 60: a binding named 'yield' in a generator body.
+let numbers = iterator() -> int {
+    let yield = 1;
+};

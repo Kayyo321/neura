@@ -1,6 +1,6 @@
 let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 
-/// @brief The contract of a signing key (Stdlib.md section 20.1).
+/// @brief The contract of a signing key (Stdlib.md section 21.1).
 /// @see [Std.Crypto.Signer](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Signer)
 #Since("0.3.0")
 export let Signer = module (

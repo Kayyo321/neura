@@ -28,7 +28,7 @@ The following public declarations are taken from the module source; each links t
 - **IntRange.IntRange** · [`export let init = func(start_value: int, end_value: int, step_value: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L32)
   Stores the bounds and step. A zero step traps.
 - **IntRange.IntRange** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L43)
-  Progressions compare by their defining bounds and step. Tagged `#Pure`.
+  Progressions compare by their defining bounds and step. Reading the argument can run its class hook.
 - **IntRange.IntRange** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L53)
   Combines the start, end, and step into a hash. Tagged `#Pure`.
 - **IntRange.IntRange** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/int-range.nra#L61)

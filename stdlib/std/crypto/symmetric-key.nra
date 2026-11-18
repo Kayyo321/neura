@@ -1,6 +1,6 @@
 let.promote _ = import:Std.Crypto.SecretMemory;
 
-/// @brief The contract of a symmetric key typed by its algorithm (Stdlib.md section 20.1).
+/// @brief The contract of a symmetric key typed by its algorithm (Stdlib.md section 21.1).
 /// @see [Std.Crypto.SymmetricKey](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-SymmetricKey)
 #Since("0.3.0")
 export let SymmetricKey = module (

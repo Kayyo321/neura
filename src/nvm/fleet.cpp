@@ -60,6 +60,11 @@ public:
                 awaiting_ = true;
                 return {head_, std::move(*request), {}};
             }
+            // A device that declines every later job (auto mode rejected or
+            // retired it, or it failed) is dropped between rounds. The rest
+            // of the fleet runs as with no device: through each member's
+            // tiers rather than step by step through the reference path.
+            if (options_.device && options_.device->declines_every_job()) options_.device = nullptr;
             const auto width = options_.device
                 ? std::min<std::size_t>(options_.window, std::max<std::size_t>(1, options_.device->batch_hint()))
                 : options_.window;

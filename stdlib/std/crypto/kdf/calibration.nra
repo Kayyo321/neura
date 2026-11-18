@@ -5,7 +5,7 @@ let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Time.Clock;
 let.promote _ = import:Std.Time.Duration;
 
-/// @brief Tunes Argon2id parameters to a target verification time on this machine (Stdlib.md section 20.6).
+/// @brief Tunes Argon2id parameters to a target verification time on this machine (Stdlib.md section 21.6).
 ///
 /// The time comes from the clock's monotonic reading, so the result depends on the host and its load; pass
 /// a Std.Time.SystemClock in production and a fixed clock in tests. Measuring runs Argon2id several times,

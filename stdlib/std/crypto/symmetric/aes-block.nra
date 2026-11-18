@@ -3,7 +3,7 @@ let.promote _ = import:Std.Crypto.CryptographicPrimitive;
 let aes = import:Std.Crypto.Internal.Aes;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 
-/// @brief The raw AES block cipher of FIPS 197 (Stdlib.md section 20.7). A building block, not a mode.
+/// @brief The raw AES block cipher of FIPS 197 (Stdlib.md section 21.7). A building block, not a mode.
 ///
 /// Encrypting a message block by block with this class is ECB, which leaks equal blocks: use an AEAD of
 /// Std.Crypto.Symmetric for data. The library offers no ECB or CBC mode. The S-box is a table indexed by

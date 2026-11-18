@@ -4,7 +4,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let hashing = import:Std.Core.Hash;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Argon2id, version 0x13, of RFC 9106 (Stdlib.md section 20.6).
+/// @brief Argon2id, version 0x13, of RFC 9106 (Stdlib.md section 21.6).
 ///
 /// Memory is one list of 64-bit words, 128 per 1 KiB block; lanes are filled one after another within each
 /// slice, which gives the same result as filling them in parallel. Argon2d and Argon2i are not offered.

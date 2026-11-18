@@ -2,7 +2,7 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.StreamingDigest;
 
-/// @brief The contract of an extendable-output function (Stdlib.md section 20.1).
+/// @brief The contract of an extendable-output function (Stdlib.md section 21.1).
 /// @see [Std.Crypto.ExtendableOutput](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-ExtendableOutput)
 #Since("0.3.0")
 export let ExtendableOutput = module (

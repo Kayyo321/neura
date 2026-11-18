@@ -9,7 +9,7 @@ let entropy = import:Std.Crypto.Random.Entropy;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief A deterministic random bit generator built on ChaCha20 with fast key erasure (Stdlib.md section 20.3).
+/// @brief A deterministic random bit generator built on ChaCha20 with fast key erasure (Stdlib.md section 21.3).
 ///
 /// The construction, which no standard fixes, is: the key starts as SHA-256("Neura ChaCha20-DRBG seed" || seed);
 /// `reseed(material)` sets it to SHA-256("Neura ChaCha20-DRBG reseed" || key || material); `fill(count)` takes

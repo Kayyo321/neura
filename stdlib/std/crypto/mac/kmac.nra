@@ -7,7 +7,7 @@ let sha3 = import:Std.Crypto.Hash.Sha3;
 let sp800_185 = import:Std.Crypto.Internal.Sp800185;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief KMAC128 and KMAC256 of NIST SP 800-185, section 4, and their XOF forms (Stdlib.md section 20.5).
+/// @brief KMAC128 and KMAC256 of NIST SP 800-185, section 4, and their XOF forms (Stdlib.md section 21.5).
 /// @see [Std.Crypto.Mac.Kmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kmac)
 #Since("0.3.0")
 export let Kmac = module (

@@ -10,7 +10,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let gf128 = import:Std.Crypto.Internal.Gf128;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief AES-GCM of NIST SP 800-38D with 96-bit nonces and 128-bit tags (Stdlib.md section 20.7).
+/// @brief AES-GCM of NIST SP 800-38D with 96-bit nonces and 128-bit tags (Stdlib.md section 21.7).
 ///
 /// A nonce must never repeat under one key: a repeat reveals the XOR of two plaintexts and lets an attacker
 /// forge tags. Where nonces cannot be guaranteed unique, prefer AesGcmSiv or XChaCha20Poly1305.

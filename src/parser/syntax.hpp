@@ -108,6 +108,10 @@ struct Expr {
         // a replacement, whose field name is in `labels` and `label_spans`
         // ("" for the source). The span starts at `new`.
         Copy,
+        // docs/design/Lifetime030.md. `iterator(parameters) -> T { body }`:
+        // `lambda` is the declaration, with `generator` set and the result
+        // type `[generator]` of the element type.
+        Generator,
     };
 
     Kind kind;
@@ -174,6 +178,12 @@ struct Statement {
         Scope,
         // select { arms }. `keyword` is the contextual word.
         Select,
+        // docs/design/Lifetime030.md. `defer call;`: the call is
+        // expressions[0]. `using (name = value) { body }`: `bindings` holds
+        // the name and expressions[0] the acquisition. `yield value;` in a
+        // generator body: the value is expressions[0]. `keyword` is the
+        // contextual word.
+        Defer, Using, Yield,
     };
 
     Kind kind;
@@ -289,6 +299,22 @@ struct AccessorClause {
 // A record class (docs/design/Records030.md, Records). The parser has built
 // its fields, one `export last` field per component, and its generated
 // constructor `init = func(components) => set`, already expanded.
+struct DeriveMapping {
+    bool variant{};
+    std::vector<std::string> parts;
+    std::vector<Span> part_spans;
+    Span path;
+    std::string wire;
+    Span wire_span;
+};
+
+struct DeriveSyntax {
+    TypeSyntax generator;
+    std::vector<TypeSyntax> arguments;
+    std::vector<DeriveMapping> mappings;
+    std::optional<Span> close_brace;
+};
+
 struct RecordSyntax {
     // The word `record`, and the ')' that ends the components.
     Span keyword;
@@ -396,12 +422,18 @@ struct Declaration {
     // A record (docs/design/Records030.md): a class whose members the parser
     // built from its components. Lowering adds its value members.
     std::shared_ptr<const RecordSyntax> record{};
+    std::shared_ptr<const DeriveSyntax> derive{};
     // The word `implements` of a class or of a module's conformance list
     // (`module implements I<T> (`, trusted companions only).
     std::optional<Span> implements_span{};
     // A member that lowering generated and no source spells, such as a
     // record's value members. Tools skip it where they show written source.
     bool generated{};
+    // A generator, `iterator(parameters) -> T { body }`
+    // (docs/design/Lifetime030.md): `type` is `[generator]` with the element
+    // type as its argument, which lowering reads as Sequence<T>.
+    bool generator{};
+    std::optional<Span> generator_keyword{};
 };
 
 struct ResolvedImport {

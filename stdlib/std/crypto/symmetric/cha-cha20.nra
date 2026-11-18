@@ -3,7 +3,7 @@ let chacha = import:Std.Crypto.Internal.ChaCha20;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief The raw ChaCha20 stream cipher of RFC 8439, XChaCha20, and HChaCha20 (Stdlib.md section 20.7). Building
+/// @brief The raw ChaCha20 stream cipher of RFC 8439, XChaCha20, and HChaCha20 (Stdlib.md section 21.7). Building
 /// blocks, not authenticated encryption.
 ///
 /// The output is unauthenticated: anyone can flip ciphertext bits and flip the same plaintext bits. Use

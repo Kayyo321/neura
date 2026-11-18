@@ -1,0 +1,23 @@
+let character = import:Std.Core.Character;
+let console = import:Std.Io.Console;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+
+// Prints Java's name and the Unicode name of a few code points, then finds code points by name. The expected
+// names are those of OpenJDK 17.0.21's Character.getName and of DerivedName.txt 17.0.0.
+export let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last points: uint32[] = [10, 65, 132, 44032, 19968, 128512];
+        for (let p in points) {
+            console.print_line(p.to_string() + ": " + optional.value_or(character.get_name(p), "-") + " / " +
+                optional.value_or(character.unicode_name(p), "-"));
+        }
+        last texts: string[] = [
+            "grinning face", "HANGUL SYLLABLE GAG", "CJK UNIFIED IDEOGRAPHS 4E00", "line feed (lf)"
+        ];
+        for (let text in texts) {
+            console.print_line(text + " -> " + character.code_point_of(text).to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

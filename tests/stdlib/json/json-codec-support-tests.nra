@@ -1,0 +1,233 @@
+let error = import:Std.Core.Error;
+let json = import:Std.Encoding.Json;
+let support = import:Std.Encoding.JsonCodecSupport;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let float16s = import:Std.Core.Float16;
+let bfloat16s = import:Std.Core.BFloat16;
+let float32s = import:Std.Core.Float32;
+let float64s = import:Std.Core.Float64;
+
+let JsonCodecSupportTests = module (
+    const Path: string = "$.owner.id";
+
+    let number = func(text: string) -> json.JsonValue => json.JsonValue.Number(text);
+
+    let encoded = func(value: result.Result<json.JsonValue>) -> string => json.write(test.assert_ok<json.JsonValue>(value));
+
+    let custom_error = func<T>(actual: result.Result<T>, code: string, path: string) {
+        match (test.assert_err<T>(actual)) {
+            error.Error.Custom(detail) => {
+                test.assert_equal_string(code, detail.code());
+                test.assert(strings.starts_with(detail.message(), path + ":"));
+            },
+            _ => {
+                test.fail("expected a codec error");
+            },
+        }
+    };
+
+    export let test_order_and_duplicate_members = func() {
+        last source = "{\"a\":1,\"nested\":[{\"\\u0061\":2,\"a\":\"\\uD83E\\uDDE0\"}],\"a\":3}";
+        test.assert_equal_string(
+        "{\"a\":1,\"nested\":[{\"a\":2,\"a\":\"🧠\"}],\"a\":3}",
+        encoded(support.parse(source)));
+        test.assert_equal_string("{\"a\":3,\"nested\":[{\"a\":\"🧠\"}]}", encoded(json.parse(source)));
+        test.assert_equal_string("[{},[],null,false,true,\"quote: \\\" slash: \\\\\"]",
+        encoded(support.parse("[ {}, [], null, false, true, \"quote: \\\" slash: \\\\\"]")));
+    };
+
+    export let test_preserves_parse_errors = func() {
+        last malformed: string[list] = new;
+        malformed.append("");
+        malformed.append(" \t\r\n");
+        malformed.append("[ 0, ]");
+        malformed.append("{\"x\": \"é\",}");
+        malformed.append("{\"x\\q\":0}");
+        malformed.append("{\"x\":\"\\uD83Dx\"}");
+        malformed.append("{\"x\":\"\\uD83D");
+        malformed.append("\"x\\\"y");
+        malformed.append("[false, 01]");
+        malformed.append("{\"x\":1e}");
+        malformed.append("trøe");
+        malformed.append("null extra");
+        malformed.append(strings.repeat("[", 513) + strings.repeat("]", 513));
+        for (let text in malformed) {
+            test.assert(error.equals(test.assert_err<json.JsonValue>(json.parse(text)),
+            test.assert_err<json.JsonValue>(support.parse(text))));
+        }
+    };
+
+    export let test_limit_counts_utf8_bytes = func() {
+        let text = "é";
+        for (let i = 0; i < 23; i++) {
+            text = strings.replace(text, "é", "éé");
+        }
+        test.assert_equal_int32(16777216, text.byte_length);
+        match (test.assert_err<json.JsonValue>(support.parse(text))) {
+            error.Error.Parse { kind, offset, message: _ } => {
+                test.assert(kind == error.ParseErrorKind.Syntax);
+                test.assert_equal_int32(0, offset);
+            },
+            _ => {
+                test.fail("the exact size limit must reach the parser");
+            },
+        }
+        custom_error<json.JsonValue>(support.parse(strings.replace_first(text, "é", "éx")), "json.codec.too_large", "$");
+    };
+
+    export let test_bool_string_and_wrong_kind = func() {
+        test.assert_equal_string("true", encoded(support.encode_bool(true, Path)));
+        test.assert_equal_bool(false, test.assert_ok<bool>(support.decode_bool(json.JsonValue.Boolean(false), Path)));
+        test.assert_equal_string("\"🧠\"", encoded(support.encode_string("🧠", Path)));
+        test.assert_equal_string("a\n𝄞", test.assert_ok<string>(support.decode_string(json.JsonValue.Text("a\n𝄞"), Path)));
+        custom_error<bool>(support.decode_bool(number("1"), Path), "json.codec.type", Path);
+        custom_error<string>(support.decode_string(json.JsonValue.Null, Path), "json.codec.type", Path);
+        custom_error<int64>(support.decode_int64(json.JsonValue.Text("1"), Path), "json.codec.type", Path);
+        custom_error<float64>(support.decode_float64(json.JsonValue.Boolean(true), Path), "json.codec.type", Path);
+    };
+
+    export let test_int8_bounds = func() {
+        last low = test.assert_ok<int8>(support.decode_int8(number("-128"), Path));
+        last high = test.assert_ok<int8>(support.decode_int8(number("127"), Path));
+        test.assert_equal_string("-128", encoded(support.encode_int8(low, Path)));
+        test.assert_equal_string("127", encoded(support.encode_int8(high, Path)));
+        custom_error<int8>(support.decode_int8(number("-129"), Path), "json.codec.range", Path);
+        custom_error<int8>(support.decode_int8(number("128"), Path), "json.codec.range", Path);
+    };
+
+    export let test_int16_bounds = func() {
+        last low = test.assert_ok<int16>(support.decode_int16(number("-32768"), Path));
+        last high = test.assert_ok<int16>(support.decode_int16(number("32767"), Path));
+        test.assert_equal_string("-32768", encoded(support.encode_int16(low, Path)));
+        test.assert_equal_string("32767", encoded(support.encode_int16(high, Path)));
+        custom_error<int16>(support.decode_int16(number("-32769"), Path), "json.codec.range", Path);
+        custom_error<int16>(support.decode_int16(number("32768"), Path), "json.codec.range", Path);
+    };
+
+    export let test_int32_bounds = func() {
+        last low = test.assert_ok<int32>(support.decode_int32(number("-2147483648"), Path));
+        last high = test.assert_ok<int32>(support.decode_int32(number("2147483647"), Path));
+        test.assert_equal_string("-2147483648", encoded(support.encode_int32(low, Path)));
+        test.assert_equal_string("2147483647", encoded(support.encode_int32(high, Path)));
+        custom_error<int32>(support.decode_int32(number("-2147483649"), Path), "json.codec.range", Path);
+        custom_error<int32>(support.decode_int32(number("2147483648"), Path), "json.codec.range", Path);
+    };
+
+    export let test_int64_bounds = func() {
+        last low = test.assert_ok<int64>(support.decode_int64(number("-9223372036854775808"), Path));
+        last high = test.assert_ok<int64>(support.decode_int64(number("9223372036854775807"), Path));
+        test.assert_equal_string("-9223372036854775808", encoded(support.encode_int64(low, Path)));
+        test.assert_equal_string("9223372036854775807", encoded(support.encode_int64(high, Path)));
+        custom_error<int64>(support.decode_int64(number("-9223372036854775809"), Path), "json.codec.range", Path);
+        custom_error<int64>(support.decode_int64(number("9223372036854775808"), Path), "json.codec.range", Path);
+    };
+
+    export let test_uint8_bounds = func() {
+        last low = test.assert_ok<uint8>(support.decode_uint8(number("0"), Path));
+        last high = test.assert_ok<uint8>(support.decode_uint8(number("255"), Path));
+        test.assert_equal_string("0", encoded(support.encode_uint8(low, Path)));
+        test.assert_equal_string("255", encoded(support.encode_uint8(high, Path)));
+        custom_error<uint8>(support.decode_uint8(number("-1"), Path), "json.codec.range", Path);
+        custom_error<uint8>(support.decode_uint8(number("256"), Path), "json.codec.range", Path);
+    };
+
+    export let test_uint16_bounds = func() {
+        last low = test.assert_ok<uint16>(support.decode_uint16(number("0"), Path));
+        last high = test.assert_ok<uint16>(support.decode_uint16(number("65535"), Path));
+        test.assert_equal_string("0", encoded(support.encode_uint16(low, Path)));
+        test.assert_equal_string("65535", encoded(support.encode_uint16(high, Path)));
+        custom_error<uint16>(support.decode_uint16(number("-1"), Path), "json.codec.range", Path);
+        custom_error<uint16>(support.decode_uint16(number("65536"), Path), "json.codec.range", Path);
+    };
+
+    export let test_uint32_bounds = func() {
+        last low = test.assert_ok<uint32>(support.decode_uint32(number("0"), Path));
+        last high = test.assert_ok<uint32>(support.decode_uint32(number("4294967295"), Path));
+        test.assert_equal_string("0", encoded(support.encode_uint32(low, Path)));
+        test.assert_equal_string("4294967295", encoded(support.encode_uint32(high, Path)));
+        custom_error<uint32>(support.decode_uint32(number("-1"), Path), "json.codec.range", Path);
+        custom_error<uint32>(support.decode_uint32(number("4294967296"), Path), "json.codec.range", Path);
+    };
+
+    export let test_uint64_bounds = func() {
+        last low = test.assert_ok<uint64>(support.decode_uint64(number("0"), Path));
+        last high = test.assert_ok<uint64>(support.decode_uint64(number("18446744073709551615"), Path));
+        test.assert_equal_string("0", encoded(support.encode_uint64(low, Path)));
+        test.assert_equal_string("18446744073709551615", encoded(support.encode_uint64(high, Path)));
+        custom_error<uint64>(support.decode_uint64(number("-1"), Path), "json.codec.range", Path);
+        custom_error<uint64>(support.decode_uint64(number("18446744073709551616"), Path), "json.codec.range", Path);
+    };
+
+    export let test_integer_form = func() {
+        test.assert_equal_uint64(9223372036854775809,
+        test.assert_ok<uint64>(support.decode_uint64(number("9223372036854775809"), Path)));
+        test.assert_equal_uint64(0, test.assert_ok<uint64>(support.decode_uint64(number("-0"), Path)));
+        last invalid: string[list] = new;
+        invalid.append("1.0");
+        invalid.append("1e2");
+        invalid.append("1E+2");
+        invalid.append("+1");
+        invalid.append("01");
+        invalid.append(" 1");
+        invalid.append("1_0");
+        invalid.append("");
+        for (let text in invalid) {
+            custom_error<int64>(support.decode_int64(number(text), Path), "json.codec.range", Path);
+            custom_error<uint64>(support.decode_uint64(number(text), Path), "json.codec.range", Path);
+        }
+    };
+
+    export let test_float16_conversion = func() {
+        test.assert_equal_string("1.001", encoded(support.encode_float16(float16.from_bits(15361), Path)));
+        test.assert_equal_uint64(15361,
+        test.assert_ok<float16>(support.decode_float16(number("1.001"), Path)).to_bits() as uint64);
+        custom_error<json.JsonValue>(support.encode_float16(float16s.NaN, Path), "json.codec.not_finite", Path);
+        custom_error<json.JsonValue>(support.encode_float16(float16s.NegativeInfinity, Path), "json.codec.not_finite", Path);
+        custom_error<float16>(support.decode_float16(number("1e999"), Path), "json.codec.not_finite", Path);
+    };
+
+    export let test_bfloat16_conversion = func() {
+        test.assert_equal_string("1.01", encoded(support.encode_bfloat16(bfloat16.from_bits(16257), Path)));
+        test.assert_equal_uint64(16257,
+        test.assert_ok<bfloat16>(support.decode_bfloat16(number("1.01"), Path)).to_bits() as uint64);
+        custom_error<json.JsonValue>(support.encode_bfloat16(bfloat16s.NaN, Path), "json.codec.not_finite", Path);
+        custom_error<json.JsonValue>(support.encode_bfloat16(bfloat16s.NegativeInfinity, Path), "json.codec.not_finite", Path);
+        custom_error<bfloat16>(support.decode_bfloat16(number("1e999"), Path), "json.codec.not_finite", Path);
+    };
+
+    export let test_float32_conversion = func() {
+        test.assert_equal_string("0.1", encoded(support.encode_float32(float32.from_bits(1036831949), Path)));
+        test.assert_equal_uint64(1036831949,
+        test.assert_ok<float32>(support.decode_float32(number("0.1"), Path)).to_bits() as uint64);
+        custom_error<json.JsonValue>(support.encode_float32(float32s.NaN, Path), "json.codec.not_finite", Path);
+        custom_error<json.JsonValue>(support.encode_float32(float32s.NegativeInfinity, Path), "json.codec.not_finite", Path);
+        custom_error<float32>(support.decode_float32(number("1e999"), Path), "json.codec.not_finite", Path);
+    };
+
+    export let test_float64_conversion = func() {
+        test.assert_equal_string("0.1", encoded(support.encode_float64(float64.from_bits(4591870180066957722), Path)));
+        test.assert_equal_uint64(4591870180066957722,
+        test.assert_ok<float64>(support.decode_float64(number("0.1"), Path)).to_bits() as uint64);
+        custom_error<json.JsonValue>(support.encode_float64(float64s.NaN, Path), "json.codec.not_finite", Path);
+        custom_error<json.JsonValue>(support.encode_float64(float64s.NegativeInfinity, Path), "json.codec.not_finite", Path);
+        custom_error<float64>(support.decode_float64(number("1e999"), Path), "json.codec.not_finite", Path);
+    };
+
+    export let test_float_rounds_directly_to_the_target = func() {
+        test.assert_equal_uint64(15360, test.assert_ok<float16>(
+        support.decode_float16(number("1.00048828125"), Path)).to_bits() as uint64);
+        test.assert_equal_uint64(15361, test.assert_ok<float16>(
+        support.decode_float16(number("1.0004882812500001"), Path)).to_bits() as uint64);
+        test.assert_equal_uint64(16257, test.assert_ok<bfloat16>(
+        support.decode_bfloat16(number("1.00390625000000001"), Path)).to_bits() as uint64);
+        test.assert_equal_uint64(9223372036854775808, test.assert_ok<float64>(
+        support.decode_float64(number("-1e-999"), Path)).to_bits());
+        test.assert_equal_string("-0.0", encoded(support.encode_float64(-0.0, Path)));
+        custom_error<float32>(support.decode_float32(number("1e39"), Path), "json.codec.not_finite", Path);
+        custom_error<float16>(support.decode_float16(number("65520"), Path), "json.codec.not_finite", Path);
+        custom_error<float64>(support.decode_float64(number("NaN"), Path), "json.codec.range", Path);
+        custom_error<float64>(support.decode_float64(number("+1"), Path), "json.codec.range", Path);
+    };
+);

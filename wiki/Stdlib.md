@@ -71,6 +71,7 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.BFloat16`](Stdlib-Core-BFloat16) | [Contracts](Stdlib-Core-BFloat16#detailed-contracts) | [Declarations](Stdlib-Core-BFloat16#exported-declarations) |
 | [`Std.Core.Bool`](Stdlib-Core-Bool) | [Contracts](Stdlib-Core-Bool#detailed-contracts) | [Declarations](Stdlib-Core-Bool#exported-declarations) |
 | [`Std.Core.Cell`](Stdlib-Core-Cell) | [Contracts](Stdlib-Core-Cell#detailed-contracts) | [Declarations](Stdlib-Core-Cell#exported-declarations) |
+| [`Std.Core.Character`](Stdlib-Core-Character) | [Contracts](Stdlib-Core-Character#detailed-contracts) | [Declarations](Stdlib-Core-Character#exported-declarations) |
 | [`Std.Core.Comparable`](Stdlib-Core-Comparable) | [Contracts](Stdlib-Core-Comparable#detailed-contracts) | [Declarations](Stdlib-Core-Comparable#exported-declarations) |
 | [`Std.Core.Comparators`](Stdlib-Core-Comparators) | [Contracts](Stdlib-Core-Comparators#detailed-contracts) | [Declarations](Stdlib-Core-Comparators#exported-declarations) |
 | [`Std.Core.Error`](Stdlib-Core-Error) | [Contracts](Stdlib-Core-Error#detailed-contracts) | [Declarations](Stdlib-Core-Error#exported-declarations) |
@@ -89,6 +90,8 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.Result`](Stdlib-Core-Result) | [Contracts](Stdlib-Core-Result#detailed-contracts) | [Declarations](Stdlib-Core-Result#exported-declarations) |
 | [`Std.Core.String`](Stdlib-Core-String) | [Contracts](Stdlib-Core-String#detailed-contracts) | [Declarations](Stdlib-Core-String#exported-declarations) |
 | [`Std.Core.StringBuilder`](Stdlib-Core-StringBuilder) | [Contracts](Stdlib-Core-StringBuilder#detailed-contracts) | [Declarations](Stdlib-Core-StringBuilder#exported-declarations) |
+| [`Std.Core.UnicodeBlock`](Stdlib-Core-UnicodeBlock) | [Contracts](Stdlib-Core-UnicodeBlock#detailed-contracts) | [Declarations](Stdlib-Core-UnicodeBlock#exported-declarations) |
+| [`Std.Core.UnicodeScript`](Stdlib-Core-UnicodeScript) | [Contracts](Stdlib-Core-UnicodeScript#detailed-contracts) | [Declarations](Stdlib-Core-UnicodeScript#exported-declarations) |
 | [`Std.Core.UInt16`](Stdlib-Core-UInt16) | [Contracts](Stdlib-Core-UInt16#detailed-contracts) | [Declarations](Stdlib-Core-UInt16#exported-declarations) |
 | [`Std.Core.UInt32`](Stdlib-Core-UInt32) | [Contracts](Stdlib-Core-UInt32#detailed-contracts) | [Declarations](Stdlib-Core-UInt32#exported-declarations) |
 | [`Std.Core.UInt64`](Stdlib-Core-UInt64) | [Contracts](Stdlib-Core-UInt64#detailed-contracts) | [Declarations](Stdlib-Core-UInt64#exported-declarations) |
@@ -99,7 +102,7 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 
 ### `Std.Crypto`
 
-Hashes, MACs, key derivation, authenticated encryption, and secure random generation; see [section 20](Stdlib-Design#20-stdcrypto).
+Hashes, MACs, key derivation, authenticated encryption, and secure random generation; see [section 21](Stdlib-Design#21-stdcrypto).
 
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
@@ -181,7 +184,14 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Encoding.Csv`](Stdlib-Encoding-Csv) | [Contracts](Stdlib-Encoding-Csv#detailed-contracts) | [Declarations](Stdlib-Encoding-Csv#exported-declarations) |
 | [`Std.Encoding.Hex`](Stdlib-Encoding-Hex) | [Contracts](Stdlib-Encoding-Hex#detailed-contracts) | [Declarations](Stdlib-Encoding-Hex#exported-declarations) |
 | [`Std.Encoding.Json`](Stdlib-Encoding-Json) | [Contracts](Stdlib-Encoding-Json#detailed-contracts) | [Declarations](Stdlib-Encoding-Json#exported-declarations) |
+| [`Std.Encoding.JsonCodecSupport`](Stdlib-Encoding-JsonCodecSupport) | [Contracts](Stdlib-Encoding-JsonCodecSupport#detailed-contracts) | [Declarations](Stdlib-Encoding-JsonCodecSupport#exported-declarations) |
 | [`Std.Encoding.Utf8`](Stdlib-Encoding-Utf8) | [Contracts](Stdlib-Encoding-Utf8#detailed-contracts) | [Declarations](Stdlib-Encoding-Utf8#exported-declarations) |
+
+### `Std.Events`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Events.Event`](Stdlib-Events-Event) | [Contracts](Stdlib-Events-Event#detailed-contracts) | [Declarations](Stdlib-Events-Event#exported-declarations) |
 
 ### `Std.Fs`
 
@@ -322,6 +332,7 @@ The [complete specification](Stdlib-Design) has these sections.
   - [8.2 `StringBuilder`](Stdlib-Design#82-stringbuilder)
   - [8.3 `Scalars`](Stdlib-Design#83-scalars)
   - [8.4 `Regex`](Stdlib-Design#84-regex)
+  - [8.5 `Character`](Stdlib-Design#85-character)
 - [9. `Std.Collections`](Stdlib-Design#9-stdcollections)
   - [9.1 Contracts](Stdlib-Design#91-contracts)
   - [9.2 Equality of collections](Stdlib-Design#92-equality-of-collections)
@@ -370,11 +381,12 @@ The [complete specification](Stdlib-Design) has these sections.
   - [18.11 Test layout](Stdlib-Design#1811-test-layout)
   - [18.12 Concurrency](Stdlib-Design#1812-concurrency)
 - [19. `Std.Concurrent`](Stdlib-Design#19-stdconcurrent)
-- [20. `Std.Crypto`](Stdlib-Design#20-stdcrypto)
-  - [20.1 Contracts](Stdlib-Design#201-contracts)
-  - [20.2 `Std.Crypto.Core`](Stdlib-Design#202-stdcryptocore)
-  - [20.3 `Std.Crypto.Random`](Stdlib-Design#203-stdcryptorandom)
-  - [20.4 `Std.Crypto.Hash`](Stdlib-Design#204-stdcryptohash)
-  - [20.5 `Std.Crypto.Mac`](Stdlib-Design#205-stdcryptomac)
-  - [20.6 `Std.Crypto.Kdf`](Stdlib-Design#206-stdcryptokdf)
-  - [20.7 `Std.Crypto.Symmetric`](Stdlib-Design#207-stdcryptosymmetric)
+- [20. `Std.Events`](Stdlib-Design#20-stdevents)
+- [21. `Std.Crypto`](Stdlib-Design#21-stdcrypto)
+  - [21.1 Contracts](Stdlib-Design#211-contracts)
+  - [21.2 `Std.Crypto.Core`](Stdlib-Design#212-stdcryptocore)
+  - [21.3 `Std.Crypto.Random`](Stdlib-Design#213-stdcryptorandom)
+  - [21.4 `Std.Crypto.Hash`](Stdlib-Design#214-stdcryptohash)
+  - [21.5 `Std.Crypto.Mac`](Stdlib-Design#215-stdcryptomac)
+  - [21.6 `Std.Crypto.Kdf`](Stdlib-Design#216-stdcryptokdf)
+  - [21.7 `Std.Crypto.Symmetric`](Stdlib-Design#217-stdcryptosymmetric)

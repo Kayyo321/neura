@@ -9,7 +9,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let hex = import:Std.Encoding.Hex;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief FF1 format-preserving encryption of NIST SP 800-38G (Rev. 1) over AES (Stdlib.md section 20.7).
+/// @brief FF1 format-preserving encryption of NIST SP 800-38G (Rev. 1) over AES (Stdlib.md section 21.7).
 ///
 /// FF1 encrypts a string of numerals in radix 2 to 65536 into another string of the same length and radix,
 /// so a 16-digit card number stays 16 digits. A message must have at least `min_length` numerals, the smallest

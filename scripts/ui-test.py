@@ -11,7 +11,8 @@ each test, in a fresh temporary directory:
 
 1. `neura check --error-format=human --color=never <name>.nra` runs with
    COLUMNS=100. Its standard error, with the temporary directory replaced by
-   `$DIR`, must equal `<name>.stderr`.
+   `$DIR` and the repository root (where the standard library's sources
+   are) by `$ROOT`, must equal `<name>.stderr`.
 2. `neura check --error-format=json` runs repeatedly; the MachineApplicable
    edits that it reports for the test file are applied back to front until
    none remain (at most 50 rounds). When any edit applied, the result must
@@ -90,6 +91,7 @@ def check_test(neura, source, bless):
         if human.returncode not in (0, 1):
             problems.append(f"neura check exited with status {human.returncode}")
         stderr = human.stderr.decode("utf-8", "replace").replace(str(directory) + "/", "$DIR/")
+        stderr = stderr.replace(str(pathlib.Path(__file__).resolve().parent.parent) + "/", "$ROOT/")
         if bless:
             expected_stderr.write_text(stderr, encoding="utf-8")
         elif not expected_stderr.exists():

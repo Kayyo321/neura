@@ -66,7 +66,7 @@ The following public declarations are taken from the module source; each links t
 - **BitSet.BitSet** · [`export let difference = func(other: BitSet) -> BitSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L361)
   A new set of this set's members that the other lacks. Tagged `#Pure`.
 - **BitSet.BitSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L369)
-  Tests for another BitSet with the same members, ignoring trailing zero words. Tagged `#Pure`.
+  Tests for another BitSet with the same members, ignoring trailing zero words. Reading the argument can run its class hook.
 - **BitSet.BitSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L393)
   The wrapping sum of the members' hashes (each member's own value). Tagged `#Pure`.
 - **BitSet.BitSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/bit-set.nra#L403)

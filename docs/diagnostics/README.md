@@ -42,6 +42,10 @@ Errors about the grammar.
 | [E0216](E0216.md) | class hook outside a declared class |
 | [E0217](E0217.md) | malformed startup block |
 | [E0218](E0218.md) | misplaced startup block |
+| [E0219](E0219.md) | malformed defer statement |
+| [E0220](E0220.md) | malformed using statement |
+| [E0221](E0221.md) | malformed generator or yield |
+| [E0222](E0222.md) | yield outside a generator |
 | [E0225](E0225.md) | positional argument after a named argument |
 | [E0226](E0226.md) | default value on a parameter that takes none |
 | [E0227](E0227.md) | malformed interpolated string |
@@ -70,6 +74,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0311](E0311.md) | reserved name |
 | [E0315](E0315.md) | ambiguous extension function |
 | [E0316](E0316.md) | extension function used without a call |
+| [E0318](E0318.md) | derivation mapping names no reachable member |
+| [E0319](E0319.md) | invalid or repeated wire name |
 
 ## E04xx: Types and bindings
 
@@ -129,6 +135,15 @@ Errors about types, values, calls, and statements.
 | [E0452](E0452.md) | a primitive borrow escapes its owner |
 | [E0453](E0453.md) | an escaping closure requires explicit construction |
 | [E0470](E0470.md) | return in a startup block |
+| [E0471](E0471.md) | deferred call with a result |
+| [E0472](E0472.md) | defer or using outside a function |
+| [E0473](E0473.md) | using in a function that cannot return a close error |
+| [E0474](E0474.md) | using resource that cannot be closed |
+| [E0475](E0475.md) | scoped resource leaves its using block |
+| [E0476](E0476.md) | yield with cleanup pending |
+| [E0477](E0477.md) | storage that cannot outlive a suspension |
+| [E0478](E0478.md) | return with a value in a generator |
+| [E0479](E0479.md) | escaping capturing generator without new |
 | [E0480](E0480.md) | conflicting inferred type arguments |
 | [E0481](E0481.md) | lambda does not fit its callable context |
 | [E0482](E0482.md) | unknown argument label |
@@ -194,6 +209,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0544](E0544.md) | class hook that may suspend |
 | [E0545](E0545.md) | hooked class storage without an initializer |
 | [E0546](E0546.md) | hooked class reference at a bodyless function |
+| [E0550](E0550.md) | event emitted under a monitor guard |
 | [E0560](E0560.md) | parameter names differ from the overridden method |
 | [E0561](E0561.md) | defaults differ from the overridden method |
 | [E0570](E0570.md) | invalid record declaration |
@@ -205,6 +221,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0576](E0576.md) | invalid static requirement or call of one |
 | [E0577](E0577.md) | ambiguous static requirement |
 | [E0578](E0578.md) | conformance declared by a module |
+| [E0579](E0579.md) | unknown or misplaced derivation |
+| [E0590](E0590.md) | unsupported JSON codec shape |
 
 ## E06xx: Concurrency
 

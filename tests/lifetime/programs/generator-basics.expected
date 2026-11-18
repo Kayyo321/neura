@@ -1,0 +1,44 @@
+created
+body computes 0
+has_next true
+has_next true
+has_next true
+next 0
+body computes 1
+next 1
+body computes 2
+next 4
+body ends
+has_next false
+has_next false
+body computes 0
+<0>
+body computes 1
+<1>
+body computes 2
+<4>
+body computes 3
+<9>
+body computes 4
+<16>
+body computes 5
+<25>
+body computes 6
+body computes 7
+body computes 8
+body computes 9
+body ends
+body computes 0
+got 0
+body computes 1
+got 1
+body computes 2
+a -1
+b 10
+a 2
+b -11
+a -3
+b 12
+a 4
+an empty generator runs
+done

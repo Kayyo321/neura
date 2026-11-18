@@ -1,0 +1,5 @@
+balance 0 -> 10
+balance 10 -> 30
+balance 30 -> 60
+entries 20004
+total 20064

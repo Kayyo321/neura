@@ -1,0 +1,74 @@
+// Edge cases 50, 51, 52, 53, 55, 58, 60 and 76 (docs/design/Lifetime030.md):
+// the forms of generators, and `iterator` and `yield` as ordinary names
+// elsewhere.
+let sequences = import:Std.Collections.Sequence;
+let lists = import:Std.Collections.ArrayList;
+
+let evens = iterator(limit: int) -> int {
+    for (let value = 0; value < limit; value = value + 2) {
+        yield value;
+    }
+};
+
+let none = iterator() -> string {};
+
+let all = iterator<T>(items: T[list]) -> T {
+    for (let item: T in items) {
+        yield item;
+    }
+};
+
+let sums = iterator(a, b: int) -> int {
+    yield (a + b);
+    yield -1;
+};
+
+let Catalog = class (
+    let entries: string[list] = new;
+    export let each = iterator() -> string {
+        for (let entry: string in entries) {
+            yield entry;
+        }
+    };
+);
+
+let names = func(items: lists.ArrayList<int>, limit: int) -> int {
+    let iterator = items.iterator();
+    let yield = 1;
+    if (iterator.has_next()) {
+        return iterator.next() + yield;
+    }
+    return limit;
+};
+
+let pipeline = func() -> sequences.Sequence<int> {
+    return evens(10).filter(func(value: int) -> bool {
+        return value > 2;
+    }).map(func(value: int) -> int {
+        return value * 3;
+    });
+};
+
+let iterator = func(value: int) -> int => value;
+
+let more_names = func(limit: int) -> bool {
+    let first = iterator(limit);
+    let below = first < limit;
+    return below;
+};
+
+// A lambda in a generator body that returns a Result may hold a `using`.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let checked = iterator() -> int {
+    let attempt = func() -> Result<int> {
+        using (source = new Resource()) {
+            return Result<int>.Ok(1);
+        }
+    };
+    yield 1;
+};

@@ -4,7 +4,7 @@ let constant_time = import:Std.Crypto.Core.ConstantTime;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief The Poly1305 one-time authenticator of RFC 8439, section 2.5 (Stdlib.md section 20.5).
+/// @brief The Poly1305 one-time authenticator of RFC 8439, section 2.5 (Stdlib.md section 21.5).
 ///
 /// The accumulator is five 26-bit limbs in uint64 words, so every product and sum stays below 2^60, and the
 /// final reduction selects between h and h - p with a mask rather than a branch.

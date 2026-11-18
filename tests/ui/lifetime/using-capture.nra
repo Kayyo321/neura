@@ -1,0 +1,23 @@
+// Edge case 44: a function value that captures the resource is not kept by a callee that retains it.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let flush = func() -> void {};
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let open = func() -> Resource => new Resource();
+let Callbacks = class (
+    let handlers: (func() -> void)[list] = new();
+    export let subscribe = func(handler: func() -> void) -> void {
+        handlers.append(handler);
+    };
+);
+let work = func(callbacks: Callbacks) -> Result<int> {
+    using (source = open()) {
+        callbacks.subscribe(func() -> void {
+            source.flush();
+        });
+    }
+    return Result<int>.Ok(0);
+};

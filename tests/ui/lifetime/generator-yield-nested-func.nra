@@ -1,0 +1,8 @@
+// Edge case 59: the body of a function nested in a generator is not the
+// generator's body.
+let outer = iterator() -> int {
+    let inner = func(value: int) -> void {
+        yield value;
+    };
+    yield 1;
+};

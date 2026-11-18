@@ -1,0 +1,12 @@
+// The event classes are not transferable, so a task cannot be given one
+// (docs/design/Lifetime030.md, Events).
+let events = import:Std.Events.Event;
+
+let listen = func(event: events.Event<int>) {};
+
+let work = func() {
+    last event = new events.Event<int>();
+    scope {
+        spawn listen(event);
+    }
+};

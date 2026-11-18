@@ -1,0 +1,9 @@
+error[E0219]: a deferred block is not supported
+ --> $DIR/defer-block.nra:4:11
+  |
+4 |     defer { cleanup(); }
+  |           ^ 'defer' takes one call, not a block
+  |
+  = help: put the statements in a function and defer a call of it
+
+For more information about this error, try `neura explain E0219`.

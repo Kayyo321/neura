@@ -3,7 +3,7 @@ let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
 let.promote _ = import:Std.Crypto.Algorithm;
 
-/// @brief The contract of a key store: local memory, TPM, PKCS#11 HSM, or cloud KMS (Stdlib.md section 20.1).
+/// @brief The contract of a key store: local memory, TPM, PKCS#11 HSM, or cloud KMS (Stdlib.md section 21.1).
 /// @see [Std.Crypto.KeyStoreProvider](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-KeyStoreProvider)
 #Since("0.3.0")
 export let KeyStoreProvider = module (

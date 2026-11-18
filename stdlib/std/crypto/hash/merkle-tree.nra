@@ -4,7 +4,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let.promote _ = import:Std.Crypto.StreamingDigest;
 
 /// @brief An append-only Merkle tree with inclusion and consistency proofs, hashed as in RFC 6962 and RFC 9162,
-/// section 2.1, over any digest (Stdlib.md section 20.4).
+/// section 2.1, over any digest (Stdlib.md section 21.4).
 ///
 /// A leaf hash is H(0x00 || data) and a node hash H(0x01 || left || right); the tree of n leaves splits at the
 /// largest power of two below n, and the empty tree's root is H(""). Proof generation follows the definitions

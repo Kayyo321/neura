@@ -35,6 +35,9 @@ static_assert(static_cast<unsigned>(IrOp::AnyPack) == 66 && static_cast<unsigned
               max_op_1_12 == 68);
 constexpr std::uint8_t max_op_records = static_cast<std::uint8_t>(IrOp::ConformanceCall);
 static_assert(max_op_records == 69);
+constexpr std::uint8_t max_op_1_14 = static_cast<std::uint8_t>(IrOp::Yield);
+static_assert(static_cast<unsigned>(IrOp::Cleanup) == 70 && static_cast<unsigned>(IrOp::Pending) == 71 &&
+              max_op_1_14 == 72);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
@@ -101,6 +104,16 @@ bool needs_any_minor(const std::vector<IrNode>& nodes) {
             return true;
         for (const auto* region : {&node.operands, &node.body, &node.alternative})
             if (needs_any_minor(*region)) return true;
+    }
+    return false;
+}
+
+// A Cleanup, Pending or Yield anywhere (NeuraIR 1.14).
+bool needs_lifetime_minor(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (static_cast<std::uint8_t>(node.op) > max_op_records) return true;
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            if (needs_lifetime_minor(*region)) return true;
     }
     return false;
 }
@@ -299,6 +312,13 @@ public:
             if (needs_payload_names(program)) version = nir_records_minor;
             else named_variants = 0;
         }
+        if (std::ranges::any_of(program.bodies, [](const IrBody& body) { return needs_lifetime_minor(body.instructions); }) ||
+            std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+                return std::ranges::any_of(item.attributes, [](const IrAttribute& attribute) {
+                    return attribute.id == AttributeId::GeneratorResume;
+                });
+            }))
+            version = std::max(version, nir_lifetime_minor);
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -508,7 +528,7 @@ private:
         // Events are derived on the linked program and never stored.
         if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
             throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
-        if (static_cast<std::uint8_t>(value.op) > max_op_records)
+        if (static_cast<std::uint8_t>(value.op) > max_op_1_14)
             throw NirError("invalid operation tag " + std::to_string(static_cast<unsigned>(value.op)));
         if (linked_argument_annotation(value)) throw NirError("argument transport is derived after linking");
         // Only bodies carry polls, and a body with one makes the file 1.9.
@@ -548,7 +568,7 @@ public:
         // no operation here.
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_records, max_op_1_14};
         static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
@@ -828,6 +848,9 @@ private:
                 if (has_attribute(value, AttributeId::HostEffects) &&
                     (value.has_body || !value.external || !value.host_binding))
                     fail("symbol '" + value.name + "': a host-effects contract belongs to a host binding without a body");
+                if (has_attribute(value, AttributeId::GeneratorResume) && minor_ < nir_lifetime_minor)
+                    fail("symbol '" + value.name + "': generator.resume requires NeuraIR format 1." +
+                         std::to_string(nir_lifetime_minor));
             }
         }
         return value;

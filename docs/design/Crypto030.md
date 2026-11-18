@@ -1,6 +1,6 @@
 # Neura 0.3.0: `Std.Crypto`, part 1
 
-This note records the shape of the first part of `Std.Crypto`: the base contracts of the specification's contract tree, `Core`, `Random`, `Hash`, `Mac`, `Kdf` and `Symmetric` (sections 2.0 to 2.5 and 2.8 of the owner's library specification). The library contract is [Stdlib, section 20](../lang/Stdlib.md#20-stdcrypto). The public-key, post-quantum, PKI, token, enclave and advanced packages (2.6, 2.7 and 2.9 to 2.12) build on these contracts in a later change.
+This note records the shape of the first part of `Std.Crypto`: the base contracts of the specification's contract tree, `Core`, `Random`, `Hash`, `Mac`, `Kdf` and `Symmetric` (sections 2.0 to 2.5 and 2.8 of the owner's library specification). The library contract is [Stdlib, section 21](../lang/Stdlib.md#21-stdcrypto). The public-key, post-quantum, PKI, token, enclave and advanced packages (2.6, 2.7 and 2.9 to 2.12) build on these contracts in a later change.
 
 Status: *proposed* on 2026-11-17, implemented by autonomous agents on the `std-crypto` branch, awaiting owner confirmation. The rows below say which parts are implemented. Decisions that the owner has not confirmed are listed at the end.
 

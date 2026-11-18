@@ -1,0 +1,16 @@
+// Case 22: the block's array remains live through its deferred call.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let show = func(values: int[]) {
+    console.println("deferred {}", values[0]);
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let index = 0; index < 3; index++) {
+            let values = [index, index + 1];
+            defer show(values);
+            console.println("body {}", index);
+        }
+        return program.ExitCode.Ok;
+    };
+);

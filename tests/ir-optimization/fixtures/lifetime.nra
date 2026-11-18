@@ -1,0 +1,57 @@
+// Deferred calls (docs/design/Lifetime030.md): the passes leave a body that
+// holds a Cleanup as lowering wrote it, and it behaves the same optimized
+// and not. Each deferred mark records its tag in the trace, so the result
+// shows the order in which the cleanups ran.
+let Lifetime = module (
+    export let trace: int64 = 0;
+
+    export let mark = func(tag: int8) -> void {
+        trace =(trace % 1000000000000) * 1000 +(tag as int64) + 500;
+    };
+
+    // The argument is saved at the statement; the later store must stay.
+
+    export let saved_argument = func(value: int8) -> int64 {
+        trace = 0;
+        let copy: int8 = value;
+        defer mark(copy);
+        copy = 3;
+        mark(copy);
+        return trace;
+    };
+
+    // The returned value is computed before the deferred calls run, last
+    // first, and a copy of it is not propagated past them.
+
+    export let held_return = func(value: int8) -> int64 {
+        trace = 0;
+        {
+            defer mark(1);
+            defer mark(2);
+            if (value > 5) {
+                return trace;
+            }
+            mark(value);
+        }
+        return trace;
+    };
+
+    // A loop runs its body's deferred call at the end of every iteration,
+    // and on break and continue.
+
+    export let loop_exits = func(limit: int8) -> int64 {
+        trace = 0;
+        let index: int8 = 0;
+        while (index < 6) {
+            index = index + 1;
+            defer mark(index);
+            if (index == 2) {
+                continue;
+            }
+            if (index > limit) {
+                break;
+            }
+        }
+        return trace;
+    };
+);

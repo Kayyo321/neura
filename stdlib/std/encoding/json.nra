@@ -1180,4 +1180,207 @@ export let Json = module (
         let [_, sum] = string.from_utf8(kept);
         return sum;
     };
+
+    /// @brief Static signatures of a compiler-derived JSON codec for T.
+    export let Codec = interface<T> (
+        static let to_json = func(value: T) -> Result<JsonValue>;
+        static let encode = func(value: T) -> Result<string>;
+        static let from_json = func(value: JsonValue) -> Result<T>;
+        static let decode = func(text: string) -> Result<T>;
+    );
+
+    /// @brief Parses the JSON grammar while preserving every object member in encounter order.
+    /// Used by JsonCodecSupport before applying a generated schema's duplicate-name rules.
+    #[Hidden, Internal, NoDiscard, Pure, ThreadSafe]
+    export let parse_ordered_members = func(text: string) -> Result<JsonValue> {
+        last parser = new OrderedParser();
+        if (parser.document(text)) {
+            return Result<JsonValue>.Ok(parser.value);
+        }
+        // Use the original parser to report the exact kind, byte offset, and message.
+        match (parse(text)) {
+            Result.Err(failure) => { return Result<JsonValue>.Err(failure); },
+            Result.Ok(_) => { trap_with_message("invalid state: ordered JSON scanner rejected valid JSON"); },
+        }
+    };
+
+    /// @brief Whether the whole text is a JSON number lexeme.
+    #[Hidden, Internal, Pure, ThreadSafe]
+    export let is_number_text = func(text: string) -> bool => scan_number(text, 0) == text.byte_length;
+
+    // The ordinary parser keeps its original class, code, and source locations.
+    // This parser shares its token scanners and asks it to decode escaped strings.
+    #Final
+    let OrderedParser = class (
+        export let value: JsonValue = JsonValue.Null;
+        let string_value: string = "";
+        let escaped_string: Parser = nil;
+
+        export let init = func {
+        };
+
+        export let document = func(text: string) -> bool {
+            last count = text.byte_length;
+            last end = value_at(text, count, 0, 0);
+            return end >= 0 && skip_whitespace(text, count, end) == count;
+        };
+
+        let value_at = func(text: string, count: int, start: int, depth: int) -> int {
+            last p = skip_whitespace(text, count, start);
+            if (p == count) {
+                return -1;
+            }
+            last b = text.byte_at(p);
+            if (b == 34) {
+                last end = string_at(text, count, p);
+                if (end >= 0) {
+                    value = JsonValue.Text(string_value);
+                }
+                return end;
+            }
+            if (b == 45 || is_digit(b)) {
+                last end = scan_number(text, p);
+                if (end >= 0) {
+                    value = JsonValue.Number(text.slice(p, end));
+                }
+                return end;
+            }
+            if (b == 123) {
+                return object_at(text, count, p, depth + 1);
+            }
+            if (b == 91) {
+                return array_at(text, count, p, depth + 1);
+            }
+            if (b == 116) {
+                value = JsonValue.Boolean(true);
+                return literal(text, count, p, "true");
+            }
+            if (b == 102) {
+                value = JsonValue.Boolean(false);
+                return literal(text, count, p, "false");
+            }
+            if (b == 110) {
+                value = JsonValue.Null;
+                return literal(text, count, p, "null");
+            }
+            return -1;
+        };
+
+        let literal = func(text: string, count: int, start: int, word: string) -> int {
+            last length = word.byte_length;
+            if (length > count - start) {
+                return -1;
+            }
+            for (let i = 1; i < length; i++) {
+                if (text.byte_at(start + i) != word.byte_at(i)) {
+                    return -1;
+                }
+            }
+            return start + length;
+        };
+
+        let array_at = func(text: string, count: int, start: int, depth: int) -> int {
+            if (depth > MaxDepth) {
+                return -1;
+            }
+            last items: JsonValue[list] = new;
+            let p = skip_whitespace(text, count, start + 1);
+            if (p < count && text.byte_at(p) == 93) {
+                value = JsonValue.Array(items);
+                return p + 1;
+            }
+            while (p < count) {
+                p = value_at(text, count, p, depth);
+                if (p < 0) {
+                    return p;
+                }
+                items.append(value);
+                p = skip_whitespace(text, count, p);
+                if (p == count) {
+                    return -1;
+                }
+                last b = text.byte_at(p);
+                if (b == 93) {
+                    value = JsonValue.Array(items);
+                    return p + 1;
+                }
+                if (b != 44) {
+                    return -1;
+                }
+                p++;
+            }
+            return -1;
+        };
+
+        let object_at = func(text: string, count: int, start: int, depth: int) -> int {
+            if (depth > MaxDepth) {
+                return -1;
+            }
+            last members: [string, JsonValue][list] = new;
+            let p = skip_whitespace(text, count, start + 1);
+            if (p < count && text.byte_at(p) == 125) {
+                value = JsonValue.Object(members);
+                return p + 1;
+            }
+            while (p < count && text.byte_at(p) == 34) {
+                p = string_at(text, count, p);
+                if (p < 0) {
+                    return p;
+                }
+                last name = string_value;
+                p = skip_whitespace(text, count, p);
+                if (p == count || text.byte_at(p) != 58) {
+                    return -1;
+                }
+                p = value_at(text, count, p + 1, depth);
+                if (p < 0) {
+                    return p;
+                }
+                members.append([name, value]);
+                p = skip_whitespace(text, count, p);
+                if (p == count) {
+                    return -1;
+                }
+                last b = text.byte_at(p);
+                if (b == 125) {
+                    value = JsonValue.Object(members);
+                    return p + 1;
+                }
+                if (b != 44) {
+                    return -1;
+                }
+                p = skip_whitespace(text, count, p + 1);
+            }
+            return -1;
+        };
+
+        let string_at = func(text: string, count: int, start: int) -> int {
+            last first = start + 1;
+            let p = plain_end(text, count, first);
+            if (p < count && text.byte_at(p) == 34) {
+                string_value = text.slice(first, p);
+                return p + 1;
+            }
+            // Skip escape pairs to find the closing quote. The existing parser
+            // checks and decodes their contents, including Unicode surrogates.
+            while (p + 1 < count && text.byte_at(p) == 92) {
+                p = plain_end(text, count, p + 2);
+            }
+            if (p == count || text.byte_at(p) != 34) {
+                return -1;
+            }
+            if (escaped_string == nil) {
+                escaped_string = new Parser();
+            }
+            escaped_string.document(text.slice(start, p + 1));
+            if (escaped_string.failed) {
+                return -1;
+            }
+            match (escaped_string.value) {
+                JsonValue.Text(decoded) => { string_value = decoded; },
+                _ => { return -1; },
+            }
+            return p + 1;
+        };
+    );
 );

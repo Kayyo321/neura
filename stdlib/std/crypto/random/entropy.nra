@@ -7,7 +7,7 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Entropy for seeding: the operating system's generator, with hardware sources and fork detection
-/// planned (Stdlib.md section 20.3).
+/// planned (Stdlib.md section 21.3).
 ///
 /// `os_bytes` uses the runtime's existing entropy service, `neura.entropy.fill`, which the runner implements
 /// with the operating system's generator (`getrandom` on Linux, the platform equivalent elsewhere). It needs the

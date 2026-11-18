@@ -10,7 +10,7 @@ let constant_time = import:Std.Crypto.Core.ConstantTime;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief AES-SIV of RFC 5297: deterministic and nonce-based authenticated encryption (Stdlib.md section 20.7).
+/// @brief AES-SIV of RFC 5297: deterministic and nonce-based authenticated encryption (Stdlib.md section 21.7).
 ///
 /// The synthetic IV is S2V, a CMAC over the associated-data items and the plaintext, so encrypting the same
 /// plaintext with the same items gives the same output: a database column encrypted this way can still be

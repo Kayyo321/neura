@@ -557,6 +557,14 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
             selectors.emplace(selector, artifact_module(artifact, selector, site));
         const auto remap = link_ir(linked.program, std::move(artifact.program), artifact.span,
                                    artifact.minor_version < 6);
+        for (const auto mapped : remap) {
+            if (mapped == no_symbol) continue;
+            const auto& item = linked.program.symbols[mapped];
+            if (item.kind != SymbolKind::Module || item.owner == no_symbol) continue;
+            const auto& owner = linked.program.symbols[item.owner];
+            if (owner.kind == SymbolKind::File && owner.library_path.empty())
+                linked.artifact_origins.try_emplace(mapped, path);
+        }
         for (const auto& [selector, id] : selectors)
             linked.modules.emplace(std::pair{path, selector}, remap[id]);
     }

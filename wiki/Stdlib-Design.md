@@ -116,7 +116,7 @@ The language has no hexadecimal integer literals, no inference of type arguments
 
 | Module | Contents | Section |
 | --- | --- | --- |
-| `Std.Core` | `Failure`, `Ordering`, `Hash`, `Error`, `Optional`, `Result`, `Unit`, `IntRange`, the primitive companion modules, `StringBuilder` | [5](#5-core-contracts), [6](#6-stdcore-types), [7](#7-primitive-companion-modules) |
+| `Std.Core` | `Failure`, `Ordering`, `Hash`, `Error`, `Optional`, `Result`, `Unit`, `IntRange`, the primitive companion modules, `StringBuilder`, `Character`, `UnicodeScript`, `UnicodeBlock` | [5](#5-core-contracts), [6](#6-stdcore-types), [7](#7-primitive-companion-modules), [8.5](#85-character) |
 | `Std.Text` | `Strings`, `Scalars`, `Regex` | [8](#8-stdtext) |
 | `Std.Collections` | `ArrayList`, `ArrayDeque`, `LinkedList`, `HashMap`, `HashSet`, `TreeMap`, `TreeSet`, `PriorityQueue`, `BitSet`, `OrdinalMap`, `Sequence`, `Sorting`, the interfaces | [9](#9-stdcollections) |
 | `Std.Math` | `Math`, `BigInteger`, `BigDecimal` | [10](#10-stdmath) |
@@ -132,7 +132,8 @@ The language has no hexadecimal integer literals, no inference of type arguments
 | `Std.Test` | Assertions | [14.2](#142-stdtest) |
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop) |
 | `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](Concurrency#9-stdconcurrent) |
-| `Std.Crypto` | The contracts, and the packages `Core`, `Random`, `Hash`, `Mac`, `Kdf` and `Symmetric` | [20](#20-stdcrypto) |
+| `Std.Events` | `Event`, `EventView`, `Subscription` | [20](#20-stdevents) |
+| `Std.Crypto` | The contracts, and the packages `Core`, `Random`, `Hash`, `Mac`, `Kdf` and `Symmetric` | [21](#21-stdcrypto) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retired-built-ins)).
 
@@ -160,7 +161,7 @@ A module may import only modules above it. Cycles are forbidden.
 8. `Std.Log`, `Std.Test`
 9. `Std.Crypto`: its contracts, then `Core`, `Hash`, `Mac`, `Kdf`, `Symmetric` and `Random`, each above the next. It imports `Std.Core`, `Std.Concurrent.AtomicInt64`, `Std.Digest.Sha256`, `Std.Encoding`, `Std.Math.BigInteger` and `Std.Time`.
 
-`StringBuilder` is in `Std.Core` because number formatting needs it. `IntRange` imports the `Iterable` and `Iterator` interfaces from `Std.Collections` so that for-each can visit a range; those two modules import nothing, so no cycle forms. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`.
+`StringBuilder` is in `Std.Core` because number formatting needs it. `IntRange` imports the `Iterable` and `Iterator` interfaces from `Std.Collections` so that for-each can visit a range; those two modules import nothing, so no cycle forms. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`. `Character` is a second exception: its full case mappings use the casing routines of `Std.Text.Internal.UnicodeCase`, which import nothing above `Std.Text`.
 
 
 ### 4.4 Built-in floor
@@ -310,7 +311,7 @@ The loop form depends on the source value.
 | --- | --- | --- |
 | For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
 | An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | For a collection's iterator, `has_next` has no effect and can be repeated. For every iterator, a generator's included, `has_next` consumes nothing and repeating it repeats no work ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
 | For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
 - **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
@@ -319,6 +320,7 @@ The loop form depends on the source value.
 - **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
+- A [generator](CoreLanguage#generators) is a function that returns a `Sequence<T>` over a generated `Iterator<T>`: its first `has_next` with nothing buffered runs the body to its next `yield`, and further calls run nothing until `next` takes the buffered value.
 
 ### 5.5 Resources
 
@@ -332,6 +334,7 @@ The loop form depends on the source value.
   - A file is closed even when the body closed it already, which reports no error. `with_connection` connects without a time limit.
   - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
 - **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
+- A [`using`](CoreLanguage#using) block applies the same rule to the value a `return` carries out of it, for a close that has already run ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). The rule is held by `close_outcome` in an internal module, `std/io/internal/close-outcome.nra`, which only a program that writes `using` loads, so that the programs that do not keep their images.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
 - **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
@@ -370,7 +373,7 @@ A function that a spawned task calls must be task-safe ([Concurrency](Concurrenc
 - **What is pinned.** The `concurrency-frontend` test runs the report over a program that links `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json`, and fails when a function other than console input is not task-safe.
 - **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`) and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](StandardLibrary#task-safety) gives the reason for each and the statement for every area.
 - **Changes made for it.** A collection's text conversion keeps its self-containment flag in the instance ([section 5.2](#52-equality-hashing-and-text)). Float parsing reads no module state. The `BigInteger` and `BigDecimal` methods build the small values they need and do not read the exported constants `Zero`, `One`, and `Ten`, which stay for the root task's use.
-- **Checked tags.** The library states these properties with [tags](Tags) that the compiler checks. `#Immutable` marks the value classes `Duration`, `Instant`, `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset`, `IntRange`, `Uuid`, `Path`, `FileMetadata`, `ItemLimits`, and `PortableErrorLink`, so tasks share their instances and may read constants such as `Duration.Zero`; each is also `#ThreadSafe`. `BigInteger`, `BigDecimal`, `RegexMatch`, `MemoryLayout`, `FunctionDescriptor`, and the immutable collections keep their contents in lists, so they are not `#Immutable` and are not transferable. `#ThreadSafe` marks the module functions of `Std.Core`, `Std.Math`, `Std.Text`, `Std.Encoding`, `Std.Digest`, and `Std.Time`, the `Std.Concurrent` handles, the `Cancellation` functions, and `Console.print_line`; a function that calls a method a program may override, such as `Error.message`, which calls `ErrorDetail.message`, is left untagged because a program's override decides whether it is task-safe. `#ThreadSafe` also marks the factory functions of other modules that build an instance without a host request, such as `ByteBuffer.create`, `Logger.create`, and `Random.seeded`, and the `Std.Test` assertions. `#Pure` marks the functions and methods that compute their result from their arguments and the state reachable from them, such as every `Math` function, the integer and float companions, the arithmetic and queries of the time value types, and the queries of a class such as `StringBuilder.is_empty` or `BitSet.contains`. A function that builds its result through a helper that fills a `StringBuilder` or a list it allocated, such as `Json.write`, `Float64.to_fixed`, `Regex.compile`, or the `BigInteger` arithmetic, is `#Pure` too. Three kinds of function are left without it: a generic function, such as a collection method, because the check applies to each specialization and a program's element type with an impure `to_string`, `equals`, or `hash_code` would make it fail; a function that can reach a method a program may override, such as `Error.message`, `Error.to_portable`, or a function that traps with an error's message through `Result.expect`, such as `Charsets.encode` and the `String` functions that take a regular expression; and a function whose result other tasks change, `AtomicInt64.load`. `#NotThreadSafe` marks the classes whose instances hold mutable or native state: `StringBuilder`, `Regex`, `Random`, `Logger`, `Stopwatch`, `FixedClock`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer`, `File`, `TcpStream`, `TcpListener`, the mutable collections (`ArrayList`, `ArrayDeque`, `LinkedList`, `HashMap`, `HashSet`, `StringMap`, `IntMap`, `OrdinalMap`, `TreeMap`, `TreeSet`, `PriorityQueue`, `BitSet`, and `Sequence`), and `Arena`, `MemorySegment`, `MethodHandle`, `Linker`, and `SymbolLookup`. A task may create and use instances of its own, a task's result may be one, and a `Guarded<T>` may hold one; giving one to another task, sending one on a channel, or making one a parallel item's argument or result is `E0602`, as it was before the tag, because none of these classes is transferable, and the error now points at the tag ([Tags](Tags#threadsafe-and-notthreadsafe)). The standard library's `equals(other: class)` overrides cannot promise `#Pure`: reading `other` may run a getter supplied by the linked application, even when the receiver class is final. Their effect summaries still follow the implementation in each linked program.
+- **Checked tags.** The library states these properties with [tags](Tags) that the compiler checks. `#Immutable` marks the value classes `Duration`, `Instant`, `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset`, `IntRange`, `Uuid`, `Path`, `FileMetadata`, `ItemLimits`, and `PortableErrorLink`, so tasks share their instances and may read constants such as `Duration.Zero`; each is also `#ThreadSafe`. `BigInteger`, `BigDecimal`, `RegexMatch`, `MemoryLayout`, `FunctionDescriptor`, and the immutable collections keep their contents in lists, so they are not `#Immutable` and are not transferable. `#ThreadSafe` marks the module functions of `Std.Core`, `Std.Math`, `Std.Text`, `Std.Encoding`, `Std.Digest`, and `Std.Time`, the `Std.Concurrent` handles, the `Cancellation` functions, and `Console.print_line`; a function that calls a method a program may override, such as `Error.message`, which calls `ErrorDetail.message`, is left untagged because a program's override decides whether it is task-safe. `#ThreadSafe` also marks the factory functions of other modules that build an instance without a host request, such as `ByteBuffer.create`, `Logger.create`, and `Random.seeded`, and the `Std.Test` assertions. `#Pure` marks the functions and methods that compute their result from their arguments and the state reachable from them, such as every `Math` function, the integer and float companions, the arithmetic and queries of the time value types, and the queries of a class such as `StringBuilder.is_empty` or `BitSet.contains`. A function that builds its result through a helper that fills a `StringBuilder` or a list it allocated, such as `Json.write`, `Float64.to_fixed`, `Regex.compile`, or the `BigInteger` arithmetic, is `#Pure` too. Three kinds of function are left without it: a generic function, such as a collection method, because the check applies to each specialization and a program's element type with an impure `to_string`, `equals`, or `hash_code` would make it fail; a function that can reach a method a program may override, such as `Error.message`, `Error.to_portable`, or a function that traps with an error's message through `Result.expect`, such as `Charsets.encode` and the `String` functions that take a regular expression; and a function whose result other tasks change, `AtomicInt64.load`. `#NotThreadSafe` marks the classes whose instances hold mutable or native state: `StringBuilder`, `Regex`, `Random`, `Logger`, `Stopwatch`, `FixedClock`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer`, `File`, `TcpStream`, `TcpListener`, the mutable collections (`ArrayList`, `ArrayDeque`, `LinkedList`, `HashMap`, `HashSet`, `StringMap`, `IntMap`, `OrdinalMap`, `TreeMap`, `TreeSet`, `PriorityQueue`, `BitSet`, and `Sequence`), the `Std.Events` classes (`Event`, `EventView`, and `Subscription`), and `Arena`, `MemorySegment`, `MethodHandle`, `Linker`, and `SymbolLookup`. A task may create and use instances of its own, a task's result may be one, and a `Guarded<T>` may hold one; giving one to another task, sending one on a channel, or making one a parallel item's argument or result is `E0602`, as it was before the tag, because none of these classes is transferable, and the error now points at the tag ([Tags](Tags#threadsafe-and-notthreadsafe)). The standard library's `equals(other: class)` overrides cannot promise `#Pure`: reading `other` may run a getter supplied by the linked application, even when the receiver class is final. Their effect summaries still follow the implementation in each linked program.
 
 
 ## 6. `Std.Core` types
@@ -663,7 +666,7 @@ A class in `Std.Core` that accumulates text. Needs T1. The module function `crea
 
 **There is no `char` type.** A code point is a `uint32` holding a Unicode scalar value. `StringBuilder.append_scalar` and `Strings.from_scalars` print a code point as its character explicitly.
 
-`Scalars` is a module of functions on `uint32`: `is_valid` (at most 0x10FFFF and not a surrogate), `utf8_length` (1 through 4), `is_ascii`, `is_ascii_digit`, `is_ascii_hex_digit`, `is_ascii_alphabetic`, `is_ascii_alphanumeric`, `is_ascii_uppercase`, `is_ascii_lowercase`, `is_ascii_whitespace`, `is_ascii_punctuation`, `is_ascii_control`, `to_ascii_upper`, `to_ascii_lower`, `digit_value(scalar, radix: int) → int` (-1 when it is not a digit of the radix), and `from_digit(value: int, radix: int) → uint32` (lowercase; traps when out of range). Each is a range comparison; none uses a table. The constant `Replacement` is 0xFFFD.
+`Scalars` is a module of functions on `uint32`: `is_valid` (at most 0x10FFFF and not a surrogate), `utf8_length` (1 through 4), `is_ascii`, `is_ascii_digit`, `is_ascii_hex_digit`, `is_ascii_alphabetic`, `is_ascii_alphanumeric`, `is_ascii_uppercase`, `is_ascii_lowercase`, `is_ascii_whitespace`, `is_ascii_punctuation`, `is_ascii_control`, `to_ascii_upper`, `to_ascii_lower`, `digit_value(scalar, radix: int) → int` (-1 when it is not a digit of the radix), and `from_digit(value: int, radix: int) → uint32` (lowercase; traps when out of range). Each is a range comparison; none uses a table. The constant `Replacement` is 0xFFFD. [`Character`](#85-character) classifies and maps every code point with the Unicode data.
 
 ### 8.4 `Regex`
 
@@ -685,6 +688,80 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
 `RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match. Its capture positions are kept in a list, so it is not marked `#Immutable` and tasks cannot share it.
+
+### 8.5 `Character`
+
+`Std.Core.Character` is Java's `Character` over Unicode 17.0.0, the version of the `String` case tables, in the library's snake_case names. It has the two shapes Java has:
+
+- **Module functions on code points.** Each takes a code point as a `uint32`, as Java's static methods take an `int`, and is total over `uint32`: a value above 0x10FFFF has the properties of an unassigned code point, and only the members that build text, UTF-8, or UTF-16 trap for it. The surrogate code points U+D800 through U+DFFF have the category `Surrogate`. There is still no `char` type ([section 8.3](#83-scalars)).
+- **The class `Character`**, an `#Immutable` value holding one Unicode scalar value, the get-only field `code_point`. `of(code_point)` and `new Character(code_point)` trap with `invalid argument: not a Unicode scalar value` for a surrogate or a value above 0x10FFFF, because a `Character`'s text must be one character; `try_of` returns `None` instead, and `from_text(text)` gives the character of a string that holds exactly one scalar value. `equals` compares the code points, `hash_code` is the code point (Java's `hashCode` is the `char` value, and a `uint32` hashes to itself, [section 5.2](#52-equality-hashing-and-text)), `compare_to` orders by code point, and `to_string` is the character. Its methods apply the common module functions to the value: the classification predicates through `is_mirrored`, `get_type`, `get_directionality`, the case mappings (which return `Character`), `digit`, `numeric_value`, `char_count`, and `utf8_length`. The identifier, emoji, and `bidi_class` functions have no method; call them with `code_point`.
+
+| Member | Behavior | Java |
+| --- | --- | --- |
+| `MinCodePoint`, `MaxCodePoint`, `MinSupplementaryCodePoint`, `Min`/`MaxHighSurrogate`, `Min`/`MaxLowSurrogate`, `Min`/`MaxSurrogate`, `MinRadix`, `MaxRadix`, `UnicodeVersion` | 0, 0x10FFFF, 0x10000, the surrogate bounds, 2, 36, and `"17.0.0"`. | The constants of the same names |
+| `get_type(cp) → GeneralCategory`, `category_code(c)` | The General_Category, an enum in Unicode's order (`UppercaseLetter` … `Unassigned`), and its two-letter code. | `getType` |
+| `get_directionality(cp) → BidiClass` | The Bidi_Class of a defined code point; `Undefined` when the category is `Unassigned`, including noncharacters. | `getDirectionality` |
+| `bidi_class(cp)`, `bidi_code(b)` | The Bidi_Class with the UCD's defaults for unassigned code points (`RightToLeft` in the Hebrew block, `BoundaryNeutral` for noncharacters), and its abbreviation. | |
+| `is_upper`, `is_lower` | The Uppercase and Lowercase properties: category Lu or Ll, or Other_Uppercase or Other_Lowercase. | `isUpperCase`, `isLowerCase` |
+| `is_title_case`, `is_letter`, `is_digit`, `is_letter_or_digit` | Category Lt; L; Nd; L or Nd. | `isTitleCase`, `isLetter`, `isDigit`, `isLetterOrDigit` |
+| `is_alphabetic`, `is_ideographic`, `is_mirrored` | The Alphabetic, Ideographic, and Bidi_Mirrored properties. | `isAlphabetic`, `isIdeographic`, `isMirrored` |
+| `is_alpha`, `is_numeric`, `is_alpha_numeric` | A letter; a code point with a Unicode Numeric_Value (any Numeric_Type but None, including fractions, Roman numerals, and CJK ideographs with Unihan values); either. Python's `str.isalpha`, `isnumeric`, and `isalnum` for one character. | |
+| `is_whitespace` | Java's set: category Zs, Zl, or Zp except U+00A0, U+2007, and U+202F, and U+0009 through U+000D and U+001C through U+001F. The `String` companion's strip and indentation use it. | `isWhitespace` |
+| `is_space_char` | Category Zs, Zl, or Zp. | `isSpaceChar` |
+| `is_space` | The White_Space property: U+0009 through U+000D, U+0020, U+0085, U+00A0, and the separators. | Not Java's deprecated `isSpace`, which tests five ASCII characters |
+| `is_iso_control`, `is_defined` | U+0000 through U+001F and U+007F through U+009F; a category other than `Unassigned` (surrogates and private use are defined, noncharacters are not). | `isISOControl`, `isDefined` |
+| `is_identifier_start`, `is_identifier_part`, `is_identifier_ignorable` | Java's profile of UAX #31: ID_Start and U+2E2F; ID_Continue, U+2E2F, and the ignorable set; U+0000 through U+0008, U+000E through U+001B, U+007F through U+009F, and category Cf. | `isUnicodeIdentifierStart`, `isUnicodeIdentifierPart`, `isIdentifierIgnorable` |
+| `is_java_identifier_start`, `is_java_identifier_part` | A letter or category Nl, Sc, or Pc; a letter, category Sc, Pc, Nd, Nl, Mc, or Mn, or the ignorable set. | `isJavaIdentifierStart`, `isJavaIdentifierPart` |
+| `is_emoji`, `is_emoji_presentation`, `is_emoji_modifier`, `is_emoji_modifier_base`, `is_emoji_component`, `is_extended_pictographic` | The UTS #51 properties. | `isEmoji` … `isExtendedPictographic` |
+| `to_upper`, `to_lower`, `to_title` `→ uint32` | The simple one-to-one mappings of UnicodeData.txt; the code point itself when there is none. The titlecase mapping is the uppercase one where UnicodeData.txt gives none. | `toUpperCase`, `toLowerCase`, `toTitleCase` |
+| `to_upper_string(cp)`, `to_lower_string(cp)`, each also with a language tag | The full mappings of `String.to_upper_case` and `to_lower_case` ([String](StandardLibrary#unicode-case-and-locale)): U+00DF gives `"SS"`, U+0130 gives `i` and U+0307, and `"tr"` maps `i` to U+0130. A lone U+03A3 has no cased letter before it and maps to U+03C3. | `String.toUpperCase` on one character |
+| `digit(cp, radix) → int` | The decimal digit value of a category Nd code point, or 10 through 35 for A through Z and a through z in ASCII or fullwidth form, when below the radix; otherwise -1. | `digit`; Java returns -1 for a bad radix, this traps |
+| `for_digit(value, radix) → uint32` | The lowercase ASCII digit. | `forDigit`; Java returns U+0000 for bad input, this traps |
+| `numeric_value(cp) → int` | 10 through 35 for the Latin letters as in `digit`; the Numeric_Value when it is an integer from 0 through 2^31 - 1; -2 for a fraction, a negative value, or a larger value; -1 for none. | `getNumericValue`, over the full Numeric_Value property |
+| `numeric_value_text(cp) → Optional<string>` | The exact Numeric_Value, such as `"1/2"`, `"-1/2"`, or `"1000000000000"`. | |
+| `is_valid_code_point`, `is_scalar_value`, `is_bmp`, `is_supplementary` | At most 0x10FFFF; and not a surrogate; below 0x10000; 0x10000 through 0x10FFFF. | `isValidCodePoint`, `isBmpCodePoint`, `isSupplementaryCodePoint` |
+| `is_surrogate`, `is_high_surrogate`, `is_low_surrogate`, `is_surrogate_pair(high, low)` | Range tests on a `uint32` unit. A `uint16` unit, such as a `String.char_at` result, takes `as uint32`: `uint16` overloads would make every call with a literal, such as `is_surrogate(55296)`, ambiguous, since a literal fits both alternatives only as a contextual match ([overloads](CoreLanguage#function-overloads)). | The methods of the same names |
+| `to_code_point(high, low)`, `high_surrogate(cp)`, `low_surrogate(cp)` | Surrogate pair conversion. A pair that is not one, or a code point that is not supplementary, traps. | `toCodePoint`, `highSurrogate`, `lowSurrogate`, which do not validate |
+| `char_count(cp)`, `to_chars(cp) → uint16[list]` | The UTF-16 units: one below 0x10000, where a surrogate code point gives itself, and a pair above. `char_count` does not validate; `to_chars` traps above 0x10FFFF. | `charCount`, `toChars` |
+| `code_point_at(units, i)`, `code_point_before(units, i)`, `code_point_count(units, start, end)`, `offset_by_code_points(units, i, n)` | The `uint16[list]` forms. An unpaired surrogate counts as one code point. A range or a move outside the list traps. | The `char[]` forms |
+| `utf8_length(cp)`, `utf16_length(cp)`, `to_utf8(cp)` | Byte and unit counts and the UTF-8 bytes of a scalar value. | |
+| `to_string(cp)`, `hash(cp)`, `compare(a, b) → Ordering`, `reverse_bytes(unit: uint16)` | The one-character string (traps unless a scalar value), the code point, numeric order, and the unit with its bytes swapped. | `toString(int)`, `hashCode(char)`, `compare`, `reverseBytes` |
+| `get_name(cp) → Optional<string>` | Java's name: the Unicode Name of a code point that UnicodeData.txt lists by name (`LATIN SMALL LETTER A`, `CJK COMPATIBILITY IDEOGRAPH-F900`); for a control, its Unicode 1.0 name (`NULL`, `LINE FEED (LF)`), except `BEL` for U+0007 and the aliases `PADDING CHARACTER`, `HIGH OCTET PRESET`, and `SINGLE GRAPHIC CHARACTER INTRODUCER` for U+0080, U+0081, and U+0099; for every other assigned code point, the block form: the block's name in capitals with its spaces, hyphens, and underscores as spaces, a space, and the code point in uppercase hex without leading zeros (`CJK UNIFIED IDEOGRAPHS 4E00`, `HANGUL SYLLABLES AC00`, `TANGUT 17000`, `HIGH SURROGATES D800`, `PRIVATE USE AREA E000`, `LATIN 1 SUPPLEMENT 84`). `None` for an unassigned code point or noncharacter and above 0x10FFFF. | `getName`; Java throws above 0x10FFFF |
+| `unicode_name(cp) → Optional<string>` | The Unicode Name property, generated for the Hangul syllables (`HANGUL SYLLABLE GAG`) and the patterned ranges of DerivedName.txt (`CJK UNIFIED IDEOGRAPH-4E00`, `TANGUT IDEOGRAPH-17000`, `KHITAN SMALL SCRIPT CHARACTER-18B00`, `NUSHU CHARACTER-1B170`, `EGYPTIAN HIEROGLYPH-13460`, `CJK COMPATIBILITY IDEOGRAPH-F900`). `None` for controls, surrogates, private use, unassigned code points, and above 0x10FFFF. | Python's `unicodedata.name` |
+| `code_point_of(name) → uint32`, `try_code_point_of(name) → Optional<uint32>` | The code point with a name that `get_name` or `unicode_name` returns. The text is compared after removing leading and trailing characters up to U+0020 and uppercasing with the root rules, so `" latin small letter a "` and `"croß mark"` match. Name aliases other than Java's control names, the loose matching of UAX #44, and named sequences do not. `code_point_of` traps for any other text; `try_code_point_of` returns `None`. | `codePointOf`; unlike Java, it also accepts the Unicode names of the Hangul syllables and the CJK unified and Tangut ideographs |
+
+**Traps.** Each message follows `invalid argument: `: `not a Unicode scalar value` (`of`, `new Character`, `to_string`, `to_upper_string`, `to_lower_string`, `utf8_length`, `utf16_length`, `to_utf8`), `not a Unicode code point` (`to_chars`), `not a surrogate pair` (`to_code_point`), `not a supplementary code point` (`high_surrogate`, `low_surrogate`), `radix outside 2 through 36` (`digit`, `for_digit`), `digit out of range` (`for_digit`), `range outside the list` (`code_point_count`), `offset outside the list` (`offset_by_code_points`), `not a Unicode character name` (`code_point_of`), and `NoBlock has no range` (`UnicodeBlock.first` and `last`). A UTF-16 index outside the list in `code_point_at` and `code_point_before` is the list read's own trap.
+
+**Not provided.** Java members that have no counterpart, and why: `MIN_VALUE`, `MAX_VALUE`, `SIZE`, `BYTES`, `charValue`, `valueOf(char)`, and `hashCode(char)` concern the 16-bit `char`, which Neura does not have (`code_point`, `of`, and `hash` take their place); the deprecated `isJavaLetter`, `isJavaLetterOrDigit`, and `isSpace`; `toChars(int, char[], int)` and the `char[]` overloads with an offset, count, start, or limit, since a list slice serves; `codePointAt(CharSequence, int)` and its relatives, which are `String.code_point_at` and its relatives on strings; `describeConstable`; and the deprecated constructor.
+
+`Std.Core.UnicodeScript` and `Std.Core.UnicodeBlock` are Java's `Character.UnicodeScript` and `Character.UnicodeBlock`. Each exports a generated enum, `UnicodeScript` with one variant per Script value sorted by long name, and `UnicodeBlock` with `NoBlock` and the blocks of Blocks.txt in code point order, and the module functions `of(cp)` (`Unknown` or `NoBlock` for a code point outside every script or block and above 0x10FFFF), `name(v)` (`Old_Italic`, `Latin-1 Supplement`), `for_name(text) → Optional` (long names, codes, and aliases under the loose matching of UAX #44: ASCII case, spaces, underscores, and hyphens are ignored), and `all()`. `UnicodeScript.code(v)` is the ISO 15924 code, and `UnicodeBlock.first(v)` and `last(v)` are a block's bounds, which trap for `NoBlock`.
+
+<!-- example: check -->
+```neura
+let character = import:Std.Core.Character;
+let unicode_script = import:Std.Core.UnicodeScript;
+
+let sigma = character.of(931);
+let lower = sigma.to_lower();                        // σ, U+03C3
+let category = character.get_type(453);             // GeneralCategory.TitlecaseLetter
+let title = character.to_title(454);                 // U+01C5
+let sharp_s = character.to_upper_string(223);        // "SS"
+let fifty = character.numeric_value(8556);           // 50, ROMAN NUMERAL FIFTY
+let script = unicode_script.of(1488);                // UnicodeScript.Hebrew
+let java_name = character.get_name(44032);           // Some("HANGUL SYLLABLES AC00")
+let unicode_name = character.unicode_name(44032);    // Some("HANGUL SYLLABLE GA")
+let face = character.code_point_of("grinning face"); // 128512
+```
+
+**Data and lookup.** `scripts/generate-unicode-tables.py` writes the property tables from the Unicode Character Database 17.0.0 as Perl's `Unicode::UCD` exposes it (the names below come from the UCD files); it checks the version and the SHA-256 of the data it reads, and `--check` compares the checked-in files. Each table is a string of printable bytes, six bits each: a range table holds the first code point of each range with its value, and a boundary table the boundaries of a property's inversion list. A lookup bisects the table, so it reads about log2(ranges) entries: 4,144 General_Category ranges, 1,268 Bidi_Class ranges, 1,510 case ranges, 2,215 numeric ranges, and between 2 and 1,598 boundaries for each binary property. The tables come to about 88 KB of source; a program that does not call a member does not carry its table.
+
+**Names.** `get_name` follows Java's documented rule ([Java SE 25 `getName`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/Character.html#getName(int))): the Unicode Name for a code point that UnicodeData.txt lists by name, and the block form for one it lists only as part of a range, such as the CJK unified ideographs, Hangul syllables, and Tangut ideographs. The names of the controls, which have no Unicode Name, were observed with OpenJDK 17.0.21: the Unicode 1.0 name where UnicodeData.txt has one, `BEL` for U+0007, whose Unicode 1.0 name `BELL` is the name of U+1F514, the figment aliases of U+0080, U+0081, and U+0099, and the block form for U+0084. `unicode_name` is the Unicode Name property, which Java does not offer. `code_point_of` accepts both kinds of names, so `code_point_of(get_name(cp))` and `code_point_of(unicode_name(cp))` give `cp` back for every named code point. It accepts no other aliases, as Java does not.
+
+Of the Unicode names, 34,594 are stored. The others, about 125,000, are generated from the code point: the Hangul syllables from the jamo short names of Jamo.txt (Unicode section 3.12), and the patterned ranges from their prefix and the code point in hex. The stored names are front-coded in code point order: each record gives the number of leading words it shares with the previous name, then its other words, each spelled out or as a code into a dictionary of 2,122 frequent words. Every block of 32 records starts with a whole name, so `get_name` decodes at most 32 records. `code_point_of` reads a trailing hex number or Hangul jamo first. For any other name, it decodes the blocks whose names start with the same first word. The tables are `Std.Core.Internal.UnicodeNames` (314 KB of source, 236 KB of it the records), which `scripts/generate-unicode-tables.py` writes from the pinned UCD 17.0.0 files UnicodeData.txt, DerivedName.txt, NameAliases.txt, Jamo.txt, and SpecialCasing.txt, not from Perl. Only the four name members import the tables. A program that does not call them builds the same image as before they existed: byte for byte with `--no-source-map`, and differing only in the line numbers of `character.nra` with the source map. A program that calls `get_name` grows from 370 KB to 856 KB, and one that calls `code_point_of` to 1.03 MB. About 300 KB of that growth is the tables, and the rest is the circuits for the operations the lookup uses.
+
+**Verification.** `tests/stdlib/character` checks every code point from 0 through 0x10FFFF, for each of 38 module functions (every predicate, `get_type`, `get_directionality`, `bidi_class`, the three simple case mappings, `digit` with radix 36, `numeric_value`, and the script and block), against digests that its generator computes per code point from the unpacked UCD data; it adds targeted cases (ASCII, Latin-1, final sigma, dotless i, titlecase digraphs, surrogates, private use, noncharacters, unassigned code points, and the largest code point) and spot checks of `numeric_value_text`, the full-case strings, and `digit` at other radices. This proves the packing and the lookups against the Perl 17.0.0 data. Before writing the test, the generator checks that data against three other sources and stops on any difference it does not list: Python's `unicodedata` (Unicode 15.1.0) for every code point assigned by 15.1, for the category, bidi class, mirroring, decimal and numeric values, `isalpha`, `isnumeric`, `isalnum`, `isupper`, `islower`, and the one-to-one upper, lower, and title mappings (the listed differences are 16.0 and 17.0 changes); Perl's regular expression engine for every code point and the binary properties (Alphabetic, Uppercase, Lowercase, Ideographic, ID_Start, ID_Continue, Bidi_Mirrored, White_Space, the six emoji properties) and the categories L, Lt, Nd, and Cn; and the simple case mappings against the 17.0.0 case tables of `String`, built from the unmodified UCD files. The script and block tables and the Unicode 16.0 and 17.0 additions to the Bidi_Class and numeric tables have no source other than the Perl data. Parity with Java is by definition, taken from the Java SE 25 documentation, except for the names, which a Java runtime checked; no Java runtime is part of the tests.
+
+`names-tests.nra` checks `get_name` and `unicode_name` for every code point, against per-plane digests that `generators/names.py` computes from the unpacked UCD files. It also checks that `code_point_of` gives back the code point of every name of both kinds, 299,382 Java names and 159,801 Unicode names. Before writing the test, the generator compares the Unicode names with Perl's `Unicode::UCD` 17.0.0 for every code point, with Python's `unicodedata` for every code point assigned by 15.1, and with ICU 77's `Any-Name` transliterator (Unicode 16.0) for every code point assigned by 16.0. It compares the Java names with every name that OpenJDK 17.0.21's `Character.getName` returns (`generators/JavaNames.java`, Unicode 13.0). The targeted cases of `character-tests.nra` come from the same JDK (`generators/JavaCodePointOf.java`). Each comparison agrees except for two listed differences. Perl names U+18D00 through U+18D1E `TANGUT IDEOGRAPH SUPPLEMENT-…`, where DerivedName.txt and ICU have `TANGUT IDEOGRAPH-…`. CPython generates no names for the Tangut ideographs.
 
 ## 9. `Std.Collections`
 
@@ -1182,7 +1259,7 @@ There is no time zone database, no named zones, and no daylight-saving rules. Co
 | `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback. |
 | `choose<T>(items: T[list]) → T` | Traps with `no such element` for an empty list. |
 
-The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets; use `Std.Crypto.Random` ([section 20.3](#203-stdcryptorandom)).
+The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets; use `Std.Crypto.Random` ([section 21.3](#213-stdcryptorandom)).
 
 **`Uuid`** is an `#Immutable` value of 16 bytes. The module function `random(random: Random)` makes a version 4 identifier from `fill_bytes`, then sets the version and variant bits. `to_string` writes the 36-character hyphenated form in lowercase. `parse(text) → Result<Uuid>` accepts either case and needs T1. It has `compare_to`, `equals`, and `hash_code` over its bytes.
 
@@ -1291,8 +1368,8 @@ Contracts deliberately kept: insertion-ordered hash collections, separate read-o
 | Finalizers, weak references | Excluded | Reclamation runs no code, by design. |
 | Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
 | Time zones, locales, localized formatting, collation | Not provided | They need large versioned data tables. |
-| Unicode normalization, non-ASCII classification | Not provided | Same reason. |
-| Signatures, key exchange, TLS, HTTP | Not provided | They need security review. Hashes, MACs, key derivation, authenticated encryption and a cryptographic generator are in [`Std.Crypto`](#20-stdcrypto); public-key cryptography is planned there. |
+| Unicode normalization | Not provided | Same reason. [`Character`](#85-character) classifies, maps, and names every code point. |
+| Signatures, key exchange, TLS, HTTP | Not provided | They need security review. Hashes, MACs, key derivation, authenticated encryption and a cryptographic generator are in [`Std.Crypto`](#21-stdcrypto); public-key cryptography is planned there. |
 | `BigInteger` bitwise operations, UDP | Not provided | |
 | Facade modules such as `Std.Collections` that re-export every collection type | Not provided | They need re-export of generic classes, which the language does not have. The type modules are the import paths. |
 
@@ -1458,13 +1535,32 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 - Tests: `stdlib-concurrent` for `Tasks` and `WorkerGroup`; the `concurrency-*` and `backend-concurrency` entries for the rest ([Concurrency](Concurrency#15-verification)).
 - Task safety of the library as a whole is in [section 5.8](#58-task-safety).
 
-## 20. `Std.Crypto`
+## 20. `Std.Events`
+
+`Std.Events.Event` is a library module in `stdlib/std/events/event.nra` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). It needs no language feature of its own. An owner keeps an `Event<T>`, emits payloads to the handlers subscribed to it, and exports its `EventView<T>`, which can only subscribe.
+
+| Declaration | Contract |
+| --- | --- |
+| `Event<T>` | The owner's side. `new Event<T>()`; `subscribe(handler: func(T) -> void) -> Subscription`; `emit(payload: T)`; `view() -> EventView<T>`; `subscriber_count() -> int`. `#Final`, `#NotThreadSafe`. |
+| `EventView<T>` | What an owner exports: `subscribe` only. It cannot emit and gives no access to the `Event`. `#Final`, `#NotThreadSafe`. |
+| `Subscription` | The token of one registration. `unsubscribe()` removes that registration and does nothing when called again; `active() -> bool`. Two subscriptions are equal only when they are the same object. `#Final`, `#NotThreadSafe`. |
+
+- `subscribe` keeps its handler until `unsubscribe`; collection is not unsubscription, and an event keeps its handlers alive. A handler that captures is therefore written `new func(...)`, and a bound method `new bound(receiver.method)`; a bare capturing handler is [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md). The same handler subscribed twice is two registrations with two tokens.
+- `emit` delivers synchronously, in registration order, to the registrations that exist when the emission starts. A registration added or removed by a handler takes effect from the next emission, so a handler removed during an emission is still called by it. A nested `emit` uses the registrations at its own start.
+- Handlers return nothing. A trap in a handler ends the run.
+- `emit` compares nothing and suppresses nothing. An owner commits its state first and then emits the old and new values it accepted, as a tuple payload; it does not read them again through a getter.
+- The registrations are an immutable list that `subscribe` and `unsubscribe` replace, so `emit` copies nothing. `subscribe` and `unsubscribe` allocate; `emit` does not, beyond what handlers do.
+- The three classes are not transferable, so giving one to a task is [E0602](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0602.md).
+- `emit` is not called under a monitor guard ([E0550](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0550.md)): in a `#Synchronized` method, in a lambda passed directly to `Guarded.with`, or in a function either of them reaches through calls the compiler resolves. A call through a function value is not followed, so the check is a check of the known call graph and not a proof.
+- Tests: `stdlib-events`, and `lifetime-programs` for delivery in every execution mode.
+
+## 21. `Std.Crypto`
 
 `Std.Crypto` holds the cryptography of the library: contracts, memory hygiene and constant-time helpers, a policy object, digests, MACs, key derivation, authenticated encryption, and random generation. It is Neura source running on the interpreter. Only `Sha256` reaches a C kernel, through `Std.Digest.Sha256`. Every primitive is checked against known answers from an independent implementation or from a standard's text (`tests/stdlib/crypto-*`, generated by `scripts/crypto-vectors/`). [The design note](https://github.com/Kayyo321/neura/blob/main/docs/design/Crypto030.md) records the API shape, the implementation tier of each item, and every stub.
 
 **What the runtime does not provide.** Interpreted code does not run in constant time. The constant-time helpers are branch-free in source, and the runtime does not guarantee constant time. The runtime cannot lock memory (`mlock`) or keep it out of swap, and it cannot erase copies of a secret that the collector made. A member that would need a missing host service has the doc line `@stub` and traps with `unsupported: <Module>.<member> is not implemented in Neura 0.3.0 (<reason>)`.
 
-### 20.1 Contracts
+### 21.1 Contracts
 
 | Module | Contract |
 | --- | --- |
@@ -1479,7 +1575,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 | `KeyEncapsulation` | `encapsulate(public_key) -> Encapsulation<SharedSecret, Ciphertext>` and `decapsulate(private_key, ciphertext) -> Result<SharedSecret>`. |
 | `KeyStoreProvider` | `KeyStoreProvider<KeyHandle>`: `provider_name`, `generate_key(algorithm, label)`, `sign`, `wrap_key`, `unwrap_key` and `delete_key`, each returning a `Result`. |
 
-### 20.2 `Std.Crypto.Core`
+### 21.2 `Std.Crypto.Core`
 
 | Module | Contract |
 | --- | --- |
@@ -1489,14 +1585,14 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 | `ConstantTime` | `ct_eq(a, b)` on byte lists (a length difference returns false at once, because lengths are public), `ct_eq_uint32`, `ct_less` and `ct_select` on `uint32` (results 0 or 1), and `ct_select_bytes`. Branch-free in source; the runtime does not guarantee constant time. |
 | `CryptoPolicy` | One process-wide `Policy`, which is `Modern` (the default), `Fips140_3` or `Cnsa2_0`. `set_policy`, `policy`, `allows(algorithm)`, `allowed_by(policy, algorithm)`, and `require(algorithm)`, which traps with `denied: <Algorithm> is not allowed under the <Policy> policy`. Each primitive calls `require` when it is created. `Modern` denies `Md5`, `Sha1` and `Rsa1024`. `Fips140_3` allows the FIPS-approved algorithms: SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2, and the approved public-key and post-quantum schemes. `Cnsa2_0` allows AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The policy is checked at run time only. It is held in a `Std.Concurrent.AtomicInt64`, so primitives can be created in spawned tasks; set it at startup, because a change reaches each task at its next creation of a primitive. |
 
-### 20.3 `Std.Crypto.Random`
+### 21.3 `Std.Crypto.Random`
 
 | Module | Contract |
 | --- | --- |
 | `Entropy` | `os_bytes(count) -> Result<uint8[list]>` reads the operating system's generator through the existing host service `neura.entropy.fill` (requests of at most 1 MiB each) and needs the entropy capability. A denied capability is an `Io` error of kind `CapabilityDenied` with the message `entropy request failed`. `hardware_bytes(count)` (RDSEED or RNDR) and `fork_generation()` (fork and VM-clone detection) are stubs. `fused_seed()` is SHA-512 over a label, 64 OS bytes and 64 hardware bytes, so it traps while `hardware_bytes` is a stub. |
 | `ChaCha20Drbg` | A generator with fast key erasure. The key starts as SHA-256("Neura ChaCha20-DRBG seed" ‖ seed), for a seed of at least 32 bytes; `reseed(material)` sets it to SHA-256("Neura ChaCha20-DRBG reseed" ‖ key ‖ material). `fill(count)` takes the ChaCha20 keystream under the key with a zero nonce, uses its first 32 bytes as the next key, and returns the next `count` bytes. Also `next_uint32`, `next_uint64`, `next_below(bound)` (rejection sampling), `reseed_from_entropy() -> Result<Unit>`, and `wipe`. `from_entropy()` seeds from 32 OS bytes. `fork_safe()` also checks `fork_generation` before every output and reseeds after a change, so it traps until that stub is implemented. A seeded generator is reproducible, which makes it suitable for tests and for deterministic derivation; seed it from `os_bytes` for secrets. |
 
-### 20.4 `Std.Crypto.Hash`
+### 21.4 `Std.Crypto.Hash`
 
 | Module | Contract |
 | --- | --- |
@@ -1508,7 +1604,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 
 Every digest checks the policy when it is created. An `update` after the output was read, or a second `finish` of a fixed-length digest, traps with `invalid state: digest finished`. No hardware acceleration (SHA-NI, AVX-512) is used.
 
-### 20.5 `Std.Crypto.Mac`
+### 21.5 `Std.Crypto.Mac`
 
 | Module | Contract |
 | --- | --- |
@@ -1518,7 +1614,7 @@ Every digest checks the policy when it is created. An `update` after the output 
 | `Poly1305` | The one-time authenticator of RFC 8439 under a 32-byte key, with `mac(key, message)`. The key must not be reused. The final reduction selects with a mask. |
 | `AesCmac` | AES-CMAC (SP 800-38B, RFC 4493) with 16-, 24- or 32-byte keys, and `mac(key, message)`. |
 
-### 20.6 `Std.Crypto.Kdf`
+### 21.6 `Std.Crypto.Kdf`
 
 | Module | Contract |
 | --- | --- |
@@ -1531,7 +1627,7 @@ Every digest checks the policy when it is created. An `update` after the output 
 | `PasswordHash` | `hash_password(password, salt, params)` gives an argon2id PHC string; `hash_password_scrypt(password, salt, log2_n, r, p, length)` gives a scrypt one. `verify_password(password, encoded) -> Result<bool>` handles argon2id v=19 and scrypt and compares in constant time; an unknown function or bad parameters is `Custom` code `crypto.unsupported`. `needs_rehash(encoded, wanted)` is true unless the string is argon2id v=19 with exactly `wanted`'s parameters. |
 | `Calibration` | `calibrate_argon2id(clock, target, parallelism, max_memory_kib) -> Result<Argon2Params>` measures on the given `Std.Time` clock. It starts at 8 KiB per lane and one pass, doubles memory while a run is faster than the target and within the cap, then adds passes up to 10. Its result depends on the host and is not deterministic. |
 
-### 20.7 `Std.Crypto.Symmetric`
+### 21.7 `Std.Crypto.Symmetric`
 
 Raw ECB and CBC modes are not exposed. Every AEAD implements `AeadCipher<SymmetricKey<C>, uint8[list], uint8[list]>`, where `C` is its own class. A constructor takes a `SymmetricKey<C>` (such as `SecretKey<AesGcm>`) or raw key bytes, and a key of the wrong length traps. `seal` returns the ciphertext and then the tag, except for `AesSiv`, which puts its synthetic IV first. `open` compares tags in constant time. A failed `open` is `Custom` code `crypto.authentication` and releases no plaintext. Each cipher checks the policy for its variant, such as `Aes128Gcm` or `Aes256Gcm`, when it is created.
 

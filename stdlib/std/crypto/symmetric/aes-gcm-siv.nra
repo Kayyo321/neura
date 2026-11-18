@@ -10,7 +10,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let gf128 = import:Std.Crypto.Internal.Gf128;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief AES-GCM-SIV of RFC 8452: nonce-misuse-resistant AEAD with 96-bit nonces (Stdlib.md section 20.7).
+/// @brief AES-GCM-SIV of RFC 8452: nonce-misuse-resistant AEAD with 96-bit nonces (Stdlib.md section 21.7).
 ///
 /// Each nonce derives fresh message keys, and the tag (a POLYVAL of the data and plaintext) is the counter of
 /// the encryption. A repeated nonce reveals only whether two messages with the same associated data were
