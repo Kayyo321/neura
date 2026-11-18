@@ -66,10 +66,7 @@ export let BFloat16 = module implements Additive<bfloat16>, Multiplicative<bfloa
         if (b < a) {
             return b;
         }
-        if (is_negative(a)) {
-            return a;
-        }
-        return b;
+        return if (is_negative(a)) -> a else -> b;
     };
 
     /// @brief Returns the greater value, propagating NaN and preferring positive zero over negative zero.
@@ -84,10 +81,7 @@ export let BFloat16 = module implements Additive<bfloat16>, Multiplicative<bfloa
         if (b > a) {
             return b;
         }
-        if (is_negative(a)) {
-            return b;
-        }
-        return a;
+        return if (is_negative(a)) -> b else -> a;
     };
 
     /// @brief max(v, low), then min with high, so a NaN `v` gives NaN. Traps when either bound is NaN or `low`
@@ -142,10 +136,7 @@ export let BFloat16 = module implements Additive<bfloat16>, Multiplicative<bfloa
             if (a_nan && b_nan) {
                 return Ordering.Equal;
             }
-            if (a_nan) {
-                return Ordering.Greater;
-            }
-            return Ordering.Less;
+            return if (a_nan) -> Ordering.Greater else -> Ordering.Less;
         }
         if (a < b) {
             return Ordering.Less;
@@ -157,10 +148,7 @@ export let BFloat16 = module implements Additive<bfloat16>, Multiplicative<bfloa
         if (a_negative == is_negative(b)) {
             return Ordering.Equal;
         }
-        if (a_negative) {
-            return Ordering.Less;
-        }
-        return Ordering.Greater;
+        return if (a_negative) -> Ordering.Less else -> Ordering.Greater;
     };
 
     /// @brief Same bit pattern, except that every NaN equals every NaN; 0.0 and -0.0 differ (section 5.2).

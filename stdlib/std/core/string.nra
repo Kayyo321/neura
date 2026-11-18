@@ -93,7 +93,7 @@ export let String = module:strings (
     #[Pure, ThreadSafe]
     export let region_matches = func(s: string, start: int, other: string, other_start: int, byte_count: int)
         -> bool {
-        if (!valid_region(s, start, byte_count) || !valid_region(other, other_start, byte_count)) {
+        if (not valid_region(s, start, byte_count) || not valid_region(other, other_start, byte_count)) {
             return false;
         }
         return s.slice(start, start + byte_count) == other.slice(other_start, other_start + byte_count);
@@ -102,7 +102,7 @@ export let String = module:strings (
     /// @brief Compares valid byte ranges after folding ASCII letters. Invalid regions return false.
     export let region_matches_ignore_ascii_case =
         func(s: string, start: int, other: string, other_start: int, byte_count: int) -> bool {
-            if (!valid_region(s, start, byte_count) || !valid_region(other, other_start, byte_count)) {
+            if (not valid_region(s, start, byte_count) || not valid_region(other, other_start, byte_count)) {
                 return false;
             }
             return strings.equals_ignore_ascii_case(
@@ -113,7 +113,7 @@ export let String = module:strings (
     /// @brief Compares valid byte ranges using simple Unicode case mapping. Invalid regions return false.
     export let region_matches_ignore_case =
         func(s: string, start: int, other: string, other_start: int, byte_count: int) -> bool {
-            if (!valid_region(s, start, byte_count) || !valid_region(other, other_start, byte_count)) {
+            if (not valid_region(s, start, byte_count) || not valid_region(other, other_start, byte_count)) {
                 return false;
             }
             return equals_ignore_case(s.slice(start, start + byte_count),
@@ -348,7 +348,7 @@ export let String = module:strings (
         let end = s.byte_length;
         while (end > 0) {
             last prev = previous_boundary(s, end);
-            if (!is_whitespace(strings.scalar_at(s, prev))) {
+            if (not is_whitespace(strings.scalar_at(s, prev))) {
                 break;
             }
             end = prev;
@@ -410,7 +410,7 @@ export let String = module:strings (
         last final_byte = s.byte_at(s.byte_length - 1);
         last has_final_separator = final_byte == 10 || final_byte == 13;
         let common = 0;
-        if (!has_final_separator) {
+        if (not has_final_separator) {
             last final_line = parts[parts.length - 1];
             common = code_point_count(final_line, 0,
                 leading_whitespace_end(final_line, final_line.byte_length as int64));
@@ -575,7 +575,7 @@ export let String = module:strings (
 
     /// @brief Traps when the offset falls outside the text or inside a UTF-8 sequence.
     let check_boundary = func(s: string, offset: int) {
-        if (!strings.is_boundary(s, offset)) {
+        if (not strings.is_boundary(s, offset)) {
             trap_with_message("invalid argument: offset is not a character boundary");
         }
     };
@@ -602,7 +602,7 @@ export let String = module:strings (
         let remaining = count;
         while (end < s.byte_length && remaining != 0) {
             last scalar = strings.scalar_at(s, end);
-            if (!is_whitespace(scalar)) {
+            if (not is_whitespace(scalar)) {
                 break;
             }
             end += unicode_scalars.utf8_length(scalar);

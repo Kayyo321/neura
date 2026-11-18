@@ -40,10 +40,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
         if (v < low) {
             return low;
         }
-        if (v > high) {
-            return high;
-        }
-        return v;
+        return if (v > high) -> high else -> v;
     };
 
     /// @brief The natural order; usable as a comparator.
@@ -52,10 +49,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
         if (a < b) {
             return Ordering.Less;
         }
-        if (a > b) {
-            return Ordering.Greater;
-        }
-        return Ordering.Equal;
+        return if (a > b) -> Ordering.Greater else -> Ordering.Equal;
     };
 
     /// @brief Square-and-multiply with checked multiplication (an overflow traps with reason 1).
@@ -98,46 +92,31 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_add = func(a: uint64, b: uint64) -> Optional<uint64> {
-        if (b > Max - a) {
-            return Optional<uint64>.None;
-        }
-        return Optional<uint64>.Some(a + b);
+        return if (b > Max - a) -> Optional<uint64>.None else -> Optional<uint64>.Some(a + b);
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_sub = func(a: uint64, b: uint64) -> Optional<uint64> {
-        if (a < b) {
-            return Optional<uint64>.None;
-        }
-        return Optional<uint64>.Some(a - b);
+        return if (a < b) -> Optional<uint64>.None else -> Optional<uint64>.Some(a - b);
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_mul = func(a: uint64, b: uint64) -> Optional<uint64> {
-        if (a != 0 && b > Max / a) {
-            return Optional<uint64>.None;
-        }
-        return Optional<uint64>.Some(a * b);
+        return if (a != 0 && b > Max / a) -> Optional<uint64>.None else -> Optional<uint64>.Some(a * b);
     };
 
     /// @brief Returns the quotient in Some, or None when the divisor is zero.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_div = func(a: uint64, b: uint64) -> Optional<uint64> {
-        if (b == 0) {
-            return Optional<uint64>.None;
-        }
-        return Optional<uint64>.Some(a / b);
+        return if (b == 0) -> Optional<uint64>.None else -> Optional<uint64>.Some(a / b);
     };
 
     /// @brief Returns the remainder in Some, or None when the divisor is zero.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_rem = func(a: uint64, b: uint64) -> Optional<uint64> {
-        if (b == 0) {
-            return Optional<uint64>.None;
-        }
-        return Optional<uint64>.Some(a % b);
+        return if (b == 0) -> Optional<uint64>.None else -> Optional<uint64>.Some(a % b);
     };
 
     /// @brief The result modulo 2^64 (section 7.2). `room` is Max - a, which cannot underflow; when b exceeds
@@ -145,19 +124,13 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     #[Pure, ThreadSafe]
     export let wrapping_add = func(a: uint64, b: uint64) -> uint64 {
         last room = Max - a;
-        if (b > room) {
-            return b - room - 1;
-        }
-        return a + b;
+        return if (b > room) -> b - room - 1 else -> a + b;
     };
 
     /// @brief When a < b, b - a is between 1 and Max, so Max - (b - a) + 1 fits.
     #[Pure, ThreadSafe]
     export let wrapping_sub = func(a: uint64, b: uint64) -> uint64 {
-        if (a >= b) {
-            return a - b;
-        }
-        return Max - (b - a) + 1;
+        return if (a >= b) -> a - b else -> Max - (b - a) + 1;
     };
 
     /// @brief Low and high 32-bit halves: every partial product has two factors below 2^32, the cross products
@@ -180,28 +153,19 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     /// @brief Clamp to Min or Max instead of overflowing.
     #[Pure, ThreadSafe]
     export let saturating_add = func(a: uint64, b: uint64) -> uint64 {
-        if (b > Max - a) {
-            return Max;
-        }
-        return a + b;
+        return if (b > Max - a) -> Max else -> a + b;
     };
 
     /// @brief Subtracts and clamps an out-of-range result to the nearest representable bound.
     #[Pure, ThreadSafe]
     export let saturating_sub = func(a: uint64, b: uint64) -> uint64 {
-        if (a < b) {
-            return Min;
-        }
-        return a - b;
+        return if (a < b) -> Min else -> a - b;
     };
 
     /// @brief Multiplies and clamps an out-of-range result to the nearest representable bound.
     #[Pure, ThreadSafe]
     export let saturating_mul = func(a: uint64, b: uint64) -> uint64 {
-        if (a != 0 && b > Max / a) {
-            return Max;
-        }
-        return a * b;
+        return if (a != 0 && b > Max / a) -> Max else -> a * b;
     };
 
     /// @brief For unsigned operands these are the ordinary quotient and remainder. A zero divisor traps (reason
@@ -303,20 +267,14 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     #[Pure, ThreadSafe]
     export let rotate_left = func(v: uint64, n: int) -> uint64 {
         last count = rotation(n);
-        if (count == 0) {
-            return v;
-        }
-        return (v << count) | (v >> (Bits - count));
+        return if (count == 0) -> v else -> (v << count) | (v >> (Bits - count));
     };
 
     /// @brief Rotates the bits right, reducing the distance modulo the bit width.
     #[Pure, ThreadSafe]
     export let rotate_right = func(v: uint64, n: int) -> uint64 {
         last count = rotation(n);
-        if (count == 0) {
-            return v;
-        }
-        return (v >> count) | (v << (Bits - count));
+        return if (count == 0) -> v else -> (v >> count) | (v << (Bits - count));
     };
 
     /// @brief The identity: every integer module has both conversions.
@@ -378,10 +336,7 @@ export let UInt64 = module implements Additive<uint64>, Multiplicative<uint64>, 
     /// @brief `n` modulo Bits, between 0 and Bits - 1.
     let rotation = func(n: int) -> int {
         last count = n % Bits;
-        if (count < 0) {
-            return count + Bits;
-        }
-        return count;
+        return if (count < 0) -> count + Bits else -> count;
     };
 
     /// @brief The additive identity, 0 (Std.Core.Arithmetic.Additive).

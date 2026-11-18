@@ -48,10 +48,7 @@ export let HostError = module (
         if (code == 14) {
             return IoErrorKind.CapabilityDenied;
         }
-        if (code == 15) {
-            return IoErrorKind.Cancelled;
-        }
-        return IoErrorKind.Other;
+        return if (code == 15) -> IoErrorKind.Cancelled else -> IoErrorKind.Other;
     };
 
     /// @brief Wraps a provider code as an I/O error with the supplied message and path.

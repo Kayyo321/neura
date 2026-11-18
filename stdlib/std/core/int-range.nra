@@ -41,10 +41,9 @@ export let IntRange = module (
         /// @brief Progressions compare by their defining bounds and step.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is IntRange)) {
+            if (other is not that: IntRange) {
                 return false;
             }
-            last that = other as IntRange;
             return start == that.start && end == that.end && step == that.step;
         };
 
@@ -59,7 +58,7 @@ export let IntRange = module (
         /// @brief Formats the progression as `start..end:step`.
         #Pure
         export let.override to_string = func -> string =>
-            start.to_string() + ".." + end.to_string() + ":" + step.to_string();
+            start.to_string() .. ".." .. end.to_string() .. ":" .. step.to_string();
 
         /// @brief The number of values. Computed in int64; a range with more than Int32.Max values traps
         /// (reason 1) in the conversion to int.
@@ -154,13 +153,16 @@ export let IntRange = module (
 
         /// @brief Returns the next value and advances. Traps with `no such element` at exhaustion.
         export let next = func -> int {
-            if (!has_next()) {
+            if (not has_next()) {
                 trap_with_message("no such element");
             }
             last value = current as int;
             current += stride;
             return value;
         };
+
+        /// @brief Names the iterator and its current value.
+        export let.override to_string = func -> string => "IntRangeIterator(next " .. current.to_string() .. ")";
     );
 
     /// @brief The values from `start` up to, but not including, `end`.

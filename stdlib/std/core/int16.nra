@@ -30,10 +30,7 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
         if (v < 0) {
             return -1;
         }
-        if (v > 0) {
-            return 1;
-        }
-        return 0;
+        return if (v > 0) -> 1 else -> 0;
     };
 
     /// @brief Returns the smaller of the two operands.
@@ -53,10 +50,7 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
         if (v < low) {
             return low;
         }
-        if (v > high) {
-            return high;
-        }
-        return v;
+        return if (v > high) -> high else -> v;
     };
 
     /// @brief The natural order; usable as a comparator.
@@ -65,10 +59,7 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
         if (a < b) {
             return Ordering.Less;
         }
-        if (a > b) {
-            return Ordering.Greater;
-        }
-        return Ordering.Equal;
+        return if (a > b) -> Ordering.Greater else -> Ordering.Equal;
     };
 
     /// @brief Square-and-multiply with checked multiplication (an overflow traps with reason 1).
@@ -136,10 +127,7 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_mul = func(a: int16, b: int16) -> Optional<int16> {
-        if (multiply_overflows(a, b)) {
-            return Optional<int16>.None;
-        }
-        return Optional<int16>.Some(a * b);
+        return if (multiply_overflows(a, b)) -> Optional<int16>.None else -> Optional<int16>.Some(a * b);
     };
 
     /// @brief None for a zero divisor and for Min / -1.
@@ -154,10 +142,7 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
     /// @brief None for a zero divisor. Min % -1 is 0, as for the operator.
     #[NoDiscard, Pure, ThreadSafe]
     export let checked_rem = func(a: int16, b: int16) -> Optional<int16> {
-        if (b == 0) {
-            return Optional<int16>.None;
-        }
-        return Optional<int16>.Some(a % b);
+        return if (b == 0) -> Optional<int16>.None else -> Optional<int16>.Some(a % b);
     };
 
     /// @brief The result modulo 2^Bits: the operation runs on the unsigned pattern and converts back (section
@@ -187,10 +172,7 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
         if (b > 0 && a > Max - b) {
             return Max;
         }
-        if (b < 0 && a < Min - b) {
-            return Min;
-        }
-        return a + b;
+        return if (b < 0 && a < Min - b) -> Min else -> a + b;
     };
 
     /// @brief Subtracts and clamps an out-of-range result to the nearest representable bound.
@@ -199,20 +181,14 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
         if (b < 0 && a > Max + b) {
             return Max;
         }
-        if (b > 0 && a < Min + b) {
-            return Min;
-        }
-        return a - b;
+        return if (b > 0 && a < Min + b) -> Min else -> a - b;
     };
 
     /// @brief Multiplies and clamps an out-of-range result to the nearest representable bound.
     #[Pure, ThreadSafe]
     export let saturating_mul = func(a: int16, b: int16) -> int16 {
         if (multiply_overflows(a, b)) {
-            if ((a < 0) != (b < 0)) {
-                return Min;
-            }
-            return Max;
+            return if ((a < 0) != (b < 0)) -> Min else -> Max;
         }
         return a * b;
     };
@@ -222,20 +198,14 @@ export let Int16 = module implements Additive<int16>, Multiplicative<int16>, Ord
     #[Pure, ThreadSafe]
     export let floor_div = func(a: int16, b: int16) -> int16 {
         last quotient = a / b;
-        if (a % b != 0 && (a < 0) != (b < 0)) {
-            return quotient - 1;
-        }
-        return quotient;
+        return if (a % b != 0 && (a < 0) != (b < 0)) -> quotient - 1 else -> quotient;
     };
 
     /// @brief The remainder with the divisor's sign. A zero divisor traps (reason 1).
     #[Pure, ThreadSafe]
     export let floor_mod = func(a: int16, b: int16) -> int16 {
         last remainder = a % b;
-        if (remainder != 0 && (remainder < 0) != (b < 0)) {
-            return remainder + b;
-        }
-        return remainder;
+        return if (remainder != 0 && (remainder < 0) != (b < 0)) -> remainder + b else -> remainder;
     };
 
     /// @brief Bit counts and rotations over the two's complement pattern.

@@ -60,17 +60,11 @@ export let WideUint = module (
             last a = limbs;
             last b = other.limbs;
             if (a.length != b.length) {
-                if (a.length < b.length) {
-                    return -1;
-                }
-                return 1;
+                return if (a.length < b.length) -> -1 else -> 1;
             }
             for (let i = a.length - 1; i >= 0; i--) {
                 if (a[i] != b[i]) {
-                    if (a[i] < b[i]) {
-                        return -1;
-                    }
-                    return 1;
+                    return if (a[i] < b[i]) -> -1 else -> 1;
                 }
             }
             return 0;
@@ -341,7 +335,7 @@ export let WideUint = module (
             }
             last work = copy();
             last groups: uint32[list] = new;
-            while (!work.is_zero()) {
+            while (not work.is_zero()) {
                 groups.append(work.divide_small(Billion));
             }
             last bytes: uint8[list] = new;
@@ -378,6 +372,9 @@ export let WideUint = module (
                 bytes.append(digits[i]);
             }
         };
+
+        /// @brief Names the value and its limb count.
+        export let.override to_string = func -> string => "WideUint(" .. limbs.length.to_string() .. " limbs)";
     );
 
     /// @brief Creates a fresh zero magnitude with no limbs.
