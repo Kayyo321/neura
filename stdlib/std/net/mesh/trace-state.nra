@@ -261,5 +261,5 @@ export let TraceState = module (
     /// @brief A parse error at `offset`.
     let fail = func(offset: int, text: string) -> Result<TraceState> =>
         Result<TraceState>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
-            message: "tracestate: " + text });
+            message: "tracestate: " .. text });
 );

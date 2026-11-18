@@ -333,7 +333,7 @@ export let Call = module (
         last content_type = optional.value_or<string>(wire.header("content-type"), "");
         if (wire.http_status != 200 || not is_grpc_content_type(content_type)) {
             last mapped = statuses.of(statuses.from_http(wire.http_status), "HTTP status " .. wire.http_status.to_string()
-                .. (is_grpc_content_type(content_type) ? "" : ", content type '" + content_type + "'"));
+                .. (is_grpc_content_type(content_type) ? "" : ", content type '" .. content_type .. "'"));
             return Result<RpcResponse>.Ok(status_response(mapped));
         }
         last trailers_only = wire.trailers.length == 0 && optional.is_some<string>(wire.header(statuses.StatusHeader));

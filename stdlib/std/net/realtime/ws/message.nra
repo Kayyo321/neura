@@ -118,7 +118,7 @@ export let Message = module (
 
         /// @brief Whether a message is open and how many bytes it holds.
         export let.override to_string = func -> string =>
-            "MessageAssembler(" .. (open_code >= 0 ? "open, " + pending.length.to_string() + " bytes" : "idle") .. ")";
+            "MessageAssembler(" .. (open_code >= 0 ? "open, " .. pending.length.to_string() .. " bytes" : "idle") .. ")";
 
         /// @brief Drops the open message and returns the failure.
         let fail = func(status: int, message: string) -> Result<Optional<Message>> {

@@ -416,7 +416,7 @@ export let Date = module (
     };
 
     /// @brief `value` (0 through 99) as two digits.
-    let two_digits = func(value: int) -> string => value < 10 ? "0" + value.to_string() : value.to_string();
+    let two_digits = func(value: int) -> string => value < 10 ? "0" .. value.to_string() : value.to_string();
 
     /// @brief `value` (0 through 9999) as four digits.
     let four_digits = func(value: int) -> string {

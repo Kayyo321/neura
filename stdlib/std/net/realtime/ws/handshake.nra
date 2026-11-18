@@ -268,7 +268,7 @@ export let Handshake = module (
         let joined = "";
         for (let header in headers) {
             if (strings.equals_ignore_ascii_case(header.name, name)) {
-                joined = found ? joined + ", " + header.value : header.value;
+                joined = found ? joined .. ", " .. header.value : header.value;
                 found = true;
             }
         }

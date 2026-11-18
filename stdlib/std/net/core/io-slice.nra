@@ -211,8 +211,8 @@ export let IoSlice = module (
                 last taken = writer(rest)?;
                 if (taken < 1 || taken > rest.length()) {
                     return Result<int>.Err(Error.Io { kind: IoErrorKind.Other,
-                        message: "gather writer took " + taken.to_string() + " of " + rest.length().to_string()
-                        + " bytes", path: "" });
+                        message: "gather writer took " .. taken.to_string() .. " of " .. rest.length().to_string()
+                        .. " bytes", path: "" });
                 }
                 done += taken;
                 total += taken;

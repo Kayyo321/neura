@@ -47,7 +47,7 @@ export let Emitter = module (
                 if (has_line_break(value) || has_nul(value)) {
                     return fail("the event id contains a line break or U+0000");
                 }
-                text = value.byte_length == 0 ? text + "id\n" : text + "id: " + value + "\n";
+                text = value.byte_length == 0 ? text .. "id\n" : text .. "id: " .. value .. "\n";
             },
             Optional.None => {},
         }

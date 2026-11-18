@@ -587,7 +587,7 @@ export let Message = module (
 
     /// @brief "IN" for class 1, otherwise "CLASSn" (RFC 3597 section 5).
     #NoDiscard
-    export let class_name = func(rclass: int) -> string => rclass == ClassIn ? "IN" : "CLASS" + rclass.to_string();
+    export let class_name = func(rclass: int) -> string => rclass == ClassIn ? "IN" : "CLASS" .. rclass.to_string();
 
     /// @brief The master-file-like text of record data; unknown data as `\# length hex` (RFC 3597 section 5).
     #NoDiscard

@@ -236,7 +236,7 @@ export let Status = module (
 
         /// @brief `NAME: message`.
         export let.override to_string = func -> string =>
-            message.byte_length == 0 ? name(code) : name(code) + ": " + message;
+            message.byte_length == 0 ? name(code) : name(code) .. ": " .. message;
     );
 
     /// @brief A status without details.
@@ -279,7 +279,7 @@ export let Status = module (
         match (code_text) {
             Optional.None => {
                 return of(from_http(http_status), message.byte_length > 0 ? message
-                    : "missing grpc-status (HTTP status " + http_status.to_string() + ")");
+                    : "missing grpc-status (HTTP status " .. http_status.to_string() .. ")");
             },
             Optional.Some(text) => {
                 last code = parse_code(text);

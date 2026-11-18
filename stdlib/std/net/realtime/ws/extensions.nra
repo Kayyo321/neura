@@ -208,7 +208,7 @@ export let Extensions = module (
     export let format = func(list: Extension[list]) -> string {
         let text = "";
         for (let i = 0; i < list.length; i++) {
-            text = i == 0 ? list[i].to_string() : text + ", " + list[i].to_string();
+            text = i == 0 ? list[i].to_string() : text .. ", " .. list[i].to_string();
         }
         return text;
     };

@@ -752,7 +752,7 @@ export let Wire = module (
                 last more = http_headers.trim_value(line);
                 return fail<http_headers.Headers>(400, "invalid field value") unless http_headers.is_valid_value(more);
                 last at = values.length - 1;
-                values[at] = values[at].byte_length == 0 ? more : values[at] + " " + more;
+                values[at] = values[at].byte_length == 0 ? more : values[at] .. " " .. more;
                 continue;
             }
             last colon = index_of_byte(line, 58, 0);

@@ -280,7 +280,7 @@ export let Wire = module (
 
     /// @brief A truncation error at `at`.
     let truncated = func(at: int, what: string) -> errors.Error =>
-        errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at, message: what + " runs past the message" };
+        errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at, message: what .. " runs past the message" };
 
     /// @brief A name error.
     let name_error = func(kind: errors.ParseErrorKind, at: int, text: string) -> Result<names.DnsName> =>

@@ -463,7 +463,7 @@ export let Uri = module (
             last pair = percent.encode(key, percent.EncodeSet.QueryComponent) .. "="
                 .. percent.encode(value, percent.EncodeSet.QueryComponent);
             last current = optional.value_or<string>(query_text, "");
-            query_text = optional.Optional<string>.Some(current.byte_length == 0 ? pair : current + "&" + pair);
+            query_text = optional.Optional<string>.Some(current.byte_length == 0 ? pair : current .. "&" .. pair);
         };
 
         /// @brief Removes the query.
@@ -578,7 +578,7 @@ export let Uri = module (
         if (bad >= 0) {
             return Result<int>.Err(Error.Parse {
                 kind: ParseErrorKind.InvalidCharacter, offset: start + bad,
-                message: "character not allowed in the " + name
+                message: "character not allowed in the " .. name
             });
         }
         return Result<int>.Ok(0);

@@ -349,5 +349,5 @@ export let Baggage = module (
     /// @brief A parse error at `offset`.
     let fail = func(offset: int, text: string) -> Result<Baggage> =>
         Result<Baggage>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
-            message: "baggage: " + text });
+            message: "baggage: " .. text });
 );

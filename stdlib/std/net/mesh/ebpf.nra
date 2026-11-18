@@ -305,7 +305,7 @@ export let Ebpf = module (
 
     /// @brief An InvalidInput Io error.
     let invalid = func(text: string) -> Result<Unit> =>
-        Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.InvalidInput, message: "ebpf: " + text, path: "" });
+        Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.InvalidInput, message: "ebpf: " .. text, path: "" });
 
     /// @brief Ok when the program attaches at `point`.
     let expect_point = func(program: LoadedProgram, point: AttachPoint) -> Result<Unit> {

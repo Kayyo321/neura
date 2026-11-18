@@ -191,20 +191,20 @@ export let Urn = module (
     let check_component = func(component: string, start: int, set: percent.EncodeSet, name: string) -> Result<int> {
         if (component.byte_length == 0) {
             return Result<int>.Err(Error.Parse {
-                kind: ParseErrorKind.Syntax, offset: start, message: "empty " + name
+                kind: ParseErrorKind.Syntax, offset: start, message: "empty " .. name
             });
         }
         last first = component.byte_at(0);
         if (first == 47 or 63) {
             return Result<int>.Err(Error.Parse {
-                kind: ParseErrorKind.Syntax, offset: start, message: name + " starts with '/' or '?'"
+                kind: ParseErrorKind.Syntax, offset: start, message: name .. " starts with '/' or '?'"
             });
         }
         last bad = percent.first_invalid(component, set);
         if (bad >= 0) {
             return Result<int>.Err(Error.Parse {
                 kind: ParseErrorKind.InvalidCharacter, offset: start + bad,
-                message: "character not allowed in the " + name
+                message: "character not allowed in the " .. name
             });
         }
         return Result<int>.Ok(0);

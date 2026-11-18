@@ -184,7 +184,7 @@ export let TraceParent = module (
     /// @brief A parse error at `offset`.
     let fail = func(offset: int, text: string) -> Result<TraceParent> =>
         Result<TraceParent>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
-            message: "traceparent: " + text });
+            message: "traceparent: " .. text });
 
     /// @brief Whether `b` is a lowercase hex digit.
     let is_hex = func(b: uint8) -> bool => (b >= 48 && b <= 57) || (b >= 97 && b <= 102);

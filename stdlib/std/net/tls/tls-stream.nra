@@ -155,7 +155,7 @@ export let TlsStream = module (
                 Optional.Some(address) => "to " .. address.to_string(),
                 Optional.None => "accepted on " .. label,
             };
-            return "TlsStream(" .. side .. (alpn.byte_length > 0 ? ", alpn " + alpn : "") .. ")";
+            return "TlsStream(" .. side .. (alpn.byte_length > 0 ? ", alpn " .. alpn : "") .. ")";
         };
     );
 );

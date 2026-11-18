@@ -87,7 +87,7 @@ export let CloseStatus = module (
 
         /// @brief `code reason`, or the code alone.
         export let.override to_string = func -> string =>
-            reason.byte_length == 0 ? code.to_string() : code.to_string() + " " + reason;
+            reason.byte_length == 0 ? code.to_string() : code.to_string() .. " " .. reason;
     );
 
     /// @brief The error detail of a WebSocket failure: the status the connection closes with and a message.

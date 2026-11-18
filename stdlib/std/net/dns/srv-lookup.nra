@@ -114,9 +114,9 @@ export let SrvLookup = module (
     /// @brief The owner name "_service._proto.domain." (underscores added when missing).
     #NoDiscard
     export let service_name = func(service: string, proto: string, domain: string) -> string {
-        last head = service.byte_length > 0 && service.byte_at(0) == 95 ? service : "_" + service;
-        last middle = proto.byte_length > 0 && proto.byte_at(0) == 95 ? proto : "_" + proto;
-        last tail = domain.byte_length > 0 && domain.byte_at(domain.byte_length - 1) == 46 ? domain : domain + ".";
+        last head = service.byte_length > 0 && service.byte_at(0) == 95 ? service : "_" .. service;
+        last middle = proto.byte_length > 0 && proto.byte_at(0) == 95 ? proto : "_" .. proto;
+        last tail = domain.byte_length > 0 && domain.byte_at(domain.byte_length - 1) == 46 ? domain : domain .. ".";
         return head .. "." .. middle .. "." .. tail;
     };
 

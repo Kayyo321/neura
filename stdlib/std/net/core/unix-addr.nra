@@ -57,7 +57,7 @@ export let UnixAddr = module (
 
         /// @brief The path, or `@` followed by the abstract name.
         #Pure
-        export let.override to_string = func -> string => is_abstract ? "@" + path : path;
+        export let.override to_string = func -> string => is_abstract ? "@" .. path : path;
     );
 
     /// @brief The address of a filesystem path; traps when the path is empty, longer than 107 bytes, or
