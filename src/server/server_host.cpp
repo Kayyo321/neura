@@ -566,6 +566,8 @@ public:
     }
 
     std::size_t in_flight() const { return in_flight_.load(); }
+    // Workers that answered their request and have not been reaped yet.
+    std::size_t finishing() const { return finishing_.load(); }
     void response_written() { --in_flight_; }
 
     void kill_all() {
@@ -1141,6 +1143,7 @@ private:
             std::lock_guard lock(reap_mutex_);
             exiting_.push_back({pid, std::move(id), answered, slot, Clock::now() + options_.grace});
         }
+        if (answered) ++finishing_;
         wake_reaper();
     }
 
@@ -1223,6 +1226,7 @@ private:
             live_.erase(entry.pid);
         }
         if (entry.slot) release();
+        if (entry.answered) --finishing_;
         const bool abnormal = done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
         if (abnormal) ++metrics_.abnormal;
         if (abnormal && !entry.id.empty()) {
@@ -1256,6 +1260,7 @@ private:
     int wake_[2] = {-1, -1};
 
     std::vector<std::string> worker_arguments_;
+    std::atomic<std::size_t> finishing_{0};
     std::mutex zygote_mutex_;
     std::unique_ptr<ZygoteClient> zygote_;
     int zygote_restarts_ = 0;
@@ -1461,6 +1466,11 @@ int serve(HostOptions options, const char* argv0) {
     while (host->in_flight() > 0 && Clock::now() < drain_deadline) std::this_thread::sleep_for(10ms);
     const auto left = host->in_flight();
     if (left > 0) host->log(4, {}, "drain timed out; killing the remaining workers", {{"in_flight", std::to_string(left)}});
+    // A worker that answered may still be finishing: recording its trace
+    // (--record-dir) and exiting. It is given its grace period, within S-12,
+    // before the rest are killed.
+    const auto finish_deadline = std::min(drain_deadline, Clock::now() + options.grace);
+    while (left == 0 && host->finishing() > 0 && Clock::now() < finish_deadline) std::this_thread::sleep_for(10ms);
     host->kill_all();
     host->log(2, {}, "stopped");
     std::cout.flush();
