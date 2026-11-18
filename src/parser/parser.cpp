@@ -2648,6 +2648,7 @@ private:
         }
 
         const auto& token = current();
+        if (at("typeof")) return type_of(start);
         // `nameof(path)` (docs/design/Calls030.md): recognized where an
         // expression starts and '(' follows; lowering checks the operand.
         if (at_contextual("nameof") && next_is(1, "(")) {
@@ -2688,6 +2689,55 @@ private:
         throw Diagnostic(token.span, "expected an expression").with_code("E0204")
             .label(token.kind == TokenKind::End ? std::string("expected an expression before the end of the file")
                                                 : "expected an expression, found '" + token.text + "'");
+    }
+
+    // `typeof(operand)` (docs/design/Expressions030.md, typeof). The operand
+    // is read as a type and as an expression, each where it parses up to the
+    // closing parenthesis; lowering decides which it names. When neither
+    // parses, the expression's error is reported.
+    Expr type_of(std::size_t start) {
+        const auto keyword = advance();
+        if (!at("("))
+            throw Diagnostic(keyword.span, "typeof takes its operand in parentheses").with_code("E0267")
+                .label("expected '(' after typeof")
+                .help("write 'typeof(value)' for the type of a value, or 'typeof(Type)' for a type");
+        advance();
+        auto result = make_expression(Expr::Kind::TypeOf, keyword.span, "typeof");
+        if (at(")"))
+            throw Diagnostic(current().span, "typeof needs an operand").with_code("E0267")
+                .label("expected a value or a type before ')'")
+                .help("write 'typeof(value)' for the type of a value, or 'typeof(Type)' for a type");
+        const auto operand = cursor_;
+        std::optional<std::size_t> type_end;
+        {
+            SpeculativeDiagnostics speculative;
+            try {
+                auto written = type();
+                if (at(")")) {
+                    result.type = std::move(written);
+                    type_end = cursor_;
+                }
+            } catch (const Diagnostic&) {
+            }
+        }
+        cursor_ = operand;
+        if (!type_end) {
+            result.operands.push_back(expression());
+        } else {
+            SpeculativeDiagnostics speculative;
+            try {
+                auto value = expression();
+                if (at(")")) {
+                    speculative.commit();
+                    result.operands.push_back(std::move(value));
+                }
+            } catch (const Diagnostic&) {
+            }
+            if (result.operands.empty()) cursor_ = *type_end;
+        }
+        expect(")");
+        result.span = span_from(start);
+        return result;
     }
 
     Expr lambda_expression(std::size_t start, std::string_view branch_keyword, bool owned = false) {

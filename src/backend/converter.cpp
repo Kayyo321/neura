@@ -3302,6 +3302,9 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         const auto result = c_.type_of(node.type, node.span);
         return state(nvr::StateOp::TextFromUtf8, c_.type_at(result).reference, {input}, result, node.span);
     }
+    case IrOp::TypeOf:
+        // specialize() expands every typeof of a concrete type.
+        throw Diagnostic(node.span, "typeof was not expanded before conversion").with_code("E0899");
     case IrOp::ConcatText: {
         // A string chain (docs/design/Expressions030.md): the operands in
         // written order, then one NVR 1.9 concat-text.

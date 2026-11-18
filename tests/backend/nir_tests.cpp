@@ -532,6 +532,20 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
                 "a conformance call beside a concat text keeps 1.15");
     chain_bytes[6] = static_cast<std::uint8_t>(nir_records_minor);
     expect_nir_error(chain_bytes, "invalid operation tag 73");
+    IrProgram described = chain;
+    described.bodies.front().instructions.front().op = IrOp::TypeOf;
+    auto described_bytes = write_nir(described);
+    check_equal(static_cast<int>(described_bytes[6]), static_cast<int>(nir_expressions_minor),
+                "a type of is written under 1.15");
+    check_equal(static_cast<int>(described_bytes[at]), 74, "the serialized TypeOf ordinal");
+    check(read_nir(described_bytes, "described").bodies.front().instructions.front().op == IrOp::TypeOf,
+          "a type of reads back");
+    described_bytes[6] = static_cast<std::uint8_t>(nir_records_minor);
+    expect_nir_error(described_bytes, "invalid operation tag 74");
+    auto beyond = described_bytes;
+    beyond[6] = static_cast<std::uint8_t>(nir_expressions_minor);
+    beyond[at] = 75;
+    expect_nir_error(beyond, "invalid operation tag 75");
 
     // A file that claims an older minor cannot use the task operations: 1.8
     // has neither the tags nor the poll bit.

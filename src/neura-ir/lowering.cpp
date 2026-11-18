@@ -602,6 +602,8 @@ private:
     IrNode interpolation(const Expr& expr, Context& context);
     // nameof.
     IrNode name_of(const Expr& expr, Context& context);
+    IrNode type_of(const Expr& expr, Context& context);
+    bool names_type(const Expr& operand, Context& context);
     SymbolId name_of_target(const Expr& path, Context& context);
     // Extension sets.
     std::map<std::string, std::vector<SymbolId>, std::less<>> extension_index_;
@@ -3697,6 +3699,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return interpolation(expr, context);
     case ExprKind::NameOf:
         return name_of(expr, context);
+    case ExprKind::TypeOf:
+        return type_of(expr, context);
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {

@@ -36,8 +36,8 @@ static_assert(static_cast<unsigned>(IrOp::AnyPack) == 66 && static_cast<unsigned
 constexpr std::uint8_t max_op_records = static_cast<std::uint8_t>(IrOp::ConformanceCall);
 static_assert(max_op_records == 69);
 // Tags 70-72 are the lifetime milestone's (M8) and are not defined here.
-constexpr std::uint8_t max_op_expressions = static_cast<std::uint8_t>(IrOp::ConcatText);
-static_assert(max_op_expressions == 73);
+constexpr std::uint8_t max_op_expressions = static_cast<std::uint8_t>(IrOp::TypeOf);
+static_assert(static_cast<unsigned>(IrOp::ConcatText) == 73 && max_op_expressions == 74);
 constexpr bool undefined_operation(std::uint8_t operation) {
     return operation > max_op_records && operation < static_cast<std::uint8_t>(IrOp::ConcatText);
 }
@@ -120,7 +120,7 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (node.op == IrOp::ConcatText) return nir_expressions_minor;
+        if (node.op == IrOp::ConcatText || node.op == IrOp::TypeOf) return nir_expressions_minor;
         if (node.op == IrOp::ConformanceCall) version = std::max(version, nir_records_minor);
         if (is_deferred_initialize(node)) {
             version = std::max(version, attribute_minor);

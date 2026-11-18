@@ -1545,3 +1545,131 @@ IrNode Lowering::name_of(const Expr& expr, Context& context) {
     result.text = symbol(target).name;
     return result;
 }
+
+// docs/design/Expressions030.md, typeof: whether the operand of `typeof`
+// names a type (a built-in type name, a class, interface, record, enum or
+// type parameter, a dotted path to one, or an applied generic) rather than
+// a value.
+bool Lowering::names_type(const Expr& operand, Context& context) {
+    const auto type_symbol = [&](SymbolId id) {
+        if (id == no_symbol) return false;
+        const auto kind = symbol(id).kind;
+        return kind == SymbolKind::Class || kind == SymbolKind::Interface || kind == SymbolKind::Enum ||
+               kind == SymbolKind::TypeParameter;
+    };
+    switch (operand.kind) {
+    case ExprKind::Name: {
+        const auto id = find(operand.text, context, operand.span);
+        if (id == no_symbol) return primitive(operand.text).has_value();
+        return type_symbol(id);
+    }
+    case ExprKind::Member: {
+        SpeculativeDiagnostics speculative;
+        try {
+            return type_symbol(name_of_target(operand, context));
+        } catch (const Diagnostic&) {
+            return false;
+        }
+    }
+    case ExprKind::TypeApplication:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// `typeof(operand)`: a TypeOf of the operand's value, saved in a constant
+// local so that it is evaluated once, or of the type the operand names,
+// passed to Std.Reflect.Core.TypeInfo.from_parts. specialize() expands the
+// TypeOf once its type is concrete (type_of.cpp).
+IrNode Lowering::type_of(const Expr& expr, Context& context) {
+    const IrType int_type{TypeKind::Integer, "int32", no_symbol, {}};
+    const IrType parts_type{TypeKind::Tuple, {}, no_symbol, {int_type, string_type, string_type}};
+    const auto no_type = [&](const Span& at, const std::string& what) {
+        return Diagnostic(at, "typeof needs a value or a type").with_code("E0267")
+            .label(what)
+            .help("pass a value, such as 'typeof(shape)', or a type, such as 'typeof(int32)'");
+    };
+    auto parts = node(IrOp::TypeOf, expr.span, parts_type);
+    IrNode described;
+    bool type_operand = expr.type && (expr.operands.empty() || names_type(expr.operands.front(), context));
+    // An operand that reads as a type and as a value that does not lower,
+    // such as `[int32, bool]`, is the type; when neither works, the value's
+    // error is reported.
+    std::optional<IrNode> lowered;
+    if (!type_operand) {
+        if (!expr.type) {
+            lowered = expression(expr.operands.front(), context);
+        } else {
+            std::optional<Diagnostic> failure;
+            {
+                SpeculativeDiagnostics speculative;
+                try {
+                    lowered = expression(expr.operands.front(), context);
+                    speculative.commit();
+                } catch (const Diagnostic& error) {
+                    failure = error;
+                }
+            }
+            if (failure) {
+                try {
+                    parts.type_arguments.push_back(type(*expr.type, context));
+                } catch (const Diagnostic&) {
+                    throw *failure;
+                }
+                type_operand = true;
+            }
+        }
+    } else {
+        parts.type_arguments.push_back(type(*expr.type, context));
+    }
+    if (type_operand) {
+        described = std::move(parts);
+    } else {
+        const auto& operand = expr.operands.front();
+        auto input = std::move(*lowered);
+        if (input.op == IrOp::Reference && input.symbol != no_symbol &&
+            symbol(input.symbol).kind == SymbolKind::Variant) {
+            if (!symbol(input.symbol).payload_types.empty())
+                throw Diagnostic(operand.span, "enum variant '" + symbol(input.symbol).name + "' requires a payload")
+                    .with_code("E0427");
+            if (has_enum_payload(program_, symbol(input.symbol).owner)) input.op = IrOp::EnumConstruct;
+        } else if (input.op == IrOp::Reference && input.type.kind == TypeKind::Callable && input.symbol != no_symbol &&
+                   symbol(input.symbol).kind == SymbolKind::Function) {
+            throw no_type(operand.span, "a function name is not a value here; call it, or bind it to a variable");
+        } else if (input.type.kind == TypeKind::Module) {
+            throw no_type(operand.span, "a module has no type that typeof describes");
+        } else if (input.op == IrOp::Reference ||
+                   (input.type.kind == TypeKind::Callable && !is_function_value(input.type))) {
+            throw no_type(operand.span, "this does not name a value");
+        }
+        if (input.type.kind == TypeKind::Void) throw no_type(operand.span, "this has type void and no value");
+        if (input.type.kind == TypeKind::Any || class_reference(input.type)) root_class();
+        const auto local = hidden_local("$typeof", input.type, operand.span, context);
+        auto save = node(IrOp::Initialize, operand.span);
+        save.symbol = local;
+        save.operands.push_back(std::move(input));
+        auto load = node(IrOp::Load, operand.span, symbol(local).type);
+        load.symbol = local;
+        parts.operands.push_back(std::move(load));
+        described = node(IrOp::ScopedValue, expr.span, parts_type);
+        described.body.push_back(std::move(save));
+        described.body.push_back(std::move(parts));
+    }
+    const std::string missing = "typeof requires Std.Reflect.Core.TypeInfo";
+    const auto module = library_module("std/reflect/core/type-info.nra", "TypeInfo", expr.span, context, missing);
+    const auto record = own_member(module, "TypeInfo");
+    const auto from_parts = member(module, "from_parts", true);
+    if (record == no_symbol || from_parts == no_symbol || symbol(from_parts).kind != SymbolKind::Function)
+        throw Diagnostic(expr.span, "Std.Reflect.Core.TypeInfo must export TypeInfo and from_parts").with_code("E0899");
+    resolve(record);
+    resolve(from_parts);
+    auto call = node(IrOp::VirtualCall, expr.span, symbol(from_parts).type);
+    call.symbol = from_parts;
+    auto qualifier = node(IrOp::Reference, expr.span, symbol(module).type);
+    qualifier.symbol = module;
+    call.operands.push_back(std::move(qualifier));
+    call.operands.push_back(std::move(described));
+    return call;
+}
+

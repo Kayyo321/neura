@@ -351,7 +351,7 @@ private:
         case IrOp::ClassIs: case IrOp::ClassCast: case IrOp::ValueEquals: case IrOp::ValueHash:
         case IrOp::ValueText: case IrOp::ReferencePlace: case IrOp::TaskScope: case IrOp::Spawn:
         case IrOp::ConformanceCall: case IrOp::SchedulerCall: case IrOp::AnyPack: case IrOp::AnyTag: case IrOp::AnyUnpack:
-        case IrOp::ConcatText:
+        case IrOp::ConcatText: case IrOp::TypeOf:
             break;
         }
         for (auto& operand : node.operands) value(operand);

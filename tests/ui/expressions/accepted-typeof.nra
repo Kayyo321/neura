@@ -1,0 +1,14 @@
+// typeof accepts a value or a type, in any expression position
+// (docs/design/Expressions030.md, typeof, edge cases 19-23).
+let reflect = import:Std.Reflect.Core.TypeInfo;
+
+let Box = class<T> ( export let item: T; export let init = func(item: T) => set; );
+
+let name = typeof(3).name;
+let same: bool = typeof(1) === typeof(2);
+let types: reflect.TypeInfo[] = [typeof(int32), typeof(string), typeof(Box<int32>), typeof(int32[]), typeof([int32, bool])];
+let nested = typeof(typeof(1)).name;
+let kind = typeof(
+    // a comment inside
+    "text"
+).kind;

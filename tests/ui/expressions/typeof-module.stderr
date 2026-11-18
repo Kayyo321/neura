@@ -1,0 +1,9 @@
+error[E0267]: typeof needs a value or a type
+ --> $DIR/typeof-module.nra:5:44
+  |
+5 | let module_operand = func { let t = typeof(console); };
+  |                                            ^^^^^^^ a module has no type that typeof describes
+  |
+  = help: pass a value, such as 'typeof(shape)', or a type, such as 'typeof(int32)'
+
+For more information about this error, try `neura explain E0267`.

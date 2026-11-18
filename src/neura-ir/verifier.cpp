@@ -1228,6 +1228,16 @@ private:
         case IrOp::TextEqual:
             check_text_operation(node);
             break;
+        case IrOp::TypeOf: {
+            const IrType parts{TypeKind::Tuple, {}, no_symbol,
+                               {IrType{TypeKind::Integer, "int32", no_symbol, {}},
+                                IrType{TypeKind::String, "string", no_symbol, {}},
+                                IrType{TypeKind::String, "string", no_symbol, {}}}};
+            if (node.type != parts) report(node.span, "typeof yields [int32, string, string]");
+            if (node.operands.size() > 1 || (node.operands.empty() && node.type_arguments.size() != 1))
+                report(node.span, "typeof takes one operand or one type argument");
+            break;
+        }
         case IrOp::ConcatText:
             if (node.operands.size() < 2) report(node.span, "a text concatenation needs at least two operands");
             for (const auto& operand : node.operands)

@@ -108,6 +108,11 @@ struct Expr {
         // a replacement, whose field name is in `labels` and `label_spans`
         // ("" for the source). The span starts at `new`.
         Copy,
+        // `typeof(operand)` (docs/design/Expressions030.md, typeof): operand 0
+        // is the operand read as an expression, when it parses as one, and
+        // `type` the operand read as a type, when it parses as one; lowering
+        // decides which it is. The span starts at `typeof`.
+        TypeOf,
     };
 
     Kind kind;

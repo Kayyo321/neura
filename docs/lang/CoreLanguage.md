@@ -743,6 +743,46 @@ let kind = nameof(Invoice);          // "Invoice"
 | The string is program data. | It is in the image and stays when names and source maps are stripped. It changes when the declaration is renamed, so it is not a stable name for stored data. |
 | `nameof` is an operator where an expression starts and `(` follows. | No declaration may be named `nameof` (`E0311`). |
 
+### typeof
+
+`typeof(operand)` describes a type as a `Std.Reflect.Core.TypeInfo` record ([design](../design/Expressions030.md#typeof), implemented, proposed): its `kind` (a `Std.Reflect.Type.TypeKind`), its `name` with type arguments, and its `qualified_name`, the name the program uses for class text. The operand is a value, evaluated once, or a type, which is not evaluated. No import is needed; import `Std.Reflect.Core.TypeInfo` to name the record's type.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class ( );
+let Circle = class : Shape ( );
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let shape: Shape = new Circle();
+        let none: Shape = nil;
+        let held: any = 7 as int64;
+        console.print_line(typeof(shape).name + " " + typeof(none).kind.to_string() + " " + typeof(held).name);
+        console.print_line(typeof(int32[]).name + " " + typeof([1, 2]).kind.to_string());
+        console.print_line((typeof(shape) === typeof(new Circle())).to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Circle Nil int64
+int32[] Array
+true
+```
+
+| Rule | Detail |
+| --- | --- |
+| A class or interface reference, `class` and `any` are described dynamically. | `typeof(shape)` of a `Circle` held as `Shape` is `Circle`; an `any` describes the value it holds. A nil reference, or an `any` holding nil, is kind `Nil` with the name `nil`; `typeof` never traps. |
+| Every other value is described by its static type. | Scalars, `string`, tuples (`[int32, string]`), arrays (`int32[]`), lists (`int32[list]`), enums (`Optional<int32>`) and function values (`func(int32) -> int32`). In a generic function, `typeof(value)` and `typeof(T)` describe the type argument of each specialization. |
+| A type operand is described statically. | A built-in type name, a class, interface, record, enum or type parameter, a dotted path to one, an applied generic (`Box<int32>`), an array or a tuple type. A name that is both a type and a value is the type. |
+| `===` compares types. | `TypeInfo` is a record, so `typeof(a) === typeof(b)` compares kind and names and `==` compares identity. |
+| The description is program data. | The kind and names are constants of the image: they stay when names and source maps are stripped and are the same through `.nir`. |
+| `typeof` is a reserved word. | `typeof` without `(`, `typeof()`, and an operand with no type (a `void` call, a module, a function name that is not called) are `E0267`. |
+
 ### Comparison chains
 
 A comparison can use one subject and several alternatives. For example, `x == 0 or 1 or 2` tests whether `x` equals any of those values, and `x != 0 and 1` tests whether it differs from both. The subject is evaluated once. Each alternative is evaluated left to right and compared with the captured subject using the original operator. An `or` chain stops at the first true comparison. An `and` chain stops at the first false comparison.

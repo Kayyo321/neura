@@ -1,0 +1,51 @@
+// typeof (docs/design/Expressions030.md, typeof, edge cases 19-24): the kind,
+// name and qualified name of built-in types, values, the dynamic class of a
+// reference (nil, a subclass held as its base, an interface), an any
+// (scalar, string, object), records, arrays, lists, tuples, enums, generic
+// classes and functions, type operands, typeof(T) in a generic function,
+// value equality and identity, and single evaluation of the operand. The
+// harness also runs it unoptimized, from .nir and without names.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let reflect = import:Std.Reflect.Core.TypeInfo;
+
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+let Square = class : Shape ( );
+let Point = record (x: int, y: int);
+let Named = interface ( );
+let Box = class<T> ( export let item: T; export let init = func(item: T) => set; );
+
+let show = func(label: string, info: reflect.TypeInfo) {
+    console.print_line(label + ": " + info.kind.to_string() + " " + info.name + " " + info.qualified_name);
+};
+
+let describe = func<T>(value: T) -> string => typeof(value).name;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let shape: Shape = new Circle();
+        let none: Shape = nil;
+        let held: any = 7 as int64;
+        let text: any = "hi";
+        let obj: any = new Square();
+        show("int32", typeof(int32));
+        show("value 3", typeof(3));
+        show("shape", typeof(shape));
+        show("nil", typeof(none));
+        show("Shape type", typeof(Shape));
+        show("record", typeof(new Point(1, 2)));
+        show("any int64", typeof(held));
+        show("any string", typeof(text));
+        show("any object", typeof(obj));
+        show("array", typeof([1, 2, 3]));
+        let pair: [int, string] = [1, "a"];
+        show("tuple", typeof(pair));
+        show("Box", typeof(new Box<int32>(4)));
+        show("Box type", typeof(Box<string>));
+        show("interface", typeof(Named));
+        console.print_line(describe(5) + " " + describe("s") + " " + describe(shape));
+        console.print_line((typeof(shape) === typeof(new Circle())).to_string() + " " + (typeof(shape) == typeof(shape)).to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,9 @@
+error[E0267]: typeof takes its operand in parentheses
+ --> $DIR/typeof-parentheses.nra:4:9
+  |
+4 | let t = typeof x;
+  |         ^^^^^^ expected '(' after typeof
+  |
+  = help: write 'typeof(value)' for the type of a value, or 'typeof(Type)' for a type
+
+For more information about this error, try `neura explain E0267`.

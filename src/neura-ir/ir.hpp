@@ -194,7 +194,14 @@ enum class IrOp {
     // chains). ConcatText is the text of its two or more string operands in
     // written order, built with one allocation; it may trap (length limit,
     // heap budget) and is never merged, split or reassociated.
-    ConcatText = 73
+    ConcatText = 73,
+    // NeuraIR nir_expressions_minor (docs/design/Expressions030.md, typeof).
+    // TypeOf yields the parts [int32, string, string] (kind ordinal, name,
+    // qualified name) of a type: the dynamic type of its one operand, the
+    // load of a constant local, or with no operand the static type in
+    // type_arguments[0]. specialize() expands it into existing operations
+    // once types are concrete; none reaches conversion.
+    TypeOf = 74
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written

@@ -66,6 +66,7 @@ Errors about declarations, scopes, and name resolution.
 | [E0263](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0263.md) | range or chain of the wrong shape |
 | [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md) | narrowing binding outside the condition of an if |
 | [E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md) | is not narrowing inside an && chain |
+| [E0267](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0267.md) | typeof without a value or a type |
 | [E0268](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0268.md) | invalid Unicode escape |
 | [E0269](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0269.md) | Unicode escape that is not a scalar value |
 | [E0270](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0270.md) | string literal escapes that are not valid UTF-8 |

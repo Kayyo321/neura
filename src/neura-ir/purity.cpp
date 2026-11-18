@@ -526,6 +526,7 @@ private:
         case IrOp::ReinterpretFloat:
         case IrOp::AnyPack:
         case IrOp::AnyTag:
+        case IrOp::TypeOf:
         case IrOp::AnyUnpack:
         case IrOp::ShortCircuit:
         case IrOp::ComparisonChain:
