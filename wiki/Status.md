@@ -30,7 +30,7 @@ Arrays use [activation and static regions](Collections#array-lifetime). An owned
 
 ## Application platform development
 
-[HTML factories](HtmlFactories) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. [Stylesheets](Stylesheets) are module-level constants, inline or from files, with CSS-module names, bundled imports and assets, and a fixed link order that the build writes beside the image. Host reconciliation, application packaging, and full render effect checks are separate milestones.
+[HTML factories](HtmlFactories) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. [Stylesheets](Stylesheets) are module-level constants, inline or from files, with CSS-module names, bundled imports and assets, and a fixed link order that the build writes beside the image. A root's commit is validated and reconciled by library code that issues the host operations in their fixed order; the roots that call it, the hosts that apply it, application packaging, and full render effect checks are separate milestones.
 
 ## Outside this release
 

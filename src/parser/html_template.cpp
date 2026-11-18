@@ -322,7 +322,9 @@ private:
             if (ancestor->name == "form" && element.name == "form")
                 bad_nesting(element.opening, ancestor, "a form cannot contain another form");
         }
-        const auto required = required_parent(element.name, parent_name);
+        // A top-level element's parent is wherever the caller places the view,
+        // so only an enclosing element of this template constrains it.
+        const auto required = parent ? required_parent(element.name, parent_name) : std::string_view{};
         if (!required.empty()) bad_nesting(element.opening, parent, "use " + std::string(required) + " as the parent");
         if (parent && !parent_accepts(parent_name, element.name))
             bad_nesting(element.opening, parent, "this child changes how the browser builds the parent");

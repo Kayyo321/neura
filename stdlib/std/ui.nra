@@ -13,9 +13,16 @@ export let Ui = module (
         export last fragment: uint32;
         #Internal
         export last slots: storage.Slot;
+        /// The reconciler that last placed this view in a tree, and in which pass.
+        #Internal
+        export let owner: class = nil;
+        #Internal
+        export let pass: uint64 = 0;
 
         #Internal
         export let init = func(descriptor: string, fragment: uint32, slots: storage.Slot) => set;
+
+        export let.override to_string = func -> string => "View(fragment " + fragment.to_string() + ")";
     );
 
     /// @brief A URL checked for use in a template attribute.
@@ -92,6 +99,45 @@ export let Ui = module (
         };
 
         export let.override hash_code = func -> uint32 => digest.hash_code();
+    );
+
+    /// @brief Why a commit was refused before anything changed.
+    #Since("0.3.0")
+    export let DiagnosticKind = enum (
+        /// A view object appears twice in the committed tree, or is already mounted.
+        ViewReused,
+        /// Two items of one `@for` have equal keys.
+        DuplicateKey,
+        /// A commit limit (`U-4` to `U-6`) is exceeded.
+        LimitExceeded
+    );
+
+    /// @brief A refused commit: what, which slot, and for a keyed item its position and key.
+    #[Final, Immutable]
+    #Since("0.3.0")
+    export let Diagnostic = class (
+        export last kind: DiagnosticKind;
+        export last message: string;
+        /// @brief The slot of the template whose value was refused.
+        export last slot: uint32;
+        /// @brief The item's position in its `@for`, or -1.
+        export last index: int64;
+        /// @brief The item's key as text, or empty.
+        export last key: string;
+
+        #Internal
+        export let init = func(kind: DiagnosticKind, message: string, slot: uint32, index: int64, key: string) => set;
+
+        export let.override to_string = func -> string => message;
+    );
+
+    /// @brief The outcome of a commit that did not fail in the host.
+    #Since("0.3.0")
+    export let RenderOutcome = enum (
+        /// The view is mounted.
+        Committed,
+        /// The view was refused; the previous view stays mounted and live.
+        Invalid(Diagnostic)
     );
 
     /// @brief Returns a URL after checking that it is a reference or uses an allowed scheme.
