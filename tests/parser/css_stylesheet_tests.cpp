@@ -186,6 +186,43 @@ void parser_boundary() {
            "E0255", "module-level 'const'");
 }
 
+
+void references() {
+    const std::string bytes =
+        "@import \"a.css\" layer(x);\n"
+        "@import url( b\\2e css );\n"
+        "@import url('c.css') screen;\n"
+        ".hero { background: url(img/hero.png) , URL( \"i\\\"q.png\" ); content: \"url(no.png)\"; }\n"
+        "/* url(comment.png) */ .mask { mask: url(#m); }\n";
+    const auto parsed = parse_stylesheet(bytes, {"refs.css"}, false);
+    const auto& found = parsed.references;
+    check(found.size() == 6, "every reference is found once, and none in a string or comment");
+    using Kind = CssReference::Kind;
+    check(found[0].kind == Kind::Import && found[0].target == "a.css" && found[0].quoted, "quoted import");
+    check(found[1].kind == Kind::Import && found[1].target == "b.css" && !found[1].quoted, "unquoted import url escapes");
+    check(found[2].kind == Kind::Import && found[2].target == "c.css" && found[2].quoted, "import url string");
+    check(found[3].kind == Kind::Url && found[3].target == "img/hero.png", "unquoted url");
+    check(found[4].kind == Kind::Url && found[4].target == "i\"q.png" && found[4].quoted, "quoted url with escape");
+    check(found[5].target == "#m", "fragment url");
+    check(bytes.substr(found[1].span.offset, found[1].span.length) == "url( b\\2e css )", "unquoted span covers the token");
+    check(bytes.substr(found[4].span.offset, found[4].span.length) == "\"i\\\"q.png\"", "quoted span covers the string");
+
+    std::vector<std::string> targets{"1.css", "", "3.css", "../assets/h.png", "x\"y", ""};
+    const auto text = rewrite_stylesheet(bytes, parsed, "", "", targets).text;
+    check(text ==
+          "@import \"1.css\" layer(x);\n"
+          "@import url( b\\2e css );\n"
+          "@import url(\"3.css\") screen;\n"
+          ".hero { background: url(../assets/h.png) , URL( \"x\\22 y\" ); content: \"url(no.png)\"; }\n"
+          "/* url(comment.png) */ .mask { mask: url(#m); }\n", "references are replaced and the rest kept");
+    check(parse_stylesheet("@namespace svg url(http://www.w3.org/2000/svg); a { b: url(c.png); }", {"n.css"}, false)
+              .references.size() == 1, "a namespace URL is not a reference");
+    const auto module = parse_stylesheet(".a { background: url(x.png); }", {"m.css"}, true);
+    const auto scoped = rewrite_stylesheet(".a { background: url(x.png); }", module, "", "m.css", {"y z.png"});
+    check(scoped.text.find("url(y\\20 z.png)") != std::string::npos && scoped.text.find(".a__") == 0,
+          "module names and references are rewritten together");
+}
+
 } // namespace
 
 int main() {
@@ -195,6 +232,7 @@ int main() {
         escapes_and_vectors();
         diagnostics();
         parser_boundary();
+        references();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "stylesheet parser: " << error.what() << '\n';

@@ -17,9 +17,16 @@ export let Ui = module (
         export last fragment: uint32;
         #Internal
         export last slots: storage.Slot;
+        /// The reconciler that last placed this view in a tree, and in which pass.
+        #Internal
+        export let owner: class = nil;
+        #Internal
+        export let pass: uint64 = 0;
 
         #Internal
         export let init = func(descriptor: string, fragment: uint32, slots: storage.Slot) => set;
+
+        export let.override to_string = func -> string => "View(fragment " + fragment.to_string() + ")";
     );
 
     /// @brief A URL checked for use in a template attribute.
@@ -42,6 +49,114 @@ export let Ui = module (
 
         #Internal
         export let init = func(value: float64, unit: string) => set;
+    );
+
+    /// @brief A stylesheet that the build wrote beside the image, named by the SHA-256 of its text.
+    /// @note The text is not in the image. The bundle links the file from `index.html`; holding the
+    /// value keeps nothing alive and registers nothing at run time.
+    #[Final, Immutable]
+    #Since("0.3.0")
+    export let Stylesheet = class (
+        /// @brief The lowercase hexadecimal SHA-256 of the written file.
+        export last digest: string;
+
+        #Internal
+        export let init = func(digest: string) => set;
+
+        /// @brief The bundle path of the file, `styles/<digest>.css`.
+        export let path = func -> string => "styles/" + digest + ".css";
+
+        export let.override to_string = func -> string => "Stylesheet(" + digest + ")";
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Stylesheet)) {
+                return false;
+            }
+            return (other as Stylesheet).digest == digest;
+        };
+
+        export let.override hash_code = func -> uint32 => digest.hash_code();
+    );
+
+    /// @brief A CSS module the build wrote beside the image, with its class and keyframes names scoped.
+    /// @note Use the constant's `class_name("name")` and `keyframes_name("name")`, which the compiler
+    /// replaces with the scoped names; their argument is a string literal naming a declared export.
+    #[Final, Immutable]
+    #Since("0.3.0")
+    export let StyleModule = class (
+        /// @brief The lowercase hexadecimal SHA-256 of the written file.
+        export last digest: string;
+
+        #Internal
+        export let init = func(digest: string) => set;
+
+        /// @brief The bundle path of the file, `styles/<digest>.css`.
+        export let path = func -> string => "styles/" + digest + ".css";
+
+        export let.override to_string = func -> string => "StyleModule(" + digest + ")";
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is StyleModule)) {
+                return false;
+            }
+            return (other as StyleModule).digest == digest;
+        };
+
+        export let.override hash_code = func -> uint32 => digest.hash_code();
+    );
+
+    /// @brief Why a commit was refused before anything changed.
+    #Since("0.3.0")
+    export let DiagnosticKind = enum (
+        /// A view object appears twice in the committed tree, or is already mounted.
+        ViewReused,
+        /// Two items of one `@for` have equal keys.
+        DuplicateKey,
+        /// A commit limit (`U-4` to `U-6`) is exceeded.
+        LimitExceeded
+    );
+
+    /// @brief A refused commit: what, which slot, and for a keyed item its position and key.
+    #[Final, Immutable]
+    #Since("0.3.0")
+    export let Diagnostic = class (
+        export last kind: DiagnosticKind;
+        export last message: string;
+        /// @brief The slot of the template whose value was refused.
+        export last slot: uint32;
+        /// @brief The item's position in its `@for`, or -1.
+        export last index: int64;
+        /// @brief The item's key as text, or empty.
+        export last key: string;
+
+        #Internal
+        export let init = func(kind: DiagnosticKind, message: string, slot: uint32, index: int64, key: string) => set;
+
+        /// @brief The message, which names the refused rule.
+        export let.override to_string = func -> string => message;
+
+        /// @brief Another diagnostic with equal fields.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Diagnostic)) {
+                return false;
+            }
+            last that = other as Diagnostic;
+            return kind == that.kind && message == that.message && slot == that.slot && index == that.index
+                && key == that.key;
+        };
+
+        /// @brief Combines the hashes of the fields.
+        export let.override hash_code = func -> uint32 =>
+            kind.hash_code() ^ message.hash_code() ^ slot.hash_code() ^ index.hash_code() ^ key.hash_code();
+    );
+
+    /// @brief The outcome of a commit that did not fail in the host.
+    #Since("0.3.0")
+    export let RenderOutcome = enum (
+        /// The view is mounted.
+        Committed,
+        /// The view was refused; the previous view stays mounted and live.
+        Invalid(Diagnostic)
     );
 
     /// @brief Returns a URL after checking that it is a reference or uses an allowed scheme.
@@ -451,41 +566,6 @@ export let Ui = module (
     /// @brief A view that embeds `child`. The child renders by itself when its own state changes;
     /// the parent's render does not run again for it.
     export let slot = func(child: Component) -> View => new View("neura:slot", 0, new storage.Payload<Component>(0, child));
-
-    /// @brief Why a commit failed validation.
-    export let DiagnosticKind = enum (ViewReused, DuplicateKey, LimitExceeded);
-
-    /// @brief A commit the host refused without changing anything.
-    #[Final, Immutable]
-    export let Diagnostic = class (
-        export last kind: DiagnosticKind;
-        export last message: string;
-        export last slot: uint32;
-        export last index: int64;
-        export last key: string;
-
-        export let init = func(kind: DiagnosticKind, message: string, slot: uint32, index: int64, key: string) => set;
-
-        /// @brief The kind and the message.
-        export let.override to_string = func -> string => kind.to_string() + ": " + message;
-
-        /// @brief Another diagnostic with equal fields.
-        export let.override equals = func(other: class) -> bool {
-            if (!(other is Diagnostic)) {
-                return false;
-            }
-            last that = other as Diagnostic;
-            return kind == that.kind && message == that.message && slot == that.slot && index == that.index
-                && key == that.key;
-        };
-
-        /// @brief Combines the hashes of the fields.
-        export let.override hash_code = func -> uint32 =>
-            kind.hash_code() ^ message.hash_code() ^ slot.hash_code() ^ index.hash_code() ^ key.hash_code();
-    );
-
-    /// @brief What a host did with a commit: applied it, or refused it and kept the previous view.
-    export let RenderOutcome = enum (Committed, Invalid(Diagnostic));
 
     /// @brief A failed commit, as given to a root's render-failure handler. `Fault` means the host
     /// failed while applying: the root stops taking events until `reset`.

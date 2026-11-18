@@ -505,6 +505,92 @@ private:
     StylesheetBody& result_;
 };
 
+// Decode the CSS escapes of a string body or an unquoted URL. An escaped
+// line break inside a string continues it and contributes nothing.
+std::string decode_css(std::string_view raw) {
+    std::string result;
+    for (std::size_t i = 0; i < raw.size();) {
+        if (raw[i] != '\\' || i + 1 == raw.size()) {
+            result += raw[i++];
+            continue;
+        }
+        ++i;
+        if (line_end(raw[i])) {
+            i += raw[i] == '\r' && i + 1 < raw.size() && raw[i + 1] == '\n' ? 2 : 1;
+            continue;
+        }
+        if (hex_digit(raw[i]) < 0) {
+            result += raw[i++];
+            continue;
+        }
+        unsigned code = 0;
+        for (unsigned count = 0; count < 6 && i < raw.size() && hex_digit(raw[i]) >= 0; ++count, ++i)
+            code = (code << 4) | static_cast<unsigned>(hex_digit(raw[i]));
+        if (i < raw.size() && space(raw[i])) i += raw[i] == '\r' && i + 1 < raw.size() && raw[i + 1] == '\n' ? 2 : 1;
+        utf8(result, code);
+    }
+    return result;
+}
+
+void collect_references(std::string_view source, const std::vector<CssToken>& tokens,
+                        const IslandPositions& positions, StylesheetBody& result) {
+    const auto skip = [&](std::size_t index) {
+        while (index < tokens.size() && trivia(tokens[index])) ++index;
+        return index;
+    };
+    const auto is = [&](std::size_t index, char c) {
+        return index < tokens.size() && tokens[index].kind == Kind::Delim && tokens[index].delimiter == c;
+    };
+    // The reference at `index`, or tokens.size() when there is none.
+    const auto reference = [&](std::size_t index, CssReference::Kind kind, bool string_allowed) {
+        if (index >= tokens.size()) return false;
+        const auto& token = tokens[index];
+        if (token.kind == Kind::Url) {
+            auto inner = source.substr(token.begin, token.end - token.begin);
+            inner = inner.substr(inner.find('(') + 1);
+            inner.remove_suffix(1);
+            while (!inner.empty() && space(inner.front())) inner.remove_prefix(1);
+            while (!inner.empty() && space(inner.back())) inner.remove_suffix(1);
+            result.references.push_back({kind, decode_css(inner), positions.span(token.begin, token.end), false});
+            return true;
+        }
+        if (token.kind == Kind::Ident && folded(token.name) == "url" && is(index + 1, '(') &&
+            tokens[index + 1].begin == token.end) {
+            const auto argument = skip(index + 2);
+            if (argument < tokens.size() && tokens[argument].kind == Kind::String) {
+                const auto& text = tokens[argument];
+                const auto body = source.substr(text.begin + 1, text.end - text.begin - 2);
+                result.references.push_back({kind, decode_css(body), positions.span(text.begin, text.end), true});
+                return true;
+            }
+            return false;
+        }
+        if (string_allowed && token.kind == Kind::String) {
+            const auto body = source.substr(token.begin + 1, token.end - token.begin - 2);
+            result.references.push_back({kind, decode_css(body), positions.span(token.begin, token.end), true});
+            return true;
+        }
+        return false;
+    };
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        const auto& token = tokens[i];
+        if (token.kind == Kind::At && folded(token.name) == "namespace") {
+            // A namespace URL names no resource.
+            while (i < tokens.size() && !is(i, ';') && !is(i, '{')) ++i;
+            continue;
+        }
+        if (token.kind == Kind::At && folded(token.name) == "import") {
+            const auto target = skip(i + 1);
+            if (reference(target, CssReference::Kind::Import, true))
+                i = tokens[target].kind == Kind::Ident ? tokens[target + 1].match : target;
+            continue;
+        }
+        if (token.kind == Kind::Url || (token.kind == Kind::Ident && folded(token.name) == "url")) {
+            if (reference(i, CssReference::Kind::Url, false) && token.kind == Kind::Ident) i = tokens[i + 1].match;
+        }
+    }
+}
+
 std::string scoped_name(std::string_view package, std::string_view key, std::string_view name) {
     util::Sha256 hash;
     constexpr std::string_view separator("\0", 1);
@@ -532,11 +618,20 @@ StylesheetBody parse_stylesheet(std::string_view bytes, Span origin, bool module
     StylesheetBody result{positions.span(0, bytes.size()), {}, {}};
     const auto tokens = CssTokenizer(bytes, positions).tokenize();
     if (module) ModuleParser(tokens, positions, result).parse();
+    collect_references(bytes, tokens, positions, result);
     return result;
 }
 
 RewrittenStylesheet rewrite_stylesheet(std::string_view bytes, const StylesheetBody& parsed,
                                        std::string_view package, std::string_view key) {
+    return rewrite_stylesheet(bytes, parsed, package, key, {});
+}
+
+RewrittenStylesheet rewrite_stylesheet(std::string_view bytes, const StylesheetBody& parsed,
+                                       std::string_view package, std::string_view key,
+                                       const std::vector<std::string>& targets) {
+    if (!targets.empty() && targets.size() != parsed.references.size())
+        throw std::invalid_argument("stylesheet reference targets do not match the analysis");
     if (bytes.size() != parsed.span.length) throw std::invalid_argument("stylesheet bytes and analysis do not match");
     RewrittenStylesheet result;
     for (const auto& entry : parsed.names) {
@@ -546,6 +641,29 @@ RewrittenStylesheet rewrite_stylesheet(std::string_view bytes, const StylesheetB
     }
     struct Edit { std::size_t begin, end; std::string_view replacement; };
     std::vector<Edit> edits;
+    std::vector<std::string> replaced;
+    replaced.reserve(targets.size());
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+        if (targets[i].empty()) continue;
+        const auto& reference = parsed.references[i];
+        std::string escaped;
+        for (const char c : targets[i]) {
+            const bool unsafe = c == '"' || c == '\'' || c == '\\' || c == '(' || c == ')' ||
+                                static_cast<unsigned char>(c) <= 32 || c == 127;
+            if (unsafe && (!reference.quoted || c == '"' || c == '\\' || static_cast<unsigned char>(c) < 32)) {
+                constexpr std::string_view hex = "0123456789abcdef";
+                escaped += '\\';
+                if (static_cast<unsigned char>(c) >= 16) escaped += hex[static_cast<unsigned char>(c) >> 4];
+                escaped += hex[static_cast<unsigned char>(c) & 15];
+                escaped += ' ';
+            } else {
+                escaped += c;
+            }
+        }
+        replaced.push_back(reference.quoted ? '"' + escaped + '"' : "url(" + escaped + ")");
+        const auto begin = reference.span.offset - parsed.span.offset;
+        edits.push_back({begin, begin + reference.span.length, replaced.back()});
+    }
     for (const auto& marker : parsed.global_markers) {
         const auto begin = marker.offset - parsed.span.offset;
         edits.push_back({begin, begin + marker.length, {}});

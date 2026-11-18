@@ -325,6 +325,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/value_layout.cpp
     src/neura-ir/storage.cpp
     src/neura-ir/static_initialization.cpp
+    src/neura-ir/initialization_order.cpp
     src/neura-ir/task_analysis.cpp
     src/neura-ir/module_dispatch.cpp
     src/neura-ir/purity.cpp
@@ -625,6 +626,12 @@ if(BUILD_TESTING)
     add_test(NAME app-ui-retained COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui/retained.py" "$<TARGET_FILE:neura>")
     set_tests_properties(app-ui-retained PROPERTIES TIMEOUT 180)
+    add_test(NAME app-html-styles COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/styles.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-html-styles PROPERTIES TIMEOUT 180)
+    add_test(NAME app-ui-reconcile COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/reconcile.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 300)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

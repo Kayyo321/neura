@@ -276,6 +276,8 @@ Errors about application forms and their build limits.
 | [E1008](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1008.md) | value cannot be iterated by a template |
 | [E1009](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1009.md) | key of the wrong type |
 | [E1011](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1011.md) | template or stylesheet file cannot be used |
+| [E1012](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1012.md) | not a class of the CSS module |
+| [E1013](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1013.md) | stylesheet import or asset cannot be resolved |
 | [E1014](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1014.md) | invalid static document structure |
 | [E1015](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1015.md) | template or stylesheet exceeds a limit |
 

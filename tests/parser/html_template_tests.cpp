@@ -103,6 +103,12 @@ void control_flow() {
     const auto& row = element(loop.children.at(0));
     CHECK(row.name == "li");
     CHECK(std::get<TemplateHole>(row.children.at(0).value).expression.kind == Expr::Kind::Lambda);
+
+    // A top-level row: the caller places it in its list or table body.
+    const auto rows = parse(lex("let item = html(name: string) {<li>{name}</li>};\n"
+                                "let line = html() {<tr><td>1</td></tr>};", "rows.nra"));
+    CHECK(element(std::get<TemplateSyntax>(initializer(rows, 0).html_factory->source).nodes.at(0)).name == "li");
+    CHECK(element(std::get<TemplateSyntax>(initializer(rows, 1).html_factory->source).nodes.at(0)).name == "tr");
 }
 
 void contextual_forms() {

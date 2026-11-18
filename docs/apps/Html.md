@@ -24,6 +24,8 @@ A text hole accepts a string, an integer in decimal, a `float32` or `float64` fo
 
 `on:event={handler}` binds a function of the event's record type. `prop:name={value}` sets a supported DOM property, and `var:--name={value}` takes a `ui.CssValue`. Dynamic URL attributes take a `ui.Url`, constructed with `ui.url(text)`. Static URLs accept relative references and the schemes `https`, `http`, `mailto`, and `tel`.
 
+A static `src` of `img`, `source`, `video`, `audio` or `track`, or `poster` of `video`, that names a local file is copied into the build output under its digest, and the template refers to the copy ([Stylesheets](Css.md#imports-and-assets)). A class name from a CSS module is `Styles.class_name("row")` ([Stylesheets](Css.md#modules)).
+
 Holes evaluate once in document order, with an element's attributes evaluated before its children. `@if` evaluates conditions in order and renders the first matching branch. `@for` evaluates its source once, then evaluates the key before the body on each iteration. An array supplies items in index order. A key is a string or a fixed-width integer.
 
 <!-- example: check -->

@@ -12,6 +12,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/containment.hpp"
+#include "neura-ir/initialization_order.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
@@ -1140,66 +1141,7 @@ void Converter::order_initialization() {
     // other module or file initializer and every top-level statement runs
     // before the entry function: files that a file imports run first, ties in
     // the order the files were given, and each file runs in source order.
-    std::vector<SymbolId> files;
-    std::map<SymbolId, std::set<SymbolId>> imports;
-    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
-        const auto& item = program_.symbols[id];
-        if (item.kind == SymbolKind::File) {
-            files.push_back(id);
-        } else if (item.kind == SymbolKind::Import && item.type.symbol != no_symbol) {
-            const auto from = file_of(id);
-            const auto to = file_of(item.type.symbol);
-            if (from != no_symbol && to != no_symbol && from != to) {
-                imports[from].insert(to);
-            }
-        }
-    }
-    // Files that import each other, directly or through other files, form a
-    // cycle. A cycle runs once every file it imports from outside the cycle
-    // has run, and its files run in the given order. Without cycles this is
-    // the plain dependency order with ties in the given order.
-    std::map<SymbolId, std::set<SymbolId>> reachable;
-    for (const auto file : files) {
-        auto& seen = reachable[file];
-        std::vector<SymbolId> pending(imports[file].begin(), imports[file].end());
-        while (!pending.empty()) {
-            const auto next = pending.back();
-            pending.pop_back();
-            if (seen.insert(next).second) {
-                pending.insert(pending.end(), imports[next].begin(), imports[next].end());
-            }
-        }
-    }
-    const auto same_cycle = [&](SymbolId a, SymbolId b) {
-        return a == b || (reachable[a].contains(b) && reachable[b].contains(a));
-    };
-    std::vector<SymbolId> order;
-    std::set<SymbolId> placed;
-    while (order.size() < files.size()) {
-        bool progressed = false;
-        for (const auto file : files) {
-            if (placed.contains(file)) continue;
-            std::vector<SymbolId> cycle;
-            for (const auto member : files) {
-                if (!placed.contains(member) && same_cycle(file, member)) cycle.push_back(member);
-            }
-            const bool ready = std::ranges::all_of(cycle, [&](SymbolId member) {
-                return std::ranges::all_of(imports[member], [&](SymbolId dependency) {
-                    return placed.contains(dependency) || same_cycle(file, dependency);
-                });
-            });
-            if (!ready) continue;
-            for (const auto member : cycle) {
-                placed.insert(member);
-                order.push_back(member);
-            }
-            progressed = true;
-            break;
-        }
-        if (!progressed) {
-            throw std::logic_error("file initialization order has no ready file");
-        }
-    }
+    const auto order = file_initialization_order(program_);
     std::vector<Startup> reference_boxes;
     std::vector<Startup> reference_values;
     for (const auto file : order) {
