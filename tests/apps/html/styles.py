@@ -65,6 +65,8 @@ const Again = css {
     .icon { mask: url(data:image/gif;base64,R0lGOD==); filter: url(#glow); }
 };
 
+let early = func() -> string => Later.class_name("late");
+
 let card = html(title: string) {
     <div class={ Local.class_name("row") }>
         <img src="img/logo.png?v=2" alt="Logo">
@@ -78,6 +80,8 @@ let App = module:program.Entry (
         console.print_line(Local.keyframes_name("fade"));
         console.print_line(File.class_name("part"));
         console.print_line(theme.Sheet.path());
+        console.print_line(theme.Local.class_name("row"));
+        console.print_line(early());
         console.print_line(First.to_string());
         if (First.equals(Again) && First.hash_code() == Again.hash_code()) {
             console.print_line("equal");
@@ -86,11 +90,14 @@ let App = module:program.Entry (
         return program.ExitCode.Ok;
     };
 );
+
+const Later = css.module { .late { color: blue; } };
 """
 
 THEME = """\
 export let Theme = module (
     export const Sheet = css { :root { --accent: #a40; } };
+    export const Local = css.module { .row { color: red; } };
 );
 """
 
@@ -151,13 +158,18 @@ with TemporaryDirectory() as temporary:
 
     theme_body = b" :root { --accent: #a40; } "
     theme_path = f"styles/{sha(theme_body)}.css"
+    theme_row = scoped("theme.nra:Theme.Local", "row")
+    theme_local_path = f"styles/{sha(f' .{theme_row} {{ color: red; }} '.encode())}.css"
+    late = scoped("app.nra:Later", "late")
+    later_path = f"styles/{sha(f' .{late} {{ color: blue; }} '.encode())}.css"
     # Imported files first, then source order; a sheet with the same digest is linked once.
-    expected_links = [theme_path, first_path, local_path, file_path]
+    expected_links = [theme_path, theme_local_path, first_path, local_path, file_path, later_path]
     check(listing["stylesheets"] == expected_links, f"links {listing['stylesheets']} != {expected_links}")
     check(base_path not in listing["stylesheets"], "an imported sheet is linked from the page")
 
     output = run(["run", "out/app.nvr"], root).stdout.splitlines()
-    check(output == [row, fade, part, theme_path, f"Stylesheet({sha(first_body)})", "equal"], f"output {output}")
+    check(output == [row, fade, part, theme_path, theme_row, late, f"Stylesheet({sha(first_body)})", "equal"],
+          f"output {output}")
 
     # The descriptor holds the bundled path; the query is kept.
     listing_ir = run(["emit-ir", "app.nra", "--no-optimize"], root).stdout
