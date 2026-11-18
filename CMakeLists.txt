@@ -466,23 +466,33 @@ if(NEURA_ENABLE_SERVER_TLS)
            OR NOT OPENSSL_CRYPTO_LIBRARY MATCHES "\\.a$")
             message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 3.5 static archives")
         endif()
+        # The OpenSSL found above, with its headers as an ordinary include
+        # directory (-I): the imported OpenSSL::SSL would give -isystem, which
+        # CPATH and the compiler's own directories can precede, so another
+        # OpenSSL on the search path (Homebrew's, in /usr/local/include on
+        # Intel macOS) was compiled against while the pinned one was linked.
+        find_package(Threads REQUIRED)
+        add_library(neura_openssl INTERFACE)
+        target_include_directories(neura_openssl INTERFACE "${OPENSSL_INCLUDE_DIR}")
+        target_link_libraries(neura_openssl INTERFACE "${OPENSSL_SSL_LIBRARY}" "${OPENSSL_CRYPTO_LIBRARY}"
+            Threads::Threads ${CMAKE_DL_LIBS})
 
         add_library(neura_server_tls STATIC src/server/http_tls.cpp)
         target_include_directories(neura_server_tls PUBLIC src)
-        target_link_libraries(neura_server_tls PRIVATE neura_server_http OpenSSL::SSL)
+        target_link_libraries(neura_server_tls PRIVATE neura_server_http neura_openssl)
         neura_target_defaults(neura_server_tls)
         target_compile_definitions(neura_server_listeners PRIVATE NEURA_SERVER_TLS_ENABLED)
         # TLS client and server streams of the standard providers
         # (src/nvm/tls_provider.cpp); without this build option they answer
         # Unsupported.
         target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
-        target_link_libraries(neura_nvm PRIVATE OpenSSL::SSL)
+        target_link_libraries(neura_nvm PRIVATE neura_openssl)
         target_link_libraries(neura_server_listeners PRIVATE neura_server_tls)
 
         if(BUILD_TESTING)
             find_package(Threads REQUIRED)
             add_executable(neura_http_tls_tests tests/server/http_tls_tests.cpp)
-            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls OpenSSL::SSL Threads::Threads)
+            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls neura_openssl Threads::Threads)
             neura_target_defaults(neura_http_tls_tests)
             add_test(NAME server-http-tls COMMAND neura_http_tls_tests)
             set_tests_properties(server-http-tls PROPERTIES TIMEOUT 15)
@@ -558,14 +568,14 @@ if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
             message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_LIBPQ_SOURCE (postgresql-18.7) and "
                 "NEURA_LIBPQ_BUILD (its build tree with libpq.a)")
         endif()
-        target_include_directories(neura_sql SYSTEM PRIVATE "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq"
+        # First, like the OpenSSL headers: a libpq elsewhere on the search
+        # path is never compiled against.
+        target_include_directories(neura_sql BEFORE PRIVATE "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq"
             "${NEURA_LIBPQ_SOURCE}/src/include")
         target_compile_definitions(neura_sql PRIVATE NEURA_SQL_POSTGRES)
-        set(OPENSSL_USE_STATIC_LIBS TRUE)
-        find_package(OpenSSL 3.5 REQUIRED)
         target_link_libraries(neura_sql PRIVATE "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a"
             "${NEURA_LIBPQ_BUILD}/src/common/libpgcommon_shlib.a" "${NEURA_LIBPQ_BUILD}/src/port/libpgport_shlib.a"
-            OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+            neura_openssl Threads::Threads)
     endif()
 endif()
 
@@ -613,10 +623,11 @@ if(NEURA_ENABLE_SERVER_HTTP2)
     message(STATUS "Server HTTP/2: nghttp2 ${neura_nghttp2_version} (${NEURA_NGHTTP2_LIBRARY})")
 
     find_package(Threads REQUIRED)
-    add_library(neura_nghttp2 STATIC IMPORTED)
-    set_target_properties(neura_nghttp2 PROPERTIES
-        IMPORTED_LOCATION "${NEURA_NGHTTP2_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${NEURA_NGHTTP2_INCLUDE_DIR}")
+    # An interface library, not an imported one, so the pinned headers are
+    # an ordinary -I directory ahead of any other nghttp2 (see neura_openssl).
+    add_library(neura_nghttp2 INTERFACE)
+    target_include_directories(neura_nghttp2 INTERFACE "${NEURA_NGHTTP2_INCLUDE_DIR}")
+    target_link_libraries(neura_nghttp2 INTERFACE "${NEURA_NGHTTP2_LIBRARY}")
     target_sources(neura_server_http PRIVATE src/server/http2_connection.cpp)
     target_link_libraries(neura_server_http PUBLIC neura_nghttp2 Threads::Threads)
     target_compile_definitions(neura_server_http PUBLIC NEURA_SERVER_HTTP2_ENABLED)
