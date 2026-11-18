@@ -2114,6 +2114,22 @@ if(BUILD_TESTING)
         endforeach()
     endfunction()
     neura_scale_test_timeouts()
+    # The longest tests start first under ctest --parallel, so they overlap
+    # the many short ones instead of running alone at the end. The costs are
+    # their seconds on the x86_64 Linux CI runner (release trial 16).
+    set(neura_test_costs
+        backend-reference 2640 lifetime-programs 900 stdlib-crypto-pqc 750 decompiler-behavior 540
+        stdlib-crypto-asymmetric 480 app-ui-reconcile 450 stdlib-character 390 backend-tier3 380
+        program-fuzz 370 lifecycle-update 360 decompiler-lift 350 stdlib-crypto-pki 330
+        expressions-equivalence 300 stdlib-crypto-advanced 290 lift-corpus 260 stdlib-crypto-token 250
+        backend-placement 240 ir-optimization-behavior 220 lift-floats 175 backend-fleet 150
+        stdlib-crypto-enclave 150)
+    while(neura_test_costs)
+        list(POP_FRONT neura_test_costs test cost)
+        if(TEST "${test}")
+            set_property(TEST "${test}" PROPERTY COST "${cost}")
+        endif()
+    endwhile()
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28" AND NEURA_SDK)
         neura_scale_test_timeouts("${NEURA_LIBCLANG_DIR}")
     endif()
