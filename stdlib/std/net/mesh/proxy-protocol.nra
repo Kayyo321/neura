@@ -378,10 +378,8 @@ export let ProxyProtocol = module (
     /// @brief The header in its own version's form; version 2 adds a CRC32C TLV when `with_crc` is true.
     #NoDiscard
     export let encode = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]> {
-        if (header.version == 1) {
-            return Result<uint8[list]>.Ok(strings.to_bytes(encode_v1(header)?));
-        }
-        return encode_v2(header, with_crc);
+        return if (header.version == 1) -> Result<uint8[list]>.Ok(strings.to_bytes(encode_v1(header)?))
+            else -> encode_v2(header, with_crc);
     };
 
     /// @brief The version 1 line, CRLF included. Fails for LOCAL, for Unix or datagram addresses, for mixed
@@ -627,10 +625,8 @@ export let ProxyProtocol = module (
                     return Detection.NotProxy;
                 }
             }
-            if (n < 13) {
-                return Detection.NeedMore;
-            }
-            return (bytes[start + 12] >> 4) == 2 ? Detection.V2 : Detection.NotProxy;
+            return if (n < 13) -> Detection.NeedMore
+                else -> (bytes[start + 12] >> 4) == 2 ? Detection.V2 : Detection.NotProxy;
         }
         last v1 = strings.to_bytes("PROXY ");
         for (let i = 0; i < 6 && i < n; i++) {
@@ -677,10 +673,8 @@ export let ProxyProtocol = module (
             }
         }
         if (end < 0) {
-            if (n >= MaxV1Length) {
-                return v1_failure(MaxV1Length, "no CRLF in the first 107 bytes");
-            }
-            return Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
+            return if (n >= MaxV1Length) -> v1_failure(MaxV1Length, "no CRLF in the first 107 bytes")
+                else -> Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
         }
         last line_bytes: uint8[list] = new;
         for (let i = 0; i < end; i++) {

@@ -198,10 +198,8 @@ export let Idna = module (
                 },
             }
         }
-        if (result.byte_length > MaxLabelLength) {
-            return failed(ParseErrorKind.OutOfRange, label.offset, "label longer than 63 bytes");
-        }
-        return Result<string>.Ok(result);
+        return if (result.byte_length > MaxLabelLength) -> failed(ParseErrorKind.OutOfRange, label.offset, "label longer than 63 bytes")
+            else -> Result<string>.Ok(result);
     };
 
     /// @brief UTS 46 CheckHyphens on a label's scalars.
@@ -273,10 +271,8 @@ export let Idna = module (
             return true;
         }
         // Halfwidth and fullwidth forms U+FF00-U+FFEF, noncharacters U+FDD0-U+FDEF, U+FFFD, and U+xxFFFE/F.
-        if ((s >= 65280 && s <= 65519) || (s >= 64976 && s <= 65007) || s == 65533) {
-            return true;
-        }
-        return (s & 65534) == 65534;
+        return if ((s >= 65280 && s <= 65519) || (s >= 64976 && s <= 65007) || s == 65533) -> true
+            else -> (s & 65534) == 65534;
     };
 
     /// @brief A letter, digit, or hyphen.
@@ -290,10 +286,8 @@ export let Idna = module (
         if (lead < 224) {
             return 2;
         }
-        if (lead < 240) {
-            return 3;
-        }
-        return 4;
+        return if (lead < 240) -> 3
+            else -> 4;
     };
 
     /// @brief At least four uppercase hex digits.

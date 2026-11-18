@@ -43,10 +43,8 @@ export let Timeout = module (
         if (unit == 0) {
             return fail(length - 1, "unknown grpc-timeout unit");
         }
-        if (value > MaxNanos / unit) {
-            return Result<Duration>.Ok(of_nanos(MaxNanos as int64));
-        }
-        return Result<Duration>.Ok(of_nanos((value * unit) as int64));
+        return if (value > MaxNanos / unit) -> Result<Duration>.Ok(of_nanos(MaxNanos as int64))
+            else -> Result<Duration>.Ok(of_nanos((value * unit) as int64));
     };
 
     /// @brief Formats a duration in the finest unit whose value fits 8 digits, rounding up.
@@ -85,10 +83,8 @@ export let Timeout = module (
         if (unit == 117) {
             return 1000;
         }
-        if (unit == 110) {
-            return 1;
-        }
-        return 0;
+        return if (unit == 110) -> 1
+            else -> 0;
     };
 
     /// @brief A failed parse at `at`.

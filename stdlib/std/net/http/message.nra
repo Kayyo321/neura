@@ -36,10 +36,8 @@ export let Message = module (
         if (protocol_id == "h2") {
             return Optional<Version>.Some(Version.Http2);
         }
-        if (protocol_id == "h3") {
-            return Optional<Version>.Some(Version.Http3);
-        }
-        return Optional<Version>.None;
+        return if (protocol_id == "h3") -> Optional<Version>.Some(Version.Http3)
+            else -> Optional<Version>.None;
     };
 
     /// @brief A request: method, request target, header map and body.

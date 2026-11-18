@@ -83,10 +83,8 @@ export let IoSlice = module (
 
         /// @brief Tests whether the view holds exactly the bytes of `bytes`.
         export let equals_bytes = func(bytes: uint8[list]) -> bool {
-            if (bytes.length != count) {
-                return false;
-            }
-            return starts_with(bytes);
+            return if (bytes.length != count) -> false
+                else -> starts_with(bytes);
         };
 
         /// @brief Tests whether two views hold the same bytes (wherever they are stored).

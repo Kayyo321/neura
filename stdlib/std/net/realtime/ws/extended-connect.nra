@@ -31,10 +31,8 @@ export let ExtendedConnect = module (
     /// does not, and any other value is a connection error (RFC 8441 section 3).
     #NoDiscard
     export let enables_extended_connect = func(value: int64) -> Result<bool> {
-        if (value == 0 || value == 1) {
-            return Result<bool>.Ok(value == 1);
-        }
-        return fail<bool>("SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1, not " .. value.to_string());
+        return if (value == 0 || value == 1) -> Result<bool>.Ok(value == 1)
+            else -> fail<bool>("SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1, not " .. value.to_string());
     };
 
     /// @brief The request fields of an extended CONNECT for a WebSocket (RFC 8441 section 5 and its example in

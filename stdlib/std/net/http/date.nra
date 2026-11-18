@@ -102,10 +102,8 @@ export let Date = module (
         if (index == 3) {
             return "Thursday";
         }
-        if (index == 5) {
-            return "Saturday";
-        }
-        return short .. "day";
+        return if (index == 5) -> "Saturday"
+            else -> short .. "day";
     };
 
     /// @brief A cursor over the bytes of a date text that records the first failure.
@@ -259,10 +257,8 @@ export let Date = module (
         if (comma > 3) {
             return parse_rfc850(reader, reference);
         }
-        if (comma < 0) {
-            return parse_asctime(reader);
-        }
-        return Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, comma, "not an HTTP-date"));
+        return if (comma < 0) -> parse_asctime(reader)
+            else -> Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, comma, "not an HTTP-date"));
     };
 
     /// @brief IMF-fixdate: day-name "," SP 2DIGIT SP month SP 4DIGIT SP time-of-day SP "GMT".
@@ -409,10 +405,8 @@ export let Date = module (
 
     /// @brief The ASCII lowercase of `b`.
     let lower = func(b: uint8) -> uint8 {
-        if (b >= 65 && b <= 90) {
-            return b + 32;
-        }
-        return b;
+        return if (b >= 65 && b <= 90) -> b + 32
+            else -> b;
     };
 
     /// @brief `value` (0 through 99) as two digits.

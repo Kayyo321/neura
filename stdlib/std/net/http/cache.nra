@@ -484,10 +484,8 @@ export let Cache = module (
         /// @brief Section 4.4: after a non-error (2xx or 3xx) response to a request whose method is not safe
         /// (unknown methods included), invalidates `uri`; returns how many responses were removed.
         export let record_response = func(method: string, uri: string, status: int) -> int {
-            if (methods.is_safe_name(method) || status < 200 || status > 399) {
-                return 0;
-            }
-            return invalidate(uri);
+            return if (methods.is_safe_name(method) || status < 200 || status > 399) -> 0
+                else -> invalidate(uri);
         };
 
         /// @brief Removes the response stored for `method` and `uri`; returns whether one was stored.
@@ -574,10 +572,8 @@ export let Cache = module (
         if (value > bound) {
             return bound;
         }
-        if (value < -bound) {
-            return -bound;
-        }
-        return value;
+        return if (value < -bound) -> -bound
+            else -> value;
     };
 
     /// @brief `value` limited to plus or minus 2147483648 (section 1.2.2).

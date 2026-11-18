@@ -306,10 +306,8 @@ export let Chunked = module (
         last decoder = new ChunkedDecoder(limits);
         last data = decoder.feed(body)?;
         return Result<uint8[list]>.Err(wire.rejection(400, "chunked body ends before the last chunk")) unless decoder.is_done();
-        if (decoder.remainder().length > 0) {
-            return Result<uint8[list]>.Err(wire.rejection(400, "bytes after the chunked body"));
-        }
-        return Result<uint8[list]>.Ok(data);
+        return if (decoder.remainder().length > 0) -> Result<uint8[list]>.Err(wire.rejection(400, "bytes after the chunked body"))
+            else -> Result<uint8[list]>.Ok(data);
     };
 
     /// @brief Decoder state: reading a chunk-size line.
@@ -333,10 +331,8 @@ export let Chunked = module (
         if (b >= 97 && b <= 102) {
             return (b - 87) as int;
         }
-        if (b >= 65 && b <= 70) {
-            return (b - 55) as int;
-        }
-        return -1;
+        return if (b >= 65 && b <= 70) -> (b - 55) as int
+            else -> -1;
     };
 
     /// @brief `n` (positive) in lowercase hexadecimal.

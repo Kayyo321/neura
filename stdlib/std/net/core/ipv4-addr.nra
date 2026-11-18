@@ -83,10 +83,8 @@ export let Ipv4Addr = module (
         /// @brief Compares the unsigned values.
         #Pure
         export let compare_to = func(other: Ipv4Addr) -> Ordering {
-            if (bits == other.bits) {
-                return Ordering.Equal;
-            }
-            return bits < other.bits ? Ordering.Less : Ordering.Greater;
+            return if (bits == other.bits) -> Ordering.Equal
+                else -> bits < other.bits ? Ordering.Less : Ordering.Greater;
         };
 
         /// @brief Tests whether another address is an `Ipv4Addr` with the same value.
@@ -174,10 +172,8 @@ export let Ipv4Addr = module (
                 if (i < length && text.byte_at(i) != 46) {
                     return failed(ParseErrorKind.InvalidCharacter, i, "expected a decimal digit");
                 }
-                if (i >= length) {
-                    return failed(ParseErrorKind.UnexpectedEnd, i, "expected a decimal digit");
-                }
-                return failed(ParseErrorKind.Syntax, i, "empty IPv4 part");
+                return if (i >= length) -> failed(ParseErrorKind.UnexpectedEnd, i, "expected a decimal digit")
+                    else -> failed(ParseErrorKind.Syntax, i, "empty IPv4 part");
             }
             if (part > 255) {
                 return failed(ParseErrorKind.OutOfRange, start, "IPv4 part above 255");
@@ -186,10 +182,8 @@ export let Ipv4Addr = module (
             parts++;
             if (parts == 4) {
                 if (i < length) {
-                    if (text.byte_at(i) == 46) {
-                        return failed(ParseErrorKind.Syntax, i, "more than four IPv4 parts");
-                    }
-                    return failed(ParseErrorKind.InvalidCharacter, i, "unexpected character after the address");
+                    return if (text.byte_at(i) == 46) -> failed(ParseErrorKind.Syntax, i, "more than four IPv4 parts")
+                        else -> failed(ParseErrorKind.InvalidCharacter, i, "unexpected character after the address");
                 }
                 return Result<Ipv4Addr>.Ok(new Ipv4Addr(value));
             }

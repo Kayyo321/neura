@@ -50,10 +50,8 @@ export let Wire = module (
         if (low == 0) {
             return StreamType.ClientBidirectional;
         }
-        if (low == 1) {
-            return StreamType.ServerBidirectional;
-        }
-        return low == 2 ? StreamType.ClientUnidirectional : StreamType.ServerUnidirectional;
+        return if (low == 1) -> StreamType.ServerBidirectional
+            else -> low == 2 ? StreamType.ClientUnidirectional : StreamType.ServerUnidirectional;
     };
 
     /// @brief Whether the stream ID names a bidirectional stream.
@@ -235,10 +233,8 @@ export let Wire = module (
         }
         last at = reader.offset;
         last session = reader.read_varint()?;
-        if (session % 4 != 0) {
-            return syntax<int64>("a session ID must be a client-initiated bidirectional stream ID", at);
-        }
-        return Result<int64>.Ok(session as int64);
+        return if (session % 4 != 0) -> syntax<int64>("a session ID must be a client-initiated bidirectional stream ID", at)
+            else -> Result<int64>.Ok(session as int64);
     };
 
     /// @brief An HTTP/3 datagram for the session: the quarter stream ID (session / 4) and the payload.
@@ -276,10 +272,8 @@ export let Wire = module (
     export let decode_datagram = func(bytes: uint8[list]) -> Result<Datagram> {
         last reader = new WireReader(bytes);
         last quarter = reader.read_varint()?;
-        if (quarter > MaxQuarterStreamId) {
-            return syntax<Datagram>("quarter stream ID above 2^60 - 1", 0);
-        }
-        return Result<Datagram>.Ok(new Datagram((quarter * 4) as int64, reader.read_rest()));
+        return if (quarter > MaxQuarterStreamId) -> syntax<Datagram>("quarter stream ID above 2^60 - 1", 0)
+            else -> Result<Datagram>.Ok(new Datagram((quarter * 4) as int64, reader.read_rest()));
     };
 
     /// @brief The reason a session ended, as a WT_CLOSE_SESSION capsule carries it.
@@ -345,10 +339,8 @@ export let Wire = module (
         }
         last code = reader.read_uint32()?;
         last text = reader.read_bytes((length as int) - 4)?;
-        if (utf8.validate(text) >= 0) {
-            return syntax<SessionClose>("the WT_CLOSE_SESSION message is not UTF-8", 0);
-        }
-        return Result<SessionClose>.Ok(new SessionClose(code, strings.from_bytes_lossy(text)));
+        return if (utf8.validate(text) >= 0) -> syntax<SessionClose>("the WT_CLOSE_SESSION message is not UTF-8", 0)
+            else -> Result<SessionClose>.Ok(new SessionClose(code, strings.from_bytes_lossy(text)));
     };
 
     /// @brief The HTTP/3 error code of a WebTransport application error code (draft section 4.4):

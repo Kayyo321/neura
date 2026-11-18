@@ -532,10 +532,8 @@ export let StubResolver = module (
         if (not response.header.is_response || response.header.id != query.header.id) {
             return Result<int>.Err(errors.custom("dns.mismatch", "response ID or QR does not match the query"));
         }
-        if (response.questions.length != 1 || not response.questions[0].equals(query.question())) {
-            return Result<int>.Err(errors.custom("dns.mismatch", "response question does not match the query"));
-        }
-        return Result<int>.Ok(0);
+        return if (response.questions.length != 1 || not response.questions[0].equals(query.question())) -> Result<int>.Err(errors.custom("dns.mismatch", "response question does not match the query"))
+            else -> Result<int>.Ok(0);
     };
 
     /// @brief The CNAME targets among records.

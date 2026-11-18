@@ -315,10 +315,8 @@ export let Multipart = module (
             if (failed_status != 0) {
                 return failure();
             }
-            if (state != Finished) {
-                return fail(400, "multipart body ends before the close delimiter");
-            }
-            return Result<MultipartEvent[list]>.Ok(new MultipartEvent[list]());
+            return if (state != Finished) -> fail(400, "multipart body ends before the close delimiter")
+                else -> Result<MultipartEvent[list]>.Ok(new MultipartEvent[list]());
         };
 
         /// @brief Whether the close delimiter has been read.

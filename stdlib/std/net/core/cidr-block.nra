@@ -155,10 +155,8 @@ export let CidrBlock = module (
             return failed(ParseErrorKind.OutOfRange, start, "prefix length too long for the family");
         }
         last network = masked(ip, prefix);
-        if (not lenient && not ips.equals(network, without_zone(ip))) {
-            return failed(ParseErrorKind.Syntax, slash, "host bits are set");
-        }
-        return Result<CidrBlock>.Ok(new CidrBlock(network, prefix));
+        return if (not lenient && not ips.equals(network, without_zone(ip))) -> failed(ParseErrorKind.Syntax, slash, "host bits are set")
+            else -> Result<CidrBlock>.Ok(new CidrBlock(network, prefix));
     };
 
     /// @brief Why an address and prefix do not form a block, or "" when they do.
@@ -197,10 +195,8 @@ export let CidrBlock = module (
 
     /// @brief The IPv4 netmask of a prefix length 0 to 32.
     let mask_v4 = func(prefix: int) -> uint32 {
-        if (prefix == 0) {
-            return 0;
-        }
-        return ((AllOnes << ((64 - prefix) as uint64)) >> 32) as uint32;
+        return if (prefix == 0) -> 0
+            else -> ((AllOnes << ((64 - prefix) as uint64)) >> 32) as uint32;
     };
 
     /// @brief The netmask bits of groups 1 to 4 for an IPv6 prefix length 0 to 128.
@@ -208,18 +204,14 @@ export let CidrBlock = module (
         if (prefix >= 64) {
             return AllOnes;
         }
-        if (prefix == 0) {
-            return 0;
-        }
-        return AllOnes << ((64 - prefix) as uint64);
+        return if (prefix == 0) -> 0
+            else -> AllOnes << ((64 - prefix) as uint64);
     };
 
     /// @brief The netmask bits of groups 5 to 8 for an IPv6 prefix length 0 to 128.
     let mask_low = func(prefix: int) -> uint64 {
-        if (prefix <= 64) {
-            return 0;
-        }
-        return AllOnes << ((128 - prefix) as uint64);
+        return if (prefix <= 64) -> 0
+            else -> AllOnes << ((128 - prefix) as uint64);
     };
 
     /// @brief Creates a CIDR parse error at a UTF-8 byte offset.

@@ -114,10 +114,8 @@ export let WebSocket = module (
         /// @brief The next bytes, or `None` at the end of the stream.
         export let receive = func -> Result<Optional<uint8[list]>> {
             last bytes = read_fn(chunk)?;
-            if (bytes.length == 0) {
-                return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
-            }
-            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(bytes));
+            return if (bytes.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(bytes));
         };
 
         /// @brief Writes the bytes.

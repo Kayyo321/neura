@@ -44,10 +44,8 @@ export let Health = module (
         if (value == 2) {
             return ServingStatus.NotServing;
         }
-        if (value == 3) {
-            return ServingStatus.ServiceUnknown;
-        }
-        return ServingStatus.Unknown;
+        return if (value == 3) -> ServingStatus.ServiceUnknown
+            else -> ServingStatus.Unknown;
     };
 
     /// @brief The `Check` method path.

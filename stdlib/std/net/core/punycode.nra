@@ -194,10 +194,8 @@ export let Punycode = module (
         if (k <= bias) {
             return TMin;
         }
-        if (k >= bias + TMax) {
-            return TMax;
-        }
-        return k - bias;
+        return if (k >= bias + TMax) -> TMax
+            else -> k - bias;
     };
 
     /// @brief Bias adaptation (RFC 3492 section 6.1).
@@ -223,10 +221,8 @@ export let Punycode = module (
         if (b >= 65 && b <= 90) {
             return (b as int64) - 65;
         }
-        if (b >= 97 && b <= 122) {
-            return (b as int64) - 97;
-        }
-        return -1;
+        return if (b >= 97 && b <= 122) -> (b as int64) - 97
+            else -> -1;
     };
 
     /// @brief Inserts the value at the index, shifting later values right.

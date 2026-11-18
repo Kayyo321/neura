@@ -150,10 +150,8 @@ export let Http = module (
             }
             last chunk = source.read(max)?;
             total = total + (chunk.length as int64);
-            if (total > limit) {
-                return Result<uint8[list]>.Err(too_large(limit));
-            }
-            return Result<uint8[list]>.Ok(chunk);
+            return if (total > limit) -> Result<uint8[list]>.Err(too_large(limit))
+                else -> Result<uint8[list]>.Ok(chunk);
         };
 
         /// @brief Bytes read so far.
@@ -508,10 +506,8 @@ export let Http = module (
         /// @brief The authenticated principal, set by `require`.
         #NoDiscard
         export let principal = func -> Optional<Principal> {
-            if (identity.length == 0) {
-                return Optional<Principal>.None;
-            }
-            return Optional<Principal>.Some(identity[0]);
+            return if (identity.length == 0) -> Optional<Principal>.None
+                else -> Optional<Principal>.Some(identity[0]);
         };
 
         /// @brief The whole body within `body_limit`, read once and kept. Fails with "http.body_too_large" past
@@ -661,10 +657,8 @@ export let Http = module (
 
         /// @brief The text "Response(STATUS, N bytes)" or "Response(STATUS, streamed)".
         export let.override to_string = func -> string {
-            if (streamed) {
-                return "Response(" .. status.to_string() .. ", streamed)";
-            }
-            return "Response(" .. status.to_string() .. ", " .. content.length.to_string() .. " bytes)";
+            return if (streamed) -> "Response(" .. status.to_string() .. ", streamed)"
+                else -> "Response(" .. status.to_string() .. ", " .. content.length.to_string() .. " bytes)";
         };
     );
 
@@ -1176,10 +1170,8 @@ export let Http = module (
         /// lists the problems.
         #NoDiscard
         export let check = func -> Result<Unit> {
-            if (problems.length == 0) {
-                return Result<Unit>.Ok(Unit.Value);
-            }
-            return Result<Unit>.Err(errors.custom("http.router.invalid", strings.join(problems, "; ")));
+            return if (problems.length == 0) -> Result<Unit>.Ok(Unit.Value)
+                else -> Result<Unit>.Err(errors.custom("http.router.invalid", strings.join(problems, "; ")));
         };
 
         /// @brief The registration problems, as a new list.
@@ -1415,10 +1407,8 @@ export let Http = module (
         while (i < token.byte_length && token.byte_at(i) == 61) {
             i++;
         }
-        if (i != token.byte_length) {
-            return Optional<string>.None;
-        }
-        return Optional<string>.Some(token);
+        return if (i != token.byte_length) -> Optional<string>.None
+            else -> Optional<string>.Some(token);
     };
 
     /// @brief A middleware that requires a principal: 401 with the envelope (and `WWW-Authenticate: Bearer` for
@@ -1447,10 +1437,8 @@ export let Http = module (
     #NoDiscard
     export let same_origin = func -> func(Request, Next) -> Result<Response> =>
         new func(request: Request, next: Next) -> Result<Response> {
-            if (methods.is_safe_name(request.method) || is_same_origin(request)) {
-                return next.call(request);
-            }
-            return Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
+            return if (methods.is_safe_name(request.method) || is_same_origin(request)) -> next.call(request)
+                else -> Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
         };
 
     /// @brief Whether `request` shows a same-origin `Sec-Fetch-Site` or `Origin`.
@@ -1629,10 +1617,8 @@ export let Http = module (
             if (request.method == "OPTIONS" && optional_is_some(requested_method)) {
                 last wanted = optional_text(requested_method);
                 last wanted_headers = optional_text(request.header("Access-Control-Request-Headers"));
-                if (policy.admits_origin(origin) && policy.admits_method(wanted) && policy.admits_headers(wanted_headers)) {
-                    return Result<Response>.Ok(policy.preflight(origin));
-                }
-                return Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
+                return if (policy.admits_origin(origin) && policy.admits_method(wanted) && policy.admits_headers(wanted_headers)) -> Result<Response>.Ok(policy.preflight(origin))
+                    else -> Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
             }
             last response = next.call(request)?;
             if (policy.admits_origin(origin)) {
@@ -1907,10 +1893,8 @@ export let Http = module (
         if (b >= 65 && b <= 70) {
             return (b as int) - 55;
         }
-        if (b >= 97 && b <= 102) {
-            return (b as int) - 87;
-        }
-        return -1;
+        return if (b >= 97 && b <= 102) -> (b as int) - 87
+            else -> -1;
     };
 
     /// @brief The path of a request target: origin form up to "?", the path of an absolute form, "*" as is.
@@ -1926,19 +1910,15 @@ export let Http = module (
             start = slash;
         }
         last question = strings.index_of_from(target, "?", start);
-        if (question < 0) {
-            return target.slice(start, target.byte_length);
-        }
-        return target.slice(start, question);
+        return if (question < 0) -> target.slice(start, target.byte_length)
+            else -> target.slice(start, question);
     };
 
     /// @brief The query of a request target without "?", or "".
     let query_of = func(target: string) -> string {
         last question = strings.index_of(target, "?");
-        if (question < 0) {
-            return "";
-        }
-        return target.slice(question + 1, target.byte_length);
+        return if (question < 0) -> ""
+            else -> target.slice(question + 1, target.byte_length);
     };
 
     /// @brief The segments of a path: "/" has none; "/a/b" has "a" and "b"; "/a/" has "a" and "".
@@ -2086,10 +2066,8 @@ export let Http = module (
         if (strings.starts_with(text, "http://") && strings.ends_with(text, ":80")) {
             return text.slice(0, text.byte_length - 3);
         }
-        if (strings.starts_with(text, "https://") && strings.ends_with(text, ":443")) {
-            return text.slice(0, text.byte_length - 4);
-        }
-        return text;
+        return if (strings.starts_with(text, "https://") && strings.ends_with(text, ":443")) -> text.slice(0, text.byte_length - 4)
+            else -> text;
     };
 
     /// @brief Whether `b` is a b64token character other than "=" (RFC 6750 section 2.1).

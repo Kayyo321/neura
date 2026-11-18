@@ -243,10 +243,8 @@ export let TlsConfig = module (
             if ((certificate.byte_length == 0) != (key.byte_length == 0)) {
                 return problem("a certificate needs its key file and a key its certificate file");
             }
-            if (timeout.to_nanos() < 0) {
-                return problem("the handshake timeout is negative");
-            }
-            return Result<Unit>.Ok(Unit.Value);
+            return if (timeout.to_nanos() < 0) -> problem("the handshake timeout is negative")
+                else -> Result<Unit>.Ok(Unit.Value);
         };
     );
 
@@ -264,10 +262,8 @@ export let TlsConfig = module (
             }
             total += protocol.byte_length + 1;
         }
-        if (total > 65535) {
-            return problem("the ALPN list is longer than 65535 bytes");
-        }
-        return Result<Unit>.Ok(Unit.Value);
+        return if (total > 65535) -> problem("the ALPN list is longer than 65535 bytes")
+            else -> Result<Unit>.Ok(Unit.Value);
     };
 
     /// @brief Ok when `name` is a valid SNI host name (RFC 6066 section 3, see the module documentation), else

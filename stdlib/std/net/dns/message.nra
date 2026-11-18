@@ -462,10 +462,8 @@ export let Message = module (
             Optional.None => {
             },
         }
-        if (writer.length() > 65535) {
-            return Result<uint8[list]>.Err(errors.custom("dns.too_large", "message longer than 65535 bytes"));
-        }
-        return Result<uint8[list]>.Ok(writer.bytes());
+        return if (writer.length() > 65535) -> Result<uint8[list]>.Err(errors.custom("dns.too_large", "message longer than 65535 bytes"))
+            else -> Result<uint8[list]>.Ok(writer.bytes());
     };
 
     /// @brief Decodes a message. Err (Parse) for a truncated or malformed message, a bad name, rdata that does
@@ -510,10 +508,8 @@ export let Message = module (
                 message.additionals.append(record);
             }
         }
-        if (reader.remaining() != 0) {
-            return Result<Message>.Err(parse_error(reader.offset(), "trailing bytes after the message"));
-        }
-        return Result<Message>.Ok(message);
+        return if (reader.remaining() != 0) -> Result<Message>.Err(parse_error(reader.offset(), "trailing bytes after the message"))
+            else -> Result<Message>.Ok(message);
     };
 
     /// @brief The record data as raw bytes, as RFC 3597 section 5 writes it for an unknown type (uncompressed).
@@ -714,10 +710,8 @@ export let Message = module (
             return Result<ResourceRecord>.Err(parse_error(start, "rdata runs past the message"));
         }
         last data = read_data(reader, rtype, length)?;
-        if (reader.offset() != start + length) {
-            return Result<ResourceRecord>.Err(parse_error(start, type_name(rtype) .. " rdata does not match RDLENGTH"));
-        }
-        return Result<ResourceRecord>.Ok(new ResourceRecord(owner, rtype, rclass, ttl, data));
+        return if (reader.offset() != start + length) -> Result<ResourceRecord>.Err(parse_error(start, type_name(rtype) .. " rdata does not match RDLENGTH"))
+            else -> Result<ResourceRecord>.Ok(new ResourceRecord(owner, rtype, rclass, ttl, data));
     };
 
     /// @brief Reads the data of a record of `rtype` spanning `length` bytes.

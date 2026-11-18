@@ -49,10 +49,8 @@ export let Spiffe = module (
         /// @brief The path segments; empty for an ID without a path.
         #NoDiscard
         export let segments = func -> string[list] {
-            if (path.byte_length == 0) {
-                return new;
-            }
-            return strings.split(path.slice(1, path.byte_length), "/");
+            return if (path.byte_length == 0) -> new
+                else -> strings.split(path.slice(1, path.byte_length), "/");
         };
 
         /// @brief The ID of the trust domain itself (`spiffe://<domain>`), as a signing authority uses.

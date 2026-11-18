@@ -76,10 +76,8 @@ export let TcpSocket = module (
         #NoDiscard
         export let receive = func -> Result<Optional<uint8[list]>> {
             last chunk = stream.read(ReceiveChunk)?;
-            if (chunk.length == 0) {
-                return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
-            }
-            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
+            return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
         };
 
         /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.

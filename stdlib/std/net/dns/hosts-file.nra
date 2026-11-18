@@ -190,6 +190,35 @@ export let HostsFile = module (
             return found;
         };
 
+        /// @brief Equal when the entries and the problems are equal, in order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: HostsFile) {
+                return false;
+            }
+            if (table.length != that.table.length || skipped.length != that.skipped.length) {
+                return false;
+            }
+            for (let i = 0; i < table.length; i++) {
+                return false unless table[i].equals(that.table[i]);
+            }
+            for (let i = 0; i < skipped.length; i++) {
+                return false unless skipped[i].equals(that.skipped[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines the hashes of the entries and the problems, consistent with equals.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let entry in table) {
+                hash = hashing.combine(hash, entry.hash_code());
+            }
+            for (let problem in skipped) {
+                hash = hashing.combine(hash, problem.hash_code());
+            }
+            return hash;
+        };
+
         /// @brief Text such as "HostsFile(3 entries, 1 problems)".
         export let.override to_string = func -> string =>
             "HostsFile(" .. table.length.to_string() .. " entries, " .. skipped.length.to_string() .. " problems)";
@@ -286,10 +315,8 @@ export let HostsFile = module (
 
     /// @brief The name without one trailing dot.
     let drop_trailing_dot = func(name: string) -> string {
-        if (name.byte_length > 0 && name.byte_at(name.byte_length - 1) == 46) {
-            return name.slice(0, name.byte_length - 1);
-        }
-        return name;
+        return if (name.byte_length > 0 && name.byte_at(name.byte_length - 1) == 46) -> name.slice(0, name.byte_length - 1)
+            else -> name;
     };
 
     /// @brief Whether the byte is an ASCII letter or digit.

@@ -110,10 +110,8 @@ export let Message = module (
             if (code == frames.Binary) {
                 return Result<Optional<Message>>.Ok(Optional<Message>.Some(Message.Binary(data)));
             }
-            if (utf8.validate(data) >= 0) {
-                return fail(close_status.InvalidPayload, "a text message is not valid UTF-8");
-            }
-            return Result<Optional<Message>>.Ok(Optional<Message>.Some(Message.Text(strings.from_bytes_lossy(data))));
+            return if (utf8.validate(data) >= 0) -> fail(close_status.InvalidPayload, "a text message is not valid UTF-8")
+                else -> Result<Optional<Message>>.Ok(Optional<Message>.Some(Message.Text(strings.from_bytes_lossy(data))));
         };
 
         /// @brief Whether a message is open and how many bytes it holds.

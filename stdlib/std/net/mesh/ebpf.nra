@@ -206,10 +206,8 @@ export let Ebpf = module (
         if (program.instructions.length == 0 || program.instructions.length % InstructionBytes != 0) {
             return invalid("bytecode must be whole 8-byte instructions");
         }
-        if (program.instruction_count() > MaxInstructions) {
-            return invalid("more than 1000000 instructions");
-        }
-        return Result<Unit>.Ok(Unit.Value);
+        return if (program.instruction_count() > MaxInstructions) -> invalid("more than 1000000 instructions")
+            else -> Result<Unit>.Ok(Unit.Value);
     };
 
     /// @brief Checks a map: a valid name, at least one entry, and a key of 4 bytes for a SockMap or 1 to 512 bytes

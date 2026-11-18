@@ -49,10 +49,8 @@ export let Method = module (
         if (text == "TRACE") {
             return Optional<HttpMethod>.Some(HttpMethod.Trace);
         }
-        if (text == "PATCH") {
-            return Optional<HttpMethod>.Some(HttpMethod.Patch);
-        }
-        return Optional<HttpMethod>.None;
+        return if (text == "PATCH") -> Optional<HttpMethod>.Some(HttpMethod.Patch)
+            else -> Optional<HttpMethod>.None;
     };
 
     /// @brief The method's token.

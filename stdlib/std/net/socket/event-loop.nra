@@ -81,10 +81,8 @@ export let EventLoop = module (
         if (backend == EventLoopBackend.Epoll) {
             return linux;
         }
-        if (backend == EventLoopBackend.Kqueue) {
-            return platform.system == "macos" or "freebsd" or "openbsd" or "netbsd" or "dragonfly";
-        }
-        return platform.system != "windows";
+        return if (backend == EventLoopBackend.Kqueue) -> platform.system == "macos" or "freebsd" or "openbsd" or "netbsd" or "dragonfly"
+            else -> platform.system != "windows";
     };
 
     /// @brief The first backend of `preference` that `platform` has, else the first of the default order it

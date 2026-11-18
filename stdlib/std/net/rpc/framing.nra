@@ -48,10 +48,8 @@ export let Framing = module (
         if (token == "gzip") {
             return Optional<Compression>.Some(Compression.Gzip);
         }
-        if (token == "deflate") {
-            return Optional<Compression>.Some(Compression.Deflate);
-        }
-        return Optional<Compression>.None;
+        return if (token == "deflate") -> Optional<Compression>.Some(Compression.Deflate)
+            else -> Optional<Compression>.None;
     };
 
     /// @brief Compresses one message; identity returns the bytes unchanged.

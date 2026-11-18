@@ -326,10 +326,8 @@ export let SocketOptions = module (
         if (option == 10 || option == 11) {
             return true;
         }
-        if (option == 12) {
-            return kind == SocketKind.Udp;
-        }
-        return tcp;
+        return if (option == 12) -> kind == SocketKind.Udp
+            else -> tcp;
     };
 
     /// @brief 1 for true, 0 for false.

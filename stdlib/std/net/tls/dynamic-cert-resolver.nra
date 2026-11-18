@@ -118,10 +118,8 @@ export let DynamicCertResolver = module (
                 return Result<bool>.Ok(false);
             }
             checked_at = now;
-            if (not changed()?) {
-                return Result<bool>.Ok(false);
-            }
-            return reload();
+            return if (not changed()?) -> Result<bool>.Ok(false)
+                else -> reload();
         };
 
         /// @brief Loads and checks a bundle now and swaps it in. Ok(false) when it equals the current one.
@@ -193,10 +191,8 @@ export let DynamicCertResolver = module (
             || strings.index_of_from(key, "-----END ", begin) < 0) {
             return invalid("the key is not a PEM private key");
         }
-        if (candidate.trust_pem.byte_length > 0 && count_certificates(candidate.trust_pem) < 1) {
-            return invalid("the trust bundle holds no complete PEM certificate");
-        }
-        return Result<CertificateBundle>.Ok(candidate);
+        return if (candidate.trust_pem.byte_length > 0 && count_certificates(candidate.trust_pem) < 1) -> invalid("the trust bundle holds no complete PEM certificate")
+            else -> Result<CertificateBundle>.Ok(candidate);
     };
 
     /// @brief The number of complete BEGIN/END CERTIFICATE blocks.

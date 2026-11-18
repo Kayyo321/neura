@@ -72,38 +72,30 @@ export let ProtoWire = module (
     /// @brief The two's-complement bit pattern of `value`.
     #NoDiscard
     export let int64_bits = func(value: int64) -> uint64 {
-        if (value >= 0) {
-            return value as uint64;
-        }
-        return AllOnes - ((-(value + 1)) as uint64);
+        return if (value >= 0) -> value as uint64
+            else -> AllOnes - ((-(value + 1)) as uint64);
     };
 
     /// @brief The `int64` whose two's-complement bit pattern is `bits`.
     #NoDiscard
     export let bits_int64 = func(bits: uint64) -> int64 {
-        if (bits < SignBit) {
-            return bits as int64;
-        }
-        return -((AllOnes - bits) as int64) - 1;
+        return if (bits < SignBit) -> bits as int64
+            else -> -((AllOnes - bits) as int64) - 1;
     };
 
     /// @brief The `int32` held in the low 32 bits of `bits`, as protobuf reads an `int32` field.
     #NoDiscard
     export let low_int32 = func(bits: uint64) -> int32 {
         last low = bits & Low32;
-        if (low < 2147483648) {
-            return low as int32;
-        }
-        return ((low as int64) - 4294967296) as int32;
+        return if (low < 2147483648) -> low as int32
+            else -> ((low as int64) - 4294967296) as int32;
     };
 
     /// @brief The zigzag encoding of a 64-bit signed value: 0, -1, 1, -2 become 0, 1, 2, 3.
     #NoDiscard
     export let zigzag64 = func(value: int64) -> uint64 {
-        if (value >= 0) {
-            return (value as uint64) * 2;
-        }
-        return ((-(value + 1)) as uint64) * 2 + 1;
+        return if (value >= 0) -> (value as uint64) * 2
+            else -> ((-(value + 1)) as uint64) * 2 + 1;
     };
 
     /// @brief The 64-bit signed value of a zigzag encoding.
@@ -325,10 +317,8 @@ export let ProtoWire = module (
             if (kind == StartGroup || kind == EndGroup) {
                 return Result<FieldKey>.Err(parse_error(at, "groups are not supported"));
             }
-            if (kind > 5) {
-                return Result<FieldKey>.Err(parse_error(at, "invalid wire type " .. kind.to_string()));
-            }
-            return Result<FieldKey>.Ok(new FieldKey(number as int, kind));
+            return if (kind > 5) -> Result<FieldKey>.Err(parse_error(at, "invalid wire type " .. kind.to_string()))
+                else -> Result<FieldKey>.Ok(new FieldKey(number as int, kind));
         };
 
         /// @brief Reads a varint of at most 10 bytes whose value fits 64 bits.

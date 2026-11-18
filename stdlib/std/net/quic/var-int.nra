@@ -26,10 +26,8 @@ export let VarInt = module (
         if (value <= 16383) {
             return 2;
         }
-        if (value <= 1073741823) {
-            return 4;
-        }
-        return 8;
+        return if (value <= 1073741823) -> 4
+            else -> 8;
     };
 
     /// @brief The shortest encoding of `value`.

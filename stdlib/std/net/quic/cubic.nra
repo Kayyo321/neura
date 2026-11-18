@@ -188,11 +188,8 @@ export let Cubic = module (
     /// windows in bytes; 0 when `w_max` is not above `cwnd_epoch`.
     #Pure
     export let k_millis = func(w_max: int64, cwnd_epoch: int64, max_datagram_size: int64) -> int64 {
-        if (w_max <= cwnd_epoch) {
-            return 0;
-        }
-        // (W_max - cwnd_epoch) / (0.4 * size) seconds^3 = diff * 5 * 10^9 / (2 * size) milliseconds^3.
-        return integer_cube_root((w_max - cwnd_epoch) * 5000000000 / (2 * max_datagram_size));
+        return if (w_max <= cwnd_epoch) -> 0
+            else -> integer_cube_root((w_max - cwnd_epoch) * 5000000000 / (2 * max_datagram_size));
     };
 
     /// @brief W_cubic(t) in bytes for `t_millis` into the epoch (see the module documentation).

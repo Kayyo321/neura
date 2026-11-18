@@ -150,10 +150,8 @@ export let Status = module (
         if (code == 505) {
             return "HTTP Version Not Supported";
         }
-        if (code == 511) {
-            return "Network Authentication Required";
-        }
-        return "";
+        return if (code == 511) -> "Network Authentication Required"
+            else -> "";
     };
 
     /// @brief Whether `code` is in 100 through 599.

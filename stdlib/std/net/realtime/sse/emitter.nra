@@ -84,10 +84,8 @@ export let Emitter = module (
     /// fails.
     #NoDiscard
     export let retry_only = func(millis: int64) -> Result<string> {
-        if (millis < 0) {
-            return fail("the reconnection time is negative");
-        }
-        return Result<string>.Ok("retry: " .. millis.to_string() .. "\n\n");
+        return if (millis < 0) -> fail("the reconnection time is negative")
+            else -> Result<string>.Ok("retry: " .. millis.to_string() .. "\n\n");
     };
 
     /// @brief Writes events to a byte sink, such as the write method of a stream or a response body.

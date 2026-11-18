@@ -78,10 +78,8 @@ export let SrvLookup = module (
         export let lookup = func(service: string, proto: string, domain: string) -> Result<SrvTarget[list]> {
             last answer = resolver.lookup(service_name(service, proto, domain), messages.TypeSrv)?;
             last found = targets_from(answer.records);
-            if (found.length == 1 && found[0].target.is_root()) {
-                return Result<SrvTarget[list]>.Ok(new);
-            }
-            return Result<SrvTarget[list]>.Ok(order_targets(found, random));
+            return if (found.length == 1 && found[0].target.is_root()) -> Result<SrvTarget[list]>.Ok(new)
+                else -> Result<SrvTarget[list]>.Ok(order_targets(found, random));
         };
 
         /// @brief The socket addresses of every target, in target order, each target's addresses in resolver

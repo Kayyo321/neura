@@ -115,10 +115,8 @@ export let Ipv6Addr = module (
             if (high != other.high) {
                 return high < other.high ? Ordering.Less : Ordering.Greater;
             }
-            if (low != other.low) {
-                return low < other.low ? Ordering.Less : Ordering.Greater;
-            }
-            return compare_text(zone, other.zone);
+            return if (low != other.low) -> low < other.low ? Ordering.Less : Ordering.Greater
+                else -> compare_text(zone, other.zone);
         };
 
         /// @brief Tests whether another object is an `Ipv6Addr` with the same value and zone.
@@ -384,10 +382,8 @@ export let Ipv6Addr = module (
                 return a.byte_at(i) < b.byte_at(i) ? Ordering.Less : Ordering.Greater;
             }
         }
-        if (a.byte_length == b.byte_length) {
-            return Ordering.Equal;
-        }
-        return a.byte_length < b.byte_length ? Ordering.Less : Ordering.Greater;
+        return if (a.byte_length == b.byte_length) -> Ordering.Equal
+            else -> a.byte_length < b.byte_length ? Ordering.Less : Ordering.Greater;
     };
 
     /// @brief Decodes one ASCII hex digit, or returns -1.
@@ -398,10 +394,8 @@ export let Ipv6Addr = module (
         if (b >= 97 && b <= 102) {
             return b - 87;
         }
-        if (b >= 65 && b <= 70) {
-            return b - 55;
-        }
-        return -1;
+        return if (b >= 65 && b <= 70) -> b - 55
+            else -> -1;
     };
 
     /// @brief Creates an IPv6 parse error at a UTF-8 byte offset.

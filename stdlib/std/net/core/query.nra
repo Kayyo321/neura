@@ -243,10 +243,8 @@ export let Query = module (
 
         /// @brief The first value at this path, if any.
         export let value = func -> optional.Optional<string> {
-            if (values.length == 0) {
-                return optional.Optional<string>.None;
-            }
-            return optional.Optional<string>.Some(values[0]);
+            return if (values.length == 0) -> optional.Optional<string>.None
+                else -> optional.Optional<string>.Some(values[0]);
         };
 
         /// @brief The names of the children in order.

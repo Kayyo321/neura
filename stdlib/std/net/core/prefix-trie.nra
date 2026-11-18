@@ -82,30 +82,24 @@ export let PrefixTrie = module (
         #NoDiscard
         export let longest_match = func(ip: ips.IpAddr) -> Optional<V> {
             last depth = longest_depth(ip);
-            if (depth < 0) {
-                return Optional<V>.None;
-            }
-            return exact(cidr.of(ip, depth));
+            return if (depth < 0) -> Optional<V>.None
+                else -> exact(cidr.of(ip, depth));
         };
 
         /// @brief The longest stored block that contains `ip`, or None.
         #NoDiscard
         export let longest_match_block = func(ip: ips.IpAddr) -> Optional<cidr.CidrBlock> {
             last depth = longest_depth(ip);
-            if (depth < 0) {
-                return Optional<cidr.CidrBlock>.None;
-            }
-            return Optional<cidr.CidrBlock>.Some(cidr.of(ip, depth));
+            return if (depth < 0) -> Optional<cidr.CidrBlock>.None
+                else -> Optional<cidr.CidrBlock>.Some(cidr.of(ip, depth));
         };
 
         /// @brief The value stored for exactly `block`, or None.
         #NoDiscard
         export let exact = func(block: cidr.CidrBlock) -> Optional<V> {
             last node = find(block);
-            if (node < 0) {
-                return Optional<V>.None;
-            }
-            return values[node];
+            return if (node < 0) -> Optional<V>.None
+                else -> values[node];
         };
 
         /// @brief The number of stored blocks.

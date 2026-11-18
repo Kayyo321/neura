@@ -346,10 +346,8 @@ export let Uri = module (
         if (lowered == "http") {
             return optional.Optional<int>.Some(80);
         }
-        if (lowered == "https") {
-            return optional.Optional<int>.Some(443);
-        }
-        return optional.Optional<int>.None;
+        return if (lowered == "https") -> optional.Optional<int>.Some(443)
+            else -> optional.Optional<int>.None;
     };
 
     /// @brief Collects URI components and builds a checked Uri. Setters without `raw` percent-encode their
@@ -641,10 +639,8 @@ export let Uri = module (
         last zone = strings.index_of(inside, "%25");
         if (zone >= 0) {
             last zone_id = inside.slice(zone + 3, length);
-            if (zone_id.byte_length == 0 || percent.first_invalid(zone_id, percent.EncodeSet.Unreserved) >= 0) {
-                return false;
-            }
-            return valid_ipv6(inside.slice(0, zone));
+            return if (zone_id.byte_length == 0 || percent.first_invalid(zone_id, percent.EncodeSet.Unreserved) >= 0) -> false
+                else -> valid_ipv6(inside.slice(0, zone));
         }
         return valid_ipv6(inside);
     };
@@ -746,10 +742,8 @@ export let Uri = module (
 
     /// @brief The host without IP-literal brackets.
     let unbracket = func(h: string) -> string {
-        if (h.byte_length >= 2 && h.byte_at(0) == 91) {
-            return h.slice(1, h.byte_length - 1);
-        }
-        return h;
+        return if (h.byte_length >= 2 && h.byte_at(0) == 91) -> h.slice(1, h.byte_length - 1)
+            else -> h;
     };
 
     /// @brief Decodes an optional component; an absent one decodes to the empty text.
@@ -830,10 +824,8 @@ export let Uri = module (
 
     /// @brief Keeps a path without authority from starting with `//`.
     let guard_path = func(host: optional.Optional<string>, path: string) -> string {
-        if (optional.is_none<string>(host) && strings.starts_with(path, "//")) {
-            return "/." .. path;
-        }
-        return path;
+        return if (optional.is_none<string>(host) && strings.starts_with(path, "//")) -> "/." .. path
+            else -> path;
     };
 
     /// @brief Reference resolution (section 5.2.2, strict).

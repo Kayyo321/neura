@@ -36,6 +36,8 @@ let ToStringHashTests = module (
     export let test_hosts_file = func {
         last a = hosts.parse("192.0.2.1 www.example.com web\nnot-an-address host\n");
         last b = hosts.parse("192.0.2.1 www.example.com web\nnot-an-address host\n");
+        agree(a, b);
+        differ(a, hosts.parse("192.0.2.2 www.example.com web\n"));
         test.assert_equal_string("HostsFile(1 entries, 1 problems)", a.to_string());
         agree(a.entries()[0], b.entries()[0]);
         test.assert_equal_string("192.0.2.1 www.example.com web", a.entries()[0].to_string());

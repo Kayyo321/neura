@@ -232,17 +232,13 @@ export let Pool = module (
             }
             match (retry_after(response, now)) {
                 Optional.Some(wait) => {
-                    if (wait.to_nanos() > max_wait.to_nanos()) {
-                        return RetryDecision.Stop;
-                    }
-                    return RetryDecision.RetryAfter(wait);
+                    return if (wait.to_nanos() > max_wait.to_nanos()) -> RetryDecision.Stop
+                        else -> RetryDecision.RetryAfter(wait);
                 },
                 Optional.None => {},
             }
-            if (status == 429) {
-                return RetryDecision.Stop;
-            }
-            return RetryDecision.RetryAfter(backoff(attempt));
+            return if (status == 429) -> RetryDecision.Stop
+                else -> RetryDecision.RetryAfter(backoff(attempt));
         };
 
         /// @brief The decision for a transport error.

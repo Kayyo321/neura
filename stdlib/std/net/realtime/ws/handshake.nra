@@ -533,10 +533,8 @@ export let Handshake = module (
             return fail<Header>("malformed header line: " .. line);
         }
         last name = line.slice(0, colon);
-        if (strings.contains(name, " ") || strings.contains(name, "\t")) {
-            return fail<Header>("malformed header name: " .. name);
-        }
-        return Result<Header>.Ok(new Header(name, strings.trim(line.slice(colon + 1, line.byte_length))));
+        return if (strings.contains(name, " ") || strings.contains(name, "\t")) -> fail<Header>("malformed header name: " .. name)
+            else -> Result<Header>.Ok(new Header(name, strings.trim(line.slice(colon + 1, line.byte_length))));
     };
 
     /// @brief Whether the version text is HTTP/1.1 or a later HTTP version.

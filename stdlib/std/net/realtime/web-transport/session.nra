@@ -133,10 +133,8 @@ export let Session = module (
         }
         last authority = value_of(fields, ":authority");
         last path = value_of(fields, ":path");
-        if (authority.byte_length == 0 || path.byte_length == 0) {
-            return fail<SessionRequest>("the :authority and :path fields are required");
-        }
-        return Result<SessionRequest>.Ok(new SessionRequest(authority, path, value_of(fields, "origin")));
+        return if (authority.byte_length == 0 || path.byte_length == 0) -> fail<SessionRequest>("the :authority and :path fields are required")
+            else -> Result<SessionRequest>.Ok(new SessionRequest(authority, path, value_of(fields, "origin")));
     };
 
     /// @brief Whether a response status accepts the session (2xx).
@@ -248,10 +246,8 @@ export let Session = module (
         #NoDiscard
         export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>> {
             last bytes = quic_stream_read(connection, stream, 65536)?;
-            if (bytes.length == 0) {
-                return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
-            }
-            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(bytes));
+            return if (bytes.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(bytes));
         };
 
         /// @brief Finishes the local side of a stream (QUIC FIN).

@@ -276,10 +276,8 @@ export let Name = module (
             }
             total = total + 1 + label.length;
         }
-        if (total > MaxNameLength) {
-            return "name longer than 255 bytes";
-        }
-        return "";
+        return if (total > MaxNameLength) -> "name longer than 255 bytes"
+            else -> "";
     };
 
     /// @brief A parse error.

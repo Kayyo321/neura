@@ -686,10 +686,8 @@ export let Wire = module (
         }
         for (let i = start + 1; i < lines.length; i++) {
             if (lines[i].byte_length == 0) {
-                if (i != lines.length - 1) {
-                    return fail<string[list]>(400, "bytes after the end of the head");
-                }
-                return Result<string[list]>.Ok(lines);
+                return if (i != lines.length - 1) -> fail<string[list]>(400, "bytes after the end of the head")
+                    else -> Result<string[list]>.Ok(lines);
             }
         }
         return fail<string[list]>(400, "head does not end with an empty line");
@@ -728,10 +726,8 @@ export let Wire = module (
                 i++;
             }
         }
-        if (start != count) {
-            return fail<string[list]>(400, "line without a line end");
-        }
-        return Result<string[list]>.Ok(lines);
+        return if (start != count) -> fail<string[list]>(400, "line without a line end")
+            else -> Result<string[list]>.Ok(lines);
     };
 
     /// @brief The fields of lines[from, to), all non-empty.
@@ -801,10 +797,8 @@ export let Wire = module (
                 return fail<bool>(501, "transfer coding " .. name .. " is not implemented");
             }
         }
-        if (chunked_count > 1) {
-            return fail<bool>(400, "chunked applied more than once");
-        }
-        return Result<bool>.Ok(last_chunked);
+        return if (chunked_count > 1) -> fail<bool>(400, "chunked applied more than once")
+            else -> Result<bool>.Ok(last_chunked);
     };
 
     /// @brief The value of 1*DIGIT text, or -1 when it is not digits or exceeds int64.
@@ -834,10 +828,8 @@ export let Wire = module (
         }
         last major = text.byte_at(5);
         last minor = text.byte_at(7);
-        if (major < 48 || major > 57 || minor < 48 || minor > 57) {
-            return -1;
-        }
-        return (major - 48) as int;
+        return if (major < 48 || major > 57 || minor < 48 || minor > 57) -> -1
+            else -> (major - 48) as int;
     };
 
     /// @brief The minor digit of a version accepted by `version_major`.

@@ -53,10 +53,8 @@ export let CloseStatus = module (
         if (code >= 1000 && code <= 1003) {
             return true;
         }
-        if (code >= 1007 && code <= 1011) {
-            return true;
-        }
-        return code >= 3000 && code <= 4999;
+        return if (code >= 1007 && code <= 1011) -> true
+            else -> code >= 3000 && code <= 4999;
     };
 
     /// @brief The status and reason of a close frame. Status 1005 stands for a frame without a body.
@@ -177,9 +175,7 @@ export let CloseStatus = module (
         for (let i = 2; i < body.length; i++) {
             reason_bytes.append(body[i]);
         }
-        if (utf8.validate(reason_bytes) >= 0) {
-            return Result<CloseReason>.Err(failure(InvalidPayload, "close reason is not UTF-8"));
-        }
-        return Result<CloseReason>.Ok(new CloseReason(code, strings.from_bytes_lossy(reason_bytes)));
+        return if (utf8.validate(reason_bytes) >= 0) -> Result<CloseReason>.Err(failure(InvalidPayload, "close reason is not UTF-8"))
+            else -> Result<CloseReason>.Ok(new CloseReason(code, strings.from_bytes_lossy(reason_bytes)));
     };
 );
