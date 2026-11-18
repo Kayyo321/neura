@@ -1,0 +1,275 @@
+let base64 = import:Std.Encoding.Base64;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The PHC string format for password hashes (Stdlib.md section 20.6):
+/// `$<id>[$v=<version>][$<name>=<value>(,<name>=<value>)*][$<salt>[$<hash>]]`, as in
+/// `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`.
+///
+/// Identifiers and parameter names are 1 to 32 characters of a-z, 0-9 and '-'; parameter values are 1 or
+/// more characters of a-z, A-Z, 0-9, '/', '+', '.' and '-'; salt and hash are standard Base64 without
+/// padding ("B64" of the PHC specification).
+/// @see [Std.Crypto.Kdf.Phc](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Phc)
+#Since("0.3.0")
+export let Phc = module (
+    /// @brief One parsed or built PHC string. A version of -1 means none; an empty salt or hash means the field
+    /// is absent (a hash needs a salt). `to_string` gives the canonical encoding, which is also what `equals`
+    /// and `hash_code` compare: a PHC string is a stored verifier, not a secret. The constructor copies the
+    /// lists it is given; do not change `salt` or `hash` afterwards.
+    #[Final, Since("0.3.0")]
+    export let PhcString = class (
+        /// @brief The function identifier, such as "argon2id".
+        export last algorithm: string;
+        /// @brief The `v=` version, or -1.
+        export last version: int;
+        last names: string[list];
+        last values: string[list];
+        /// @brief The salt bytes (empty when absent).
+        export last salt: uint8[list];
+        /// @brief The hash bytes (empty when absent).
+        export last hash: uint8[list];
+
+        /// @brief Builds a PHC string; parameter names and values are given in order. An invalid identifier,
+        /// name or value, lists of different lengths, or a hash without a salt traps with "invalid argument:
+        /// PHC ...".
+        export let init = func(id: string, version_number: int, parameter_names: string[list],
+                parameter_values: string[list], salt_bytes: uint8[list], hash_bytes: uint8[list]) {
+            if (!is_name(id)) {
+                trap_with_message("invalid argument: PHC identifier");
+            }
+            if (parameter_names.length != parameter_values.length) {
+                trap_with_message("invalid argument: PHC parameter lists differ in length");
+            }
+            for (let i = 0; i < parameter_names.length; i++) {
+                if (!is_name(parameter_names[i]) || !is_value(parameter_values[i])) {
+                    trap_with_message("invalid argument: PHC parameter");
+                }
+            }
+            if (hash_bytes.length > 0 && salt_bytes.length == 0) {
+                trap_with_message("invalid argument: PHC hash without salt");
+            }
+            algorithm = id;
+            version = version_number;
+            names = copy_strings(parameter_names);
+            values = copy_strings(parameter_values);
+            salt = copy_bytes(salt_bytes);
+            hash = copy_bytes(hash_bytes);
+        };
+
+        /// @brief The value of the named parameter.
+        export let parameter = func(name: string) -> Optional<string> {
+            for (let i = 0; i < names.length; i++) {
+                if (names[i] == name) {
+                    return Optional<string>.Some(values[i]);
+                }
+            }
+            return Optional<string>.None;
+        };
+
+        /// @brief The parameter names, in order.
+        export let parameter_names = func -> string[list] {
+            let out: string[list] = new;
+            for (let name in names) {
+                out.append(name);
+            }
+            return out;
+        };
+
+        export let.override to_string = func -> string {
+            let text = "$" + algorithm;
+            if (version >= 0) {
+                text += "$v=" + version.to_string();
+            }
+            if (names.length > 0) {
+                text += "$";
+                for (let i = 0; i < names.length; i++) {
+                    if (i > 0) {
+                        text += ",";
+                    }
+                    text += names[i] + "=" + values[i];
+                }
+            }
+            if (salt.length > 0) {
+                text += "$" + base64.encode_unpadded(salt);
+                if (hash.length > 0) {
+                    text += "$" + base64.encode_unpadded(hash);
+                }
+            }
+            return text;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is PhcString)) {
+                return false;
+            }
+            return to_string() == (other as PhcString).to_string();
+        };
+
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+    );
+
+    let copy_strings = func(items: string[list]) -> string[list] {
+        let out: string[list] = new;
+        for (let item in items) {
+            out.append(item);
+        }
+        return out;
+    };
+
+    let copy_bytes = func(items: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let item in items) {
+            out.append(item);
+        }
+        return out;
+    };
+
+    let is_name = func(text: string) -> bool {
+        if (text.byte_length < 1 || text.byte_length > 32) {
+            return false;
+        }
+        for (let i = 0; i < text.byte_length; i++) {
+            last c = text.byte_at(i);
+            if (!((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 45)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let is_value = func(text: string) -> bool {
+        if (text.byte_length < 1) {
+            return false;
+        }
+        for (let i = 0; i < text.byte_length; i++) {
+            last c = text.byte_at(i);
+            if (!((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 47 || c == 43
+                    || c == 46 || c == 45)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let fail = func(offset: int, message: string) -> Result<PhcString> =>
+        Result<PhcString>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Parses a PHC string. A malformed string fails with a `Parse` error at the offending field.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(text: string) -> Result<PhcString> {
+        if (text.byte_length == 0 || text.byte_at(0) != 36) {
+            return fail(0, "PHC string must start with '$'");
+        }
+        // Split at '$' into fields, remembering where each starts.
+        let fields: string[list] = new;
+        let starts: int[list] = new;
+        let start = 1;
+        for (let i = 1; i <= text.byte_length; i++) {
+            if (i == text.byte_length || text.byte_at(i) == 36) {
+                fields.append(text.slice(start, i));
+                starts.append(start);
+                start = i + 1;
+            }
+        }
+        if (!is_name(fields[0])) {
+            return fail(1, "invalid PHC identifier");
+        }
+        let index = 1;
+        let version = -1;
+        if (index < fields.length && fields[index].byte_length > 2 && fields[index].slice(0, 2) == "v=") {
+            last digits = fields[index].slice(2, fields[index].byte_length);
+            last parsed = parse_version(digits);
+            if (parsed < 0) {
+                return fail(starts[index] + 2, "invalid PHC version");
+            }
+            version = parsed;
+            index++;
+        }
+        let names: string[list] = new;
+        let values: string[list] = new;
+        if (index < fields.length && contains_equals(fields[index])) {
+            last field = fields[index];
+            let part_start = 0;
+            for (let i = 0; i <= field.byte_length; i++) {
+                if (i == field.byte_length || field.byte_at(i) == 44) {
+                    last part = field.slice(part_start, i);
+                    last at = equals_at(part);
+                    if (at < 0) {
+                        return fail(starts[index] + part_start, "PHC parameter needs '='");
+                    }
+                    last name = part.slice(0, at);
+                    last value = part.slice(at + 1, part.byte_length);
+                    if (!is_name(name) || !is_value(value)) {
+                        return fail(starts[index] + part_start, "invalid PHC parameter");
+                    }
+                    names.append(name);
+                    values.append(value);
+                    part_start = i + 1;
+                }
+            }
+            index++;
+        }
+        let salt: uint8[list] = new;
+        let hash: uint8[list] = new;
+        if (index < fields.length) {
+            match (base64.decode_unpadded(fields[index])) {
+                Result.Ok(bytes) => {
+                    salt = bytes;
+                },
+                Result.Err(e) => {
+                    return fail(starts[index], "invalid PHC salt");
+                },
+            }
+            if (salt.length == 0) {
+                return fail(starts[index], "empty PHC salt");
+            }
+            index++;
+        }
+        if (index < fields.length) {
+            match (base64.decode_unpadded(fields[index])) {
+                Result.Ok(bytes) => {
+                    hash = bytes;
+                },
+                Result.Err(e) => {
+                    return fail(starts[index], "invalid PHC hash");
+                },
+            }
+            if (hash.length == 0) {
+                return fail(starts[index], "empty PHC hash");
+            }
+            index++;
+        }
+        if (index < fields.length) {
+            return fail(starts[index], "unexpected PHC field");
+        }
+        return Result<PhcString>.Ok(new PhcString(fields[0], version, names, values, salt, hash));
+    };
+
+    /// @brief A decimal version of at most 9 digits, or -1.
+    let parse_version = func(digits: string) -> int {
+        if (digits.byte_length < 1 || digits.byte_length > 9) {
+            return -1;
+        }
+        let value = 0;
+        for (let i = 0; i < digits.byte_length; i++) {
+            last c = digits.byte_at(i);
+            if (c < 48 || c > 57) {
+                return -1;
+            }
+            value = value * 10 + ((c - 48) as int);
+        }
+        return value;
+    };
+
+    let contains_equals = func(text: string) -> bool => equals_at(text) >= 0;
+
+    let equals_at = func(text: string) -> int {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 61) {
+                return i;
+            }
+        }
+        return -1;
+    };
+);

@@ -1,0 +1,101 @@
+let argon2 = import:Std.Crypto.Kdf.Argon2;
+let hex = import:Std.Encoding.Hex;
+let hkdf = import:Std.Crypto.Kdf.Hkdf;
+let int32s = import:Std.Core.Int32;
+let pbkdf2 = import:Std.Crypto.Kdf.Pbkdf2;
+let scrypt = import:Std.Crypto.Kdf.Scrypt;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let test = import:Std.Test;
+let vectors = import:KdfVectors;
+
+// HKDF against cryptography, PBKDF2 and scrypt against hashlib, Argon2id against RFC 9106 and openssl
+// (support/kdf-vectors.nra, scripts/crypto-vectors/gen-kdf.py).
+let KdfTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let number = func(text: string) -> int => test.assert_ok(int32s.parse(text));
+
+    let check_hkdf = func<H: StreamingDigest<H>>(rows: string[], i: int) {
+        last ikm = decode(rows[i + 1]);
+        last salt = decode(rows[i + 2]);
+        last info = decode(rows[i + 3]);
+        last length = number(rows[i + 4]);
+        last prk = hkdf.extract<H>(salt, ikm);
+        test.assert_equal_string(rows[i + 5], hex.encode(prk));
+        test.assert_equal_string(rows[i + 6], hex.encode(hkdf.expand<H>(prk, info, length)));
+        test.assert_equal_string(rows[i + 6], hex.encode(hkdf.derive<H>(salt, ikm, info, length)));
+    };
+
+    export let test_hkdf = func {
+        last rows = vectors.hkdf;
+        for (let i = 0; i < rows.length; i += 7) {
+            last name = rows[i];
+            if (name == "sha224") {
+                check_hkdf<sha2.Sha224>(rows, i);
+            } else if (name == "sha256") {
+                check_hkdf<sha2.Sha256>(rows, i);
+            } else if (name == "sha384") {
+                check_hkdf<sha2.Sha384>(rows, i);
+            } else if (name == "sha512") {
+                check_hkdf<sha2.Sha512>(rows, i);
+            } else {
+                check_hkdf<sha3.Sha3_256>(rows, i);
+            }
+        }
+        test.assert_equal_int32(105, rows.length);
+    };
+
+    let pbkdf2_of = func<H: StreamingDigest<H>>(rows: string[], i: int) -> string =>
+        hex.encode(pbkdf2.derive<H>(decode(rows[i + 1]), decode(rows[i + 2]), number(rows[i + 3]), number(rows[i + 4])));
+
+    export let test_pbkdf2 = func {
+        last rows = vectors.pbkdf2;
+        for (let i = 0; i < rows.length; i += 6) {
+            last name = rows[i];
+            let out = "";
+            if (name == "sha224") {
+                out = pbkdf2_of<sha2.Sha224>(rows, i);
+            } else if (name == "sha256") {
+                out = pbkdf2_of<sha2.Sha256>(rows, i);
+            } else if (name == "sha384") {
+                out = pbkdf2_of<sha2.Sha384>(rows, i);
+            } else if (name == "sha512") {
+                out = pbkdf2_of<sha2.Sha512>(rows, i);
+            } else {
+                out = pbkdf2_of<sha3.Sha3_256>(rows, i);
+            }
+            test.assert_equal_string(rows[i + 5], out);
+        }
+        test.assert_equal_int32(120, rows.length);
+    };
+
+    export let test_scrypt = func {
+        last rows = vectors.scrypt;
+        for (let i = 0; i < rows.length; i += 7) {
+            last out = scrypt.derive(decode(rows[i]), decode(rows[i + 1]), number(rows[i + 2]), number(rows[i + 3]),
+                number(rows[i + 4]), number(rows[i + 5]));
+            test.assert_equal_string(rows[i + 6], hex.encode(out));
+        }
+    };
+
+    export let test_argon2id = func {
+        last rows = vectors.argon2id;
+        for (let i = 0; i < rows.length; i += 10) {
+            last params = new argon2.Argon2Params(number(rows[i + 4]), number(rows[i + 5]), number(rows[i + 6]),
+                number(rows[i + 7]));
+            last tag = argon2.argon2id_with(decode(rows[i]), decode(rows[i + 1]), decode(rows[i + 2]),
+                decode(rows[i + 3]), params);
+            test.assert_equal_string(rows[i + 8], hex.encode(tag));
+        }
+        test.assert_equal_int32(70, rows.length);
+    };
+
+    export let test_argon2_params = func {
+        last params = new argon2.Argon2Params(64, 3, 1, 32);
+        test.assert(params.equals(new argon2.Argon2Params(64, 3, 1, 32)));
+        test.assert(!params.equals(new argon2.Argon2Params(64, 2, 1, 32)));
+        test.assert_equal_int64(params.hash_code() as int64, new argon2.Argon2Params(64, 3, 1, 32).hash_code() as int64);
+        test.assert_equal_string("Argon2Params(m=64, t=3, p=1, length=32)", params.to_string());
+    };
+);

@@ -1,0 +1,69 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Balloon hashing (Boneh, Corrigan-Gibbs and Schechter, 2016, Algorithm 1) over any digest, with
+/// delta = 3 (Stdlib.md section 20.6).
+///
+/// The paper leaves the byte encoding open; this module fixes it: every integer (the counter, and t, m and i
+/// of the index block) is 8 bytes little-endian, a hash of several values hashes their concatenation, and
+/// to_int reads the first 8 bytes of a digest little-endian. No standard test vectors exist; the tests compare
+/// with an independent Python reference (scripts/crypto-vectors/balloon_reference.py), and the output matches
+/// another implementation only if it makes the same choices.
+/// @see [Std.Crypto.Kdf.Balloon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Balloon)
+#Since("0.3.0")
+export let Balloon = module (
+    /// @brief The H-length Balloon hash of the password and salt with `space_cost` blocks of memory and
+    /// `time_cost` mixing rounds; a cost below 1 traps with "invalid argument: Balloon costs".
+    #[NoDiscard, Since("0.3.0")]
+    export let derive = func<H: StreamingDigest<H>>(password: uint8[list], salt: uint8[list], space_cost: int,
+            time_cost: int) -> uint8[list] {
+        crypto_policy.require(Algorithm.Balloon);
+        if (space_cost < 1 || time_cost < 1) {
+            trap_with_message("invalid argument: Balloon costs");
+        }
+        let counter: uint64 = 0;
+        let buffer: uint8[list][list] = new;
+        buffer.append(hash3<H>(counter, password, salt));
+        counter += 1;
+        for (let m = 1; m < space_cost; m++) {
+            buffer.append(hash3<H>(counter, buffer[m - 1], new));
+            counter += 1;
+        }
+        for (let t = 0; t < time_cost; t++) {
+            for (let m = 0; m < space_cost; m++) {
+                last previous = buffer[(m + space_cost - 1) % space_cost];
+                buffer[m] = hash3<H>(counter, previous, buffer[m]);
+                counter += 1;
+                for (let i = 0; i < 3; i++) {
+                    let index_block: uint8[list] = new;
+                    words.append64_le(index_block, t as uint64);
+                    words.append64_le(index_block, m as uint64);
+                    words.append64_le(index_block, i as uint64);
+                    last chosen = hash3<H>(counter, salt, index_block);
+                    counter += 1;
+                    last other = (words.load64_le(chosen, 0) % (space_cost as uint64)) as int;
+                    buffer[m] = hash3<H>(counter, buffer[m], buffer[other]);
+                    counter += 1;
+                }
+            }
+        }
+        last out = words.copy(buffer[space_cost - 1]);
+        for (let block in buffer) {
+            words.wipe(block);
+        }
+        return out;
+    };
+
+    /// @brief H(LE64(counter) || a || b).
+    let hash3 = func<H: StreamingDigest<H>>(counter: uint64, a: uint8[list], b: uint8[list]) -> uint8[list] {
+        let digest = H.create();
+        let prefix: uint8[list] = new;
+        words.append64_le(prefix, counter);
+        digest.update(prefix);
+        digest.update(a);
+        digest.update(b);
+        return digest.finish();
+    };
+);

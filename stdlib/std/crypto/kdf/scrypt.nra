@@ -1,0 +1,98 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let pbkdf2 = import:Std.Crypto.Kdf.Pbkdf2;
+let salsa20 = import:Std.Crypto.Internal.Salsa20;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The scrypt password-based key derivation function of RFC 7914 (Stdlib.md section 20.6).
+///
+/// The working memory is 128 * r * N bytes, held as 32-bit words; a call whose memory would exceed 1 GiB traps
+/// before allocating.
+/// @see [Std.Crypto.Kdf.Scrypt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Scrypt)
+#Since("0.3.0")
+export let Scrypt = module (
+    /// @brief `length` bytes derived from the password and salt with cost N (a power of two above 1), block size
+    /// r and parallelism p. Other parameters, or r * p of 2^30 or more, trap with "invalid argument: scrypt
+    /// parameters".
+    #[NoDiscard, Since("0.3.0")]
+    export let derive = func(password: uint8[list], salt: uint8[list], n: int, r: int, p: int, length: int)
+            -> uint8[list] {
+        crypto_policy.require(Algorithm.Scrypt);
+        if (n < 2 || (n & (n - 1)) != 0 || r < 1 || p < 1 || (r as int64) * (p as int64) >= 1073741824
+                || (n as int64) * (r as int64) * 128 > 1073741824 || length < 0) {
+            trap_with_message("invalid argument: scrypt parameters");
+        }
+        let blocks = pbkdf2.derive<sha2.Sha256>(password, salt, 1, p * 128 * r);
+        last words_per_block = 32 * r;
+        let x: uint32[list] = new;
+        let v: uint32[list] = new;
+        let y: uint32[list] = new;
+        let scratch: uint32[list] = new;
+        for (let i = 0; i < 16; i++) {
+            scratch.append(0);
+        }
+        for (let i = 0; i < words_per_block; i++) {
+            x.append(0);
+            y.append(0);
+        }
+        for (let i = 0; i < n * words_per_block; i++) {
+            v.append(0);
+        }
+        for (let block = 0; block < p; block++) {
+            last base = block * 128 * r;
+            for (let i = 0; i < words_per_block; i++) {
+                x[i] = words.load32_le(blocks, base + 4 * i);
+            }
+            // ROMix.
+            for (let i = 0; i < n; i++) {
+                for (let k = 0; k < words_per_block; k++) {
+                    v[i * words_per_block + k] = x[k];
+                }
+                block_mix(x, y, scratch, r);
+            }
+            for (let i = 0; i < n; i++) {
+                last j = (x[(2 * r - 1) * 16] & ((n - 1) as uint32)) as int;
+                for (let k = 0; k < words_per_block; k++) {
+                    x[k] = x[k] ^ v[j * words_per_block + k];
+                }
+                block_mix(x, y, scratch, r);
+            }
+            let encoded: uint8[list] = new;
+            for (let w in x) {
+                words.append32_le(encoded, w);
+            }
+            for (let i = 0; i < encoded.length; i++) {
+                blocks[base + i] = encoded[i];
+            }
+        }
+        for (let i = 0; i < v.length; i++) {
+            v[i] = 0;
+        }
+        last out = pbkdf2.derive<sha2.Sha256>(password, blocks, 1, length);
+        words.wipe(blocks);
+        return out;
+    };
+
+    /// @brief scryptBlockMix: X becomes (Y0, Y2, ..., Y1, Y3, ...), where Yi = Salsa20/8(Y(i-1) xor Xi).
+    let block_mix = func(x: uint32[list], y: uint32[list], scratch: uint32[list], r: int) {
+        let t: uint32[list] = new;
+        for (let k = 0; k < 16; k++) {
+            t.append(x[(2 * r - 1) * 16 + k]);
+        }
+        for (let i = 0; i < 2 * r; i++) {
+            for (let k = 0; k < 16; k++) {
+                t[k] = t[k] ^ x[16 * i + k];
+            }
+            salsa20.core8(t, 0, scratch);
+            // Even blocks go to the first half, odd blocks to the second.
+            last target = (i % 2 == 0 ? i / 2 : r + i / 2) * 16;
+            for (let k = 0; k < 16; k++) {
+                y[target + k] = t[k];
+            }
+        }
+        for (let k = 0; k < 32 * r; k++) {
+            x[k] = y[k];
+        }
+    };
+);

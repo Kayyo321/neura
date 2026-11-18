@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): denied: Argon2id is not allowed under the Fips140_3 policy
+let argon2 = import:Std.Crypto.Kdf.Argon2;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let pbkdf2 = import:Std.Crypto.Kdf.Pbkdf2;
+let program = import:Std.Program;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        let _ = pbkdf2.derive<sha2.Sha256>(new([1]), new([2]), 1, 16);
+        let _ = argon2.argon2id(new([1]), new([1, 2, 3, 4, 5, 6, 7, 8]), new argon2.Argon2Params(8, 1, 1, 32));
+        return program.ExitCode.Ok;
+    };
+);

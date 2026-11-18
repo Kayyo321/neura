@@ -1508,3 +1508,16 @@ Every digest checks the policy when it is created. An `update` after the output 
 | `Kmac` | `Kmac128` and `Kmac256` (SP 800-185, section 4). `new Kmac128(key)` gives a 32-byte tag (64 for `Kmac256`); `new Kmac128(key, customization, length)` takes any length of at least 4 bytes. `finish_xof(count)` and `squeeze` give KMACXOF. The functions are `kmac128(key, data, length, customization)`, `kmac128_xof` and the same for 256. |
 | `Poly1305` | The one-time authenticator of RFC 8439 under a 32-byte key, with `mac(key, message)`. The key must not be reused. The final reduction selects with a mask. |
 | `AesCmac` | AES-CMAC (SP 800-38B, RFC 4493) with 16-, 24- or 32-byte keys, and `mac(key, message)`. |
+
+### 20.6 `Std.Crypto.Kdf`
+
+| Module | Contract |
+| --- | --- |
+| `Hkdf` | RFC 5869 over any digest: `extract<H>(salt, input_key)` (an empty salt is HashLen zero bytes), `expand<H>(prk, info, length)` (traps above 255 × HashLen), `derive<H>(salt, input_key, info, length)`, and `expand_label<H>(prk, label, length)`, which puts a domain-separation label in `info`. |
+| `Pbkdf2` | `derive<H>(password, salt, iterations, length)` (SP 800-132, RFC 8018). Fewer than one iteration traps. |
+| `Scrypt` | `derive(password, salt, n, r, p, length)` (RFC 7914). It traps when N is not a power of two above 1, when r·p ≥ 2^30, or when 128·r·N exceeds 1 GiB. |
+| `Argon2` | Argon2id version 0x13 (RFC 9106). `Argon2Params(memory_kib, iterations, parallelism, tag_length)` is an immutable value that traps on out-of-range values. `argon2id(password, salt, params)` and `argon2id_with(password, salt, secret, associated_data, params)`. A salt under 8 bytes traps. Lanes are filled one after another, which gives the result of parallel filling. Argon2d and Argon2i are not offered. |
+| `Balloon` | `derive<H>(password, salt, space_cost, time_cost)`, single-buffer Balloon hashing with delta = 3 over any digest. The paper leaves the encodings open. This library uses 8-byte little-endian counters and indices, concatenated hash inputs, and `to_int` as the first 8 digest bytes little-endian modulo `space_cost`. No standard test vectors exist. |
+| `Phc` | `PhcString(id, version, names, values, salt, hash)` and `parse(text) -> Result<PhcString>` for the PHC string format (`$id$v=19$m=65536,t=3,p=4$salt$hash`, B64 without padding). Malformed text is a `Parse` error at the offending offset. `to_string` is the canonical encoding, which `equals` and `hash_code` use. |
+| `PasswordHash` | `hash_password(password, salt, params)` gives an argon2id PHC string; `hash_password_scrypt(password, salt, log2_n, r, p, length)` gives a scrypt one. `verify_password(password, encoded) -> Result<bool>` handles argon2id v=19 and scrypt and compares in constant time; an unknown function or bad parameters is `Custom` code `crypto.unsupported`. `needs_rehash(encoded, wanted)` is true unless the string is argon2id v=19 with exactly `wanted`'s parameters. |
+| `Calibration` | `calibrate_argon2id(clock, target, parallelism, max_memory_kib) -> Result<Argon2Params>` measures on the given `Std.Time` clock. It starts at 8 KiB per lane and one pass, doubles memory while a run is faster than the target and within the cap, then adds passes up to 10. Its result depends on the host and is not deterministic. |

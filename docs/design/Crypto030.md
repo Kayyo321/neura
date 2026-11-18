@@ -51,6 +51,13 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | Poly1305 (2.4) | KAT | `cryptography` 43, including all-ones keys and messages for the final carry | implemented |
 | AES-CMAC (2.4) | KAT | `cryptography` 43, 128/192/256-bit keys, 0 to 100 bytes | implemented |
 | Constant-time verification that refuses truncated tags (2.4) | logic | `verify` tests with truncated and altered tags | implemented |
+| HKDF (2.8) | KAT | `cryptography` 43 over SHA-224/256/384/512 and SHA3-256: 15 cases, including empty salt and info, outputs up to 3 × HashLen + 5; PRK from Python `hmac` | implemented |
+| PBKDF2 (2.8) | KAT | `hashlib.pbkdf2_hmac`: 20 cases over 5 hashes, dkLen up to 100, up to 10 iterations | implemented |
+| scrypt (2.8) | KAT | `hashlib.scrypt`: 5 cases, including RFC 7914's ("", "", 16, 1, 1, 64), r = 3, p = 3 | implemented |
+| Argon2id (2.8) | KAT | RFC 9106 section 5.3 (32 KiB, t = 3, p = 4, with secret and associated data) and 6 `openssl kdf ARGON2ID` cases: m 8 to 40, t 1 to 3, p 1 to 3, tags 4 to 100 bytes | implemented |
+| Balloon hashing (2.8) | logic | no standard vectors exist; an independent Python reference from the paper's Algorithm 1 (`balloon_reference.py`), 5 cases over SHA-256, SHA-512 and SHA3-256 | implemented |
+| PHC strings, `needs_rehash`, password hashing and verification (2.8) | logic | round trips, 11 rejections, verification against an `openssl` tag | implemented |
+| Calibration to a target latency (2.8) | logic over host data | a deterministic test clock | implemented over a caller-supplied `Std.Time` clock |
 
 ## Runtime needs
 
@@ -65,3 +72,6 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 1. `OutLen` became the static requirement `output_length()`, because Neura has no value type parameters.
 2. `Signer` and `Verifier` are named by their signature type, and a KEM by its ciphertext type, because one class may not implement two instances of `CryptographicPrimitive` (`E0503`).
 3. Tests live in one area per package, `tests/stdlib/crypto-<package>/`, with each package's generated vectors under its `support/`. They are not in a single `tests/stdlib/crypto/`. Each area is a separate ctest entry, so the packages run in parallel.
+4. Balloon hashing fixes the encodings the paper leaves open: 8-byte little-endian integers, concatenated hash inputs, and `to_int` as the first 8 digest bytes little-endian modulo `space_cost`.
+5. Only Argon2id is offered, not Argon2d or Argon2i. `needs_rehash` asks for a rehash on any parameter difference, not only on an upgrade. PHC strings cover argon2id and scrypt, not passlib's PBKDF2 form.
+6. Calibration takes a `Clock` and tunes memory before passes, as RFC 9106, section 4 recommends. It stops at 10 passes.

@@ -117,6 +117,14 @@ Hashes, MACs, key derivation, authenticated encryption, and secure random genera
 | [`Std.Crypto.Hash.Sha2`](Stdlib-Crypto-Sha2) | [Contracts](Stdlib-Crypto-Sha2#detailed-contracts) | [Declarations](Stdlib-Crypto-Sha2#exported-declarations) |
 | [`Std.Crypto.Hash.Sha3`](Stdlib-Crypto-Sha3) | [Contracts](Stdlib-Crypto-Sha3#detailed-contracts) | [Declarations](Stdlib-Crypto-Sha3#exported-declarations) |
 | [`Std.Crypto.Hash.TupleHash`](Stdlib-Crypto-TupleHash) | [Contracts](Stdlib-Crypto-TupleHash#detailed-contracts) | [Declarations](Stdlib-Crypto-TupleHash#exported-declarations) |
+| [`Std.Crypto.Kdf.Argon2`](Stdlib-Crypto-Argon2) | [Contracts](Stdlib-Crypto-Argon2#detailed-contracts) | [Declarations](Stdlib-Crypto-Argon2#exported-declarations) |
+| [`Std.Crypto.Kdf.Balloon`](Stdlib-Crypto-Balloon) | [Contracts](Stdlib-Crypto-Balloon#detailed-contracts) | [Declarations](Stdlib-Crypto-Balloon#exported-declarations) |
+| [`Std.Crypto.Kdf.Calibration`](Stdlib-Crypto-Calibration) | [Contracts](Stdlib-Crypto-Calibration#detailed-contracts) | [Declarations](Stdlib-Crypto-Calibration#exported-declarations) |
+| [`Std.Crypto.Kdf.Hkdf`](Stdlib-Crypto-Hkdf) | [Contracts](Stdlib-Crypto-Hkdf#detailed-contracts) | [Declarations](Stdlib-Crypto-Hkdf#exported-declarations) |
+| [`Std.Crypto.Kdf.PasswordHash`](Stdlib-Crypto-PasswordHash) | [Contracts](Stdlib-Crypto-PasswordHash#detailed-contracts) | [Declarations](Stdlib-Crypto-PasswordHash#exported-declarations) |
+| [`Std.Crypto.Kdf.Pbkdf2`](Stdlib-Crypto-Pbkdf2) | [Contracts](Stdlib-Crypto-Pbkdf2#detailed-contracts) | [Declarations](Stdlib-Crypto-Pbkdf2#exported-declarations) |
+| [`Std.Crypto.Kdf.Phc`](Stdlib-Crypto-Phc) | [Contracts](Stdlib-Crypto-Phc#detailed-contracts) | [Declarations](Stdlib-Crypto-Phc#exported-declarations) |
+| [`Std.Crypto.Kdf.Scrypt`](Stdlib-Crypto-Scrypt) | [Contracts](Stdlib-Crypto-Scrypt#detailed-contracts) | [Declarations](Stdlib-Crypto-Scrypt#exported-declarations) |
 | [`Std.Crypto.KeyEncapsulation`](Stdlib-Crypto-KeyEncapsulation) | [Contracts](Stdlib-Crypto-KeyEncapsulation#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyEncapsulation#exported-declarations) |
 | [`Std.Crypto.KeyStoreProvider`](Stdlib-Crypto-KeyStoreProvider) | [Contracts](Stdlib-Crypto-KeyStoreProvider#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyStoreProvider#exported-declarations) |
 | [`Std.Crypto.Mac.AesCmac`](Stdlib-Crypto-AesCmac) | [Contracts](Stdlib-Crypto-AesCmac#detailed-contracts) | [Declarations](Stdlib-Crypto-AesCmac#exported-declarations) |
@@ -356,3 +364,4 @@ The [complete specification](Stdlib-Design) has these sections.
   - [20.2 `Std.Crypto.Core`](Stdlib-Design#202-stdcryptocore)
   - [20.4 `Std.Crypto.Hash`](Stdlib-Design#204-stdcryptohash)
   - [20.5 `Std.Crypto.Mac`](Stdlib-Design#205-stdcryptomac)
+  - [20.6 `Std.Crypto.Kdf`](Stdlib-Design#206-stdcryptokdf)
