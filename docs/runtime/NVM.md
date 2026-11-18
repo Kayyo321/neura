@@ -78,7 +78,7 @@ Forms come from two sources. The converter records one for every block it can de
 
 #### Tier 1 in the executor
 
-`neura run`, `neura test`, `run --each`, fleets without a graph device, the parallel items of a run, and task images all use tiers 1 and 2 by default. A step of a block on tier 1 is a reference step with another way of computing the graph's outputs:
+`neura run`, `neura test`, `run --each`, fleets without a graph device (or after they drop one), the parallel items of a run, and task images all use tiers 1 and 2 by default. A step of a block on tier 1 is a reference step with another way of computing the graph's outputs:
 
 1. The step is charged and the scheduling decision made exactly as by reference, and the block's slot inputs are checked for initialization in input order. An uninitialized slot traps with the same detail, at the same step.
 2. The input values are read whole from their slots and constants, without expanding them into lanes, and the lowered block computes the selected exit and every value an exit reads. When a check fails, it selects the trap exit of the first failing check, as the selector would.
@@ -171,7 +171,7 @@ Native code is not the [native capability](../lang/Tooling.md#build-and-run-exec
 
 #### Controls
 
-- `--tier=0|1|2` on `neura run` and `neura test` (`RunLimits::tier`) sets the highest tier; 2 is the default. Tiers 1 and 2 are not used with a graph device, which evaluates the graphs it accepts.
+- `--tier=0|1|2` on `neura run` and `neura test` (`RunLimits::tier`) sets the highest tier; 2 is the default. Tiers 1 and 2 are not used with a graph device, which evaluates the graphs it accepts. A fleet's members share the command's tier cache and use it once the fleet drops a device that declines every job, as auto mode's device does after it gives up ([GPU execution](../lang/GpuExecution.md#105-advance)).
 - `NEURA_TIER=0` or `NEURA_TIER=1` in the environment lowers the tier of every run in the process, the test suite's included. `NEURA_RUN_OPTIONS` may lower the tier of a [native executable](../lang/Standalone.md) with `--tier=0` or `--tier=1`. Nothing raises it.
 - `--jit=off|on|auto` on `neura run` and `neura test` (`RunLimits::jit`) chooses between native code and the interpreter for regions (above); `auto` is the default. `NEURA_JIT=off|on|auto` in the environment applies to every run in the process, the test suite's included, and combines with the option: `off` from either wins, then `on` from either. `NEURA_RUN_OPTIONS` accepts `--jit` for a native executable. `NEURA_JIT_DUMP=1` writes each compiled region's code, in hexadecimal, to standard error (or to the file it names).
 - `--tier-stats` prints, after the run, the blocks lifted (by hint and by search), the proof and search time, the steps each tier ran (tier 2 counts the steps run inside regions), with the steps kernel calls charged for themselves (`kernel calls N`, shown only when there are some) so that the total is the run's `--stats` step count, why blocks stayed on tier 0, the blocks that ran most steps on tier 0, the regions formed, how often regions were entered, left, and deoptimized and why, the blocks where they deoptimized and left most, and for native code the mode, the regions compiled and their bytes of code, the regions left on the interpreter and why, and how many entries ran native code. These lines are diagnostics, not part of the invariants above: they depend on timing and threads. `--stats` is unchanged, so its output is identical at every tier.
