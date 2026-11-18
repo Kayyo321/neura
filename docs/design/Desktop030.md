@@ -159,11 +159,32 @@ The dialog services take a window handle, a suggested file name (a name, not a p
 | There is no updater. A package carries its version; installing a newer one replaces the older. Updating the SDK or the runtime service never touches an installed or running application. | proposed |
 | The runner for each system is built on that system and delivered in its target component. The Windows runner needs only pipes, clocks and entropy from the system, because windows, files and fetches go through the host; the services that answer `unsupported` on Windows today stay so. | proposed; the child now relies on tasks and on an overlapping console read of a pipe, which are tested on Linux only ([Concurrency](../lang/Concurrency.md#16-limits)) |
 
-### Linux package (A5)
+### Packages built here (A5)
 
-`python3 scripts/package-desktop.py --engine <electron directory> --package <package directory> --name <name> -o <file>.tar.gz` assembles the Linux x86-64 `.tar.gz`: the engine with its executable renamed to `<name>` and without `default_app.asar`, `resources/app/` holding `package.json`, `main.js`, `preload.js` and the package directory, and `LICENSES/` with the engine's license, the Chromium notices and Neura's license. It refuses a package directory that holds `.nra` source. Entries are sorted, owned by 0:0 and dated at `SOURCE_DATE_EPOCH` (default 0), and gzip records no name or time, so two builds from the same inputs are byte-identical; the tool prints the archive's and the file tree's SHA-256 and says the package is unsigned. Any other format is refused with a message naming it. `tests/desktop/run_package_test.py` builds the fixture package twice and compares the bytes, installs it under a path with spaces and non-ASCII characters, and launches it under Xvfb with a fresh home and no SDK on the path: the page's bridge call makes the native child retitle the window, no process of the tree holds a listening socket, and after SIGTERM the application exits 0 with no process left. The fixture package is 126,129,890 bytes, under B-D3.
+`python3 scripts/package-desktop.py --engine <electron directory> --package <package directory> --name <name> --icon <1024-pixel PNG> [--format tar.gz|deb|zip] [--test-hooks <dialog script>] -o <file>` assembles a package. The application tree is the engine with its executable renamed to `<name>` (`<name>.exe` for Windows) and without `default_app.asar`; `resources/app/` holding `package.json`, `main.js`, `preload.js` and the package directory; `resources/icons/` with the icon scaled from the one 1,024-pixel PNG (16 to 512 pixels, or a `.ico` of 16 to 256 for Windows); and `LICENSES/` with the engine's license, the Chromium notices, Neura's license, `PROVIDERS.txt` (the child's runtime and providers are Neura's; on Linux it links only the system C and math libraries, which the package does not carry) and the notices `desktop.json` lists under `notices`. The tool refuses a package directory that holds `.nra` source. Entries are sorted, owned by 0:0 and dated at `SOURCE_DATE_EPOCH` (default 0; a `.zip` records 1980-01-01), gzip records no name or time, and icons are encoded by Pillow without metadata, so the same inputs, Python and Pillow give the same bytes. The tool prints the archive's and the file tree's SHA-256 and says the package is unsigned.
 
-This tool stands in for `neura package` until project targets exist ([Projects](Projects030.md)); `E1033`, `.deb`, `.zip`, `.dmg`, `.msix`, icons and signing are not implemented.
+| Format | What it is | Status |
+| --- | --- | --- |
+| `.tar.gz` | The tree, for Linux x86-64 | Built twice and compared, extracted under a path with spaces and non-ASCII characters and launched under Xvfb with no SDK on the path: the bridge retitles the window through the child, no process listens, SIGTERM ends it with 0 and no survivors |
+| `.deb` | The tree under `/opt/<name>` (with `chrome-sandbox` setuid root, which Chromium uses where unprivileged user namespaces are off), `/usr/bin/<name>`, a desktop entry, hicolor icons and a copyright file; `Depends` lists Electron's libraries and `xdg-utils` | Built twice and compared, checked with `dpkg-deb -I` and `-c`, extracted with `dpkg-deb -x` as an installation root and launched as the `.tar.gz` is. Never installed into a system here, so installation and removal by `dpkg` are not qualified |
+| `.zip` | The tree of a Windows x86-64 engine (a directory with `electron.exe`) | Only the container: built twice from a stand-in engine directory and compared and listed. Neither the Windows engine nor a Windows native child is available here, so no Windows package is built or qualified |
+| `.dmg`, `.msix`, `--sign` | | Refused with a message naming the system that builds them; nothing is produced |
+
+`--test-hooks` adds `test-dialogs.json` and names it in `desktop.json` (`testHooks.dialogs`); the host follows it in place of the system's dialogs, and the tool prints that the package is not a release. A release build refuses a `desktop.json` that names test hooks. `tests/desktop/run_package_test.py` runs all of the above. The fixture packages are about 127 MB, under B-D3.
+
+This tool stands in for `neura package` until project targets exist ([Projects](Projects030.md)); `E1033` belongs to that command and is not reported by the tool, which ends with status 1 and a message.
+
+### Budgets measured here (A5)
+
+`python3 scripts/bench-desktop.py <electron> --neura <neura> [--json <file>]` builds the fixture's `.tar.gz`, extracts it, launches it once to warm the file cache and then 10 times under Xvfb with `--timing`, which makes the host print the time from the start of its main process to the first window's `ready-to-show`. It reports that figure and the wall time from starting `xvfb-run` (which also starts an X server) to the line, and, 5 s after the first counted launch's first paint, the tree's resident size as PSS and as the plain sum of RSS, and the child's RSS. The workload is the fixture (a static page and the Neura fixture child), not the reference application, which needs renderer-side Neura (A2, A3); the numbers are those of the host, an empty renderer and the child, and are not evidence about a Neura UI.
+
+Measured on 2026-11-17, Linux x86-64 (Debian 13, kernel 7.1), AMD Ryzen 7 9800X3D on a shared, loaded machine (load average 5 to 15 during the run), Electron 45.3.3 under Xvfb, Release build:
+
+| Budget | Measured | Limit | Met |
+| --- | --- | --- | --- |
+| B-D1 | 542.5 ms median, 560 ms 95th percentile from starting `xvfb-run`; 119.5 ms and 131 ms as the host reports it | 1.5 s median, 2.5 s 95th percentile | yes, for the fixture |
+| B-D2 | 276.4 MiB PSS over 8 processes (632.7 MiB if RSS is summed, counting shared pages in every process); child 36.4 MiB RSS | 350 MiB tree, 40 MiB child | yes on PSS and for the child; no if summed RSS is the measure. The child has 3.6 MiB left before the budget with no application state |
+| B-D3 | 126,861,127 bytes (`.tar.gz`) | 130 MiB | yes |
 
 ## Lowering and artifacts
 
@@ -232,7 +253,7 @@ Each step is one commit with its targeted tests. None changes any image.
 | 6 | The Windows runner: a hosted Windows job, the runner built there, the stdio channel on pipes, the Windows wait source | The step 3 and 4 tests on Windows |
 | 7 | `neura package` for `.tar.gz`, `.deb`, `.zip`; reproducibility; licenses; icons | Cases 11, 13, 14, 35; two builds compared byte for byte |
 | 8 | `.dmg` and `.msix` on their runners; signing hooks | Cases 36; install, launch and remove on each runner |
-| 9 | The launch, memory and size budgets | B-D1 to B-D3 |
+| 9 | The launch, memory and size budgets | B-D1 to B-D3 (Linux measured with the fixture, above) |
 
 ## Gate and acceptance
 
