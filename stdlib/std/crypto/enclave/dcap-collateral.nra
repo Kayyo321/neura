@@ -1,0 +1,869 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let algorithms = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let certificate = import:Std.Crypto.Pki.Certificate;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let dcap = import:Std.Crypto.Enclave.Dcap;
+let der = import:Std.Crypto.Pki.Der;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let error = import:Std.Core.Error;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let hashing = import:Std.Core.Hash;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let json = import:Std.Encoding.Json;
+let name = import:Std.Crypto.Pki.Name;
+let path = import:Std.Crypto.Pki.PathValidation;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let signature = import:Std.Crypto.Pki.SignatureVerifier;
+let strings = import:Std.Text.Strings;
+let utf8 = import:Std.Encoding.Utf8;
+let verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Offline Intel SGX v3 and TDX v4 collateral validation for Dcap.verify.
+///
+/// The caller supplies the exact signed TCB Info v3 and QE Identity v2 JSON bodies, their signatures and
+/// signing certificates, the PCK issuer certificate, and the root and PCK full CRLs. The validation instant
+/// and the Intel trust anchor come through Dcap.verify. The allowed TCB status policy defaults to UpToDate.
+/// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+#Since("0.3.0")
+export let DcapCollateral = module (
+    const IntelSgxExtension = "1.2.840.113741.1.13.1";
+    const AuthorityKeyIdentifier = "2.5.29.35";
+    const CrlNumber = "2.5.29.20";
+
+    /// @brief Intel platform, QE, or TDX module TCB statuses the caller can explicitly allow. Revoked always fails.
+    /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+    #Since("0.3.0")
+    export let TcbStatus = enum (
+        UpToDate, SwHardeningNeeded, ConfigurationNeeded, ConfigurationAndSwHardeningNeeded,
+        OutOfDate, OutOfDateConfigurationNeeded
+    );
+
+    let wire_status = func(status: TcbStatus) -> string => match (status) {
+        TcbStatus.UpToDate => "UpToDate",
+        TcbStatus.SwHardeningNeeded => "SWHardeningNeeded",
+        TcbStatus.ConfigurationNeeded => "ConfigurationNeeded",
+        TcbStatus.ConfigurationAndSwHardeningNeeded => "ConfigurationAndSWHardeningNeeded",
+        TcbStatus.OutOfDate => "OutOfDate",
+        TcbStatus.OutOfDateConfigurationNeeded => "OutOfDateConfigurationNeeded",
+    };
+
+    let failure = func<T>(text: string) -> Result<T> =>
+        Result<T>.Err(error.custom("crypto.dcap_collateral", text));
+
+    let before = func(left: instant.Instant, right: instant.Instant) -> bool =>
+        left.epoch_seconds < right.epoch_seconds || (left.epoch_seconds == right.epoch_seconds && left.nanos < right.nanos);
+
+    let valid_window = func(at, issued, next: instant.Instant) -> bool => !before(at, issued) && before(at, next);
+
+    let check_status = func(status: string, allowed: TcbStatus[list]) -> Result<Unit> {
+        for (let value in allowed) {
+            if (status == wire_status(value)) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+        }
+        return Result<Unit>.Err(error.custom("crypto.dcap_tcb_status", "DCAP status refused by policy: " + status));
+    };
+
+    /// @brief A signed Intel collateral body and its directly Intel-rooted signing certificate.
+    /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+    #[Final, Since("0.3.0")]
+    export let SignedJson = class (
+        /// @brief Exact UTF-8 JSON signed by Intel, without its outer response envelope.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export last body: string;
+        last raw_signature: uint8[list];
+        last signer: uint8[list];
+
+        /// @brief Copies the 64-byte signature and signing certificate DER alongside the signed JSON text.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let init = func(payload: string, signature_bytes, signer_certificate: uint8[list]) {
+            body = payload;
+            raw_signature = words.copy(signature_bytes);
+            signer = words.copy(signer_certificate);
+        };
+
+        /// @brief A copy of the fixed-width P-256 signature.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #[NoDiscard, Since("0.3.0")]
+        export let signature_bytes = func -> uint8[list] => words.copy(raw_signature);
+
+        /// @brief A copy of the signing certificate.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #[NoDiscard, Since("0.3.0")]
+        export let certificate_der = func -> uint8[list] => words.copy(signer);
+
+        /// @brief Whether the signed content, signature and signing certificate are equal.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SignedJson)) {
+                return false;
+            }
+            last right = other as SignedJson;
+            return body == right.body && constant_time.ct_eq(raw_signature, right.signature_bytes())
+                && constant_time.ct_eq(signer, right.certificate_der());
+        };
+
+        /// @brief A hash of the signed body and supporting bytes.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 {
+            let hash = body.hash_code();
+            for (let byte in raw_signature) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            for (let byte in signer) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief The type without the signed body.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "DcapCollateral.SignedJson";
+    );
+
+    let key_usage = func(cert: certificate.Certificate, bit: int) -> bool => match (cert.key_usage) {
+        Optional.Some(usage) => usage.has(bit),
+        Optional.None => false,
+    };
+
+    let parse_certificate = func(bytes: uint8[list]) -> Result<certificate.Certificate> {
+        if (bytes.length == 0 || bytes.length > 8192) {
+            return failure<certificate.Certificate>("Intel collateral certificate exceeds its size bound");
+        }
+        return certificate.parse(bytes);
+    };
+
+    let authenticate_json = func(info: SignedJson, signer: certificate.Certificate, root: certificate.Certificate,
+        at: instant.Instant) -> Result<json.JsonValue> {
+        if (info.body.byte_length == 0 || info.body.byte_length > 65536 || signer.is_ca()
+            || !key_usage(signer, extensions.DigitalSignature)
+            || signer.public_key.key_algorithm != public_keys.KeyAlgorithm.Ec
+            || signer.public_key.parameter_set != "P-256") {
+            return failure<json.JsonValue>("invalid Intel collateral signer or document size");
+        }
+        last names = signer.subject.common_names();
+        if (names.length != 1 || names[0] != "Intel SGX TCB Signing") {
+            return failure<json.JsonValue>("wrong Intel collateral signer identity");
+        }
+        let options = new path.ValidationOptions(at);
+        options.strict_profile = false;
+        let _ = path.validate(signer, new, new([root]), options)?;
+        last key = ecdsa.parse_public_key(ecdsa.Curve.P256, signer.public_key.key)?;
+        let checker = new ecdsa.EcdsaVerifier(key, Algorithm.Sha256);
+        if (!checker.verify_raw(words.utf8(info.body), info.signature_bytes())) {
+            return failure<json.JsonValue>("invalid Intel signed JSON signature");
+        }
+        return json.parse_ordered_members(info.body);
+    };
+
+    let object = func(value: json.JsonValue) -> Result<[string, json.JsonValue][list]> {
+        match (value) {
+            json.JsonValue.Object(members) => {
+                if (members.length > 32) {
+                    return failure<[string, json.JsonValue][list]>("too many Intel collateral object members");
+                }
+                for (let i = 0; i < members.length; i++) {
+                    for (let j = 0; j < i; j++) {
+                        if (members[i][0] == members[j][0]) {
+                            return failure<[string, json.JsonValue][list]>("duplicate Intel collateral JSON member");
+                        }
+                    }
+                }
+                return Result<[string, json.JsonValue][list]>.Ok(members);
+            },
+            _ => {
+                return failure<[string, json.JsonValue][list]>("expected an Intel collateral JSON object");
+            },
+        }
+    };
+
+    let field = func(members: [string, json.JsonValue][list], name: string) -> Result<json.JsonValue> =>
+        match (json.member(members, name)) {
+            Optional.Some(value) => Result<json.JsonValue>.Ok(value),
+            Optional.None => failure<json.JsonValue>("missing Intel collateral field " + name),
+        };
+
+    let text = func(members: [string, json.JsonValue][list], name: string) -> Result<string> =>
+        match (field(members, name)?) {
+            json.JsonValue.Text(value) => Result<string>.Ok(value),
+            _ => failure<string>("invalid Intel collateral text field " + name),
+        };
+
+    let integer = func(members: [string, json.JsonValue][list], name: string, maximum: int64) -> Result<int> {
+        match (field(members, name)?) {
+            json.JsonValue.Number(number) => {
+                match (json.number_to_int64(number)) {
+                    Optional.Some(value) if value >= 0 && value <= maximum => {
+                        return Result<int>.Ok(value as int);
+                    },
+                    _ => {},
+                }
+            },
+            _ => {},
+        }
+        return failure<int>("invalid Intel collateral integer field " + name);
+    };
+
+    let hex_value = func(members: [string, json.JsonValue][list], name: string, size: int) -> Result<uint8[list]> {
+        last value = text(members, name)?;
+        if (value.byte_length != 2 * size) {
+            return failure<uint8[list]>("invalid Intel collateral hex field width " + name);
+        }
+        return hex.decode(value);
+    };
+
+    let array = func(members: [string, json.JsonValue][list], name: string, maximum: int)
+        -> Result<json.JsonValue[list]> {
+        match (field(members, name)?) {
+            json.JsonValue.Array(values) if values.length > 0 && values.length <= maximum => {
+                return Result<json.JsonValue[list]>.Ok(values);
+            },
+            _ => {
+                return failure<json.JsonValue[list]>("invalid Intel collateral array field " + name);
+            },
+        }
+    };
+
+    let date = func(members: [string, json.JsonValue][list], name: string) -> Result<instant.Instant> {
+        last value = text(members, name)?;
+        if (value.byte_length != 20 || value.byte_at(19) != 90) {
+            return failure<instant.Instant>("invalid Intel collateral timestamp " + name);
+        }
+        return instant.parse(value);
+    };
+
+    let check_json_window = func(members: [string, json.JsonValue][list], at: instant.Instant) -> Result<Unit> {
+        last issued = date(members, "issueDate")?;
+        last next = date(members, "nextUpdate")?;
+        if (!valid_window(at, issued, next) || integer(members, "tcbEvaluationDataNumber", 2147483647)? == 0) {
+            return failure<Unit>("Intel collateral is stale, premature or has invalid evaluation data");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let PckTcb = class (
+        export last svns: uint8[list];
+        export last pce_svn: int;
+        export last pce_id: uint8[list];
+        export last fmspc: uint8[list];
+
+        export let init = func(components: uint8[list], svn: int, pce, family: uint8[list]) {
+            svns = components;
+            pce_svn = svn;
+            pce_id = pce;
+            fmspc = family;
+        };
+
+        export let.override to_string = func -> string => "DcapCollateral.PckTcb";
+    );
+
+    let pck_extension = func(cert: certificate.Certificate) -> Result<uint8[list]> =>
+        match (cert.extension(IntelSgxExtension)) {
+            Optional.Some(ext) => Result<uint8[list]>.Ok(ext.value),
+            Optional.None => failure<uint8[list]>("missing Intel PCK extension"),
+        };
+
+    let read_tcb = func(value: der.Element) -> Result<[uint8[list], int]> {
+        if (!value.is_universal(der.TagSequence)) {
+            return failure<[uint8[list], int]>("invalid Intel PCK TCB");
+        }
+        let reader = value.reader();
+        let svns = words.zeros(16);
+        let seen: uint32 = 0;
+        let pce_svn = -1;
+        let cpu_svn: uint8[list] = new;
+        last prefix = IntelSgxExtension + ".2.";
+        for (let i = 0; reader.has_more(); i++) {
+            if (i >= 18) {
+                return failure<[uint8[list], int]>("too many Intel PCK TCB fields");
+            }
+            let entry = (reader.next_universal(der.TagSequence, "PCK TCB field")?).reader();
+            last oid = (entry.next_universal(der.TagOid, "PCK TCB OID")?).oid()?;
+            let number = 0;
+            for (let n = 1; n <= 18; n++) {
+                if (oid.dotted == prefix + n.to_string()) {
+                    number = n;
+                    break;
+                }
+            }
+            if (number == 0 || (seen & ((1 as uint32) << number)) != 0) {
+                return failure<[uint8[list], int]>("unknown or repeated Intel PCK TCB field");
+            }
+            seen = seen | ((1 as uint32) << number);
+            last item = entry.next()?;
+            entry.finish()?;
+            if (number == 18) {
+                cpu_svn = item.octet_string()?;
+            } else if (number == 17) {
+                pce_svn = (item.small_integer(65535)?) as int;
+            } else {
+                svns[number - 1] = (item.small_integer(255)?) as uint8;
+            }
+        }
+        if (seen != 524286 || !constant_time.ct_eq(cpu_svn, svns)) {
+            return failure<[uint8[list], int]>("incomplete or inconsistent Intel PCK TCB");
+        }
+        return Result<[uint8[list], int]>.Ok([svns, pce_svn]);
+    };
+
+    let check_platform_configuration = func(value: der.Element) -> Result<Unit> {
+        if (!value.is_universal(der.TagSequence)) {
+            return failure<Unit>("invalid Intel scalable PCK platform configuration");
+        }
+        let reader = value.reader();
+        let seen: string[list] = new;
+        last prefix = IntelSgxExtension + ".7.";
+        while (reader.has_more()) {
+            let entry = (reader.next_universal(der.TagSequence, "PCK platform configuration")?).reader();
+            last field = (entry.next_universal(der.TagOid, "PCK platform configuration OID")?).oid()?;
+            if (field.dotted != prefix + "1" && field.dotted != prefix + "2" && field.dotted != prefix + "3") {
+                return failure<Unit>("unknown Intel scalable PCK platform configuration");
+            }
+            for (let name in seen) {
+                if (name == field.dotted) {
+                    return failure<Unit>("repeated Intel scalable PCK platform configuration");
+                }
+            }
+            seen.append(field.dotted);
+            let _ = (entry.next_universal(der.TagBoolean, "PCK platform configuration flag")?).boolean()?;
+            entry.finish()?;
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let read_pck = func(pck: certificate.Certificate, scalable: bool) -> Result<PckTcb> {
+        last bytes = pck_extension(pck)?;
+        if (bytes.length > 2048) {
+            return failure<PckTcb>("Intel PCK extension exceeds its size bound");
+        }
+        last top = der.parse(bytes)?;
+        if (!top.is_universal(der.TagSequence)) {
+            return failure<PckTcb>("invalid Intel PCK extension");
+        }
+        let reader = top.reader();
+        let seen: string[list] = new;
+        let fmspc: uint8[list] = new;
+        let pce_id: uint8[list] = new;
+        let svns: uint8[list] = new;
+        let pce_svn = -1;
+        let platform_type = -1;
+        let platform_provisioning_id = false;
+        let platform_instance = false;
+        let platform_configuration = false;
+        for (let index = 0; reader.has_more(); index++) {
+            if (index >= 8) {
+                return failure<PckTcb>("too many Intel PCK extension fields");
+            }
+            let entry = (reader.next_universal(der.TagSequence, "PCK extension field")?).reader();
+            last oid = (entry.next_universal(der.TagOid, "PCK extension field OID")?).oid()?;
+            for (let name in seen) {
+                if (name == oid.dotted) {
+                    return failure<PckTcb>("duplicate Intel PCK extension field");
+                }
+            }
+            seen.append(oid.dotted);
+            last value = entry.next()?;
+            entry.finish()?;
+            if (oid.dotted == IntelSgxExtension + ".1" && scalable) {
+                platform_provisioning_id = (value.octet_string()?).length == 16;
+            } else if (oid.dotted == IntelSgxExtension + ".2") {
+                last parts = read_tcb(value)?;
+                svns = parts[0];
+                pce_svn = parts[1];
+            } else if (oid.dotted == IntelSgxExtension + ".3") {
+                pce_id = value.octet_string()?;
+            } else if (oid.dotted == IntelSgxExtension + ".4") {
+                fmspc = value.octet_string()?;
+            } else if (oid.dotted == IntelSgxExtension + ".5") {
+                if (!value.is_universal(der.TagEnumerated)) {
+                    return failure<PckTcb>("invalid Intel PCK platform type");
+                }
+                platform_type = (value.small_integer(1)?) as int;
+            } else if (oid.dotted == IntelSgxExtension + ".6" && scalable) {
+                platform_instance = (value.octet_string()?).length == 16;
+            } else if (oid.dotted == IntelSgxExtension + ".7" && scalable) {
+                check_platform_configuration(value)?;
+                platform_configuration = true;
+            } else if (scalable) {
+                return failure<PckTcb>("unsupported Intel scalable PCK component");
+            }
+        }
+        if ((scalable && (platform_type != 1 || !platform_provisioning_id || !platform_instance || !platform_configuration)) ||
+            (!scalable && platform_type != 0)) {
+            return failure<PckTcb>("Intel PCK platform type or scalable configuration differs from the DCAP profile");
+        }
+        if (svns.length != 16 || pce_svn < 0 || pce_id.length != 2 || fmspc.length != 6) {
+            return failure<PckTcb>("missing Intel PCK TCB or platform identifiers");
+        }
+        return Result<PckTcb>.Ok(new PckTcb(svns, pce_svn, pce_id, fmspc));
+    };
+
+    let parse_component_svns = func(components: json.JsonValue[list]) -> Result<uint8[list]> {
+        if (components.length != 16) {
+            return failure<uint8[list]>("Intel TCB level requires exactly sixteen component SVNs");
+        }
+        let result: uint8[list] = new;
+        for (let component in components) {
+            result.append((integer(object(component)?, "svn", 255)?) as uint8);
+        }
+        return Result<uint8[list]>.Ok(result);
+    };
+
+    let meets_svns = func(actual, required: uint8[list], first: int) -> bool {
+        for (let i = first; i < 16; i++) {
+            if (actual[i] < required[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let sort_key = func(sgx_svns, tdx_svns: uint8[list], pce_svn: int) -> uint8[list] {
+        let key = words.copy(sgx_svns);
+        key.append((pce_svn >> 8) as uint8);
+        key.append((pce_svn & 255) as uint8);
+        for (let svn in tdx_svns) {
+            key.append(svn);
+        }
+        return key;
+    };
+
+    let key_above = func(left, right: uint8[list]) -> bool {
+        for (let i = 0; i < left.length; i++) {
+            if (left[i] != right[i]) {
+                return left[i] > right[i];
+            }
+        }
+        return false;
+    };
+
+    let platform_tcb = func(value: json.JsonValue, pck: PckTcb, tee_svns: uint8[list], at: instant.Instant)
+        -> Result<string> {
+        last fields = object(value)?;
+        last tdx = tee_svns.length == 16;
+        if (text(fields, "id")? != (tdx ? "TDX" : "SGX") || integer(fields, "version", 3)? != 3
+            || integer(fields, "tcbType", 0)? != 0
+            || !constant_time.ct_eq(hex_value(fields, "fmspc", 6)?, pck.fmspc)
+            || !constant_time.ct_eq(hex_value(fields, "pceId", 2)?, pck.pce_id)) {
+            return failure<string>("unsupported or mismatched Intel platform TCB information");
+        }
+        check_json_window(fields, at)?;
+        let previous_key: uint8[list] = new;
+        let status = "";
+        for (let level in array(fields, "tcbLevels", 64)?) {
+            last entry = object(level)?;
+            last requirements = object(field(entry, "tcb")?)?;
+            last sgx_svns = parse_component_svns(array(requirements, "sgxtcbcomponents", 16)?)?;
+            last pce_svn = integer(requirements, "pcesvn", 65535)?;
+            let tdx_svns: uint8[list] = new;
+            let tdx_matches = true;
+            if (tdx) {
+                // For a versioned TDX module, the first two TEE SVNs select that module below.
+                tdx_svns = parse_component_svns(array(requirements, "tdxtcbcomponents", 16)?)?;
+                last first = tee_svns[1] == 0 ? 0 : 2;
+                tdx_matches = meets_svns(tee_svns, tdx_svns, first);
+            }
+            last key = sort_key(sgx_svns, tdx_svns, pce_svn);
+            if (previous_key.length != 0 && !key_above(previous_key, key)) {
+                return failure<string>("Intel platform TCB levels must have descending distinct SVN tuples");
+            }
+            previous_key = key;
+            if (status == "" && meets_svns(pck.svns, sgx_svns, 0) && tdx_matches && pck.pce_svn >= pce_svn) {
+                if (before(at, date(entry, "tcbDate")?)) {
+                    return failure<string>("Intel platform TCB date is in the future");
+                }
+                status = text(entry, "tcbStatus")?;
+                if (status == "") {
+                    return failure<string>("missing Intel platform TCB status");
+                }
+            }
+        }
+        if (status == "") {
+            return failure<string>("no matching Intel platform TCB level");
+        }
+        return Result<string>.Ok(status);
+    };
+
+    let u16 = func(bytes: uint8[list], offset: int) -> int => (bytes[offset] as int) | ((bytes[offset + 1] as int) << 8);
+
+    let masked_matches = func(actual, expected, mask: uint8[list]) -> bool {
+        let different: uint8 = 0;
+        for (let i = 0; i < actual.length; i++) {
+            different = different | ((actual[i] & mask[i]) ^ expected[i]);
+        }
+        return different == 0;
+    };
+
+    let component_tcb = func(fields: [string, json.JsonValue][list], svn: int, at: instant.Instant) -> Result<string> {
+        let highest = 65536;
+        let status = "";
+        for (let level in array(fields, "tcbLevels", 64)?) {
+            last entry = object(level)?;
+            last requirements = object(field(entry, "tcb")?)?;
+            last required = integer(requirements, "isvsvn", 65535)?;
+            if (required >= highest) {
+                return failure<string>("Intel component TCB levels must have descending distinct SVNs");
+            }
+            highest = required;
+            if (status == "" && svn >= required) {
+                if (before(at, date(entry, "tcbDate")?)) {
+                    return failure<string>("Intel component TCB date is in the future");
+                }
+                status = text(entry, "tcbStatus")?;
+                if (status == "") {
+                    return failure<string>("missing Intel component TCB status");
+                }
+            }
+        }
+        if (status == "") {
+            return failure<string>("no matching Intel component TCB level");
+        }
+        return Result<string>.Ok(status);
+    };
+
+    let qe_tcb = func(value: json.JsonValue, report: uint8[list], tee: dcap.Platform, at: instant.Instant)
+        -> Result<string> {
+        last fields = object(value)?;
+        last expected_id = tee == dcap.Platform.Tdx ? "TD_QE" : "QE";
+        if (text(fields, "id")? != expected_id || integer(fields, "version", 2)? != 2) {
+            return failure<string>("unsupported Intel QE identity");
+        }
+        check_json_window(fields, at)?;
+        last misc = words.slice(report, 16, 20);
+        if (!masked_matches(misc, hex_value(fields, "miscselect", 4)?, hex_value(fields, "miscselectMask", 4)?)
+            || !masked_matches(words.slice(report, 48, 64), hex_value(fields, "attributes", 16)?,
+                hex_value(fields, "attributesMask", 16)?)
+            || !constant_time.ct_eq(words.slice(report, 128, 160), hex_value(fields, "mrsigner", 32)?)
+            || u16(report, 256) != integer(fields, "isvprodid", 65535)?) {
+            return failure<string>("Intel quoting enclave does not match its signed identity");
+        }
+        last status = component_tcb(fields, u16(report, 258), at)?;
+        if (status != "UpToDate" && status != "OutOfDate" && status != "ConfigurationNeeded"
+            && status != "Revoked" && status != "OutOfDateConfigurationNeeded") {
+            return failure<string>("invalid Intel QE TCB status");
+        }
+        return Result<string>.Ok(status);
+    };
+
+    let tdx_module = func(fields: [string, json.JsonValue][list], version: uint8) -> Result<[string, json.JsonValue][list]> {
+        last base = object(field(fields, "tdxModule")?)?;
+        if (version == 0) {
+            return Result<[string, json.JsonValue][list]>.Ok(base);
+        }
+        let selected: [string, json.JsonValue][list] = new;
+        last wanted = "TDX_" + strings.to_ascii_upper(hex.encode(new([version])));
+        for (let item in array(fields, "tdxModuleIdentities", 64)?) {
+            last identity = object(item)?;
+            if (strings.to_ascii_upper(text(identity, "id")?) == wanted) {
+                if (selected.length != 0) {
+                    return failure<[string, json.JsonValue][list]>("duplicate Intel TDX module identity");
+                }
+                selected = identity;
+            }
+        }
+        if (selected.length == 0) {
+            return failure<[string, json.JsonValue][list]>("no matching Intel TDX module identity");
+        }
+        return Result<[string, json.JsonValue][list]>.Ok(selected);
+    };
+
+    let tdx_module_tcb = func(tcb_info: json.JsonValue, report: uint8[list], at: instant.Instant) -> Result<string> {
+        last version = report[1];
+        last identity = tdx_module(object(tcb_info)?, version)?;
+        last actual = words.slice(report, 112, 120);
+        if (!constant_time.ct_eq(words.slice(report, 64, 112), hex_value(identity, "mrsigner", 48)?)
+            || !constant_time.ct_eq(actual, words.zeros(8))
+            || !masked_matches(actual, hex_value(identity, "attributes", 8)?,
+                hex_value(identity, "attributesMask", 8)?)) {
+            return failure<string>("TDX module signer or SEAM attributes differ from the signed identity");
+        }
+        if (version == 0) {
+            return Result<string>.Ok("UpToDate");
+        }
+        last status = component_tcb(identity, report[0] as int, at)?;
+        if (status != "UpToDate" && status != "OutOfDate" && status != "Revoked") {
+            return failure<string>("invalid Intel TDX module TCB status");
+        }
+        return Result<string>.Ok(status);
+    };
+
+    let check_crl_extensions = func(wrapper: der.Element, issuer: certificate.Certificate) -> Result<Unit> {
+        if (wrapper.tag_class != der.ContextSpecific || wrapper.tag_number != 0 || !wrapper.constructed) {
+            return failure<Unit>("invalid Intel CRL extension wrapper");
+        }
+        let outer = wrapper.reader();
+        let entries = (outer.next_universal(der.TagSequence, "CRL extensions")?).reader();
+        outer.finish()?;
+        let number_seen = false;
+        let aki_seen = false;
+        while (entries.has_more()) {
+            last ext = extensions.parse_extension(entries.next()?)?;
+            if (ext.oid.dotted == CrlNumber && !number_seen && !ext.critical) {
+                let _ = (der.parse(ext.value)?).small_integer(9223372036854775807)?;
+                number_seen = true;
+            } else if (ext.oid.dotted == AuthorityKeyIdentifier && !aki_seen && !ext.critical) {
+                last aki = extensions.parse_authority_key_identifier(ext.value)?;
+                match (issuer.subject_key_identifier) {
+                    Optional.Some(ski) if aki.has_key_identifier && constant_time.ct_eq(ski, aki.key_identifier) => {},
+                    _ => {
+                        return failure<Unit>("Intel CRL authority key identifier does not match its issuer");
+                    },
+                }
+                aki_seen = true;
+            } else {
+                return failure<Unit>("unsupported, scoped, or duplicate Intel CRL extension");
+            }
+        }
+        if (!number_seen || !aki_seen) {
+            return failure<Unit>("Intel CRL needs its number and authority key identifier");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let check_revocations = func(list: der.Element, issued: instant.Instant, targets: certificate.Certificate[list])
+        -> Result<Unit> {
+        let entries = list.reader();
+        for (let i = 0; entries.has_more(); i++) {
+            if (i >= 8192) {
+                return failure<Unit>("Intel CRL has too many revoked entries");
+            }
+            let entry = (entries.next_universal(der.TagSequence, "CRL entry")?).reader();
+            last serial = (entry.next_universal(der.TagInteger, "revoked serial number")?).integer()?;
+            last revoked_at = (entry.next()?).time()?;
+            if (serial.length == 0 || serial[0] >= 128 || (serial.length == 1 && serial[0] == 0)
+                || serial.length > 21 || (serial.length == 21 && serial[0] != 0) || before(issued, revoked_at)) {
+                return failure<Unit>("invalid Intel CRL serial number or revocation date");
+            }
+            if (entry.has_more()) {
+                let attributes = (entry.next_universal(der.TagSequence, "CRL entry extensions")?).reader();
+                let reason_seen = false;
+                let invalidity_seen = false;
+                while (attributes.has_more()) {
+                    last ext = extensions.parse_extension(attributes.next()?)?;
+                    if (ext.oid.dotted == "2.5.29.21" && !reason_seen && !ext.critical) {
+                        last reason = der.parse(ext.value)?;
+                        if (!reason.is_universal(der.TagEnumerated)) {
+                            return failure<Unit>("invalid Intel CRL revocation reason");
+                        }
+                        last reason_code = reason.small_integer(10)?;
+                        if (reason_code == 7 || reason_code == 8) {
+                            return failure<Unit>("invalid revocation reason for a complete Intel CRL");
+                        }
+                        reason_seen = true;
+                    } else if (ext.oid.dotted == "2.5.29.24" && !invalidity_seen && !ext.critical) {
+                        last invalidity = der.parse(ext.value)?;
+                        if (!invalidity.is_universal(der.TagGeneralizedTime) || before(revoked_at, invalidity.time()?)) {
+                            return failure<Unit>("invalid Intel CRL invalidity date");
+                        }
+                        invalidity_seen = true;
+                    } else {
+                        return failure<Unit>("unsupported, indirect, or duplicate Intel CRL entry extension");
+                    }
+                }
+            }
+            entry.finish()?;
+            for (let target in targets) {
+                if (constant_time.ct_eq(serial, target.serial)) {
+                    return Result<Unit>.Err(error.custom("crypto.dcap_revoked", "Intel CRL revokes a required certificate"));
+                }
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let verify_crl = func(bytes: uint8[list], issuer: certificate.Certificate, targets: certificate.Certificate[list],
+        at: instant.Instant) -> Result<Unit> {
+        if (bytes.length == 0 || bytes.length > 131072 || !key_usage(issuer, extensions.CrlSign)) {
+            return failure<Unit>("missing or oversized Intel CRL or issuer without cRLSign");
+        }
+        last top = der.parse_with_depth(bytes, 16)?;
+        if (!top.is_universal(der.TagSequence)) {
+            return failure<Unit>("invalid Intel CertificateList");
+        }
+        let list = top.reader();
+        last tbs = list.next_universal(der.TagSequence, "TBSCertList")?;
+        last algorithm = algorithms.parse(list.next_universal(der.TagSequence, "CRL signature algorithm")?)?;
+        last bits = (list.next_universal(der.TagBitString, "CRL signature")?).bit_string()?;
+        list.finish()?;
+        if (bits.unused_bits != 0 || algorithm.oid.dotted != "1.2.840.10045.4.3.2"
+            || new verifier.AlgorithmVerifier().verify_signature(algorithm, issuer.public_key, tbs.encoded(), bits.bytes)
+            != signature.SignatureCheck.Valid) {
+            return failure<Unit>("invalid Intel CRL signature");
+        }
+
+        let fields = tbs.reader();
+        last version = (fields.next_universal(der.TagInteger, "CRL version")?).small_integer(1)?;
+        last inner = algorithms.parse(fields.next_universal(der.TagSequence, "CRL inner signature algorithm")?)?;
+        last declared_issuer = name.parse(fields.next_universal(der.TagSequence, "CRL issuer")?)?;
+        last issued = (fields.next()?).time()?;
+        last next = (fields.next()?).time()?;
+        if (version != 1 || !inner.equals(algorithm) || !declared_issuer.equals(issuer.subject)
+            || !valid_window(at, issued, next)) {
+            return failure<Unit>("invalid, wrong-issuer, or expired Intel CRL");
+        }
+        if (fields.peek_is(der.Universal, der.TagSequence)) {
+            check_revocations(fields.next()?, issued, targets)?;
+        }
+        check_crl_extensions(fields.next()?, issuer)?;
+        fields.finish()?;
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let check_issuer = func(quote: dcap.Quote, expected: uint8[list]) -> Result<Unit> {
+        let pem = quote.certification_data();
+        if (pem.length == 0 || pem.length > 16384) {
+            return failure<Unit>("DCAP PCK chain exceeds its size bound");
+        }
+        if (pem[pem.length - 1] == 0) {
+            pem.remove_at(pem.length - 1);
+        }
+        last chain = certificate.parse_pem(utf8.decode(pem)?)?;
+        if (chain.length != 3 || !constant_time.ct_eq(chain[1].der_bytes, expected)) {
+            return failure<Unit>("Intel CRL issuer differs from the quote's authenticated PCK issuer");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let Collateral = class (
+        last tcb: SignedJson;
+        last identity: SignedJson;
+        last pck_issuer: uint8[list];
+        last root_crl: uint8[list];
+        last pck_crl: uint8[list];
+        last allowed: TcbStatus[list];
+
+        export let init = func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list],
+            statuses: TcbStatus[list]) {
+            if (statuses.length == 0 || statuses.length > 6) {
+                trap_with_message("invalid argument: DCAP needs between one and six acceptable TCB statuses");
+            }
+            tcb = tcb_info;
+            identity = qe_identity;
+            pck_issuer = words.copy(issuer_der);
+            root_crl = words.copy(root_list);
+            pck_crl = words.copy(pck_list);
+            let copy: TcbStatus[list] = new;
+            for (let status in statuses) {
+                copy.append(status);
+            }
+            allowed = copy;
+        };
+
+        export let verify = func(quote: dcap.Quote, pck_der: uint8[list], trusted_root_der: uint8[list],
+            at: instant.Instant, expected: dcap.Platform) -> Result<Unit> {
+            if (quote.platform != expected) {
+                return Result<Unit>.Err(error.custom("crypto.unsupported_dcap", "DCAP collateral profile differs from the quote"));
+            }
+            if (at.nanos < 0 || at.nanos >= 1000000000) {
+                trap_with_message("invalid argument: DCAP collateral needs a normalized instant");
+            }
+            check_issuer(quote, pck_issuer)?;
+            last root = parse_certificate(trusted_root_der)?;
+            last issuer = parse_certificate(pck_issuer)?;
+            last pck = parse_certificate(pck_der)?;
+            last tcb_signer = parse_certificate(tcb.certificate_der())?;
+            last qe_signer = parse_certificate(identity.certificate_der())?;
+            let options = new path.ValidationOptions(at);
+            options.strict_profile = false;
+            last chain = path.validate(pck, new([issuer]), new([root]), options)?;
+            if (chain.chain.length != 3 || !chain.chain[1].equals(issuer)) {
+                return failure<Unit>("Intel PCK must chain through the supplied issuer");
+            }
+            verify_crl(root_crl, root, new([issuer, tcb_signer, qe_signer]), at)?;
+            verify_crl(pck_crl, issuer, new([pck]), at)?;
+            last platform = authenticate_json(tcb, tcb_signer, root, at)?;
+            last quoting = authenticate_json(identity, qe_signer, root, at)?;
+            last qe_status = qe_tcb(quoting, quote.qe_report(), expected, at)?;
+            check_status(qe_status, allowed)?;
+            last tdx = expected == dcap.Platform.Tdx;
+            last pck_tcb = read_pck(pck, tdx)?;
+            if (tdx) {
+                last report = quote.report_body();
+                last platform_status = platform_tcb(platform, pck_tcb, words.slice(report, 0, 16), at)?;
+                check_status(platform_status, allowed)?;
+                last module_status = tdx_module_tcb(platform, report, at)?;
+                check_status(module_status, allowed)?;
+                // Intel combines an outdated component with a configuration-needed platform.
+                if ((module_status == "OutOfDate" || qe_status == "OutOfDate")
+                    && (platform_status == "ConfigurationNeeded" || platform_status == "ConfigurationAndSWHardeningNeeded")) {
+                    return check_status("OutOfDateConfigurationNeeded", allowed);
+                }
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            return check_status(platform_tcb(platform, pck_tcb, new, at)?, allowed);
+        };
+
+        export let.override to_string = func -> string => "DcapCollateral.Collateral";
+    );
+
+    /// @brief Validates SGX v3 collateral for Dcap.verify. This profile supports
+    /// standard SGX PCKs, TCB Info v3 of type zero, QE Identity v2 and full root and issuer CRLs.
+    /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+    #[Final, Since("0.3.0")]
+    export let SgxCollateralVerifier = class implements dcap.CollateralVerifier (
+        last collateral: Collateral;
+
+        /// @brief Copies the exact collateral bytes. The default policy accepts only UpToDate. An explicit
+        /// allowlist applies to each selected TCB status. Revocation always fails.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let init = func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list]) {
+            collateral = new Collateral(tcb_info, qe_identity, issuer_der, root_list, pck_list, new([TcbStatus.UpToDate]));
+        } or func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list],
+            statuses: TcbStatus[list]) {
+            collateral = new Collateral(tcb_info, qe_identity, issuer_der, root_list, pck_list, statuses);
+        };
+
+        /// @brief Validates collateral for the quote and PCK previously authenticated by Dcap.verify.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify = func(quote: dcap.Quote, pck_der: uint8[list], trusted_root_der: uint8[list],
+            at: instant.Instant) -> Result<Unit> => collateral.verify(quote, pck_der, trusted_root_der, at, dcap.Platform.Sgx);
+
+        /// @brief The verifier type without the collateral bytes.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "DcapCollateral.SgxCollateralVerifier";
+    );
+
+    /// @brief Validates TDX v4 collateral for Dcap.verify. This profile supports
+    /// scalable PCKs, TDX TCB Info v3 of type zero, TD_QE Identity v2 and full root and issuer CRLs.
+    /// It checks the selected SEAM module signer, attributes and security version.
+    /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+    #[Final, Since("0.3.0")]
+    export let TdxCollateralVerifier = class implements dcap.CollateralVerifier (
+        last collateral: Collateral;
+
+        /// @brief Copies the exact collateral bytes. The default policy accepts only UpToDate. An explicit
+        /// allowlist applies to each selected TCB status. Revocation always fails.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let init = func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list]) {
+            collateral = new Collateral(tcb_info, qe_identity, issuer_der, root_list, pck_list, new([TcbStatus.UpToDate]));
+        } or func(tcb_info: SignedJson, qe_identity: SignedJson, issuer_der, root_list, pck_list: uint8[list],
+            statuses: TcbStatus[list]) {
+            collateral = new Collateral(tcb_info, qe_identity, issuer_der, root_list, pck_list, statuses);
+        };
+
+        /// @brief Validates collateral for the quote and PCK previously authenticated by Dcap.verify.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify = func(quote: dcap.Quote, pck_der: uint8[list], trusted_root_der: uint8[list],
+            at: instant.Instant) -> Result<Unit> => collateral.verify(quote, pck_der, trusted_root_der, at, dcap.Platform.Tdx);
+
+        /// @brief The verifier type without the collateral bytes.
+        /// @see [Std.Crypto.Enclave.DcapCollateral](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-DcapCollateral)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "DcapCollateral.TdxCollateralVerifier";
+    );
+);
