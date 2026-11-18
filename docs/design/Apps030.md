@@ -322,6 +322,18 @@ A budget is a number the release must meet, with the workload, the statistic, th
 | B-S5 | Drain | Exit within S-12 plus 1 s; every request in flight completes or is reported | A termination signal under the B-S1 load | The same script | Here; A4 |
 | B-S6 | Sustained load | Resident size slope under 1% per minute after minute 2; no descriptor or process left | 10 minutes at half the B-S2 rate, with one request in 1,000 trapping | The same script | Here; A6 |
 
+Measured in the apps integration, round 2 (2026-11-18, `tests/apps/web/bench-web.py`; Linux x86-64, 8 CPUs, a shared machine at load average 2.6 to 6.6; headless Chromium 156 and Firefox 153 ESR; `nvm.wasm` of the A2 round-2 build; 1,000 rows of `tests/apps/web/bench/rows.nra`, each row a component, and `bench/list.nra`, one `Std.Ui.Controls.list`). These are misses, recorded rather than resolved:
+
+| Budget | Chromium | Firefox |
+| --- | --- | --- |
+| B-W5, a row component changes (only that row renders) | median 126.7 ms, 95th 259.7 ms | median 134.0 ms, 95th 265.0 ms |
+| B-W5, a row of the list control changes (the list renders) | median 249.0 ms, 95th 309.8 ms | median 282.0 ms, 95th 326.0 ms |
+| B-W6, reversing the row components | 95th 270.1 ms | 95th 306.0 ms |
+| B-W7, tasks over 50 ms after the first commit | none (the run yields between slices) | not measured: Firefox reports no long-task entries |
+| B-W9, browser half, after cycle 100 and cycle 1,000 (10,000 clicks) | `neura.ui.stats` 4 nodes, 2 listeners, 1 template, 0 queued; 1 open root; 1 subscriber; `nvm.wasm` memory 17,891,328 bytes: equal | the same, equal |
+
+The B-W5 time is the reconciler and the turn in `nvm.wasm`: about 2.8 million steps for a row component's change and 4.7 million for the list control's (model host, `Components030`), which at the measured times is roughly 20 million steps a second in the browser (an inference from the model-host counts). The model-host run of B-W9 takes 54.2 million steps for 10,000 cycles (5,417 a cycle), under its limit of 100 million. Chromium's JavaScript heap read 6.2 and 9.3 MB at the two points without a forced collection, which is not evidence either way.
+
 Published results name the hardware, system, browser, engine, driver and workload. A language benchmark is not evidence for B-W4 to B-W7, and the size of the core is not evidence for B-D3.
 
 ## What this machine can qualify

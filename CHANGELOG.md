@@ -87,6 +87,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- A web bundle's page ran its image under the runtime's default limit of 100,000,000 steps for the whole run, so a page whose updates are heavy stopped with a step-limit trap after a number of interactions (the 1,000-row list of budget B-W5 stopped before its 200 clicks were done). The boot module now runs the image with the largest limit; `NvmExecution`'s `maxSteps` still sets one.
 - A view that one UI root refused or only prepared is no longer `ViewReused` in another root; only a view that another root has mounted is.
 - An HTML factory may return an element whose required parent is outside the template, such as `<li>` or `<tr>`; it was rejected as `E0243` although the HTML note's own `part_row` example does this.
 - `nvm.wasm` lowers binary32 and binary64 operations to the WebAssembly float instructions, as x86-64 and AArch64 do. The lowering used to refuse them on every other platform, so float blocks in a browser ran by reference: `mandelbrot` and `spectral-norm` at their quick sizes went from about 6 s to 1.5 s in Chromium, and the geometric mean of the wall-clock set from 644 ms to 555 ms.

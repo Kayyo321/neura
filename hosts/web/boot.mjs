@@ -58,7 +58,10 @@ async function start() {
     const history = new HistoryHost({ mode: config.routing, base: config.base ?? '/' });
     // The http_client group, when the bundle lists it: the page's origin and the bundle's connect origins.
     const http = config.http ? new FetchHost({ origins: config.http.origins }) : undefined;
-    const execution = new NvmExecution(module, new Uint8Array(image), { host: browserHost({ ui, history, http }) });
+    // An application's event loop lasts as long as the page, so its run has no step limit of its own (the largest
+    // limit); the runtime's default of 100,000,000 steps would stop a busy page after a number of interactions.
+    const execution = new NvmExecution(module, new Uint8Array(image),
+                                       { host: browserHost({ ui, history, http }), maxSteps: 2n ** 64n - 1n });
     page.documentElement.dataset.neuraState = 'running';
     try {
         const event = await execution.run({ hasPendingEvents: () => ui.queued > 0 });
