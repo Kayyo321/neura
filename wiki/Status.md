@@ -60,6 +60,7 @@ These are not decided. For most of them the compiler rejects or does not offer t
 | Generics | Inference of the type arguments of `new` and of enum constructors, which stay written or target-typed; generic class inheritance, variance |
 | Modules | Package-level resolution, and with it the boundary of `#Internal`, which is a directory tree until packages exist |
 | Lifecycle | Ownership, alias safety beyond the shared-object rule below, definite initialization of `let` fields (`last` fields are checked), failure cleanup |
+| Class hooks | `#ThreadSafe` standard library classes whose methods read class-typed values (54 classes, such as `Duration.equals`) are rejected with `E0608` in programs that declare a getter that is not task-safe ([Hooks030, Events](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md#events)). Candidate rules: require task-safe hook clauses, or charge a getter's effects to the reader's caller |
 
 ## Recorded decisions
 
