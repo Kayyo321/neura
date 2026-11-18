@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): unsupported: Std.Crypto.Pqc.FnDsa.sign is not implemented in Neura 0.3.0 \(FIPS 206 is not published
+let fn_dsa = import:Std.Crypto.Pqc.FnDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = fn_dsa.sign(fn_dsa.ParameterSet.FnDsa512, new([1]), new([2]));
+        return program.ExitCode.Ok;
+    };
+);

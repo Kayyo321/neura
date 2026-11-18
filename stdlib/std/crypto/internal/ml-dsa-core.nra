@@ -1,0 +1,790 @@
+let pqc_keccak = import:Std.Crypto.Internal.PqcKeccak;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The algorithms of FIPS 204 (ML-DSA) over byte lists, without policy checks or key objects. Internal:
+/// Std.Crypto.Pqc.MlDsa wraps it. Polynomials are `int64[list]` of 256 coefficients in [0, q), q = 8380417, so
+/// a product of two coefficients stays below 2^46.
+#Since("0.3.0")
+export let MlDsaCore = module (
+    const Q: int64 = 8380417;
+
+    /// @brief SHAKE256 (H of FIPS 204).
+    export let shake256 = func(bytes: uint8[list], length: int) -> uint8[list] {
+        let sponge = new pqc_keccak.Xof(136, 31);
+        sponge.absorb(bytes);
+        return sponge.squeeze(length);
+    };
+
+    /// @brief Bytes of an XOF read in blocks of its rate.
+    let Stream = class (
+        last sponge: pqc_keccak.Xof;
+        last rate: int;
+        let block: uint8[list] = new;
+        let at: int = 0;
+
+        export let init = func(rate_bytes: int, seed: uint8[list]) {
+            rate = rate_bytes;
+            sponge = new(rate_bytes, 31);
+            sponge.absorb(seed);
+        };
+
+        export let next = func -> int {
+            if (at == block.length) {
+                block = sponge.squeeze(rate);
+                at = 0;
+            }
+            last b = block[at] as int;
+            at++;
+            return b;
+        };
+
+        export let.override to_string = func -> string => "MlDsaCore.Stream";
+    );
+
+    /// @brief The coefficient in (-q/2, q/2] congruent to x in [0, q).
+    let center = func(x: int64) -> int64 {
+        if (x > 4190208) {
+            return x - Q;
+        }
+        return x;
+    };
+
+    /// @brief x mod q for x in (-q, q).
+    let reduce = func(x: int64) -> int64 {
+        if (x < 0) {
+            return x + Q;
+        }
+        return x;
+    };
+
+    /// @brief Appends the 256 values (each below 2^bits) packed little-endian.
+    let pack = func(out: uint8[list], values: int64[list], bits: int) {
+        let acc: int64 = 0;
+        let filled = 0;
+        for (let i = 0; i < 256; i++) {
+            acc = acc | (values[i] << filled);
+            filled += bits;
+            while (filled >= 8) {
+                out.append((acc & 255) as uint8);
+                acc = acc >> 8;
+                filled -= 8;
+            }
+        }
+    };
+
+    /// @brief 256 values of `bits` bits from the 32 * bits bytes at `at`.
+    let unpack = func(bytes: uint8[list], at: int, bits: int) -> int64[list] {
+        let out: int64[list] = new;
+        last mask = ((1 as int64) << bits) - 1;
+        let acc: int64 = 0;
+        let filled = 0;
+        for (let i = at; i < at + 32 * bits; i++) {
+            acc = acc | ((bytes[i] as int64) << filled);
+            filled += 8;
+            while (filled >= bits) {
+                out.append(acc & mask);
+                acc = acc >> bits;
+                filled -= bits;
+            }
+        }
+        return out;
+    };
+
+    /// @brief One ML-DSA parameter set with its NTT table (built per object, so tasks can use it).
+    export let Engine = class (
+        export last k: int;
+        export last l: int;
+        last eta: int64;
+        last eta_bits: int;
+        last tau: int;
+        last gamma1: int64;
+        last gamma1_bits: int;
+        last gamma2: int64;
+        last w1_bits: int;
+        last beta: int64;
+        last omega: int;
+        /// @brief The length of c-tilde, lambda / 4.
+        export last c_length: int;
+        /// @brief zeta^BitRev8(i) for i < 256.
+        let zetas: int64[list] = new;
+
+        /// @brief The parameter set ML-DSA-44, -65 or -87, named by 44, 65 or 87.
+        export let init = func(level: int) {
+            if (level == 44) {
+                k = 4;
+                l = 4;
+                eta = 2;
+                tau = 39;
+                c_length = 32;
+                gamma1_bits = 17;
+                gamma2 = 95232;
+                omega = 80;
+            } else if (level == 65) {
+                k = 6;
+                l = 5;
+                eta = 4;
+                tau = 49;
+                c_length = 48;
+                gamma1_bits = 19;
+                gamma2 = 261888;
+                omega = 55;
+            } else {
+                k = 8;
+                l = 7;
+                eta = 2;
+                tau = 60;
+                c_length = 64;
+                gamma1_bits = 19;
+                gamma2 = 261888;
+                omega = 75;
+            }
+            if (eta == 2) {
+                eta_bits = 3;
+            } else {
+                eta_bits = 4;
+            }
+            gamma1 = (1 as int64) << gamma1_bits;
+            if (gamma2 == 95232) {
+                w1_bits = 6;
+            } else {
+                w1_bits = 4;
+            }
+            beta = (tau as int64) * eta;
+            let powers: int64[list] = new;
+            let p: int64 = 1;
+            for (let i = 0; i < 256; i++) {
+                powers.append(p);
+                p = (p * 1753) % Q;
+            }
+            for (let i = 0; i < 256; i++) {
+                let r = 0;
+                for (let b = 0; b < 8; b++) {
+                    r = r | (((i >> b) & 1) << (7 - b));
+                }
+                zetas.append(powers[r]);
+            }
+        };
+
+        /// @brief The public-key length, 32 + 320k.
+        export let pk_length = func -> int => 32 + 320 * k;
+        /// @brief The private-key length.
+        export let sk_length = func -> int => 128 + 32 * ((k + l) * eta_bits + 13 * k);
+        /// @brief The signature length.
+        export let sig_length = func -> int => c_length + l * 32 * (gamma1_bits + 1) + omega + k;
+
+        // ---- NTT (Algorithms 41 and 42) ----
+
+        let ntt = func(w: int64[list]) {
+            let m = 0;
+            for (let len = 128; len >= 1; len = len / 2) {
+                for (let start = 0; start < 256; start += 2 * len) {
+                    m++;
+                    last zeta = zetas[m];
+                    for (let j = start; j < start + len; j++) {
+                        last t = (zeta * w[j + len]) % Q;
+                        last a = w[j];
+                        w[j + len] = reduce(a - t);
+                        w[j] = (a + t) % Q;
+                    }
+                }
+            }
+        };
+
+        let inverse_ntt = func(w: int64[list]) {
+            let m = 256;
+            for (let len = 1; len < 256; len = len * 2) {
+                for (let start = 0; start < 256; start += 2 * len) {
+                    m--;
+                    last zeta = Q - zetas[m];
+                    for (let j = start; j < start + len; j++) {
+                        last t = w[j];
+                        last u = w[j + len];
+                        w[j] = (t + u) % Q;
+                        w[j + len] = (zeta * reduce(t - u)) % Q;
+                    }
+                }
+            }
+            for (let j = 0; j < 256; j++) {
+                w[j] = (w[j] * 8347681) % Q;
+            }
+        };
+
+        let zero = func -> int64[list] {
+            let f: int64[list] = new;
+            for (let i = 0; i < 256; i++) {
+                f.append(0);
+            }
+            return f;
+        };
+
+        let copy = func(f: int64[list]) -> int64[list] {
+            let g: int64[list] = new;
+            for (let i = 0; i < 256; i++) {
+                g.append(f[i]);
+            }
+            return g;
+        };
+
+        /// @brief acc += a * b, pointwise in the NTT domain.
+        let multiply_add = func(acc: int64[list], a: int64[list], b: int64[list]) {
+            for (let i = 0; i < 256; i++) {
+                acc[i] = (acc[i] + a[i] * b[i]) % Q;
+            }
+        };
+
+        /// @brief a * b, pointwise in the NTT domain, then the inverse NTT.
+        let product = func(a: int64[list], b: int64[list]) -> int64[list] {
+            let out: int64[list] = new;
+            for (let i = 0; i < 256; i++) {
+                out.append((a[i] * b[i]) % Q);
+            }
+            inverse_ntt(out);
+            return out;
+        };
+
+        // ---- Sampling (Algorithms 29 to 34) ----
+
+        /// @brief A-hat, row-major: entry (r, s) is RejNTTPoly(rho || s || r).
+        let expand_a = func(rho: uint8[list]) -> int64[list][list] {
+            let a: int64[list][list] = new;
+            for (let r = 0; r < k; r++) {
+                for (let s = 0; s < l; s++) {
+                    let seed = words.copy(rho);
+                    seed.append(s as uint8);
+                    seed.append(r as uint8);
+                    let stream = new Stream(168, seed);
+                    let poly: int64[list] = new;
+                    while (poly.length < 256) {
+                        last b0 = stream.next() as int64;
+                        last b1 = stream.next() as int64;
+                        last b2 = (stream.next() & 127) as int64;
+                        last z = b0 + 256 * b1 + 65536 * b2;
+                        if (z < Q) {
+                            poly.append(z);
+                        }
+                    }
+                    a.append(poly);
+                }
+            }
+            return a;
+        };
+
+        /// @brief RejBoundedPoly(rho || r as two bytes), coefficients modulo q.
+        let rej_bounded = func(rho: uint8[list], r: int) -> int64[list] {
+            let seed = words.copy(rho);
+            seed.append((r & 255) as uint8);
+            seed.append((r >> 8) as uint8);
+            let stream = new Stream(136, seed);
+            let poly: int64[list] = new;
+            while (poly.length < 256) {
+                last z = stream.next();
+                last z0 = z & 15;
+                last z1 = z >> 4;
+                if (eta == 2) {
+                    if (z0 < 15) {
+                        poly.append(reduce(2 - ((z0 % 5) as int64)));
+                    }
+                    if (z1 < 15 && poly.length < 256) {
+                        poly.append(reduce(2 - ((z1 % 5) as int64)));
+                    }
+                } else {
+                    if (z0 < 9) {
+                        poly.append(reduce(4 - (z0 as int64)));
+                    }
+                    if (z1 < 9 && poly.length < 256) {
+                        poly.append(reduce(4 - (z1 as int64)));
+                    }
+                }
+            }
+            return poly;
+        };
+
+        /// @brief SampleInBall(c-tilde), coefficients modulo q.
+        let sample_in_ball = func(c_tilde: uint8[list]) -> int64[list] {
+            let stream = new Stream(136, c_tilde);
+            let signs: int[list] = new;
+            for (let i = 0; i < 8; i++) {
+                signs.append(stream.next());
+            }
+            let c = zero();
+            let bit = 0;
+            for (let i = 256 - tau; i < 256; i++) {
+                let j = stream.next();
+                while (j > i) {
+                    j = stream.next();
+                }
+                c[i] = c[j];
+                if (((signs[bit >> 3] >> (bit & 7)) & 1) == 1) {
+                    c[j] = Q - 1;
+                } else {
+                    c[j] = 1;
+                }
+                bit++;
+            }
+            return c;
+        };
+
+        /// @brief ExpandMask(rho'', kappa): l polynomials with coefficients in (-gamma1, gamma1], modulo q.
+        let expand_mask = func(rho: uint8[list], kappa: int) -> int64[list][list] {
+            let y: int64[list][list] = new;
+            for (let r = 0; r < l; r++) {
+                let seed = words.copy(rho);
+                seed.append(((kappa + r) & 255) as uint8);
+                seed.append(((kappa + r) >> 8) as uint8);
+                last v = shake256(seed, 32 * (gamma1_bits + 1));
+                let poly = unpack(v, 0, gamma1_bits + 1);
+                for (let i = 0; i < 256; i++) {
+                    poly[i] = reduce(gamma1 - poly[i]);
+                }
+                y.append(poly);
+            }
+            return y;
+        };
+
+        // ---- Rounding (Algorithms 35 to 40) ----
+
+        /// @brief Decompose(r) for r in [0, q): r1 into `high`, r0 (centered) returned.
+        let low_bits = func(r: int64) -> int64 {
+            let r0 = r % (2 * gamma2);
+            if (r0 > gamma2) {
+                r0 -= 2 * gamma2;
+            }
+            if (r - r0 == Q - 1) {
+                return r0 - 1;
+            }
+            return r0;
+        };
+
+        let high_bits = func(r: int64) -> int64 {
+            let r0 = r % (2 * gamma2);
+            if (r0 > gamma2) {
+                r0 -= 2 * gamma2;
+            }
+            if (r - r0 == Q - 1) {
+                return 0;
+            }
+            return (r - r0) / (2 * gamma2);
+        };
+
+        let use_hint = func(hint: bool, r: int64) -> int64 {
+            last m = (Q - 1) / (2 * gamma2);
+            let r0 = r % (2 * gamma2);
+            if (r0 > gamma2) {
+                r0 -= 2 * gamma2;
+            }
+            let r1: int64 = 0;
+            if (r - r0 == Q - 1) {
+                r0 = r0 - 1;
+            } else {
+                r1 = (r - r0) / (2 * gamma2);
+            }
+            if (!hint) {
+                return r1;
+            }
+            if (r0 > 0) {
+                return (r1 + 1) % m;
+            }
+            return (r1 - 1 + m) % m;
+        };
+
+        /// @brief The infinity norm of a centered polynomial is below `bound`.
+        let norm_below = func(f: int64[list], bound: int64) -> bool {
+            for (let i = 0; i < 256; i++) {
+                last c = center(f[i]);
+                if (c >= bound || c <= 0 - bound) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // ---- Key generation (Algorithm 6) ----
+
+        /// @brief ML-DSA.KeyGen_internal(xi): [pk, sk].
+        export let keygen = func(xi: uint8[list]) -> uint8[list][list] {
+            let seed = words.copy(xi);
+            seed.append(k as uint8);
+            seed.append(l as uint8);
+            last expanded = shake256(seed, 128);
+            last rho = words.slice(expanded, 0, 32);
+            last rho_prime = words.slice(expanded, 32, 96);
+            last key = words.slice(expanded, 96, 128);
+            words.wipe(expanded);
+            last a = expand_a(rho);
+            let s1: int64[list][list] = new;
+            let s1_hat: int64[list][list] = new;
+            for (let r = 0; r < l; r++) {
+                last poly = rej_bounded(rho_prime, r);
+                s1.append(poly);
+                let hat = copy(poly);
+                ntt(hat);
+                s1_hat.append(hat);
+            }
+            let s2: int64[list][list] = new;
+            for (let r = 0; r < k; r++) {
+                s2.append(rej_bounded(rho_prime, r + l));
+            }
+            words.wipe(rho_prime);
+            let pk = words.copy(rho);
+            let t0_packed: uint8[list] = new;
+            for (let r = 0; r < k; r++) {
+                let t = zero();
+                for (let s = 0; s < l; s++) {
+                    multiply_add(t, a[r * l + s], s1_hat[s]);
+                }
+                inverse_ntt(t);
+                last e = s2[r];
+                let t1: int64[list] = new;
+                let t0: int64[list] = new;
+                for (let i = 0; i < 256; i++) {
+                    last value = (t[i] + e[i]) % Q;
+                    // Power2Round: r0 = value mod+- 2^13.
+                    let r0 = value & 8191;
+                    if (r0 > 4096) {
+                        r0 -= 8192;
+                    }
+                    t1.append((value - r0) >> 13);
+                    t0.append(4096 - r0);
+                }
+                pack(pk, t1, 10);
+                pack(t0_packed, t0, 13);
+            }
+            last tr = shake256(pk, 64);
+            let sk = words.copy(rho);
+            words.append_all(sk, key);
+            words.append_all(sk, tr);
+            for (let r = 0; r < l; r++) {
+                pack_eta(sk, s1[r]);
+            }
+            for (let r = 0; r < k; r++) {
+                pack_eta(sk, s2[r]);
+            }
+            words.append_all(sk, t0_packed);
+            return new([pk, sk]);
+        };
+
+        /// @brief BitPack(w, eta, eta) for w modulo q.
+        let pack_eta = func(out: uint8[list], f: int64[list]) {
+            let values: int64[list] = new;
+            for (let i = 0; i < 256; i++) {
+                values.append(eta - center(f[i]));
+            }
+            pack(out, values, eta_bits);
+        };
+
+        /// @brief The polynomial at `at` packed by BitPack(w, a, b), modulo q.
+        let unpack_signed = func(bytes: uint8[list], at: int, bits: int, b: int64) -> int64[list] {
+            let f = unpack(bytes, at, bits);
+            for (let i = 0; i < 256; i++) {
+                f[i] = reduce(b - f[i]);
+            }
+            return f;
+        };
+
+        /// @brief w1Encode(w1) appended to `out`.
+        let w1_encode = func(out: uint8[list], w1: int64[list][list]) {
+            for (let r = 0; r < k; r++) {
+                pack(out, w1[r], w1_bits);
+            }
+        };
+
+        /// @brief The public key of a private key, recomputed from rho, s1 and s2, or an empty list when the
+        /// private key is malformed: a coefficient of s1 or s2 outside [-eta, eta], or a tr or t0 that does
+        /// not match the recomputed key. The length is checked by the caller.
+        export let derive_public = func(sk: uint8[list]) -> uint8[list] {
+            last rho = words.slice(sk, 0, 32);
+            let at = 128;
+            let s1_hat: int64[list][list] = new;
+            let s2: int64[list][list] = new;
+            for (let r = 0; r < k + l; r++) {
+                let poly = unpack(sk, at, eta_bits);
+                for (let i = 0; i < 256; i++) {
+                    if (poly[i] > 2 * eta) {
+                        return new;
+                    }
+                    poly[i] = reduce(eta - poly[i]);
+                }
+                if (r < l) {
+                    ntt(poly);
+                    s1_hat.append(poly);
+                } else {
+                    s2.append(poly);
+                }
+                at += 32 * eta_bits;
+            }
+            last a = expand_a(rho);
+            let pk = words.copy(rho);
+            let t0_packed: uint8[list] = new;
+            for (let r = 0; r < k; r++) {
+                let t = zero();
+                for (let s = 0; s < l; s++) {
+                    multiply_add(t, a[r * l + s], s1_hat[s]);
+                }
+                inverse_ntt(t);
+                last e = s2[r];
+                let t1: int64[list] = new;
+                let t0: int64[list] = new;
+                for (let i = 0; i < 256; i++) {
+                    last value = (t[i] + e[i]) % Q;
+                    let r0 = value & 8191;
+                    if (r0 > 4096) {
+                        r0 -= 8192;
+                    }
+                    t1.append((value - r0) >> 13);
+                    t0.append(4096 - r0);
+                }
+                pack(pk, t1, 10);
+                pack(t0_packed, t0, 13);
+            }
+            last tr = shake256(pk, 64);
+            let diff: uint8 = 0;
+            for (let i = 0; i < 64; i++) {
+                diff = diff | (tr[i] ^ sk[64 + i]);
+            }
+            for (let i = 0; i < t0_packed.length; i++) {
+                diff = diff | (t0_packed[i] ^ sk[at + i]);
+            }
+            if (diff != 0) {
+                return new;
+            }
+            return pk;
+        };
+
+        // ---- Signing (Algorithm 7) ----
+
+        /// @brief mu = H(tr || M', 64), where tr is the 64 bytes at offset 64 of sk or H(pk, 64).
+        export let message_representative = func(tr: uint8[list], message: uint8[list]) -> uint8[list] {
+            let sponge = new pqc_keccak.Xof(136, 31);
+            sponge.absorb(tr);
+            sponge.absorb(message);
+            return sponge.squeeze(64);
+        };
+
+        /// @brief tr, the 64 bytes at offset 64 of the private key.
+        export let private_tr = func(sk: uint8[list]) -> uint8[list] => words.slice(sk, 64, 128);
+
+        /// @brief ML-DSA.Sign_internal with the message representative mu given (external mu) and the 32-byte
+        /// rnd.
+        export let sign_mu = func(sk: uint8[list], mu: uint8[list], rnd: uint8[list]) -> uint8[list] {
+            last rho = words.slice(sk, 0, 32);
+            last key = words.slice(sk, 32, 64);
+            let at = 128;
+            let s1_hat: int64[list][list] = new;
+            for (let r = 0; r < l; r++) {
+                let poly = unpack_signed(sk, at, eta_bits, eta);
+                ntt(poly);
+                s1_hat.append(poly);
+                at += 32 * eta_bits;
+            }
+            let s2_hat: int64[list][list] = new;
+            for (let r = 0; r < k; r++) {
+                let poly = unpack_signed(sk, at, eta_bits, eta);
+                ntt(poly);
+                s2_hat.append(poly);
+                at += 32 * eta_bits;
+            }
+            let t0_hat: int64[list][list] = new;
+            for (let r = 0; r < k; r++) {
+                let poly = unpack_signed(sk, at, 13, 4096);
+                ntt(poly);
+                t0_hat.append(poly);
+                at += 416;
+            }
+            last a = expand_a(rho);
+            let seed = words.copy(key);
+            words.append_all(seed, rnd);
+            words.append_all(seed, mu);
+            last rho2 = shake256(seed, 64);
+            words.wipe(seed);
+            words.wipe(key);
+            let kappa = 0;
+            while (true) {
+                last y = expand_mask(rho2, kappa);
+                kappa += l;
+                let y_hat: int64[list][list] = new;
+                for (let s = 0; s < l; s++) {
+                    let poly = copy(y[s]);
+                    ntt(poly);
+                    y_hat.append(poly);
+                }
+                let w: int64[list][list] = new;
+                let w1: int64[list][list] = new;
+                for (let r = 0; r < k; r++) {
+                    let poly = zero();
+                    for (let s = 0; s < l; s++) {
+                        multiply_add(poly, a[r * l + s], y_hat[s]);
+                    }
+                    inverse_ntt(poly);
+                    let high: int64[list] = new;
+                    for (let i = 0; i < 256; i++) {
+                        high.append(high_bits(poly[i]));
+                    }
+                    w.append(poly);
+                    w1.append(high);
+                }
+                let challenge_input = words.copy(mu);
+                w1_encode(challenge_input, w1);
+                last c_tilde = shake256(challenge_input, c_length);
+                let c_hat = sample_in_ball(c_tilde);
+                ntt(c_hat);
+                // z = y + c s1, checked against gamma1 - beta.
+                let z: int64[list][list] = new;
+                let ok = true;
+                for (let s = 0; s < l && ok; s++) {
+                    let poly = product(c_hat, s1_hat[s]);
+                    last ys = y[s];
+                    for (let i = 0; i < 256; i++) {
+                        poly[i] = (poly[i] + ys[i]) % Q;
+                    }
+                    ok = norm_below(poly, gamma1 - beta);
+                    z.append(poly);
+                }
+                if (!ok) {
+                    continue;
+                }
+                // r0 = LowBits(w - c s2), checked against gamma2 - beta; then the hint.
+                let hints: bool[list][list] = new;
+                let count = 0;
+                for (let r = 0; r < k && ok; r++) {
+                    last cs2 = product(c_hat, s2_hat[r]);
+                    last ct0 = product(c_hat, t0_hat[r]);
+                    last wr = w[r];
+                    let row: bool[list] = new;
+                    for (let i = 0; i < 256; i++) {
+                        last diff = reduce(wr[i] - cs2[i]);
+                        last r0 = low_bits(diff);
+                        if (r0 >= gamma2 - beta || r0 <= beta - gamma2) {
+                            ok = false;
+                            break;
+                        }
+                        last c0 = center(ct0[i]);
+                        if (c0 >= gamma2 || c0 <= 0 - gamma2) {
+                            ok = false;
+                            break;
+                        }
+                        // MakeHint(-ct0, w - cs2 + ct0): HighBits(w - cs2 + ct0) != HighBits(w - cs2).
+                        last hint = high_bits((diff + ct0[i]) % Q) != high_bits(diff);
+                        if (hint) {
+                            count++;
+                        }
+                        row.append(hint);
+                    }
+                    hints.append(row);
+                }
+                if (!ok || count > omega) {
+                    continue;
+                }
+                let sig = words.copy(c_tilde);
+                for (let s = 0; s < l; s++) {
+                    let values: int64[list] = new;
+                    last zs = z[s];
+                    for (let i = 0; i < 256; i++) {
+                        values.append(gamma1 - center(zs[i]));
+                    }
+                    pack(sig, values, gamma1_bits + 1);
+                }
+                let positions: uint8[list] = new;
+                let ends: uint8[list] = new;
+                for (let r = 0; r < k; r++) {
+                    last row = hints[r];
+                    for (let i = 0; i < 256; i++) {
+                        if (row[i]) {
+                            positions.append(i as uint8);
+                        }
+                    }
+                    ends.append(positions.length as uint8);
+                }
+                while (positions.length < omega) {
+                    positions.append(0);
+                }
+                words.append_all(sig, positions);
+                words.append_all(sig, ends);
+                return sig;
+            }
+            return new;
+        };
+
+        // ---- Verification (Algorithm 8) ----
+
+        /// @brief ML-DSA.Verify_internal with the message representative mu given. The signature length is
+        /// checked by the caller; a malformed hint or a large z gives false.
+        export let verify_mu = func(pk: uint8[list], mu: uint8[list], sig: uint8[list]) -> bool {
+            // sigDecode and HintBitUnpack.
+            let at = c_length;
+            let z_hat: int64[list][list] = new;
+            for (let s = 0; s < l; s++) {
+                let poly = unpack_signed(sig, at, gamma1_bits + 1, gamma1);
+                if (!norm_below(poly, gamma1 - beta)) {
+                    return false;
+                }
+                ntt(poly);
+                z_hat.append(poly);
+                at += 32 * (gamma1_bits + 1);
+            }
+            last hint_at = at;
+            let hints: bool[list][list] = new;
+            let index = 0;
+            for (let r = 0; r < k; r++) {
+                let row: bool[list] = new;
+                for (let i = 0; i < 256; i++) {
+                    row.append(false);
+                }
+                last end = sig[hint_at + omega + r] as int;
+                if (end < index || end > omega) {
+                    return false;
+                }
+                last first = index;
+                while (index < end) {
+                    if (index > first && sig[hint_at + index - 1] >= sig[hint_at + index]) {
+                        return false;
+                    }
+                    row[sig[hint_at + index] as int] = true;
+                    index++;
+                }
+                hints.append(row);
+            }
+            for (let i = index; i < omega; i++) {
+                if (sig[hint_at + i] != 0) {
+                    return false;
+                }
+            }
+            last c_tilde = words.slice(sig, 0, c_length);
+            last rho = words.slice(pk, 0, 32);
+            last a = expand_a(rho);
+            let c_hat = sample_in_ball(c_tilde);
+            ntt(c_hat);
+            let challenge_input = words.copy(mu);
+            let w1: int64[list][list] = new;
+            for (let r = 0; r < k; r++) {
+                let t1 = unpack(pk, 32 + 320 * r, 10);
+                for (let i = 0; i < 256; i++) {
+                    t1[i] = t1[i] << 13;
+                }
+                ntt(t1);
+                let w = zero();
+                for (let s = 0; s < l; s++) {
+                    multiply_add(w, a[r * l + s], z_hat[s]);
+                }
+                for (let i = 0; i < 256; i++) {
+                    w[i] = reduce(w[i] - (c_hat[i] * t1[i]) % Q);
+                }
+                inverse_ntt(w);
+                last row = hints[r];
+                let high: int64[list] = new;
+                for (let i = 0; i < 256; i++) {
+                    high.append(use_hint(row[i], w[i]));
+                }
+                w1.append(high);
+            }
+            w1_encode(challenge_input, w1);
+            last again = shake256(challenge_input, c_length);
+            let diff: uint8 = 0;
+            for (let i = 0; i < c_length; i++) {
+                diff = diff | (again[i] ^ c_tilde[i]);
+            }
+            return diff == 0;
+        };
+
+        export let.override to_string = func -> string => "MlDsaCore.Engine(k = " + k.to_string() + ")";
+    );
+);

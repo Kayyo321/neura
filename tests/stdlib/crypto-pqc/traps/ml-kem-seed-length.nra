@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: ML-KEM seeds d and z must be 32 bytes each
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem512);
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 31; i++) {
+            seed.append(0);
+        }
+        let _ = kem.key_pair_from_seed(seed, seed);
+        return program.ExitCode.Ok;
+    };
+);

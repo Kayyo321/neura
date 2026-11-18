@@ -1,0 +1,180 @@
+// test-options: --gpu=off --max-steps 4000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let error = import:Std.Core.Error;
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let test = import:Std.Test;
+
+// The API around the known answers: round trips through the contracts, the data errors (Result or false),
+// printing and equality of keys, the policy, and use from spawned tasks.
+let PqcApiTests = module (
+    let bytes = func(count: int, start: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(((start + i) % 256) as uint8);
+        }
+        return out;
+    };
+
+    let error_code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let generator = func -> drbg.ChaCha20Drbg => new(bytes(32, 7));
+
+    export let test_ml_dsa_round_trip_through_the_contracts = func {
+        last key = test.assert_ok(ml_dsa.generate_key_pair(ml_dsa.ParameterSet.MlDsa44, generator()));
+        let signer: Signer<ml_dsa.MlDsaPrivateKey, uint8[list]> = new ml_dsa.MlDsaSigner(key, generator());
+        let verifier: Verifier<ml_dsa.MlDsaPublicKey, uint8[list]> = new ml_dsa.MlDsaVerifier(key.public_key());
+        last message = bytes(100, 1);
+        last signature = signer.sign(message);
+        test.assert_equal_int32(2420, signature.length);
+        test.assert(verifier.verify(message, signature));
+        test.assert(!verifier.verify(bytes(100, 2), signature));
+        test.assert(signer.algorithm() == Algorithm.MlDsa44);
+        test.assert(verifier.public_key().equals(key.public_key()));
+    };
+
+    export let test_ml_dsa_variants_and_rejections = func {
+        last key = ml_dsa.key_pair_from_seed(ml_dsa.ParameterSet.MlDsa65, bytes(32, 3));
+        last signer = new ml_dsa.MlDsaSigner(key);
+        last verifier = new ml_dsa.MlDsaVerifier(key.public_key());
+        last message = bytes(10, 9);
+        last context = bytes(255, 0);
+        // The deterministic variant is rnd = 32 zero bytes, and repeats.
+        last deterministic = signer.sign_deterministic(message, context);
+        test.assert(deterministic.length == 3309);
+        let zeros: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            zeros.append(0);
+        }
+        last again = signer.sign_with(message, context, zeros);
+        for (let i = 0; i < again.length; i++) {
+            test.assert(again[i] == deterministic[i]);
+        }
+        test.assert(verifier.verify_with_context(message, deterministic, context));
+        // Another context, a context over 255 bytes, a truncated or extended signature: false.
+        test.assert(!verifier.verify_with_context(message, deterministic, bytes(255, 1)));
+        test.assert(!verifier.verify_with_context(message, deterministic, bytes(256, 0)));
+        let short = signer.sign_deterministic(message, new);
+        short.remove_at(0);
+        test.assert(!verifier.verify(message, short));
+        let long = signer.sign_deterministic(message, new);
+        long.append(0);
+        test.assert(!verifier.verify(message, long));
+        // A pre-hash signature verifies only as a pre-hash signature with the same hash.
+        last hashed = signer.sign_prehash_with(message, new, Algorithm.Sha512, zeros);
+        test.assert(verifier.verify_prehash(message, hashed, new, Algorithm.Sha512));
+        test.assert(!verifier.verify_prehash(message, hashed, new, Algorithm.Sha3_512));
+        test.assert(!verifier.verify(message, hashed));
+        // A private key whose tr does not match its public key is malformed.
+        let tampered = key.expose();
+        let copy: uint8[list] = new;
+        for (let b in tampered) {
+            copy.append(b);
+        }
+        copy[64] = copy[64] ^ 1;
+        test.assert_equal_string("crypto.invalid_key",
+            error_code(test.assert_err(ml_dsa.parse_private_key(ml_dsa.ParameterSet.MlDsa65, copy))));
+        test.assert_equal_string("crypto.invalid_key",
+            error_code(test.assert_err(ml_dsa.parse_public_key(ml_dsa.ParameterSet.MlDsa65, bytes(10, 0)))));
+        // The private key re-parses to the same public key.
+        last parsed = test.assert_ok(ml_dsa.parse_private_key(ml_dsa.ParameterSet.MlDsa65, key.expose()));
+        test.assert(parsed.public_key().equals(key.public_key()));
+        test.assert_equal_uint64(parsed.public_key().hash_code() as uint64, key.public_key().hash_code() as uint64);
+    };
+
+    export let test_ml_dsa_printing = func {
+        last key = ml_dsa.key_pair_from_seed(ml_dsa.ParameterSet.MlDsa87, bytes(32, 5));
+        test.assert_equal_string("MlDsaPrivateKey(ML-DSA-87, <redacted>)", key.to_string());
+        test.assert_equal_string("MlDsaPublicKey(ML-DSA-87, 2592 bytes)", key.public_key().to_string());
+        test.assert_equal_string("MlDsaSigner(ML-DSA-87, <redacted>)", new ml_dsa.MlDsaSigner(key).to_string());
+        test.assert_equal_string("MlDsaVerifier(ML-DSA-87)", new ml_dsa.MlDsaVerifier(key.public_key()).to_string());
+        test.assert_equal_int32(4896, ml_dsa.private_key_length(ml_dsa.ParameterSet.MlDsa87));
+        test.assert_equal_int32(4627, ml_dsa.signature_length(ml_dsa.ParameterSet.MlDsa87));
+        key.wipe();
+        test.assert(key.is_wiped());
+    };
+
+    export let test_slh_dsa_round_trip_and_lengths = func {
+        last key = test.assert_ok(slh_dsa.generate_key_pair(slh_dsa.ParameterSet.Sha2_128f, generator()));
+        let signer: Signer<slh_dsa.SlhDsaPrivateKey, uint8[list]> = new slh_dsa.SlhDsaSigner(key, generator());
+        let verifier: Verifier<slh_dsa.SlhDsaPublicKey, uint8[list]> = new slh_dsa.SlhDsaVerifier(key.public_key());
+        last message = bytes(33, 4);
+        last signature = signer.sign(message);
+        test.assert_equal_int32(17088, signature.length);
+        test.assert(verifier.verify(message, signature));
+        test.assert(!verifier.verify(bytes(33, 5), signature));
+        let short = signature;
+        short.remove_at(0);
+        test.assert(!verifier.verify(message, short));
+        test.assert_equal_string("SlhDsaPrivateKey(SLH-DSA-SHA2-128f, <redacted>)", key.to_string());
+        test.assert_equal_string("SlhDsaPublicKey(SLH-DSA-SHA2-128f, 32 bytes)", key.public_key().to_string());
+        test.assert_equal_string("crypto.invalid_key",
+            error_code(test.assert_err(slh_dsa.parse_public_key(slh_dsa.ParameterSet.Shake256s, bytes(32, 0)))));
+        last expected: int[] = [7856, 17088, 16224, 35664, 29792, 49856];
+        last sets: slh_dsa.ParameterSet[] = [
+            slh_dsa.ParameterSet.Sha2_128s, slh_dsa.ParameterSet.Sha2_128f, slh_dsa.ParameterSet.Sha2_192s,
+            slh_dsa.ParameterSet.Sha2_192f, slh_dsa.ParameterSet.Sha2_256s, slh_dsa.ParameterSet.Sha2_256f
+        ];
+        last shake_sets: slh_dsa.ParameterSet[] = [
+            slh_dsa.ParameterSet.Shake128s, slh_dsa.ParameterSet.Shake128f, slh_dsa.ParameterSet.Shake192s,
+            slh_dsa.ParameterSet.Shake192f, slh_dsa.ParameterSet.Shake256s, slh_dsa.ParameterSet.Shake256f
+        ];
+        for (let i = 0; i < 6; i++) {
+            test.assert_equal_int32(expected[i], slh_dsa.signature_length(sets[i]));
+            test.assert_equal_int32(expected[i], slh_dsa.signature_length(shake_sets[i]));
+        }
+        test.assert_equal_string("SLH-DSA-SHAKE-256s", slh_dsa.name(slh_dsa.ParameterSet.Shake256s));
+        test.assert_equal_int32(128, slh_dsa.private_key_length(slh_dsa.ParameterSet.Sha2_256f));
+    };
+
+    export let test_policy = func {
+        crypto_policy.set_policy(crypto_policy.Policy.Cnsa2_0);
+        // CNSA 2.0 allows ML-KEM-1024 and ML-DSA-87 only.
+        test.assert(crypto_policy.allows(Algorithm.MlKem1024));
+        test.assert(crypto_policy.allows(Algorithm.MlDsa87));
+        test.assert(!crypto_policy.allows(Algorithm.MlKem768));
+        test.assert(!crypto_policy.allows(Algorithm.SlhDsa));
+        last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem1024);
+        last key = kem.key_pair_from_seed(bytes(32, 0), bytes(32, 1));
+        last sent = kem.encapsulate_with(key.public_key(), bytes(32, 2));
+        test.assert(test.assert_ok(kem.decapsulate(key, sent.ciphertext)).ct_equals(sent.shared_secret));
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        test.assert(crypto_policy.allows(Algorithm.SlhDsa));
+        test.assert(crypto_policy.allows(Algorithm.MlDsa44));
+        crypto_policy.set_policy(crypto_policy.Policy.Modern);
+    };
+
+    let work = func(n: int) -> int {
+        last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem512);
+        last key = kem.key_pair_from_seed(bytes(32, n), bytes(32, n + 1));
+        last sent = kem.encapsulate_with(key.public_key(), bytes(32, n + 2));
+        last received = test.assert_ok(kem.decapsulate(key, sent.ciphertext));
+        last signing = ml_dsa.key_pair_from_seed(ml_dsa.ParameterSet.MlDsa44, received.expose());
+        last signature = new ml_dsa.MlDsaSigner(signing).sign_deterministic(sent.ciphertext, new);
+        last ok = new ml_dsa.MlDsaVerifier(signing.public_key()).verify(sent.ciphertext, signature);
+        last hashed_key = slh_dsa.key_pair_from_seed(slh_dsa.ParameterSet.Sha2_128f, bytes(16, n), bytes(16, n + 1),
+            bytes(16, n + 2));
+        last hashed = new slh_dsa.SlhDsaSigner(hashed_key).sign_deterministic(signature, new);
+        last hashed_ok = new slh_dsa.SlhDsaVerifier(hashed_key.public_key()).verify(signature, hashed);
+        return ok && hashed_ok ? sent.ciphertext.length + signature.length + hashed.length : 0;
+    };
+
+    export let test_schemes_in_tasks = func {
+        let total = 0;
+        scope (s) {
+            let a = spawn work(1);
+            let b = spawn work(2);
+            total = a.join() + b.join();
+        }
+        test.assert_equal_int32(2 * (768 + 2420 + 17088), total);
+    };
+);

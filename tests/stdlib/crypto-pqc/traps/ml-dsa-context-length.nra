@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: an ML-DSA context string is at most 255 bytes
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 256; i++) {
+            seed.append(0);
+        }
+        let key = ml_dsa.key_pair_from_seed(ml_dsa.ParameterSet.MlDsa44, new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]));
+        let _ = new ml_dsa.MlDsaSigner(key).sign_deterministic(new([1]), seed);
+        return program.ExitCode.Ok;
+    };
+);

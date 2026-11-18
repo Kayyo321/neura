@@ -1,0 +1,14 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): denied: SlhDsa is not allowed under the Cnsa2_0 policy
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        crypto_policy.set_policy(crypto_policy.Policy.Cnsa2_0);
+        let _ = slh_dsa.parse_public_key(slh_dsa.ParameterSet.Sha2_128f, new([1]));
+        let _ = slh_dsa.key_pair_from_seed(slh_dsa.ParameterSet.Sha2_128f, new([1]), new([2]), new([3]));
+        return program.ExitCode.Ok;
+    };
+);

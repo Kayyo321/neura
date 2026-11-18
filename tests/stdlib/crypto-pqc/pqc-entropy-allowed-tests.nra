@@ -1,0 +1,38 @@
+// test-options: --gpu=off --allow-entropy --max-steps 400000000
+// host-dependent-counts: the operating system's bytes change how often the samplers reject
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let test = import:Std.Test;
+
+// With the entropy capability, the convenience entries draw from the operating system. The values are not
+// reproducible, so the tests check round trips and lengths.
+let PqcEntropyAllowedTests = module (
+    export let test_ml_kem = func {
+        last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem768);
+        last key = test.assert_ok(kem.generate_key_pair());
+        last sent = kem.encapsulate(key.public_key());
+        last again = test.assert_ok(kem.try_encapsulate(key.public_key()));
+        test.assert(!sent.shared_secret.ct_equals(again.shared_secret));
+        test.assert(test.assert_ok(kem.decapsulate(key, sent.ciphertext)).ct_equals(sent.shared_secret));
+    };
+
+    export let test_ml_dsa = func {
+        last key = test.assert_ok(ml_dsa.generate_key_pair(ml_dsa.ParameterSet.MlDsa65));
+        last signer = new ml_dsa.MlDsaSigner(key);
+        last verifier = new ml_dsa.MlDsaVerifier(key.public_key());
+        last message: uint8[list] = new([1, 2, 3]);
+        test.assert(verifier.verify(message, signer.sign(message)));
+        last hashed = test.assert_ok(signer.try_sign_prehash(message, new([9]), Algorithm.Sha3_256));
+        test.assert(verifier.verify_prehash(message, hashed, new([9]), Algorithm.Sha3_256));
+    };
+
+    export let test_slh_dsa = func {
+        last key = test.assert_ok(slh_dsa.generate_key_pair(slh_dsa.ParameterSet.Sha2_128f));
+        last message: uint8[list] = new([4, 5]);
+        last signature = new slh_dsa.SlhDsaSigner(key).sign(message);
+        test.assert(new slh_dsa.SlhDsaVerifier(key.public_key()).verify(message, signature));
+    };
+);

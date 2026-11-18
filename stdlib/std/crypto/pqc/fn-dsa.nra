@@ -1,0 +1,48 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+
+/// @brief FN-DSA, the Falcon-based signature scheme that NIST is to standardize as FIPS 206 (Stdlib.md section
+/// 20.9). Every member is a stub.
+///
+/// On 2026-11-17 NIST's list of FIPS publications held FIPS 203, 204 and 205 but no FIPS 206, final or draft,
+/// its post-quantum project page described FIPS 206 as in development, and the NIST ACVP server had no FN-DSA
+/// test vectors. Without the standard's text, the key, signature and message encodings of FN-DSA are not
+/// fixed, so no implementation could be checked against them. Each member
+/// checks the policy for `Algorithm.FnDsa` and then traps with `unsupported: ...`.
+/// @see [Std.Crypto.Pqc.FnDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-FnDsa)
+#Since("0.3.0")
+export let FnDsa = module (
+    /// @brief Placeholder names for two FN-DSA parameter sets, after the Falcon-512 and Falcon-1024 parameter sets
+    /// of the Falcon submission; FIPS 206 may define them differently.
+    #Since("0.3.0")
+    export let ParameterSet = enum (FnDsa512, FnDsa1024);
+
+    /// @brief An FN-DSA key pair: the private key's encoding.
+    /// @stub FIPS 206 is not published (no final or draft text or test vectors from NIST on 2026-11-17)
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func(set: ParameterSet) -> Result<uint8[list]> {
+        crypto_policy.require(Algorithm.FnDsa);
+        trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.generate_key_pair is not implemented in Neura 0.3.0 "
+            + "(FIPS 206 is not published: no final or draft text or test vectors from NIST on 2026-11-17)");
+    };
+
+    /// @brief The FN-DSA signature of the message under the encoded private key.
+    /// @stub FIPS 206 is not published (no final or draft text or test vectors from NIST on 2026-11-17)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign = func(set: ParameterSet, private_key: uint8[list], message: uint8[list]) -> uint8[list] {
+        crypto_policy.require(Algorithm.FnDsa);
+        trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.sign is not implemented in Neura 0.3.0 "
+            + "(FIPS 206 is not published: no final or draft text or test vectors from NIST on 2026-11-17)");
+    };
+
+    /// @brief Whether the signature is valid for the message under the encoded public key.
+    /// @stub FIPS 206 is not published (no final or draft text or test vectors from NIST on 2026-11-17)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(set: ParameterSet, public_key: uint8[list], message: uint8[list], signature: uint8[list])
+            -> bool {
+        crypto_policy.require(Algorithm.FnDsa);
+        trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.verify is not implemented in Neura 0.3.0 "
+            + "(FIPS 206 is not published: no final or draft text or test vectors from NIST on 2026-11-17)");
+    };
+);

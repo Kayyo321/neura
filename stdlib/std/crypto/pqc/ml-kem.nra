@@ -1,0 +1,333 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let core = import:Std.Crypto.Internal.MlKemCore;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief ML-KEM, the module-lattice key-encapsulation mechanism of FIPS 203, in its three parameter sets
+/// (Stdlib.md section 20.9).
+///
+/// `MlKem` implements `KeyEncapsulation`. Every randomized operation has a deterministic form for known-answer
+/// tests and derivations: `key_pair_from_seed(d, z)` and `encapsulate_with(public_key, m)`. The convenience
+/// forms draw their randomness from a `ChaCha20Drbg` given to the constructor, or else from
+/// `Entropy.os_bytes`. Decapsulation uses implicit rejection: a ciphertext that does not re-encrypt to itself
+/// gives the pseudorandom key J(z || c) instead of an error. The input checks of FIPS 203, section 7 run when a
+/// key is made from bytes. Only the comparison of the re-encryption and the choice of the implicit-rejection
+/// key are branch-free in source; the sampling, reduction and decoding code branches on secret values, and
+/// the runtime does not guarantee constant time in any case.
+/// @see [Std.Crypto.Pqc.MlKem](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MlKem)
+#Since("0.3.0")
+export let MlKem = module (
+    /// @brief The parameter sets of FIPS 203, section 8: ML-KEM-512, ML-KEM-768 and ML-KEM-1024.
+    #Since("0.3.0")
+    export let ParameterSet = enum (MlKem512, MlKem768, MlKem1024);
+
+    /// @brief The module rank k of the parameter set.
+    let rank = func(set: ParameterSet) -> int => match (set) {
+        ParameterSet.MlKem512 => 2,
+        ParameterSet.MlKem768 => 3,
+        ParameterSet.MlKem1024 => 4,
+    };
+
+    /// @brief The policy identifier of the parameter set.
+    let algorithm_of = func(set: ParameterSet) -> Algorithm => match (set) {
+        ParameterSet.MlKem512 => Algorithm.MlKem512,
+        ParameterSet.MlKem768 => Algorithm.MlKem768,
+        ParameterSet.MlKem1024 => Algorithm.MlKem1024,
+    };
+
+    /// @brief The standard's name of the parameter set, such as "ML-KEM-768".
+    #[NoDiscard, Since("0.3.0")]
+    export let name = func(set: ParameterSet) -> string => match (set) {
+        ParameterSet.MlKem512 => "ML-KEM-512",
+        ParameterSet.MlKem768 => "ML-KEM-768",
+        ParameterSet.MlKem1024 => "ML-KEM-1024",
+    };
+
+    /// @brief The encapsulation-key length in bytes: 800, 1184 or 1568.
+    #[NoDiscard, Since("0.3.0")]
+    export let public_key_length = func(set: ParameterSet) -> int => 384 * rank(set) + 32;
+
+    /// @brief The decapsulation-key length in bytes: 1632, 2400 or 3168.
+    #[NoDiscard, Since("0.3.0")]
+    export let private_key_length = func(set: ParameterSet) -> int => 768 * rank(set) + 96;
+
+    /// @brief The ciphertext length in bytes: 768, 1088 or 1568.
+    #[NoDiscard, Since("0.3.0")]
+    export let ciphertext_length = func(set: ParameterSet) -> int => match (set) {
+        ParameterSet.MlKem512 => 768,
+        ParameterSet.MlKem768 => 1088,
+        ParameterSet.MlKem1024 => 1568,
+    };
+
+    /// @brief The length of the shared secret, 32 bytes for every parameter set.
+    #Since("0.3.0")
+    export const SharedSecretLength = 32;
+
+    let invalid_key = func<T>(text: string) -> Result<T> => Result<T>.Err(error.custom("crypto.invalid_key", text));
+
+    /// @brief An ML-KEM encapsulation key. Every instance has passed the length and modulus checks of FIPS 203,
+    /// section 7.2. Equal keys have equal bytes.
+    #[Final, Since("0.3.0")]
+    export let MlKemPublicKey = class (
+        /// @brief The parameter set.
+        export last parameter_set: ParameterSet;
+        /// @brief The encoded key.
+        last encoded: uint8[list];
+
+        /// @brief Copies the encoded key. A wrong length, or a key that fails the modulus check, traps with
+        /// `invalid argument`; use `MlKem.parse_public_key` for keys from outside the program.
+        export let init = func(set: ParameterSet, bytes: uint8[list]) {
+            crypto_policy.require(algorithm_of(set));
+            if (bytes.length != public_key_length(set)) {
+                trap_with_message("invalid argument: " + name(set) + " encapsulation key must be "
+                    + public_key_length(set).to_string() + " bytes");
+            }
+            if (!new core.Engine(rank(set)).check_ek(bytes)) {
+                trap_with_message("invalid argument: " + name(set) + " encapsulation key fails the modulus check");
+            }
+            parameter_set = set;
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the encoded key.
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is MlKemPublicKey)) {
+                return false;
+            }
+            last key = other as MlKemPublicKey;
+            if (key.parameter_set != parameter_set) {
+                return false;
+            }
+            last bytes = key.encoded;
+            for (let i = 0; i < encoded.length; i++) {
+                if (bytes[i] != encoded[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = hashing.combine(17, (parameter_set as int) as uint32);
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string =>
+            "MlKemPublicKey(" + name(parameter_set) + ", " + encoded.length.to_string() + " bytes)";
+    );
+
+    /// @brief An ML-KEM decapsulation key (dk_PKE || ek || H(ek) || z) in secret memory. Every instance has
+    /// passed the length and hash checks of FIPS 203, section 7.3. `to_string` never prints it.
+    #[Final, Since("0.3.0")]
+    export let MlKemPrivateKey = class implements PrivateKey<MlKem> (
+        /// @brief The parameter set.
+        export last parameter_set: ParameterSet;
+        last material: SecretBytes;
+
+        /// @brief Copies the encoded key. A wrong length, or a key whose stored H(ek) does not match, traps
+        /// with `invalid argument`; use `MlKem.parse_private_key` for keys from outside the program.
+        export let init = func(set: ParameterSet, bytes: uint8[list]) {
+            crypto_policy.require(algorithm_of(set));
+            if (bytes.length != private_key_length(set)) {
+                trap_with_message("invalid argument: " + name(set) + " decapsulation key must be "
+                    + private_key_length(set).to_string() + " bytes");
+            }
+            if (!new core.Engine(rank(set)).check_dk(bytes)) {
+                trap_with_message("invalid argument: " + name(set) + " decapsulation key fails the hash check");
+            }
+            parameter_set = set;
+            material = new(bytes);
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+
+        /// @brief The encapsulation key stored inside the decapsulation key.
+        export let public_key_bytes = func -> uint8[list] {
+            last k = rank(parameter_set);
+            return words.slice(material.expose(), 384 * k, 768 * k + 32);
+        };
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> MlKemPublicKey => new(parameter_set, public_key_bytes());
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "MlKemPrivateKey(" + name(parameter_set) + ", <redacted>)";
+    );
+
+    /// @brief An ML-KEM parameter set as a `KeyEncapsulation`. The shared secret is a 32-byte `SecretBytes`
+    /// and the ciphertext a byte list.
+    #[Final, Since("0.3.0")]
+    export let MlKem = class implements KeyEncapsulation<MlKemPublicKey, MlKemPrivateKey, SecretBytes, uint8[list]> (
+        /// @brief The parameter set.
+        export last parameter_set: ParameterSet;
+        last engine: core.Engine;
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        /// @brief The parameter set, with randomness from `Entropy.os_bytes`, or from the given generator.
+        export let init = func(set: ParameterSet) {
+            crypto_policy.require(algorithm_of(set));
+            parameter_set = set;
+            engine = new(rank(set));
+        } or func(set: ParameterSet, random: drbg.ChaCha20Drbg) {
+            crypto_policy.require(algorithm_of(set));
+            parameter_set = set;
+            engine = new(rank(set));
+            generator = random;
+            has_generator = true;
+        };
+
+        /// @brief `MlKem512`, `MlKem768` or `MlKem1024`.
+        export let algorithm = func -> Algorithm => algorithm_of(parameter_set);
+
+        let random_bytes = func(count: int) -> Result<uint8[list]> {
+            if (has_generator) {
+                return Result<uint8[list]>.Ok(generator.fill(count));
+            }
+            return entropy.os_bytes(count);
+        };
+
+        /// @brief ML-KEM.KeyGen_internal (FIPS 203, Algorithm 16) from the 32-byte seeds d and z. Another
+        /// length traps.
+        #NoDiscard
+        export let key_pair_from_seed = func(d: uint8[list], z: uint8[list]) -> MlKemPrivateKey {
+            if (d.length != 32 || z.length != 32) {
+                trap_with_message("invalid argument: ML-KEM seeds d and z must be 32 bytes each");
+            }
+            last pair = engine.keygen(d, z);
+            let key: MlKemPrivateKey = new(parameter_set, pair[1]);
+            words.wipe(pair[1]);
+            return key;
+        };
+
+        /// @brief ML-KEM.KeyGen (FIPS 203, Algorithm 19) with 64 random bytes. Fails when the entropy source
+        /// fails.
+        #NoDiscard
+        export let generate_key_pair = func -> Result<MlKemPrivateKey> {
+            match (random_bytes(64)) {
+                Result.Ok(seed) => {
+                    last key = key_pair_from_seed(words.slice(seed, 0, 32), words.slice(seed, 32, 64));
+                    words.wipe(seed);
+                    return Result<MlKemPrivateKey>.Ok(key);
+                },
+                Result.Err(e) => {
+                    return Result<MlKemPrivateKey>.Err(e);
+                },
+            }
+        };
+
+        let check_set = func(set: ParameterSet) {
+            if (set != parameter_set) {
+                trap_with_message("invalid argument: an " + name(set) + " key given to " + name(parameter_set));
+            }
+        };
+
+        /// @brief ML-KEM.Encaps_internal (FIPS 203, Algorithm 17) with the given 32-byte m. Another length, or a
+        /// key of another parameter set, traps.
+        #NoDiscard
+        export let encapsulate_with = func(public_key: MlKemPublicKey, m: uint8[list])
+                -> Encapsulation<SecretBytes, uint8[list]> {
+            check_set(public_key.parameter_set);
+            if (m.length != 32) {
+                trap_with_message("invalid argument: ML-KEM randomness m must be 32 bytes");
+            }
+            last pair = engine.encaps(public_key.to_bytes(), m);
+            let secret: SecretBytes = new(pair[0]);
+            words.wipe(pair[0]);
+            return new(secret, pair[1]);
+        };
+
+        /// @brief ML-KEM.Encaps (FIPS 203, Algorithm 20) with 32 random bytes. Fails when the entropy source
+        /// fails.
+        #NoDiscard
+        export let try_encapsulate = func(public_key: MlKemPublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            match (random_bytes(32)) {
+                Result.Ok(m) => {
+                    last result = encapsulate_with(public_key, m);
+                    words.wipe(m);
+                    return Result<Encapsulation<SecretBytes, uint8[list]>>.Ok(result);
+                },
+                Result.Err(e) => {
+                    return Result<Encapsulation<SecretBytes, uint8[list]>>.Err(e);
+                },
+            }
+        };
+
+        /// @brief ML-KEM.Encaps with 32 random bytes. Traps with `unavailable: ...` when the entropy source
+        /// fails; `try_encapsulate` returns that failure instead.
+        export let encapsulate = func(public_key: MlKemPublicKey) -> Encapsulation<SecretBytes, uint8[list]> {
+            match (try_encapsulate(public_key)) {
+                Result.Ok(result) => {
+                    return result;
+                },
+                Result.Err(e) => {
+                    trap_with_message("unavailable: ML-KEM encapsulation needs entropy: " + e.to_string());
+                },
+            }
+        };
+
+        /// @brief ML-KEM.Decaps (FIPS 203, Algorithm 21). A ciphertext of the wrong length fails with `Custom`
+        /// code `crypto.invalid_ciphertext`; any ciphertext of the right length gives a key, the implicit
+        /// rejection key when it was altered. A key of another parameter set traps.
+        export let decapsulate = func(private_key: MlKemPrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes> {
+            check_set(private_key.parameter_set);
+            if (ciphertext.length != ciphertext_length(parameter_set)) {
+                return Result<SecretBytes>.Err(error.custom("crypto.invalid_ciphertext",
+                    name(parameter_set) + " ciphertext must be " + ciphertext_length(parameter_set).to_string() + " bytes"));
+            }
+            let key = engine.decaps(private_key.expose(), ciphertext);
+            let secret: SecretBytes = new(key);
+            words.wipe(key);
+            return Result<SecretBytes>.Ok(secret);
+        };
+
+        /// @brief An encapsulation key from outside the program, after the length and modulus checks of FIPS
+        /// 203, section 7.2. A failure is `Custom` code `crypto.invalid_key`.
+        #NoDiscard
+        export let parse_public_key = func(bytes: uint8[list]) -> Result<MlKemPublicKey> {
+            if (bytes.length != public_key_length(parameter_set)) {
+                return invalid_key<MlKemPublicKey>(name(parameter_set) + " encapsulation key must be "
+                    + public_key_length(parameter_set).to_string() + " bytes");
+            }
+            if (!engine.check_ek(bytes)) {
+                return invalid_key<MlKemPublicKey>(name(parameter_set) + " encapsulation key fails the modulus check");
+            }
+            return Result<MlKemPublicKey>.Ok(new(parameter_set, bytes));
+        };
+
+        /// @brief A decapsulation key from outside the program, after the length and hash checks of FIPS 203,
+        /// section 7.3. A failure is `Custom` code `crypto.invalid_key`.
+        #NoDiscard
+        export let parse_private_key = func(bytes: uint8[list]) -> Result<MlKemPrivateKey> {
+            if (bytes.length != private_key_length(parameter_set)) {
+                return invalid_key<MlKemPrivateKey>(name(parameter_set) + " decapsulation key must be "
+                    + private_key_length(parameter_set).to_string() + " bytes");
+            }
+            if (!engine.check_dk(bytes)) {
+                return invalid_key<MlKemPrivateKey>(name(parameter_set) + " decapsulation key fails the hash check");
+            }
+            return Result<MlKemPrivateKey>.Ok(new(parameter_set, bytes));
+        };
+
+        export let.override to_string = func -> string => "MlKem(" + name(parameter_set) + ")";
+    );
+);

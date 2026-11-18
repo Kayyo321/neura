@@ -1,0 +1,64 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The message formatting shared by ML-DSA (FIPS 204) and SLH-DSA (FIPS 205): the domain-separated M'
+/// of the pure and pre-hash variants. Internal. The pre-hash digests use the public Std.Crypto.Hash functions,
+/// so the policy is checked for the pre-hash function.
+#Since("0.3.0")
+export let PqcPrehash = module (
+    /// @brief OID || PH(M): the DER object identifier of the pre-hash function (FIPS 204, section 5.4; FIPS 205,
+    /// section 10.2) followed by the digest of the message; SHAKE128 gives 32 bytes and SHAKE256 64. Another
+    /// algorithm traps with `invalid argument`.
+    export let digest_info = func(hash: Algorithm, message: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new([6, 9, 96, 134, 72, 1, 101, 3, 4, 2]);
+        if (hash == Algorithm.Sha256) {
+            out.append(1);
+            words.append_all(out, sha2.sha256(message));
+        } else if (hash == Algorithm.Sha384) {
+            out.append(2);
+            words.append_all(out, sha2.sha384(message));
+        } else if (hash == Algorithm.Sha512) {
+            out.append(3);
+            words.append_all(out, sha2.sha512(message));
+        } else if (hash == Algorithm.Sha224) {
+            out.append(4);
+            words.append_all(out, sha2.sha224(message));
+        } else if (hash == Algorithm.Sha512_256) {
+            out.append(6);
+            words.append_all(out, sha2.sha512_256(message));
+        } else if (hash == Algorithm.Sha3_224) {
+            out.append(7);
+            words.append_all(out, sha3.sha3_224(message));
+        } else if (hash == Algorithm.Sha3_256) {
+            out.append(8);
+            words.append_all(out, sha3.sha3_256(message));
+        } else if (hash == Algorithm.Sha3_384) {
+            out.append(9);
+            words.append_all(out, sha3.sha3_384(message));
+        } else if (hash == Algorithm.Sha3_512) {
+            out.append(10);
+            words.append_all(out, sha3.sha3_512(message));
+        } else if (hash == Algorithm.Shake128) {
+            out.append(11);
+            words.append_all(out, sha3.shake128(message, 32));
+        } else if (hash == Algorithm.Shake256) {
+            out.append(12);
+            words.append_all(out, sha3.shake256(message, 64));
+        } else {
+            trap_with_message("invalid argument: " + hash.to_string() + " is not a pre-hash function of HashML-DSA or HashSLH-DSA");
+        }
+        return out;
+    };
+
+    /// @brief M' = domain || |ctx| || ctx || rest.
+    export let formatted = func(domain: uint8, context: uint8[list], rest: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        out.append(domain);
+        out.append(context.length as uint8);
+        words.append_all(out, context);
+        words.append_all(out, rest);
+        return out;
+    };
+);

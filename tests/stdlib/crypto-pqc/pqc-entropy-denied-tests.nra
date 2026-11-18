@@ -1,0 +1,45 @@
+// test-options: --gpu=off --deny-entropy
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let error = import:Std.Core.Error;
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let ml_kem = import:Std.Crypto.Pqc.MlKem;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let test = import:Std.Test;
+
+// Without the entropy capability, every convenience entry that draws from Entropy.os_bytes returns its error,
+// and the deterministic entries still work.
+let PqcEntropyDeniedTests = module (
+    let zeros = func(count: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(0);
+        }
+        return out;
+    };
+
+    let denied = func(e: error.Error) {
+        test.assert_equal_string("CapabilityDenied: entropy request failed", error.message(e));
+    };
+
+    export let test_ml_kem = func {
+        last kem = new ml_kem.MlKem(ml_kem.ParameterSet.MlKem512);
+        denied(test.assert_err(kem.generate_key_pair()));
+        last key = kem.key_pair_from_seed(zeros(32), zeros(32));
+        denied(test.assert_err(kem.try_encapsulate(key.public_key())));
+    };
+
+    export let test_ml_dsa = func {
+        denied(test.assert_err(ml_dsa.generate_key_pair(ml_dsa.ParameterSet.MlDsa44)));
+        last key = ml_dsa.key_pair_from_seed(ml_dsa.ParameterSet.MlDsa44, zeros(32));
+        last signer = new ml_dsa.MlDsaSigner(key);
+        denied(test.assert_err(signer.try_sign(new([1]), new)));
+        denied(test.assert_err(signer.try_sign_prehash(new([1]), new, Algorithm.Sha256)));
+    };
+
+    export let test_slh_dsa = func {
+        denied(test.assert_err(slh_dsa.generate_key_pair(slh_dsa.ParameterSet.Sha2_128f)));
+        last key = slh_dsa.key_pair_from_seed(slh_dsa.ParameterSet.Sha2_128f, zeros(16), zeros(16), zeros(16));
+        denied(test.assert_err(new slh_dsa.SlhDsaSigner(key).try_sign(new([1]), new)));
+    };
+);
