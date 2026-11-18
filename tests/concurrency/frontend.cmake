@@ -936,24 +936,25 @@ check_labels(group_work_captures_an_object
 check_rejection(command_work_captures_a_state [=[
 let ui = import:Std.Ui;
 let result = import:Std.Core.Result;
+let commands = import:Std.Ui.Commands;
 let model = import:Std.Ui.ModelHost;
 let status = html(n: int32) { <output>{n}</output> };
 ]=] [=[
         let count = new ui.State<int32>(0);
-        let command = new ui.Command<int32, int32>(new func(step: int32) -> result.Result<int32> {
+        let command = new commands.Command<int32, int32>(new func(step: int32) -> result.Result<int32> {
             return result.Result<int32>.Ok(count.get() + step);
         });
         let top = ui.component<int32>(count, new func(value: int32) -> ui.View => status(value));
         command.bind(top);
         command.run(1);
         let root = result.expect<ui.Root>(ui.mount(new model.Host(), "#app", top), "mount");
-        root.run_with_commands();
-]=] "17:9"
+        commands.run(root);
+]=] "18:9"
     "a value of type func\\(Launch, Sender<uint64>\\) -> void is not transferable, so it cannot be given to a spawned task")
 check_labels(command_work_captures_a_state
-    "command_work_captures_a_state.nra\",[^}]*\"line\":11,\"column\":44,\"primary\":false,\"label\":\"a function value of this type captures a value of type State<int32> here\""
-    "ui.nra\",[^}]*,\"primary\":false,\"label\":\"a function value of this type captures a value of type func\\(int32\\) -> Result<int32> here\""
-    "ui.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
+    "command_work_captures_a_state.nra\",[^}]*\"line\":12,\"column\":44,\"primary\":false,\"label\":\"a function value of this type captures a value of type State<int32> here\""
+    "commands.nra\",[^}]*,\"primary\":false,\"label\":\"a function value of this type captures a value of type func\\(int32\\) -> Result<int32> here\""
+    "commands.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
 
 check_rejection(tasks_all_call_writes_a_global "${groups_import}\
 let total: int = 0;

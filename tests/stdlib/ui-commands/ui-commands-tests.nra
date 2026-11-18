@@ -1,5 +1,6 @@
 let cancellation = import:Std.Concurrent.Cancellation;
 let channels = import:Std.Concurrent.Channel;
+let commands = import:Std.Ui.Commands;
 let error = import:Std.Core.Error;
 let model = import:Std.Ui.ModelHost;
 let result = import:Std.Core.Result;
@@ -26,12 +27,12 @@ let double = func(value: int32) -> result.Result<int32> {
     return result.Result<int32>.Ok(value * 2);
 };
 
-let describe = func(state: ui.CommandState<int32>) -> string => match (state) {
-    ui.CommandState.Idle => "idle",
-    ui.CommandState.Running => "running",
-    ui.CommandState.Succeeded(value) => "succeeded " + value.to_string(),
-    ui.CommandState.Failed(problem) => "failed " + error.message(error.from_portable(problem)),
-    ui.CommandState.Cancelled => "cancelled",
+let describe = func(state: commands.CommandState<int32>) -> string => match (state) {
+    commands.CommandState.Idle => "idle",
+    commands.CommandState.Running => "running",
+    commands.CommandState.Succeeded(value) => "succeeded " + value.to_string(),
+    commands.CommandState.Failed(problem) => "failed " + error.message(error.from_portable(problem)),
+    commands.CommandState.Cancelled => "cancelled",
 };
 
 let UiCommandsTests = module (
@@ -50,8 +51,8 @@ let UiCommandsTests = module (
     };
 
     // A component that renders the state of `command`, bound to it.
-    let command_component = func(command: ui.Command<int32, int32>, trace: string[list]) -> ui.Component {
-        last top = ui.component<ui.CommandState<int32>>(command.state, new func(state: ui.CommandState<int32>) -> ui.View {
+    let command_component = func(command: commands.Command<int32, int32>, trace: string[list]) -> ui.Component {
+        last top = ui.component<commands.CommandState<int32>>(command.state, new func(state: commands.CommandState<int32>) -> ui.View {
             trace.append(describe(state));
             return status_view(describe(state));
         });
@@ -63,34 +64,34 @@ let UiCommandsTests = module (
     export let test_run_succeeds = func() -> void {
         let trace: string[list] = new;
         let host = new model.Host();
-        let command = new ui.Command<int32, int32>(double);
+        let command = new commands.Command<int32, int32>(double);
         let top = command_component(command, trace);
         let root = mounted(host, "#app", top);
         host.click(1, top, new func(event: ui.ClickEvent) {
-            test.assert(command.run(21) == ui.RunOutcome.Started);
+            test.assert(command.run(21) == commands.RunOutcome.Started);
         });
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; succeeded 42", join(trace));
         test.assert_equal_int32(0, root.commands_in_flight());
         test.assert_equal_int32(0, command.runs_in_flight());
         test.assert(root.stats().turns == 2);
         test.assert_equal_string("open #app: root 1; commit 1 on root 1: 1 render; commit 2 on root 1: 1 render; "
-                                 + "completion; commit 3 on root 1: 1 render", join(host.log));
+                                 + "await completion; commit 3 on root 1: 1 render", join(host.log));
     };
 
     // A failed run is Failed with the error's portable form.
     export let test_run_fails = func() -> void {
         let trace: string[list] = new;
         let host = new model.Host();
-        let command = new ui.Command<int32, int32>(double);
+        let command = new commands.Command<int32, int32>(double);
         let top = command_component(command, trace);
         let root = mounted(host, "#app", top);
         host.click(1, top, new func(event: ui.ClickEvent) {
             command.run(-1);
         });
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; failed the input is negative", join(trace));
     };
 
@@ -98,7 +99,7 @@ let UiCommandsTests = module (
     export let test_run_twice_discards_first = func() -> void {
         let trace: string[list] = new;
         let host = new model.Host();
-        let command = new ui.Command<int32, int32>(double);
+        let command = new commands.Command<int32, int32>(double);
         let top = command_component(command, trace);
         let root = mounted(host, "#app", top);
         host.click(1, top, new func(event: ui.ClickEvent) {
@@ -107,7 +108,7 @@ let UiCommandsTests = module (
         });
         host.await_completion();
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; succeeded 4", join(trace));
         test.assert(root.stale_completions() == 1);
         test.assert(command.generation() == 2);
@@ -120,7 +121,7 @@ let UiCommandsTests = module (
         let trace: string[list] = new;
         const [open_gate, gate, _] = channels.open<int32>(4);
         const [report, reports, _] = channels.open<string>(4);
-        let command = new ui.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
             match (gate.receive()) {
                 channels.Received.Value(extra) => {
                     report.send("opened");
@@ -155,7 +156,7 @@ let UiCommandsTests = module (
             show.set(true);
         });
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; cancelled", join(trace));
         test.assert(root.stale_completions() == 1);
         test.assert(command.generation() == 2);
@@ -176,7 +177,7 @@ let UiCommandsTests = module (
     export let test_cancel_when_idle = func() -> void {
         let trace: string[list] = new;
         let host = new model.Host();
-        let command = new ui.Command<int32, int32>(double);
+        let command = new commands.Command<int32, int32>(double);
         let top = command_component(command, trace);
         let root = mounted(host, "#app", top);
         command.cancel();
@@ -190,7 +191,7 @@ let UiCommandsTests = module (
             command.cancel();
         });
         host.end_batch();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; succeeded 6", join(trace));
         test.assert(command.generation() == 1);
     };
@@ -200,7 +201,7 @@ let UiCommandsTests = module (
     export let test_cancel_running = func() -> void {
         let trace: string[list] = new;
         const [open_gate, gate, _] = channels.open<int32>(4);
-        let command = new ui.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
             match (gate.receive()) {
                 channels.Received.Value(extra) => {
                     return result.Result<int32>.Ok(value + extra);
@@ -220,7 +221,7 @@ let UiCommandsTests = module (
             command.cancel();
         });
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; cancelled", join(trace));
         test.assert(root.stale_completions() == 1);
         open_gate.send(0);
@@ -230,7 +231,7 @@ let UiCommandsTests = module (
     export let test_gate_opened_by_event = func() -> void {
         let trace: string[list] = new;
         const [open_gate, gate, _] = channels.open<int32>(4);
-        let command = new ui.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
             match (gate.receive()) {
                 channels.Received.Value(extra) => {
                     return result.Result<int32>.Ok(value + extra);
@@ -250,7 +251,7 @@ let UiCommandsTests = module (
             open_gate.send(2);
         });
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; running; succeeded 42", join(trace));
         test.assert(root.stale_completions() == 0);
     };
@@ -259,12 +260,12 @@ let UiCommandsTests = module (
     // Rejected too.
     export let test_limit_and_rejection = func() -> void {
         let trace: string[list] = new;
-        let loose = new ui.Command<int32, int32>(double);
-        test.assert(loose.run(1) == ui.RunOutcome.Rejected);
+        let loose = new commands.Command<int32, int32>(double);
+        test.assert(loose.run(1) == commands.RunOutcome.Rejected);
         let host = new model.Host();
-        let first = new ui.Command<int32, int32>(double);
+        let first = new commands.Command<int32, int32>(double);
         let top = command_component(first, trace);
-        let second = new ui.Command<int32, int32>(double);
+        let second = new commands.Command<int32, int32>(double);
         second.bind(top);
         let root = mounted(host, "#app", top);
         root.set_command_limit(2);
@@ -276,12 +277,12 @@ let UiCommandsTests = module (
         });
         host.await_completion();
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("Started; Started; Rejected", join(outcomes));
         test.assert_equal_string("succeeded 2", describe(first.state.get()));
         test.assert_equal_string("succeeded 4", describe(second.state.get()));
         root.close();
-        test.assert(first.run(1) == ui.RunOutcome.Rejected);
+        test.assert(first.run(1) == commands.RunOutcome.Rejected);
     };
 
     // Closing the root with a run in flight: run_with_commands cancels it, waits for its task, and
@@ -289,7 +290,7 @@ let UiCommandsTests = module (
     export let test_close_with_run_in_flight = func() -> void {
         let trace: string[list] = new;
         const [open_gate, gate, _] = channels.open<int32>(4);
-        let command = new ui.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
+        let command = new commands.Command<int32, int32>(new func(value: int32) -> result.Result<int32> {
             let _ = gate.receive();
             return result.Result<int32>.Ok(value);
         });
@@ -303,7 +304,7 @@ let UiCommandsTests = module (
             root.close();
         });
         host.end_batch();
-        root.run_with_commands();
+        commands.run(root);
         test.assert(root.is_closed());
         test.assert_equal_int32(0, root.commands_in_flight());
         test.assert_equal_int32(0, command.runs_in_flight());
@@ -317,26 +318,26 @@ let UiCommandsTests = module (
     export let test_run_on_mount = func() -> void {
         let trace: string[list] = new;
         let host = new model.Host();
-        let command = new ui.Command<int32, int32>(double);
+        let command = new commands.Command<int32, int32>(double);
         let top = command_component(command, trace);
         let root = mounted(host, "#app", top);
         command.run(8);
         host.await_completion();
-        root.run_with_commands();
+        commands.run(root);
         test.assert_equal_string("idle; succeeded 16", join(trace));
     };
 
     // Unmount leaves no listener, subscription or task: 100 cycles of mount, run, complete, close.
     export let test_no_retained_runs = func() -> void {
         let host = new model.Host();
-        let command = new ui.Command<int32, int32>(double);
+        let command = new commands.Command<int32, int32>(double);
         let trace: string[list] = new;
         let top = command_component(command, trace);
         for (let cycle = 0; cycle < 100; cycle++) {
             let root = mounted(host, "#app", top);
             command.run(cycle);
             host.await_completion();
-            root.run_with_commands();
+            commands.run(root);
             test.assert_equal_int32(0, root.commands_in_flight());
             root.close();
             test.assert_equal_int32(0, command.state.subscriber_count());

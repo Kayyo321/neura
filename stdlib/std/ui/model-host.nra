@@ -6,7 +6,7 @@ let ui = import:Std.Ui;
 /// @brief A UI host in memory, for tests of state, components and turns without a browser.
 /// A test scripts events in batches; each `wait` of a root posts the next batch, and a root's
 /// `run` returns when the script is exhausted. It is also a `ui.TaskHost` (a scripted
-/// `await_completion` makes the root wait for a command), a `ui.HistoryHost` with an in-memory
+/// `await_completion` makes a root run by `Std.Ui.Commands.run` wait for a command), a `ui.HistoryHost` with an in-memory
 /// history (`back`, `forward` and `navigate_externally` script navigations), and a `ui.FocusHost`
 /// that records the focused element. Commits are recorded as lines in `log`, and a
 /// test can make the next commit fail or be refused. The host does not interpret views: the
@@ -89,6 +89,31 @@ export let ModelHost = module (
         export let input = func(listener: uint64, target: ui.Component, handler: func(ui.InputEvent) -> void,
                                 value: string) {
             last event = new ui.InputEvent(value, false, false);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a change event with `value` and `checked` to the batch being scripted.
+        export let change = func(listener: uint64, target: ui.Component, handler: func(ui.ChangeEvent) -> void,
+                                 value: string, checked: bool) {
+            last event = new ui.ChangeEvent(value, checked);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a submit event to the batch being scripted.
+        export let submit = func(listener: uint64, target: ui.Component, handler: func(ui.SubmitEvent) -> void) {
+            last event = new ui.SubmitEvent("");
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a blur event to the batch being scripted.
+        export let blur = func(listener: uint64, target: ui.Component, handler: func(ui.FocusEvent) -> void) {
+            last event = new ui.FocusEvent();
             scripting.steps.append(new Step(listener, target, false, new func() {
                 handler(event);
             }));
@@ -242,23 +267,16 @@ export let ModelHost = module (
 
         export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake {
             if (batches.length == 0) {
-                return ui.Wake.Ended;
+                return ui.Wake.Idle;
             }
             last batch = batches[0];
             batches.remove_at(0);
-            if (!batch.barrier) {
-                post_all(root, batch);
-                return ui.Wake.Events;
+            if (batch.barrier) {
+                log.append("await completion");
+                return ui.Wake.Idle;
             }
-            match (completions.receive()) {
-                channels.Received.Value(ticket) => {
-                    log.append("completion");
-                    return ui.Wake.Completed(ticket);
-                },
-                _ => {
-                    return ui.Wake.Ended;
-                },
-            }
+            post_all(root, batch);
+            return ui.Wake.Events;
         };
 
         /// @brief Forgets the recorded lines.
