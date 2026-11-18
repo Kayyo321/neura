@@ -252,4 +252,12 @@ let App = module:program.Entry (
     failure = run(["check", "missing-srcset.nra", "--color=never"], root, expect=1).stderr
     check("E1013" in failure and "no file exists" in failure, failure)
 
+    # neura docs gives a factory's parameters and result and a stylesheet's form, never their bodies.
+    (root / "documented.nra").write_text('/// A row.\nexport let row = html(name: string, count: int32) { <li>{name}</li> };\n'
+                                         '/// Styles.\nexport const Styles = css.module { .row { color: red; } };\n'
+                                         '/// Shared.\nexport const Shared = css from "./parts.module.css";\n')
+    signatures = [entry["signature"] for entry in json.loads(run(["docs", "documented.nra"], root).stdout)["files"][0]["symbols"]]
+    check(signatures == ["let row = html(name: string, count: int32) -> ui.View", "const Styles = css.module",
+                         'const Shared = css from "./parts.module.css"'], f"docs signatures {signatures}")
+
 print("stylesheet build checks passed")

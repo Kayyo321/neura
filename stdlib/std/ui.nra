@@ -16,8 +16,10 @@ export let Ui = module (
         export last descriptor: string;
         #Internal
         export last fragment: uint32;
+        /// The slot evaluated last; each slot's `next` is the one evaluated before it. Walk the slots in
+        /// evaluation order with `Std.Ui.Internal.Build.slots_in_order`.
         #Internal
-        export last slots: storage.Slot;
+        export last last_slot: storage.Slot;
         /// The reconciler that last placed this view in a tree, and in which pass.
         #Internal
         export let owner: class = nil;
@@ -25,7 +27,7 @@ export let Ui = module (
         export let pass: uint64 = 0;
 
         #Internal
-        export let init = func(descriptor: string, fragment: uint32, slots: storage.Slot) => set;
+        export let init = func(descriptor: string, fragment: uint32, last_slot: storage.Slot) => set;
 
         export let.override to_string = func -> string => "View(fragment " + fragment.to_string() + ")";
     );
@@ -1372,20 +1374,16 @@ export let Ui = module (
         if (view == nil) {
             return;
         }
-        let slot = view.slots;
-        while (slot != nil) {
+        for (let slot in build.slots_in_order(view)) {
             if (slot is storage.Payload<Component>) {
                 found.append((slot as storage.Payload<Component>).value);
             } else if (slot is storage.Payload<View>) {
                 children_of((slot as storage.Payload<View>).value, found);
             } else if (slot is storage.Payload<build.Items>) {
-                let item = (slot as storage.Payload<build.Items>).value.first;
-                while (item != nil) {
+                for (let item in build.items_in_order((slot as storage.Payload<build.Items>).value)) {
                     children_of(item.view, found);
-                    item = item.next;
                 }
             }
-            slot = slot.next;
         }
     };
 
