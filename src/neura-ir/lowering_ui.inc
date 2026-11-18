@@ -279,6 +279,19 @@ private:
         if (html_bindings::contains(html_bindings::url_attributes, attribute.name) && !html_bindings::allowed_url(value))
             throw Diagnostic(span, "URL not allowed").with_code("E1007")
                 .label("use a relative URL or the https, http, mailto or tel scheme");
+        if (attribute.name == "srcset") {
+            for (const auto& [begin, end] : srcset_urls(value)) {
+                const auto candidate = value.substr(begin, end - begin);
+                const auto colon = candidate.find(':');
+                std::string scheme(colon < candidate.find_first_of("/?#") ? candidate.substr(0, colon) : "");
+                for (auto& c : scheme) {
+                    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+                }
+                if (!html_bindings::allowed_url(candidate) || scheme == "mailto" || scheme == "tel")
+                    throw Diagnostic(span, "URL not allowed").with_code("E1007")
+                        .label("each srcset candidate needs a relative URL or the https or http scheme");
+            }
+        }
         if (attribute.name == "id") {
             const auto [first, inserted] = ids_.emplace(value, span);
             if (!inserted)
@@ -309,11 +322,13 @@ private:
             auto text = value ? line_endings(*value) : std::string{};
             static_attribute(element, attribute, text);
             if (attribute.asset_error) throw *attribute.asset_error;
-            if (attribute.asset) {
-                // A local media file: the bundle holds it under its digest.
+            if (!attribute.assets.empty()) {
+                // Local media files: the bundle holds each under its digest.
                 auto& files = compiler_.program_.bundle_files;
-                if (std::ranges::none_of(files, [&](const IrBundleFile& file) { return file.path == attribute.asset->path; }))
-                    files.push_back({attribute.asset->path, attribute.asset->sha256, attribute.asset->contents});
+                for (const auto& asset : attribute.assets) {
+                    if (std::ranges::none_of(files, [&](const IrBundleFile& file) { return file.path == asset->path; }))
+                        files.push_back({asset->path, asset->sha256, asset->contents});
+                }
                 text = attribute.asset_target;
             }
             return Json::Object{{"name", name}, {"value", text}};

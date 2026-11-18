@@ -541,4 +541,32 @@ TemplateSyntax parse_template(std::string_view body, Span origin) {
     return TemplateParser(body, std::move(origin)).parse();
 }
 
+std::vector<std::pair<std::size_t, std::size_t>> srcset_urls(std::string_view value) {
+    std::vector<std::pair<std::size_t, std::size_t>> urls;
+    const auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r'; };
+    std::size_t at = 0;
+    while (at < value.size()) {
+        while (at < value.size() && (blank(value[at]) || value[at] == ',')) ++at;
+        if (at == value.size()) break;
+        const auto begin = at;
+        while (at < value.size() && !blank(value[at])) ++at;
+        auto end = at;
+        bool separated = false;
+        while (end > begin && value[end - 1] == ',') {
+            --end;
+            separated = true;
+        }
+        urls.emplace_back(begin, end);
+        if (separated) continue;
+        // Descriptors run to the next comma outside parentheses.
+        int depth = 0;
+        while (at < value.size() && (value[at] != ',' || depth > 0)) {
+            if (value[at] == '(') ++depth;
+            else if (value[at] == ')' && depth > 0) --depth;
+            ++at;
+        }
+    }
+    return urls;
+}
+
 } // namespace neura

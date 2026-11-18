@@ -200,4 +200,56 @@ with TemporaryDirectory() as temporary:
     (root / "enough.nra").write_text("".join(f"const S{i} = css {{ .c{i} {{ order: {i}; }} }};\n" for i in range(256)))
     run(["check", "enough.nra"], root)
 
+    # Bundled media beyond src and poster: the strings that begin image-set() options, each srcset URL, and the
+    # href of an SVG <use>. A link's href and a MIME type string are not files.
+    icons = b"<svg xmlns='http://www.w3.org/2000/svg'><symbol id='tick'/></svg>"
+    second_image = b"\x89PNG second"
+    avif = b"AVIF bytes"
+    (root / "img/b.png").write_bytes(second_image)
+    (root / "img/c.avif").write_bytes(avif)
+    (root / "img/icons.svg").write_bytes(icons)
+    (root / "media.nra").write_text("""\
+const Images = css {
+    .hero { background-image: image-set("img/logo.png" 1x, url(img/b.png) 2x, "img/c.avif" type("image/avif")); }
+    .old { background-image: -webkit-image-set('img/b.png' 1x); }
+};
+
+let gallery = html() {
+    <picture>
+        <source srcset="img/logo.png 1x, img/b.png 2x" type="image/png">
+        <img src="img/logo.png" srcset="img/logo.png, img/b.png 2x, https://example.org/x.png 3x" alt="Gallery">
+    </picture>
+    <svg viewBox="0 0 4 4"><use href="img/icons.svg#tick"/></svg>
+    <a href="img/logo.png">Logo</a>
+};
+
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode => program.ExitCode.Ok;
+);
+""")
+    media = root / "media"
+    media.mkdir()
+    run(["build", "media.nra", "-o", "media/media.nvr"], root)
+    listing = json.loads((media / "media.nvr.styles.json").read_text())
+    paths = {entry["path"] for entry in listing["files"]}
+    logo_asset, b_asset = f"assets/{sha(logo)}.png", f"assets/{sha(second_image)}.png"
+    avif_asset, icons_asset = f"assets/{sha(avif)}.avif", f"assets/{sha(icons)}.svg"
+    check({logo_asset, b_asset, avif_asset, icons_asset} <= paths, f"media files not bundled: {paths}")
+    images_body = (
+        '\n    .hero { background-image: image-set("../' + logo_asset + '" 1x, url(../' + b_asset + ') 2x, "../' +
+        avif_asset + '" type("image/avif")); }\n'
+        "    .old { background-image: -webkit-image-set(\"../" + b_asset + "\" 1x); }\n").encode()
+    check(f"styles/{sha(images_body)}.css" in paths, "image-set() strings are not rewritten as expected")
+    media_ir = run(["emit-ir", "media.nra", "--no-optimize"], root).stdout
+    for value in (f"{logo_asset} 1x, {b_asset} 2x", f"{logo_asset}, {b_asset} 2x, https://example.org/x.png 3x",
+                  f"{icons_asset}#tick", "img/logo.png"):
+        check(f'\\"value\\":\\"{value}\\"' in media_ir, f"descriptor value {value} missing")
+    (root / "bad-srcset.nra").write_text('let i = html() { <img srcset="ok.png 1x, javascript:x 2x" alt="x"> };\n')
+    failure = run(["check", "bad-srcset.nra", "--color=never"], root, expect=1).stderr
+    check("E1007" in failure and "srcset" in failure, failure)
+    (root / "missing-srcset.nra").write_text('let i = html() { <img srcset="img/logo.png 1x, img/none.png 2x" alt="x"> };\n')
+    failure = run(["check", "missing-srcset.nra", "--color=never"], root, expect=1).stderr
+    check("E1013" in failure and "no file exists" in failure, failure)
+
 print("stylesheet build checks passed")

@@ -337,29 +337,60 @@ void resolve_stylesheet(StylesheetSyntax& syntax, SourceDependencies& dependenci
 }
 
 bool media_source(const TemplateElement& element, const TemplateAttribute& attribute) {
-    if (attribute.kind != TemplateAttribute::Kind::Attribute || element.svg) return false;
+    if (attribute.kind != TemplateAttribute::Kind::Attribute) return false;
+    // An SVG <use> names a symbol, in this document or in a file.
+    if (element.svg) return attribute.name == "href" && element.name == "use";
     if (attribute.name == "poster") return element.name == "video";
+    if (attribute.name == "srcset") return element.name == "img" || element.name == "source";
     return attribute.name == "src" &&
            (element.name == "img" || element.name == "source" || element.name == "video" ||
             element.name == "audio" || element.name == "track");
 }
 
-// A static src or poster of a media element that names a local file.
+// A media reference names a local file unless it is empty, a fragment, a
+// root-relative or protocol-relative path, or has a scheme.
+bool local_media(std::string_view target) {
+    return !target.empty() && target.front() != '#' && target.front() != '/' && url_scheme(target).empty();
+}
+
+// The value a template carries for a bundled file: its path in the bundle,
+// which the page resolves against the bundle's base (decision 24).
+std::string bundled_reference(const BundleFileSyntax& asset, std::string_view suffix) {
+    return asset.path + std::string(suffix);
+}
+
+// A static media reference that names local files: each file is hashed into
+// the bundle and the value rewritten to name it there.
 void resolve_media(const TemplateElement& element, TemplateAttribute& attribute, SourceDependencies& dependencies) {
     const auto* value = std::get_if<std::string>(&attribute.value);
     if (!value || !attribute.value_span || !media_source(element, attribute)) return;
-    const auto& target = *value;
-    if (target.empty() || target.front() == '#' || target.front() == '/' || !url_scheme(target).empty()) return;
-    std::string suffix;
     const auto& span = *attribute.value_span;
+    std::vector<std::pair<std::size_t, std::size_t>> urls;
+    if (attribute.name == "srcset") urls = srcset_urls(*value);
+    else urls.emplace_back(0, value->size());
+    std::string rewritten;
+    std::size_t copied = 0;
     try {
-        const auto local = local_reference(target, fs::path(span.file).parent_path(), dependencies.root, span, suffix);
-        auto asset = read_asset(local, span);
-        attribute.asset_target = asset.path + suffix;
-        attribute.asset = std::make_shared<BundleFileSyntax>(std::move(asset));
+        for (const auto& [begin, end] : urls) {
+            const auto target = std::string_view(*value).substr(begin, end - begin);
+            if (!local_media(target)) continue;
+            std::string suffix;
+            const auto local = local_reference(target, fs::path(span.file).parent_path(), dependencies.root, span, suffix);
+            auto asset = std::make_shared<BundleFileSyntax>(read_asset(local, span));
+            rewritten += value->substr(copied, begin - copied);
+            rewritten += bundled_reference(*asset, suffix);
+            copied = end;
+            if (std::ranges::none_of(attribute.assets, [&](const auto& item) { return item->path == asset->path; }))
+                attribute.assets.push_back(std::move(asset));
+        }
     } catch (const Diagnostic& error) {
+        attribute.assets.clear();
         attribute.asset_error = std::make_shared<Diagnostic>(error);
+        return;
     }
+    if (copied == 0 && attribute.assets.empty()) return;
+    rewritten += value->substr(copied);
+    attribute.asset_target = std::move(rewritten);
 }
 
 void collect_template_imports(std::vector<TemplateNode>& nodes, SourceDependencies& dependencies) {
