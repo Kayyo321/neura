@@ -43,6 +43,10 @@ export let Build = module (
     export let finish = func(builder: Builder, descriptor: string, fragment: uint32) -> ui.View =>
         new ui.View(descriptor, fragment, builder.first);
 
+    export let stylesheet = func(digest: string) -> ui.Stylesheet => new ui.Stylesheet(digest);
+
+    export let style_module = func(digest: string) -> ui.StyleModule => new ui.StyleModule(digest);
+
     export let begin_items = func -> Items => new Items();
 
     export let add_item = func(items: Items, key: string, view: ui.View) {

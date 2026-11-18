@@ -81,6 +81,10 @@ struct SourceDependencies {
     fs::path root;
     std::vector<const Expr*> imports;
     std::set<fs::path> active_templates;
+    // Imported stylesheets resolved so far, by file, and the chain of
+    // stylesheet files being resolved, to report a cycle.
+    std::map<fs::path, std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>>> imported_styles{};
+    std::vector<fs::path> active_styles{};
 };
 
 void collect_imports(const Declaration& declaration, SourceDependencies& dependencies);
@@ -127,17 +131,249 @@ ResolvedTemplate read_template(const Token& path, const fs::path& root) {
             util::sha256_hex(source)};
 }
 
-void collect_template_imports(const std::vector<TemplateNode>& nodes, SourceDependencies& dependencies) {
+// The bytes of a file the build reads, from an overlay or the disk, or
+// nullopt when there is none. `too_large` is set when it exceeds `maximum`.
+std::optional<std::string> read_input_file(const fs::path& normalized, std::size_t maximum, bool& too_large) {
+    const auto name = normalized.generic_string();
+    std::string source;
+    too_large = false;
+    if (source_overlays && source_overlays->contains(name) &&
+        (!overlay_hidden_sources || !overlay_hidden_sources->contains(name))) {
+        source = source_overlays->at(name);
+    } else {
+        if (!source_exists(normalized)) return std::nullopt;
+        std::ifstream input(normalized, std::ios::binary);
+        if (!input) return std::nullopt;
+        source.resize(maximum + 1);
+        input.read(source.data(), static_cast<std::streamsize>(source.size()));
+        source.resize(static_cast<std::size_t>(input.gcount()));
+        if (input.bad()) return std::nullopt;
+    }
+    too_large = source.size() > maximum;
+    return source;
+}
+
+[[noreturn]] void style_reference_error(const Span& span, std::string reason) {
+    throw Diagnostic(span, "stylesheet import or asset cannot be resolved").with_code("E1013")
+        .label(std::move(reason));
+}
+
+std::string lowercase_ascii(std::string text) {
+    for (auto& c : text) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    return text;
+}
+
+// The scheme of a URL reference, lowercased, or empty for a relative one.
+std::string url_scheme(std::string_view target) {
+    const auto colon = target.find(':');
+    if (colon == std::string_view::npos || colon == 0) return {};
+    if (target.find_first_of("/?#") < colon) return {};
+    for (std::size_t i = 0; i < colon; ++i) {
+        const char c = target[i];
+        const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        if (!letter && (i == 0 || !((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'))) return {};
+    }
+    return lowercase_ascii(std::string(target.substr(0, colon)));
+}
+
+// A local file named by a relative reference, inside the source root. The
+// query and fragment are returned in `suffix` and are not part of the file.
+fs::path local_reference(std::string_view target, const fs::path& directory, const fs::path& root, const Span& span,
+                         std::string& suffix) {
+    const auto end = target.find_first_of("?#");
+    suffix = end == std::string_view::npos ? std::string{} : std::string(target.substr(end));
+    const auto written = target.substr(0, end == std::string_view::npos ? target.size() : end);
+    if (written.empty()) style_reference_error(span, "this reference names no file");
+    if (written.front() == '/' || written.find('\\') != std::string_view::npos)
+        style_reference_error(span, "write a path relative to this file, using '/' separators");
+    std::error_code error;
+    const auto normalized = fs::weakly_canonical(directory / fs::path(written), error);
+    if (error) style_reference_error(span, "cannot resolve this path");
+    const auto within = normalized.lexically_relative(root);
+    if (within.empty() || *within.begin() == "..")
+        style_reference_error(span, "this path leaves the source root " + root.generic_string() + '/');
+    return normalized;
+}
+
+// The extension of a bundled asset: the file's own, lowercased, when it is
+// short and alphanumeric; otherwise none.
+std::string asset_extension(const fs::path& file) {
+    auto extension = lowercase_ascii(file.extension().generic_string());
+    if (extension.size() < 2 || extension.size() > 11) return {};
+    for (std::size_t i = 1; i < extension.size(); ++i) {
+        const char c = extension[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) return {};
+    }
+    return extension;
+}
+
+BundleFileSyntax read_asset(const fs::path& file, const Span& span) {
+    constexpr std::size_t maximum = 64u * 1024 * 1024; // W-1
+    bool too_large = false;
+    auto bytes = read_input_file(file, maximum, too_large);
+    if (!bytes) style_reference_error(span, "no file exists at this path");
+    if (too_large) style_reference_error(span, "the file exceeds the bundle file limit W-1 of 64 MiB");
+    auto digest = util::sha256_hex(*bytes);
+    return {"assets/" + digest + asset_extension(file), std::move(digest), std::move(*bytes)};
+}
+
+void add_bundle_file(std::vector<BundleFileSyntax>& files, BundleFileSyntax file) {
+    if (std::ranges::none_of(files, [&](const BundleFileSyntax& item) { return item.path == file.path; }))
+        files.push_back(std::move(file));
+}
+
+std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>> import_stylesheet(const fs::path& file, const Span& span,
+                                                                            SourceDependencies& dependencies);
+
+// Resolve every url(...) and @import of a stylesheet whose text came from a
+// file in `directory`.
+void resolve_style_references(ResolvedStylesheet& sheet, const fs::path& directory, SourceDependencies& dependencies) {
+    sheet.targets.assign(sheet.body.references.size(), {});
+    for (std::size_t i = 0; i < sheet.body.references.size(); ++i) {
+        const auto& reference = sheet.body.references[i];
+        const auto& target = reference.target;
+        const auto scheme = url_scheme(target);
+        const bool import = reference.kind == CssReference::Kind::Import;
+        if (!import && (target.empty() || target.front() == '#' || scheme == "data")) continue;
+        if (!scheme.empty() || target.starts_with("//"))
+            style_reference_error(reference.span, import
+                ? "a remote stylesheet needs its origin listed under 'style' in a project manifest"
+                : "a remote resource needs its origin listed under 'style' in a project manifest");
+        std::string suffix;
+        const auto local = local_reference(target, directory, dependencies.root, reference.span, suffix);
+        if (import) {
+            auto [imported, files] = import_stylesheet(local, reference.span, dependencies);
+            sheet.targets[i] = imported.path.substr(std::string_view("styles/").size()) + suffix;
+            for (auto& item : files) add_bundle_file(sheet.files, std::move(item));
+            add_bundle_file(sheet.files, std::move(imported));
+        } else {
+            auto asset = read_asset(local, reference.span);
+            sheet.targets[i] = "../" + asset.path + suffix;
+            add_bundle_file(sheet.files, std::move(asset));
+        }
+    }
+}
+
+std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>> import_stylesheet(const fs::path& file, const Span& span,
+                                                                            SourceDependencies& dependencies) {
+    if (const auto found = std::ranges::find(dependencies.active_styles, file);
+        found != dependencies.active_styles.end()) {
+        std::string chain;
+        for (auto it = found; it != dependencies.active_styles.end(); ++it)
+            chain += it->lexically_relative(dependencies.root).generic_string() + " -> ";
+        chain += file.lexically_relative(dependencies.root).generic_string();
+        style_reference_error(span, "these stylesheets import each other: " + chain);
+    }
+    if (const auto cached = dependencies.imported_styles.find(file); cached != dependencies.imported_styles.end())
+        return cached->second;
+    constexpr std::size_t maximum = 1024 * 1024;
+    bool too_large = false;
+    auto source = read_input_file(file, maximum, too_large);
+    if (!source) style_reference_error(span, "no stylesheet exists at this path");
+    if (too_large) style_reference_error(span, "the stylesheet exceeds 1 MiB");
+    if (!nvr::valid_utf8(*source)) style_reference_error(span, "the stylesheet must contain valid UTF-8");
+    const auto name = file.generic_string();
+    SourceMap::global().add(name, *source, SourceKind::User);
+    const auto bom = source->starts_with("\xEF\xBB\xBF") ? 3u : 0u;
+    ResolvedStylesheet sheet;
+    sheet.text = source->substr(bom);
+    sheet.body = parse_stylesheet(sheet.text, {name, 1, 1, bom, sheet.text.size()}, false);
+    sheet.path = file.lexically_relative(dependencies.root).generic_string();
+    sheet.external = true;
+    dependencies.active_styles.push_back(file);
+    resolve_style_references(sheet, file.parent_path(), dependencies);
+    dependencies.active_styles.pop_back();
+    auto text = rewrite_stylesheet(sheet.text, sheet.body, {}, {}, sheet.targets).text;
+    auto digest = util::sha256_hex(text);
+    std::pair<BundleFileSyntax, std::vector<BundleFileSyntax>> result{
+        {"styles/" + digest + ".css", std::move(digest), std::move(text)}, std::move(sheet.files)};
+    dependencies.imported_styles.emplace(file, result);
+    return result;
+}
+
+void resolve_stylesheet(StylesheetSyntax& syntax, SourceDependencies& dependencies) {
+    ResolvedStylesheet sheet;
+    fs::path directory;
+    if (syntax.source.kind == TokenKind::CssIsland) {
+        if (!syntax.body) return;
+        sheet.text = syntax.source.text;
+        sheet.body = *syntax.body;
+        sheet.external = false;
+        const fs::path declaring(syntax.source.span.file);
+        directory = declaring.parent_path();
+        sheet.path = declaring.lexically_relative(dependencies.root).generic_string();
+    } else {
+        const auto& path = syntax.source;
+        const auto& root = dependencies.root;
+        constexpr std::size_t maximum = 1024 * 1024;
+        const auto written = decode_string_literal(path.text);
+        const fs::path relative(written);
+        if (relative.empty() || relative.has_root_path() || written.find(':') != std::string::npos ||
+            written.find('\\') != std::string::npos)
+            template_file_error(path, root, "write a relative path using '/' separators");
+        std::error_code error;
+        const auto normalized = fs::weakly_canonical(fs::path(path.span.file).parent_path() / relative, error);
+        if (error) template_file_error(path, root, "cannot resolve this path");
+        const auto within = normalized.lexically_relative(root);
+        if (within.empty() || *within.begin() == "..") template_file_error(path, root, "this path leaves the source root");
+        bool too_large = false;
+        auto source = read_input_file(normalized, maximum, too_large);
+        if (!source) template_file_error(path, root, "no stylesheet file exists at this path");
+        if (too_large) template_file_error(path, root, "the stylesheet exceeds 1 MiB");
+        if (!nvr::valid_utf8(*source)) template_file_error(path, root, "the stylesheet must contain valid UTF-8");
+        const auto name = normalized.generic_string();
+        SourceMap::global().add(name, *source, SourceKind::User);
+        const auto bom = source->starts_with("\xEF\xBB\xBF") ? 3u : 0u;
+        sheet.text = source->substr(bom);
+        sheet.body = parse_stylesheet(sheet.text, {name, 1, 1, bom, sheet.text.size()}, syntax.module);
+        sheet.external = true;
+        sheet.path = within.generic_string();
+        directory = normalized.parent_path();
+        dependencies.active_styles.push_back(normalized);
+    }
+    resolve_style_references(sheet, directory, dependencies);
+    if (sheet.external) dependencies.active_styles.pop_back();
+    syntax.resolved = std::move(sheet);
+}
+
+bool media_source(const TemplateElement& element, const TemplateAttribute& attribute) {
+    if (attribute.kind != TemplateAttribute::Kind::Attribute || element.svg) return false;
+    if (attribute.name == "poster") return element.name == "video";
+    return attribute.name == "src" &&
+           (element.name == "img" || element.name == "source" || element.name == "video" ||
+            element.name == "audio" || element.name == "track");
+}
+
+// A static src or poster of a media element that names a local file.
+void resolve_media(const TemplateElement& element, TemplateAttribute& attribute, SourceDependencies& dependencies) {
+    const auto* value = std::get_if<std::string>(&attribute.value);
+    if (!value || !attribute.value_span || !media_source(element, attribute)) return;
+    const auto& target = *value;
+    if (target.empty() || target.front() == '#' || target.front() == '/' || !url_scheme(target).empty()) return;
+    std::string suffix;
+    const auto& span = *attribute.value_span;
+    try {
+        const auto local = local_reference(target, fs::path(span.file).parent_path(), dependencies.root, span, suffix);
+        auto asset = read_asset(local, span);
+        attribute.asset_target = asset.path + suffix;
+        attribute.asset = std::make_shared<BundleFileSyntax>(std::move(asset));
+    } catch (const Diagnostic& error) {
+        attribute.asset_error = std::make_shared<Diagnostic>(error);
+    }
+}
+
+void collect_template_imports(std::vector<TemplateNode>& nodes, SourceDependencies& dependencies) {
     for (const auto& node : nodes) {
         if (const auto* hole = std::get_if<TemplateHole>(&node.value)) {
             collect_imports(hole->expression, dependencies);
         } else if (const auto* element = std::get_if<std::shared_ptr<TemplateElement>>(&node.value)) {
-            for (const auto& attribute : (*element)->attributes) {
+            for (auto& attribute : (*element)->attributes) {
                 if (const auto* value = std::get_if<Expr>(&attribute.value)) collect_imports(*value, dependencies);
+                resolve_media(**element, attribute, dependencies);
             }
             collect_template_imports((*element)->children, dependencies);
         } else if (const auto* choice = std::get_if<std::shared_ptr<TemplateIf>>(&node.value)) {
-            for (const auto& branch : (*choice)->branches) {
+            for (auto& branch : (*choice)->branches) {
                 if (branch.condition) collect_imports(*branch.condition, dependencies);
                 collect_template_imports(branch.children, dependencies);
             }
@@ -162,7 +398,7 @@ void collect_imports(const Expr& expression, SourceDependencies& dependencies) {
     if (expression.match) collect_imports(*expression.match, dependencies);
     if (expression.html_factory) {
         auto& factory = *expression.html_factory;
-        if (const auto* body = std::get_if<TemplateSyntax>(&factory.source)) {
+        if (auto* body = std::get_if<TemplateSyntax>(&factory.source)) {
             collect_template_imports(body->nodes, dependencies);
         } else {
             const auto& path = std::get<Token>(factory.source);
@@ -175,6 +411,7 @@ void collect_imports(const Expr& expression, SourceDependencies& dependencies) {
         }
         for (const auto& alternative : factory.overloads) collect_imports(alternative, dependencies);
     }
+    if (expression.stylesheet) resolve_stylesheet(*expression.stylesheet, dependencies);
 }
 
 void collect_imports(const Declaration& declaration, SourceDependencies& dependencies) {

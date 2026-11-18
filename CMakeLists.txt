@@ -325,6 +325,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/value_layout.cpp
     src/neura-ir/storage.cpp
     src/neura-ir/static_initialization.cpp
+    src/neura-ir/initialization_order.cpp
     src/neura-ir/task_analysis.cpp
     src/neura-ir/module_dispatch.cpp
     src/neura-ir/purity.cpp
@@ -618,6 +619,9 @@ if(BUILD_TESTING)
     add_test(NAME app-html-typed COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/typed.py" "$<TARGET_FILE:neura>")
     set_tests_properties(app-html-typed PROPERTIES TIMEOUT 180)
+    add_test(NAME app-html-styles COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/styles.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-html-styles PROPERTIES TIMEOUT 180)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

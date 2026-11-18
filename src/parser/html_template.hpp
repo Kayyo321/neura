@@ -7,6 +7,16 @@
 
 namespace neura {
 
+// A file the build writes beside the image: a stylesheet, or an asset that a
+// stylesheet or a template references. The path is relative to the
+// directory that holds index.html: 'styles/<sha256>.css' or
+// 'assets/<sha256>.<extension>'.
+struct BundleFileSyntax {
+    std::string path;
+    std::string sha256;
+    std::string contents;
+};
+
 struct TemplateText { std::string value; };
 struct TemplateHole { Expr expression; };
 struct TemplateElement;
@@ -27,6 +37,13 @@ struct TemplateAttribute {
     std::vector<Token> modifiers;
     std::variant<std::monostate, std::string, Expr> value;
     std::optional<Span> value_span;
+    // A local media file named by a static src or poster, as the source
+    // loader resolved it, and the value that replaces the written one.
+    std::shared_ptr<BundleFileSyntax> asset{};
+    std::string asset_target{};
+    // Why the file could not be resolved; lowering reports it after the
+    // element's own checks.
+    std::shared_ptr<Diagnostic> asset_error{};
 };
 
 struct TemplateElement {
@@ -78,11 +95,27 @@ struct HtmlFactorySyntax {
     std::optional<ResolvedTemplate> external{};
 };
 
+// What the source loader resolved for a stylesheet form.
+struct ResolvedStylesheet {
+    // The CSS bytes, without a byte-order mark, and their analysis.
+    std::string text;
+    StylesheetBody body;
+    // A file's path relative to the source root, or for an inline sheet the
+    // relative path of the declaring source file.
+    std::string path;
+    bool external;
+    // One rewritten target per reference of `body`; empty keeps it as written.
+    std::vector<std::string> targets;
+    // Imported stylesheets and assets, each once, in first-reference order.
+    std::vector<BundleFileSyntax> files;
+};
+
 struct StylesheetSyntax {
     bool module;
     // CssIsland for inline CSS, String for a path read by the source loader.
     Token source;
     std::optional<StylesheetBody> body{};
+    std::optional<ResolvedStylesheet> resolved{};
 };
 
 TemplateSyntax parse_template(std::string_view body, Span origin);

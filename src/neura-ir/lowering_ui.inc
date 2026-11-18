@@ -306,8 +306,16 @@ private:
         if (!expression) {
             const auto* value = std::get_if<std::string>(&attribute.value);
             if (boolean && value) wrong_attribute(attribute, string_type, "a bare flag or a bool hole");
-            const auto text = value ? line_endings(*value) : std::string{};
+            auto text = value ? line_endings(*value) : std::string{};
             static_attribute(element, attribute, text);
+            if (attribute.asset_error) throw *attribute.asset_error;
+            if (attribute.asset) {
+                // A local media file: the bundle holds it under its digest.
+                auto& files = compiler_.program_.bundle_files;
+                if (std::ranges::none_of(files, [&](const IrBundleFile& file) { return file.path == attribute.asset->path; }))
+                    files.push_back({attribute.asset->path, attribute.asset->sha256, attribute.asset->contents});
+                text = attribute.asset_target;
+            }
             return Json::Object{{"name", name}, {"value", text}};
         }
 
@@ -553,4 +561,122 @@ IrNode Lowering::html_factory(const Expr& expression, Context& context) {
     auto result = closure_value(callable, environment, span);
     if (syntax.retained) result.text = owned_lambda;
     return result;
+}
+
+namespace {
+
+// The constant's name qualified by the modules that declare it, within its file.
+std::string qualified_constant(const IrProgram& program, SymbolId id) {
+    std::string result = program.symbols[id].name;
+    for (auto owner = program.symbols[id].owner;
+         owner != no_symbol && program.symbols[owner].kind != SymbolKind::File; owner = program.symbols[owner].owner)
+        result = program.symbols[owner].name + "." + result;
+    return result;
+}
+
+} // namespace
+
+IrNode Lowering::stylesheet(const Expr& expr, Context& context) {
+    const auto& syntax = *expr.stylesheet;
+    if (!syntax.resolved)
+        throw Diagnostic(syntax.source.span, "template or stylesheet file cannot be used").with_code("E1011")
+            .label("the stylesheet must be loaded with its declaring source file");
+    const auto& sheet = *syntax.resolved;
+    (void)context;
+    const auto found = stylesheet_constants_.find(&expr);
+    const auto constant = found == stylesheet_constants_.end() ? no_symbol : found->second;
+    if (constant == no_symbol || symbol(constant).kind != SymbolKind::Global || !symbol(constant).constant)
+        throw Diagnostic(expr.span, "html or css form not allowed here").with_code("E0255")
+            .label("a stylesheet must be the whole initializer of a module-level 'const'");
+    // Without a project the package name is empty. The key of a file is its
+    // path below the source root; an inline sheet adds the qualified name of
+    // its constant to the path of the declaring file.
+    const auto key = sheet.external ? sheet.path : sheet.path + ":" + qualified_constant(program_, constant);
+    auto rewritten = rewrite_stylesheet(sheet.text, sheet.body, "", key, sheet.targets);
+    auto digest = util::sha256_hex(rewritten.text);
+    const auto path = "styles/" + digest + ".css";
+    const auto add_file = [&](IrBundleFile file) {
+        if (std::ranges::none_of(program_.bundle_files, [&](const IrBundleFile& item) { return item.path == file.path; }))
+            program_.bundle_files.push_back(std::move(file));
+    };
+    for (const auto& file : sheet.files) add_file({file.path, file.sha256, file.contents});
+    add_file({path, digest, std::move(rewritten.text)});
+    stylesheet_links_.push_back({constant, expr.span.offset, path});
+    if (syntax.module)
+        style_modules_[constant] = {std::move(rewritten.classes), std::move(rewritten.keyframes)};
+
+    const auto build = library_module("std/ui/internal/build.nra", "Build", expr.span, context,
+                                      "a stylesheet requires Std.Ui.Internal.Build");
+    const auto member = own_member(build, syntax.module ? "style_module" : "stylesheet");
+    if (member == no_symbol) throw Diagnostic(expr.span, "missing UI support member").with_code("E0899");
+    resolve(member);
+    auto call = node(IrOp::Call, expr.span, symbol(member).type);
+    call.symbol = member;
+    auto text = node(IrOp::String, expr.span, string_type);
+    text.text = std::move(digest);
+    call.operands.push_back(std::move(text));
+    return call;
+}
+
+std::optional<IrNode> Lowering::style_module_name(const Expr& expr, Context& context) {
+    const auto& callee = expr.operands.front();
+    if (callee.kind != ExprKind::Member || (callee.text != "class_name" && callee.text != "keyframes_name"))
+        return std::nullopt;
+    const auto& receiver = callee.operands.front();
+    if (receiver.kind != ExprKind::Name && receiver.kind != ExprKind::Member) return std::nullopt;
+    const auto target = expression(receiver, context);
+    const auto is_module = [&](const IrType& type) {
+        if (type.kind != TypeKind::Object || type.symbol == no_symbol || symbol(type.symbol).name != "StyleModule")
+            return false;
+        const auto file = source_file(program_, type.symbol);
+        return file != no_symbol && symbol(file).library_path == "std/ui.nra";
+    };
+    if (!is_module(target.type)) return std::nullopt;
+    const bool classes = callee.text == "class_name";
+    const auto constant = target.op == IrOp::Load ? target.symbol : no_symbol;
+    if (constant != no_symbol && !style_modules_.contains(constant)) resolve(constant);
+    const auto found = constant == no_symbol ? style_modules_.end() : style_modules_.find(constant);
+    if (found == style_modules_.end())
+        throw Diagnostic(receiver.span, "not a class of the CSS module").with_code("E1012")
+            .label("'" + callee.text + "' needs a css.module constant declared in source here");
+    if (expr.operands.size() != 2 || expr.operands[1].kind != ExprKind::String)
+        throw Diagnostic(expr.operands.size() == 2 ? expr.operands[1].span : expr.span,
+                         "not a class of the CSS module").with_code("E1012")
+            .label("the argument must be one string literal naming a " +
+                   std::string(classes ? "class" : "keyframes rule") + " of the module");
+    const auto& names = classes ? found->second.classes : found->second.keyframes;
+    const auto name = decode_string_literal(expr.operands[1].text);
+    const auto scoped = names.find(name);
+    if (scoped == names.end()) {
+        std::vector<std::string> candidates;
+        for (const auto& [local, ignored] : names) candidates.push_back(local);
+        auto error = Diagnostic(expr.operands[1].span, "not a class of the CSS module").with_code("E1012")
+            .label("the module declares no " + std::string(classes ? "class" : "keyframes rule") + " '" + name + "'");
+        if (const auto nearest = closest_name(name, candidates)) error.help("did you mean '" + *nearest + "'?");
+        throw error;
+    }
+    auto result = node(IrOp::String, expr.span, string_type);
+    result.text = scoped->second;
+    return result;
+}
+
+void Lowering::order_stylesheets() {
+    if (stylesheet_links_.empty()) return;
+    // Module initialization order, then source order (Html030.md, Stylesheets).
+    std::map<SymbolId, std::size_t> rank;
+    for (const auto file : file_initialization_order(program_)) rank.emplace(file, rank.size());
+    std::ranges::stable_sort(stylesheet_links_, [&](const StylesheetLink& left, const StylesheetLink& right) {
+        const auto left_file = source_file(program_, left.constant);
+        const auto right_file = source_file(program_, right.constant);
+        return std::pair{rank[left_file], left.offset} < std::pair{rank[right_file], right.offset};
+    });
+    for (const auto& link : stylesheet_links_) {
+        if (std::ranges::find(program_.stylesheet_links, link.path) == program_.stylesheet_links.end())
+            program_.stylesheet_links.push_back(link.path);
+    }
+    constexpr std::size_t maximum = 256; // U-8
+    if (program_.stylesheet_links.size() > maximum)
+        throw Diagnostic(symbol(stylesheet_links_.back().constant).span, "template or stylesheet exceeds a limit")
+            .with_code("E1015").label("U-8 stylesheets registered: " + std::to_string(program_.stylesheet_links.size()) +
+                                      " exceeds " + std::to_string(maximum));
 }

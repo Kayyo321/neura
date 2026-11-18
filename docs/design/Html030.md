@@ -121,7 +121,7 @@ The tables are frozen data in `src/parser/html_tables.inc`, generated into the l
 | Boolean attributes (`disabled` `checked` `selected` `readonly` `required` `multiple` `hidden` `open` `autofocus` `inert` `novalidate` `formnovalidate` `reversed` `controls` `loop` `muted` `default` `playsinline`): written bare, the attribute is present; with a hole the expression is `bool` and the attribute is present when it is true. A quoted value on one is `E1005`. | proposed |
 | A dynamic attribute takes a `string`, or an `Optional<string>` whose `None` removes the attribute. Numeric attributes (`colspan` `rowspan` `min` `max` `step` `width` `height` `tabindex` `maxlength` `minlength` `size` `rows` `cols` `start` `span` `value` on `progress`, `meter`, `li` and `data`) also take any integer type, written in decimal. `aria-*` also takes `bool`, written `true` or `false`, and `data-*` any integer type. Anything else, `nil` included, is `E1005`. | proposed |
 | URL attributes (`href`, `src`, `poster`, `cite`, `action`, `formaction`): a static value is a relative reference, a fragment, or an absolute URL with the scheme `https`, `http`, `mailto` or `tel`; anything else, `javascript:` and `data:` included, is `E1007`. A dynamic value has the type `ui.Url`, which `ui.url(text)` returns after the same check; a `string` is `E1007`. `srcset` is static only. | proposed |
-| A relative `src`, `poster` or `href` of a media element names a file relative to the template's source file. The build hashes the file, copies it into the bundle and rewrites the reference; a missing file is `E1013`. | proposed |
+| A relative `src`, `poster` or `href` of a media element names a file relative to the template's source file. The build hashes the file, copies it into the bundle and rewrites the reference; a missing file is `E1013`. | implemented for `src` and `poster`; a template's bundled path is relative to the page |
 | `prop:value` (`input`, `textarea`, `select`; `string`), `prop:checked` and `prop:indeterminate` (`input`; `bool`), `prop:selected` (`option`; `bool`) and `prop:open` (`details`, `dialog`; `bool`) set a DOM property. No other property exists in 0.3.0. | proposed |
 | `var:--name={value}` sets a custom property on the element. The value has the type `ui.CssValue`, built by `ui.length`, `ui.color`, `ui.number` and `ui.percent`, each of which carries a number and a unit; no text is spliced into a stylesheet. | proposed |
 | `on:event={handler}` takes a callable whose type is `func(E) -> void` for the event's record `E` ([Components](Components030.md#events)). The expression is evaluated when the view is built; `on:click={save()}` calls `save` then and binds what it returns. Modifiers are `prevent_default` and `stop_propagation`, each valid on the events that table lists. | proposed |
@@ -131,15 +131,15 @@ The tables are frozen data in `src/parser/html_tables.inc`, generated into the l
 
 | Rule | Status |
 | --- | --- |
-| A stylesheet form is the whole initializer of a module-level `const`. It has the type `ui.Stylesheet`, or `ui.StyleModule` for `css.module`. `new css`, a `css` form in an expression, in a function or as an argument is `E0255`. | proposed |
+| A stylesheet form is the whole initializer of a module-level `const`. It has the type `ui.Stylesheet`, or `ui.StyleModule` for `css.module`. `new css`, a `css` form in an expression, in a function or as an argument is `E0255`. | implemented |
 | The text is kept as written. Selectors, custom properties, media and container queries, layers, keyframes, nesting, vendor prefixes and properties the compiler has never heard of pass through. The structural reader reports `E0253` for an unterminated string, comment or `url(`, or an unbalanced delimiter in the CSS body. An inline island whose outer closing brace cannot be identified still reports `E0241`. | structural reader implemented |
-| There is no hole in CSS. A `{` is a CSS brace. | proposed |
-| Nothing is minified in 0.3.0. The build changes three things only: module names, `url(...)` references, and `@import` targets. | proposed |
-| `url(...)` and a local `@import` are resolved relative to the stylesheet's source file. The target is hashed, copied into the bundle and the reference rewritten; an `@import` stays an `@import`, so conditions and layers keep their meaning. A cycle of imports, a missing file, or a remote URL whose origin the manifest does not list under `style` is `E1013`. | proposed |
-| `css.module` renames class selectors, identifier-spelled `@keyframes` declarations and references to those declarations in `animation-name` and `animation`. The shorthand uses CSS animation keyword precedence. Strings, unrelated identifiers, custom properties and attribute selectors keep their spelling. `:global(...)` is removed and its content kept as written. `:global` without parentheses and `:local` report `E0256`. | module analysis and rewrite implemented, stylesheet lowering proposed |
-| A renamed name is `name__h`, where `h` is the first 10 characters of the lowercase base-32 SHA-256 of the package name, the stylesheet's key and the local name, separated by NUL bytes. The key is the source path relative to the package root for a file, and the constant's qualified name for an inline sheet. The name uses the decoded CSS identifier and is independent of the sheet's content. Rewriting appends the suffix to the original identifier spelling. | module name generation implemented |
-| `Styles.class_name("row")` and `Styles.keyframes_name("fade")` are constant strings. The argument is a string literal that names a declared export; anything else is `E1012`. | proposed |
-| Stylesheets are linked from `index.html` in a fixed order: the manifest's `styles` in the order listed, then every stylesheet constant reachable from the target's entry, in module initialization order and then source order. A sheet is listed once, by content digest. The order does not depend on when a component mounts, and unmounting removes nothing. | proposed |
+| There is no hole in CSS. A `{` is a CSS brace. | implemented |
+| Nothing is minified in 0.3.0. The build changes three things only: module names, `url(...)` references, and `@import` targets. | implemented |
+| `url(...)` and a local `@import` are resolved relative to the stylesheet's source file. The target is hashed, copied into the bundle and the reference rewritten; an `@import` stays an `@import`, so conditions and layers keep their meaning. A cycle of imports, a missing file, or a remote URL whose origin the manifest does not list under `style` is `E1013`. | implemented; manifest `style` origins wait for projects (A6), so every remote reference is `E1013` |
+| `css.module` renames class selectors, identifier-spelled `@keyframes` declarations and references to those declarations in `animation-name` and `animation`. The shorthand uses CSS animation keyword precedence. Strings, unrelated identifiers, custom properties and attribute selectors keep their spelling. `:global(...)` is removed and its content kept as written. `:global` without parentheses and `:local` report `E0256`. | implemented |
+| A renamed name is `name__h`, where `h` is the first 10 characters of the lowercase base-32 SHA-256 of the package name, the stylesheet's key and the local name, separated by NUL bytes. The key is the source path relative to the package root for a file, and for an inline sheet the path of the declaring source file relative to the package root, a colon, and the constant's name qualified by its enclosing modules (`app.nra:Theme.Local`); see decision 15. The name uses the decoded CSS identifier and is independent of the sheet's content. Rewriting appends the suffix to the original identifier spelling. | module name generation implemented |
+| `Styles.class_name("row")` and `Styles.keyframes_name("fade")` are constant strings. The argument is a string literal that names a declared export; anything else is `E1012`. | implemented for constants declared in source; a constant from a `.nir` library is `E1012` |
+| Stylesheets are linked from `index.html` in a fixed order: the manifest's `styles` in the order listed, then every stylesheet constant reachable from the target's entry, in module initialization order and then source order. A constant is reachable when its file is: a build from source loads exactly the files its inputs reach by import, and every stylesheet constant of those files is linked, used or not (decision 16). A sheet is listed once, by content digest. The order does not depend on when a component mounts, and unmounting removes nothing. | order implemented and written to `<image>.styles.json`; manifest `styles` and `index.html` wait for bundles (A6) |
 
 ### External files
 
@@ -152,9 +152,9 @@ const Local = css.module from "./parts.module.css";
 
 | Rule | Status |
 | --- | --- |
-| The file holds the body alone, without the braces. A template file's holes see the declared parameters and the scope of the declaration, exactly as an inline body would. | proposed |
-| The path is a string literal without escapes: relative, with `/` separators, resolved from the directory of the declaring source file. It must stay inside a source or asset root of the declaring package; for a build without a project, inside the directory of the first source file. | proposed |
-| The file is UTF-8, at most 1 MiB, with an optional byte-order mark that is ignored. | proposed |
+| The file holds the body alone, without the braces. A template file's holes see the declared parameters and the scope of the declaration, exactly as an inline body would. | implemented |
+| The path is a string literal without escapes: relative, with `/` separators, resolved from the directory of the declaring source file. It must stay inside a source or asset root of the declaring package; for a build without a project, inside the directory of the first source file. | implemented without a project |
+| The file is UTF-8, at most 1 MiB, with an optional byte-order mark that is ignored. | implemented |
 | An inline body and a file with the same text give the same descriptor and the same image, apart from source-map entries. | proposed |
 | The build records the digest of every file read. A deployed application reads none of them. | proposed |
 
@@ -221,7 +221,7 @@ A call of a factory builds the whole view before it returns.
 | A view is a heap object: its descriptor, its fragment and its slot values. A block slot holds the views of the chosen branch or of the items, with their keys. | proposed |
 | The descriptor is executable data. Stripping names and source maps leaves it and the application works. Spans from template source to generated calls are source-map entries, as optional as any other. | proposed |
 | The factory's symbol carries the attribute `ui.factory`, which names its descriptor constant. Symbol attributes need no format version. The decompiler prints a factory as `html(...) { ... }` from the descriptor and the calls when the attribute is present, and as a function with `Build` calls when it is not; it does not claim to recover the source's formatting. | proposed |
-| A stylesheet constant is a `ui.Stylesheet` holding the SHA-256 of the file the build writes. The text is not in the image. | proposed |
+| A stylesheet constant is a `ui.Stylesheet` holding the SHA-256 of the file the build writes. The text is not in the image. | implemented; the build writes the files beside the image |
 | The optimizer treats `Build` calls as the calls they are: allocating, ordered, not removable when the view is used. Folding a hole's constant expression is ordinary folding. | proposed |
 | NVR is unchanged. Tiers need no new operation; a render is ordinary code and runs at whatever tier its blocks reach. | proposed |
 
@@ -434,6 +434,16 @@ Each step is one commit on the milestone branch with its targeted tests. No step
 ## Migration
 
 Nothing in a 0.2 program changes. A program that assembled markup as text replaces it with factories; text that was concatenated into attributes becomes a whole-expression hole; a handler that was a string becomes a function; styles written as strings become a stylesheet and a class or a `var:` binding.
+
+## Decisions taken without the owner
+
+Taken during A1 on 2026-11-17 by autonomous agents, awaiting owner confirmation.
+
+15. The key of an inline stylesheet is `<source path>:<qualified constant>`, not the qualified name alone. A file's module name cannot be recovered from its path (the mapping from `Foo_Bar` and `FooBar` to file names is not one to one), and two files may declare constants with the same name, which the name alone would give the same scoped names.
+16. "Reachable" is reachability of files, not of uses: every stylesheet constant of a loaded file is linked. A constant that nothing reads still styles the page, as a `<link>` would, and the order stays independent of what code runs.
+17. Until bundles exist (Projects030 step 4), `neura build -o out/app.nvr` writes the stylesheets and assets beside the image at their bundle paths and lists them, with the link order, in `out/app.nvr.styles.json`, a canonical JSON file with `schema` 1. This is an interim interface for the bundle writer, which takes the same lists from the compiled program; it is not a bundle file.
+18. A file imported by `@import` is an ordinary stylesheet, even when the importing sheet is a `css.module`: its names are not scoped and it is not linked from `index.html`.
+19. A template's bundled media path is `assets/<digest>.<extension>`, relative to the page. A deep-linked route such as `/parts/7` resolves it against that path; the adapter or `index.html` must resolve it against the bundle's base (A2, A6).
 
 ## Approved design decisions
 

@@ -40,6 +40,60 @@ export let Ui = module (
         export let init = func(value: float64, unit: string) => set;
     );
 
+    /// @brief A stylesheet that the build wrote beside the image, named by the SHA-256 of its text.
+    /// @note The text is not in the image. The bundle links the file from `index.html`; holding the
+    /// value keeps nothing alive and registers nothing at run time.
+    #[Final, Immutable]
+    #Since("0.3.0")
+    export let Stylesheet = class (
+        /// @brief The lowercase hexadecimal SHA-256 of the written file.
+        export last digest: string;
+
+        #Internal
+        export let init = func(digest: string) => set;
+
+        /// @brief The bundle path of the file, `styles/<digest>.css`.
+        export let path = func -> string => "styles/" + digest + ".css";
+
+        export let.override to_string = func -> string => "Stylesheet(" + digest + ")";
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Stylesheet)) {
+                return false;
+            }
+            return (other as Stylesheet).digest == digest;
+        };
+
+        export let.override hash_code = func -> uint32 => digest.hash_code();
+    );
+
+    /// @brief A CSS module the build wrote beside the image, with its class and keyframes names scoped.
+    /// @note Use the constant's `class_name("name")` and `keyframes_name("name")`, which the compiler
+    /// replaces with the scoped names; their argument is a string literal naming a declared export.
+    #[Final, Immutable]
+    #Since("0.3.0")
+    export let StyleModule = class (
+        /// @brief The lowercase hexadecimal SHA-256 of the written file.
+        export last digest: string;
+
+        #Internal
+        export let init = func(digest: string) => set;
+
+        /// @brief The bundle path of the file, `styles/<digest>.css`.
+        export let path = func -> string => "styles/" + digest + ".css";
+
+        export let.override to_string = func -> string => "StyleModule(" + digest + ")";
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is StyleModule)) {
+                return false;
+            }
+            return (other as StyleModule).digest == digest;
+        };
+
+        export let.override hash_code = func -> uint32 => digest.hash_code();
+    );
+
     /// @brief Returns a URL after checking that it is a reference or uses an allowed scheme.
     export let url = func(text: string) -> Url {
         let delimiter = true;

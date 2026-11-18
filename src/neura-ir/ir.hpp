@@ -254,6 +254,15 @@ struct IrNativeLibrary {
     bool operator==(const IrNativeLibrary&) const = default;
 };
 
+// A file a build writes beside the image (Html030.md, Lowering and
+// artifacts): a stylesheet or an asset, by its path relative to the
+// directory that holds index.html.
+struct IrBundleFile {
+    std::string path;
+    std::string sha256;
+    std::string contents;
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -266,6 +275,11 @@ struct IrProgram {
     // Calls inlined by the optimizer; empty before optimization and not part
     // of a .nir file, which holds IR as lowered.
     std::vector<IrInlineSite> inline_sites{};
+    // Stylesheets and assets of the program's stylesheet forms and templates,
+    // each once, and the stylesheets index.html links, in cascade order. Not
+    // part of a .nir file: a build from source writes them.
+    std::vector<IrBundleFile> bundle_files{};
+    std::vector<std::string> stylesheet_links{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

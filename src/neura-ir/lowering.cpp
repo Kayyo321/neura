@@ -4,6 +4,7 @@
 #include "definite_assignment.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
+#include "initialization_order.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
 #include "integer.hpp"
@@ -19,6 +20,7 @@
 #include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
 #include "tooling/json.hpp"
+#include "util/sha256.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
 
@@ -246,6 +248,21 @@ private:
     std::map<const Statement*, GlobalDestructure> destructures_;
     std::set<std::pair<SymbolId, SymbolId>> wrapper_imports_;
     std::map<SymbolId, std::vector<IrNode>> template_constants_;
+    // Stylesheet forms (Html030.md, Stylesheets): the scoped names of each
+    // css.module constant, and every stylesheet constant with the bundle
+    // path of its file, to order the links once lowering is done.
+    struct StyleModuleNames {
+        std::map<std::string, std::string, std::less<>> classes;
+        std::map<std::string, std::string, std::less<>> keyframes;
+    };
+    std::map<SymbolId, StyleModuleNames> style_modules_;
+    std::map<const Expr*, SymbolId> stylesheet_constants_;
+    struct StylesheetLink {
+        SymbolId constant;
+        std::size_t offset;
+        std::string path;
+    };
+    std::vector<StylesheetLink> stylesheet_links_;
     std::deque<Declaration> named_html_;
     const std::vector<ParsedFile>* files_ = nullptr;
     SymbolId root_class_ = no_symbol;
@@ -354,6 +371,9 @@ private:
     IrNode lambda(const Declaration& declaration, Context& context);
     class UiLowering;
     IrNode html_factory(const Expr& expr, Context& context);
+    IrNode stylesheet(const Expr& expr, Context& context);
+    std::optional<IrNode> style_module_name(const Expr& expr, Context& context);
+    void order_stylesheets();
     std::vector<IrNode> html_body(SymbolId id, const Expr& expression, Context& context);
     IrType html_view_type(const Span& span, const Context& context);
     IrNode bind_function(IrNode callee, Context& context, bool owned = false);
@@ -1519,6 +1539,8 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
 
 void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     auto ctx = context(symbol(id).owner);
+    if (decl.initializer && decl.initializer->kind == ExprKind::Stylesheet)
+        stylesheet_constants_[&*decl.initializer] = id;
     if (decl.initializer && decl.initializer->kind == ExprKind::Import) {
         if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation").with_code("E0704");
         auto target = resolve_import(*decl.initializer);
@@ -2404,6 +2426,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
 
 IrNode Lowering::call(const Expr& expr, Context& context) {
     if (auto result = primitive_call(expr, context)) return std::move(*result);
+    if (auto result = style_module_name(expr, context)) return std::move(*result);
     const auto& callee_expr = expr.operands.front();
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
     // say what the form requires (Concurrency.md section 4.4).
@@ -3109,7 +3132,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::HtmlFactory:
         return html_factory(expr, context);
     case ExprKind::Stylesheet:
-        throw Diagnostic(expr.span, "stylesheet forms cannot be lowered yet").with_code("E0801");
+        return stylesheet(expr, context);
     case ExprKind::TypeApplication: {
         auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
@@ -4977,6 +5000,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // Classes written in type positions, including those their own bodies
     // write.
     for (std::size_t i = 0; i < pending_anonymous_.size(); ++i) lower_declaration(pending_anonymous_[i]);
+    order_stylesheets();
     for (auto& [file, constants] : template_constants_) {
         const auto body = std::ranges::find(program_.bodies, file, &IrBody::owner);
         if (body == program_.bodies.end()) {
