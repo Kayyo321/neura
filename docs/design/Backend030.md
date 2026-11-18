@@ -92,7 +92,7 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a copy elsewhere | `backend-host` |
 | `splice` with pipe handles, `neura.net.pipe` and `neura.net.splice` | implemented on Linux (`splice(2)`, the bytes never reach the NVM); 13 elsewhere | `backend-host` |
 | System name resolution, `neura.net.resolve` | implemented with `getaddrinfo`; blocks every task while it waits | `backend-host` |
-| HTTP/2 over TLS through ALPN `h2` (on by default, `--no-http2`), and h2c with prior knowledge (`--h2c`) | implemented in builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0), by the owner's amendment of decision 9; see "HTTP/2 and decision 9" below | `server-host` (`test_http2_curl`, `test_http2_streams`, `test_http2_reload`), `server-host-h2c` |
+| HTTP/2 over TLS through ALPN `h2` (on by default, `--no-http2`), and h2c with prior knowledge (`--h2c`) | implemented in builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0), which every release archive is, by the owner's amendment of decision 9; see "HTTP/2 and decision 9" below | `server-host` (`test_http2_curl`, `test_http2_streams`, `test_http2_reload`), `server-host-h2c` |
 | `MSG_ZEROCOPY` | not provided, after measurement: see "MSG_ZEROCOPY" below | |
 | UDP GSO and GRO: options 13 `UDP_SEGMENT` and 14 `UDP_GRO`, `neura.net.udp.receive_segments` with the segment size | implemented on Linux; 13 elsewhere | `backend-host` (loopback: a 2,500-byte send arrives as 1,000, 1,000 and 500; with GRO, coalesced with segment size 1,000) |
 | MPTCP: `neura.net.mptcp.listen`, `neura.net.mptcp.connect`, option 15 `SO_PROTOCOL` | implemented on Linux 5.6 and later; 13 when the kernel has none or `net.mptcp.enabled` is 0 | `backend-host` (262 read back on this kernel) |
@@ -339,7 +339,7 @@ A service that waits is overlapping and cancellable.
 | An outgoing `https` fetch verifies the peer against the system trust store, or a bundle the configuration names. Verification cannot be turned off from Neura code. | proposed |
 | Plain HTTP and HTTPS can listen together, each on its own address. | implemented |
 
-The [server component lock](../../packaging/server-components.lock.toml) pins OpenSSL 3.5.9. It records the source archive digest, the upstream release-signing key and the bundled license. The server component links the static libraries. The standalone TLS tests also run with a system installation of OpenSSL 3.5.
+The [server component lock](../../packaging/server-components.lock.toml) pins OpenSSL 3.5.9. It records the source archive digest, the upstream release-signing key and the bundled license. The server component links the static libraries. The standalone TLS tests also run with a system installation of OpenSSL 3.5. The release archives are built with TLS, HTTP/2 and the PostgreSQL provider: `packaging/build-server-components.sh` builds OpenSSL, nghttp2 and libpq from the locked sources, checks each source archive and licence text against the lock's SHA-256 (the release workflow does not check the upstream signatures again; the lock records the keys they were checked with), and the archives carry the three licence texts ([server host](../runtime/ServerHost.md#release-archives)).
 
 ## SQL
 
