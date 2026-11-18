@@ -426,7 +426,14 @@ private:
     void shutdown() {
         {
             std::lock_guard lock(mutex_);
-            for (auto& [id, stream] : streams_) give_up(*stream);
+            for (auto& [id, stream] : streams_) {
+                // A stream whose response has ended is not cancelled: its
+                // worker may still be finishing (recording its trace,
+                // exiting), as it does when an HTTP/1.1 client closes after
+                // the response. Its reads and writes still fail.
+                if (stream->end_sent) stream->cancel = nullptr;
+                give_up(*stream);
+            }
         }
         for (auto& [id, stream] : streams_) {
             if (stream->thread.joinable()) stream->thread.join();
