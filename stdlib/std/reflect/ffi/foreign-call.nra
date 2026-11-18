@@ -1,0 +1,236 @@
+let.promote optional = import:Std.Core.Optional;
+let descriptors = import:Std.DynamicForeign.FunctionDescriptor;
+let foreign_values = import:Std.DynamicForeign.ForeignValue;
+let linkers = import:Std.DynamicForeign.Linker;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let memory_layouts = import:Std.DynamicForeign.MemoryLayout;
+let segments = import:Std.DynamicForeign.MemorySegment;
+let value_layouts = import:Std.DynamicForeign.ValueLayout;
+let abi = import:Std.Reflect.Ffi.Abi;
+let model = import:Std.Reflect.Internal.Model;
+
+/// @brief Dynamic foreign calls from reflected values (docs/design/Reflect030.md, The packages): a
+/// `ForeignSymbol` is a native function found by name with its C signature, and a `CallFrame` collects
+/// `Std.Reflect.Dynamic.Variant` arguments, converts each to its C type, and calls through
+/// `Std.DynamicForeign`. Calls need the native capability, like every `Std.DynamicForeign` call. The target
+/// passed to `lookup` must be the platform the program runs on: it decides the width of `long`, `size_t` and
+/// pointers.
+/// @see [Std.Reflect.Ffi.ForeignCall](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-ForeignCall)
+#Since("0.3.0")
+export let ForeignCall = module (
+    /// @brief A native function: its name, address, C signature and the target it follows.
+    #Since("0.3.0")
+    export let ForeignSymbol = class (
+        export last name: string;
+        export last address: segments.MemorySegment;
+        export last target: abi.Target;
+        export last returns_void: bool;
+        export last result: abi.CType;
+        export last parameters: abi.CType[list];
+
+        export let init = func(label: string, at: segments.MemorySegment, on: abi.Target, no_result: bool,
+                               result_type: abi.CType, parameter_types: abi.CType[list]) {
+            name = label;
+            address = at;
+            target = on;
+            returns_void = no_result;
+            result = result_type;
+            parameters = parameter_types;
+        };
+
+        /// @brief A new frame for one call.
+        export let frame = func -> CallFrame => new CallFrame(instance);
+
+        export let.override to_string = func -> string {
+            let text = (returns_void ? "void" : result.to_string()) + " " + name + "(";
+            for (let i = 0; i < parameters.length; i++) {
+                text = text + (i == 0 ? "" : ", ") + parameters[i].to_string();
+            }
+            return text + ")";
+        };
+    );
+
+    /// @brief The arguments of one call. Each argument is checked against its C type when the call is made: an
+    /// integer type takes a Variant of the Neura integer of the same width and signedness, `Float` a float32,
+    /// `Double` a float64, `Bool` a bool, and `Pointer` a `Std.DynamicForeign.MemorySegment.MemorySegment`.
+    #Since("0.3.0")
+    export let CallFrame = class (
+        export last symbol: ForeignSymbol;
+        export last arguments: model.Variant[list];
+
+        export let init = func(target: ForeignSymbol) {
+            symbol = target;
+            arguments = new;
+        };
+
+        /// @brief Adds the next argument and returns this frame.
+        export let push = func(value: model.Variant) -> CallFrame {
+            arguments.append(value);
+            return instance;
+        };
+
+        /// @brief Makes the call; the result is a Variant of the result's Neura type, nil for `void`. A wrong
+        /// argument count or type traps before the call.
+        export let invoke = func -> model.Variant {
+            if (arguments.length != symbol.parameters.length) {
+                trap_with_message("invalid argument: " + symbol.name + " takes " +
+                                  symbol.parameters.length.to_string() + " argument(s)");
+            }
+            last values: foreign_values.ForeignValue[list] = new;
+            for (let i = 0; i < arguments.length; i++) {
+                values.append(to_foreign(symbol.parameters[i], symbol.target, arguments[i]));
+            }
+            last handle = linkers.native_linker().downcall_handle(symbol.address, descriptor_of(symbol));
+            last returned = handle.invoke_values(values);
+            if (symbol.returns_void) {
+                return model.wrap(nil as class);
+            }
+            return from_foreign(symbol.result, symbol.target, returned);
+        };
+
+        export let.override to_string = func -> string => "frame for " + symbol.to_string();
+    );
+
+    /// @brief The native function `name` in the default lookup of the running program (the C library and the
+    /// program's own native code), or None.
+    #Since("0.3.0")
+    export let lookup = func(name: string, on: abi.Target, returns_void: bool, result: abi.CType,
+                             parameters: abi.CType[list]) -> Optional<ForeignSymbol> =>
+        lookup_in(lookups.default_lookup(), name, on, returns_void, result, parameters);
+
+    /// @brief The native function `name` in `library`, or None.
+    #Since("0.3.0")
+    export let lookup_in = func(library: lookups.SymbolLookup, name: string, on: abi.Target, returns_void: bool,
+                                result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol> {
+        match (library.find(name)) {
+            Optional.Some(address) => {
+                return Optional<ForeignSymbol>.Some(new ForeignSymbol(name, address, on, returns_void, result, parameters));
+            },
+            Optional.None => {
+                return Optional<ForeignSymbol>.None;
+            },
+        }
+    };
+
+    /// @brief The `Std.DynamicForeign` layout of a C scalar on the target.
+    #Since("0.3.0")
+    export let value_layout = func(type: abi.CType, on: abi.Target) -> memory_layouts.MemoryLayout {
+        if (type == abi.CType.Pointer) {
+            return value_layouts.Address;
+        }
+        if (type == abi.CType.Float) {
+            return value_layouts.Float32;
+        }
+        if (type == abi.CType.Double) {
+            return value_layouts.Float64;
+        }
+        if (type == abi.CType.Bool) {
+            return value_layouts.Bool;
+        }
+        last size = abi.size_of(type, on);
+        last signed = is_signed(type);
+        if (size == 1) {
+            return signed ? value_layouts.Int8 : value_layouts.UInt8;
+        }
+        if (size == 2) {
+            return signed ? value_layouts.Int16 : value_layouts.UInt16;
+        }
+        if (size == 4) {
+            return signed ? value_layouts.Int32 : value_layouts.UInt32;
+        }
+        return signed ? value_layouts.Int64 : value_layouts.UInt64;
+    };
+
+    let is_signed = func(type: abi.CType) -> bool =>
+        type == abi.CType.Char || type == abi.CType.SChar || type == abi.CType.Short || type == abi.CType.Int ||
+        type == abi.CType.Long || type == abi.CType.LongLong || type == abi.CType.Int8 || type == abi.CType.Int16 ||
+        type == abi.CType.Int32 || type == abi.CType.Int64;
+
+    let descriptor_of = func(symbol: ForeignSymbol) -> descriptors.FunctionDescriptor {
+        last layouts: memory_layouts.MemoryLayout[list] = new;
+        for (let type in symbol.parameters) {
+            layouts.append(value_layout(type, symbol.target));
+        }
+        last result = symbol.returns_void ? Optional<memory_layouts.MemoryLayout>.None
+                                          : Optional<memory_layouts.MemoryLayout>.Some(value_layout(symbol.result, symbol.target));
+        return new descriptors.FunctionDescriptor(result, layouts);
+    };
+
+    let to_foreign = func(type: abi.CType, on: abi.Target, value: model.Variant) -> foreign_values.ForeignValue {
+        if (type == abi.CType.Pointer) {
+            return foreign_values.ForeignValue.Address(value.get<segments.MemorySegment>());
+        }
+        if (type == abi.CType.Float) {
+            return foreign_values.ForeignValue.Float32(value.get<float32>());
+        }
+        if (type == abi.CType.Double) {
+            return foreign_values.ForeignValue.Float64(value.get<float64>());
+        }
+        if (type == abi.CType.Bool) {
+            return foreign_values.ForeignValue.Bool(value.get<bool>());
+        }
+        last size = abi.size_of(type, on);
+        if (is_signed(type)) {
+            if (size == 1) {
+                return foreign_values.ForeignValue.Int8(value.get<int8>());
+            }
+            if (size == 2) {
+                return foreign_values.ForeignValue.Int16(value.get<int16>());
+            }
+            if (size == 4) {
+                return foreign_values.ForeignValue.Int32(value.get<int32>());
+            }
+            return foreign_values.ForeignValue.Int64(value.get<int64>());
+        }
+        if (size == 1) {
+            return foreign_values.ForeignValue.UInt8(value.get<uint8>());
+        }
+        if (size == 2) {
+            return foreign_values.ForeignValue.UInt16(value.get<uint16>());
+        }
+        if (size == 4) {
+            return foreign_values.ForeignValue.UInt32(value.get<uint32>());
+        }
+        return foreign_values.ForeignValue.UInt64(value.get<uint64>());
+    };
+
+    let from_foreign = func(type: abi.CType, on: abi.Target, value: foreign_values.ForeignValue) -> model.Variant {
+        if (type == abi.CType.Pointer) {
+            return model.variant_of(foreign_values.as_segment(value));
+        }
+        if (type == abi.CType.Float) {
+            return model.variant_of(foreign_values.as_float32(value));
+        }
+        if (type == abi.CType.Double) {
+            return model.variant_of(foreign_values.as_float64(value));
+        }
+        if (type == abi.CType.Bool) {
+            return model.variant_of(foreign_values.as_bool(value));
+        }
+        last size = abi.size_of(type, on);
+        if (is_signed(type)) {
+            last wide = foreign_values.as_int64(value);
+            if (size == 1) {
+                return model.variant_of(wide as int8);
+            }
+            if (size == 2) {
+                return model.variant_of(wide as int16);
+            }
+            if (size == 4) {
+                return model.variant_of(wide as int32);
+            }
+            return model.variant_of(wide);
+        }
+        last bits = foreign_values.as_uint64(value);
+        if (size == 1) {
+            return model.variant_of(bits as uint8);
+        }
+        if (size == 2) {
+            return model.variant_of(bits as uint16);
+        }
+        if (size == 4) {
+            return model.variant_of(bits as uint32);
+        }
+        return model.variant_of(bits);
+    };
+);
