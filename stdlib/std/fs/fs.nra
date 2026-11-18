@@ -39,10 +39,9 @@ export let Fs = module (
         /// @brief Tests equality of the kind, size, and modification time.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FileMetadata)) {
+            if (other is not metadata: FileMetadata) {
                 return false;
             }
-            last metadata = other as FileMetadata;
             return kind == metadata.kind && size == metadata.size &&
                 (modified == nil ? metadata.modified == nil : modified === metadata.modified);
         };
@@ -56,8 +55,8 @@ export let Fs = module (
         /// @brief Formats the metadata as Kind(size, modified), with nil for an absent timestamp.
         #Pure
         export let.override to_string = func -> string =>
-            kind.to_string() + "(" + size.to_string() + ", " +
-            (modified == nil ? "nil" : modified.to_string()) + ")";
+            kind.to_string() .. "(" .. size.to_string() .. ", " ..
+            (modified == nil ? "nil" : modified.to_string()) .. ")";
     );
 
     /// @brief Carries the provider's entry kind, byte size and timestamp fields, or an error code.
@@ -99,9 +98,7 @@ export let Fs = module (
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
                 let [valid, text] = string.from_utf8(data);
-                if (!valid) {
-                    return result.Result<string>.Err(bytes.invalid_utf8(path.to_string()));
-                }
+                return result.Result<string>.Err(bytes.invalid_utf8(path.to_string())) unless valid;
                 return result.Result<string>.Ok(text);
             },
             result.Result.Err(failure) => {

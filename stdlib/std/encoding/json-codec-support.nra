@@ -28,18 +28,16 @@ export let JsonCodecSupport = module (
         return json.parse_ordered_members(text);
     };
 
-    let wrong_kind = func<T>(path: string, expected: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.type", path + ": expected " + expected));
+    let wrong_kind = func<T>(path: string, expected: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.type", path .. ": expected " .. expected));
 
-    let outside_range = func<T>(path: string, type_name: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.range", path + ": expected a number representable as " + type_name));
+    let outside_range = func<T>(path: string, type_name: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.range", path .. ": expected a number representable as " .. type_name));
 
-    let not_finite = func<T>(path: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.not_finite", path + ": expected a finite number"));
+    let not_finite = func<T>(path: string) -> Result<T> => Result<T>.Err(error.custom("json.codec.not_finite", path .. ": expected a finite number"));
 
     let number_text = func(value: json.JsonValue, path: string) -> Result<string> {
         match (value) {
             json.JsonValue.Number(text) => {
-                if (!json.is_number_text(text)) {
-                    return Result<string>.Err(error.custom("json.codec.range", path + ": invalid JSON number text"));
-                }
+                return Result<string>.Err(error.custom("json.codec.range", path .. ": invalid JSON number text")) unless json.is_number_text(text);
                 return Result<string>.Ok(text);
             },
             _ => {
@@ -145,9 +143,7 @@ export let JsonCodecSupport = module (
 
     #[NoDiscard, Pure, ThreadSafe]
     export let encode_float16 = func(value: float16, path: string) -> Result<json.JsonValue> {
-        if (!float16s.is_finite(value)) {
-            return not_finite<json.JsonValue>(path);
-        }
+        return not_finite<json.JsonValue>(path) unless float16s.is_finite(value);
         return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
     };
 
@@ -155,17 +151,13 @@ export let JsonCodecSupport = module (
     export let decode_float16 = func(value: json.JsonValue, path: string) -> Result<float16> {
         last text = number_text(value, path)?;
         last decoded = number_result<float16>(float16s.parse(text), path, "float16")?;
-        if (!float16s.is_finite(decoded)) {
-            return not_finite<float16>(path);
-        }
+        return not_finite<float16>(path) unless float16s.is_finite(decoded);
         return Result<float16>.Ok(decoded);
     };
 
     #[NoDiscard, Pure, ThreadSafe]
     export let encode_bfloat16 = func(value: bfloat16, path: string) -> Result<json.JsonValue> {
-        if (!bfloat16s.is_finite(value)) {
-            return not_finite<json.JsonValue>(path);
-        }
+        return not_finite<json.JsonValue>(path) unless bfloat16s.is_finite(value);
         return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
     };
 
@@ -173,17 +165,13 @@ export let JsonCodecSupport = module (
     export let decode_bfloat16 = func(value: json.JsonValue, path: string) -> Result<bfloat16> {
         last text = number_text(value, path)?;
         last decoded = number_result<bfloat16>(bfloat16s.parse(text), path, "bfloat16")?;
-        if (!bfloat16s.is_finite(decoded)) {
-            return not_finite<bfloat16>(path);
-        }
+        return not_finite<bfloat16>(path) unless bfloat16s.is_finite(decoded);
         return Result<bfloat16>.Ok(decoded);
     };
 
     #[NoDiscard, Pure, ThreadSafe]
     export let encode_float32 = func(value: float32, path: string) -> Result<json.JsonValue> {
-        if (!float32s.is_finite(value)) {
-            return not_finite<json.JsonValue>(path);
-        }
+        return not_finite<json.JsonValue>(path) unless float32s.is_finite(value);
         return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
     };
 
@@ -191,17 +179,13 @@ export let JsonCodecSupport = module (
     export let decode_float32 = func(value: json.JsonValue, path: string) -> Result<float32> {
         last text = number_text(value, path)?;
         last decoded = number_result<float32>(float32s.parse(text), path, "float32")?;
-        if (!float32s.is_finite(decoded)) {
-            return not_finite<float32>(path);
-        }
+        return not_finite<float32>(path) unless float32s.is_finite(decoded);
         return Result<float32>.Ok(decoded);
     };
 
     #[NoDiscard, Pure, ThreadSafe]
     export let encode_float64 = func(value: float64, path: string) -> Result<json.JsonValue> {
-        if (!float64s.is_finite(value)) {
-            return not_finite<json.JsonValue>(path);
-        }
+        return not_finite<json.JsonValue>(path) unless float64s.is_finite(value);
         return Result<json.JsonValue>.Ok(json.JsonValue.Number(value.to_string()));
     };
 
@@ -209,9 +193,7 @@ export let JsonCodecSupport = module (
     export let decode_float64 = func(value: json.JsonValue, path: string) -> Result<float64> {
         last text = number_text(value, path)?;
         last decoded = number_result<float64>(float64s.parse(text), path, "float64")?;
-        if (!float64s.is_finite(decoded)) {
-            return not_finite<float64>(path);
-        }
+        return not_finite<float64>(path) unless float64s.is_finite(decoded);
         return Result<float64>.Ok(decoded);
     };
 );

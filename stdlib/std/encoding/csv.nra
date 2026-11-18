@@ -36,7 +36,7 @@ export let Csv = module (
                 }
                 record.append(unquote(text, i + 1, end));
                 end++;
-                if (end < count && !is_separator(text, end)) {
+                if (end < count && not is_separator(text, end)) {
                     return failure(ParseErrorKind.Syntax, end, "text after closing quote");
                 }
             } else {
@@ -92,7 +92,7 @@ export let Csv = module (
         for (let row in rows) {
             let first = true;
             for (let field in row) {
-                if (!first) {
+                if (not first) {
                     out.append(",");
                 }
                 first = false;
