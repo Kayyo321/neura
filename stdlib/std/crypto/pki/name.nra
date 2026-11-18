@@ -16,7 +16,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// removing leading and trailing white space and collapsing inner runs of it to one space (the parts of LDAP
 /// StringPrep this library applies); other values compare by their encodings; the pairs of a multi-valued RDN
 /// compare as sets. `to_string` is RFC 4514 text, most specific RDN first.
-/// @see [Std.Crypto.Pki.Name](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Name)
+/// @see [Std.Crypto.Pki.Name](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Name)
 #Since("0.3.0")
 export let Name = module (
     /// @brief One attribute type and value.
@@ -218,7 +218,7 @@ export let Name = module (
     let short_name = func(dotted: string) -> string {
         last name = oids.name_of(dotted);
         if (name == "CN" || name == "C" || name == "O" || name == "OU" || name == "L" || name == "ST" || name == "DC"
-                || name == "UID") {
+            || name == "UID") {
             return name;
         }
         return dotted;
@@ -232,7 +232,7 @@ export let Name = module (
         for (let i = 0; i < n; i++) {
             last c = bytes[i];
             if (c == 44 || c == 43 || c == 34 || c == 92 || c == 60 || c == 62 || c == 59
-                    || (i == 0 && (c == 35 || c == 32)) || (i == n - 1 && c == 32)) {
+                || (i == 0 && (c == 35 || c == 32)) || (i == n - 1 && c == 32)) {
                 out.append(92);
             }
             out.append(c);

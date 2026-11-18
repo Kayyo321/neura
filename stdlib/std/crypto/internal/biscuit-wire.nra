@@ -149,7 +149,7 @@ export let BiscuitWire = module (
         export last version: int;
 
         export let init = func(block_data: uint8[list], key: ed25519.Ed25519PublicKey, encoded_key: uint8[list],
-                signed: uint8[list], format: int) {
+            signed: uint8[list], format: int) {
             data = block_data;
             next_key = key;
             key_bytes = encoded_key;
@@ -227,7 +227,9 @@ export let BiscuitWire = module (
 
     let verify_proof = func(encoded: uint8[list], block: SignatureBlock) -> bool {
         match (read_message(encoded, [10, 18], [])) {
-            Result.Err(_) => { return false; },
+            Result.Err(_) => {
+                return false;
+            },
             Result.Ok(message) => {
                 if (message.fields.length != 1) {
                     return false;

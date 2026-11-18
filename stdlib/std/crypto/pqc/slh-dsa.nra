@@ -15,7 +15,7 @@ let prehash = import:Std.Crypto.Internal.PqcPrehash;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief SLH-DSA, the stateless hash-based signature scheme of FIPS 205, in its twelve parameter sets
-/// (Stdlib.md section 20.9).
+/// (Stdlib.md section 21.9).
 ///
 /// `SlhDsaSigner` implements `Signer` and `SlhDsaVerifier` implements `Verifier`. Signing is hedged by
 /// default: the n-byte `addrnd` comes from a `ChaCha20Drbg` given to the signer, or else from
@@ -23,7 +23,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// Pure SLH-DSA takes a context string of at most 255 bytes, and HashSLH-DSA signs a digest under the object
 /// identifier of the hash. The "s" sets give small signatures and sign slowly; the "f" sets sign fast. Every
 /// set is security category 1, 3 or 5 by its n of 16, 24 or 32 bytes.
-/// @see [Std.Crypto.Pqc.SlhDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-SlhDsa)
+/// @see [Std.Crypto.Pqc.SlhDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-SlhDsa)
 #Since("0.3.0")
 export let SlhDsa = module (
     /// @brief The parameter sets of FIPS 205, section 11.
@@ -185,7 +185,7 @@ export let SlhDsa = module (
     /// @brief slh_keygen_internal (FIPS 205, Algorithm 18) from the three n-byte seeds; another length traps.
     #[NoDiscard, Since("0.3.0")]
     export let key_pair_from_seed = func(set: ParameterSet, sk_seed: uint8[list], sk_prf: uint8[list], pk_seed: uint8[list])
-            -> SlhDsaPrivateKey {
+        -> SlhDsaPrivateKey {
         crypto_policy.require(Algorithm.SlhDsa);
         last n = security_bytes(set);
         if (sk_seed.length != n || sk_prf.length != n || pk_seed.length != n) {
@@ -308,7 +308,7 @@ export let SlhDsa = module (
         /// SHA-3 and SHAKE algorithms of Std.Crypto.Hash) and the given n-byte addrnd.
         #NoDiscard
         export let sign_prehash_with = func(message: uint8[list], context: uint8[list], hash: Algorithm,
-                addrnd: uint8[list]) -> uint8[list] {
+            addrnd: uint8[list]) -> uint8[list] {
             check(context, addrnd);
             return engine.sign(prehash.formatted(1, context, prehash.digest_info(hash, message)), key.expose(), addrnd);
         };
@@ -316,7 +316,7 @@ export let SlhDsa = module (
         /// @brief The deterministic variant of hash_slh_sign.
         #NoDiscard
         export let sign_prehash_deterministic = func(message: uint8[list], context: uint8[list], hash: Algorithm)
-                -> uint8[list] {
+            -> uint8[list] {
             last n = engine.n;
             return sign_prehash_with(message, context, hash, words.slice(key.expose(), 2 * n, 3 * n));
         };
@@ -403,7 +403,7 @@ export let SlhDsa = module (
         /// @brief hash_slh_verify (FIPS 205, Algorithm 25) with the pre-hash function `hash`.
         #NoDiscard
         export let verify_prehash = func(message: uint8[list], signature: uint8[list], context: uint8[list],
-                hash: Algorithm) -> bool {
+            hash: Algorithm) -> bool {
             if (context.length > 255) {
                 return false;
             }

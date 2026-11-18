@@ -95,7 +95,7 @@ export let JoseJson = module (
     /// @brief The string member: Ok(None) when absent, Ok(Some(text)) when a string, and `Custom` code `code`
     /// when present with another type.
     export let string_member = func(members: [string, json.JsonValue][list], name: string, code: string)
-            -> Result<Optional<string>> {
+        -> Result<Optional<string>> {
         match (json.member(members, name)) {
             Optional.None => {
                 return Result<Optional<string>>.Ok(Optional<string>.None);
@@ -130,7 +130,7 @@ export let JoseJson = module (
 
     /// @brief The required string member; absent or another type fails with the code.
     export let required_text = func(members: [string, json.JsonValue][list], name: string, code: string)
-            -> Result<string> {
+        -> Result<string> {
         if (!has(members, name)) {
             return fail<string>(code, "member \"" + name + "\" is missing");
         }
@@ -140,7 +140,7 @@ export let JoseJson = module (
     /// @brief The bytes of a required base64url member (unpadded, strict); absent, another type or bad
     /// base64url fails with the code.
     export let required_bytes = func(members: [string, json.JsonValue][list], name: string, code: string)
-            -> Result<uint8[list]> {
+        -> Result<uint8[list]> {
         match (required_text(members, name, code)) {
             Result.Err(e) => {
                 return Result<uint8[list]>.Err(e);

@@ -9,7 +9,7 @@ let utf8 = import:Std.Encoding.Utf8;
 /// Lengths are always in their shortest form and integers are minimal, so the output is DER. A SET's
 /// elements are sorted. Values outside a type's rules (a PrintableString character, a time before 1950 for
 /// UTCTime) trap with "invalid argument: ...", because they are programming errors.
-/// @see [Std.Crypto.Pki.DerWriter](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-DerWriter)
+/// @see [Std.Crypto.Pki.DerWriter](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-DerWriter)
 #Since("0.3.0")
 export let DerWriter = module (
     /// @brief The element with the tag class (0 to 3), construction, tag number and content.
@@ -207,8 +207,8 @@ export let DerWriter = module (
         last bytes = utf8.encode(text);
         for (let c in bytes) {
             if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
-                    || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
-                    || c == 61 || c == 63)) {
+                || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
+                || c == 61 || c == 63)) {
                 trap_with_message("invalid argument: PrintableString character");
             }
         }

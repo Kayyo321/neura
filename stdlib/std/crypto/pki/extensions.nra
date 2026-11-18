@@ -15,7 +15,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// Every typed value keeps the DER of the extension's value (`der_bytes`), which `equals` and `hash_code`
 /// compare. Each `parse_<name>` reads the extnValue contents and fails with a `Parse` error on a value that
 /// breaks the extension's ASN.1, or a constraint of RFC 5280 that a certificate user must check.
-/// @see [Std.Crypto.Pki.Extensions](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Extensions)
+/// @see [Std.Crypto.Pki.Extensions](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Extensions)
 #Since("0.3.0")
 export let Extensions = module (
     // KeyUsage bits (RFC 5280, section 4.2.1.3).
@@ -86,6 +86,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is BasicConstraints
             && same((other as BasicConstraints).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string => $"BasicConstraints(ca {ca}, path length {path_length})";
     );
@@ -106,6 +107,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is KeyUsage
             && same((other as KeyUsage).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string {
             let names = "";
@@ -143,6 +145,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is ExtendedKeyUsage
             && same((other as ExtendedKeyUsage).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string => "ExtendedKeyUsage(" + oid_list(purposes) + ")";
     );
@@ -159,6 +162,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is GeneralSubtree
             && (other as GeneralSubtree).base.equals(base);
+
         export let.override hash_code = func -> uint32 => base.hash_code();
         export let.override to_string = func -> string => "GeneralSubtree(" + base.to_string() + ")";
     );
@@ -174,7 +178,7 @@ export let Extensions = module (
         export last der_bytes: uint8[list];
 
         export let init = func(allowed: GeneralSubtree[list], denied: GeneralSubtree[list], allowed_present: bool,
-                denied_present: bool, encoded: uint8[list]) {
+            denied_present: bool, encoded: uint8[list]) {
             permitted = allowed;
             excluded = denied;
             has_permitted = allowed_present;
@@ -184,6 +188,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is NameConstraints
             && same((other as NameConstraints).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string =>
             $"NameConstraints({permitted.length} permitted, {excluded.length} excluded)";
@@ -200,7 +205,7 @@ export let Extensions = module (
         export last der_bytes: uint8[list];
 
         export let init = func(id: uint8[list], id_present: bool, names: GeneralName[list], serial_number: uint8[list],
-                encoded: uint8[list]) {
+            encoded: uint8[list]) {
             key_identifier = id;
             has_key_identifier = id_present;
             issuer = names;
@@ -210,6 +215,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is AuthorityKeyIdentifier
             && same((other as AuthorityKeyIdentifier).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string => "AuthorityKeyIdentifier(" + hex.encode(key_identifier) + ")";
     );
@@ -230,6 +236,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is PolicyQualifier
             && same((other as PolicyQualifier).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string => $"PolicyQualifier({id.dotted}, {text})";
     );
@@ -249,6 +256,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is PolicyInformation
             && same((other as PolicyInformation).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string => $"PolicyInformation({policy.dotted}, {qualifiers.length} qualifiers)";
     );
@@ -267,8 +275,10 @@ export let Extensions = module (
         export let.override equals = func(other: class) -> bool => other is PolicyMapping
             && (other as PolicyMapping).issuer_domain.equals(issuer_domain)
             && (other as PolicyMapping).subject_domain.equals(subject_domain);
+
         export let.override hash_code = func -> uint32 =>
             ((issuer_domain.hash_code() as uint64 * 31 + subject_domain.hash_code() as uint64) & 4294967295) as uint32;
+
         export let.override to_string = func -> string => $"PolicyMapping({issuer_domain.dotted} -> {subject_domain.dotted})";
     );
 
@@ -287,6 +297,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is PolicyConstraints
             && same((other as PolicyConstraints).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string =>
             $"PolicyConstraints(require explicit {require_explicit_policy}, inhibit mapping {inhibit_policy_mapping})";
@@ -303,7 +314,7 @@ export let Extensions = module (
         export last der_bytes: uint8[list];
 
         export let init = func(full: GeneralName[list], relative: uint8[list], reason_bits: uint8[list],
-                issuer: GeneralName[list], encoded: uint8[list]) {
+            issuer: GeneralName[list], encoded: uint8[list]) {
             full_name = full;
             relative_name = relative;
             reasons = reason_bits;
@@ -313,6 +324,7 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is DistributionPoint
             && same((other as DistributionPoint).der_bytes, der_bytes);
+
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
         export let.override to_string = func -> string => $"DistributionPoint({full_name.length} names)";
     );
@@ -330,8 +342,10 @@ export let Extensions = module (
 
         export let.override equals = func(other: class) -> bool => other is AccessDescription
             && (other as AccessDescription).method.equals(method) && (other as AccessDescription).location.equals(location);
+
         export let.override hash_code = func -> uint32 =>
             ((method.hash_code() as uint64 * 31 + location.hash_code() as uint64) & 4294967295) as uint32;
+
         export let.override to_string = func -> string => "AccessDescription(" + method.dotted + ", " + location.to_string() + ")";
     );
 

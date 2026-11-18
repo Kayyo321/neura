@@ -3,7 +3,7 @@
 /// The sources are RFC 5280 (X.509), RFC 3279, 4055, 5480, 5758, 8410 and 8017 (algorithms), RFC 6960 (OCSP),
 /// RFC 6962 (Certificate Transparency), RFC 8018 and 5084 (PBES2), RFC 2985 (PKCS #9), and the NIST Computer
 /// Security Objects Register for ML-DSA, SLH-DSA and ML-KEM (fetched 2026-11-17).
-/// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oids)
+/// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
 #Since("0.3.0")
 export let Oids = module (
     // Name attributes (RFC 5280 appendix A, RFC 4519, PKCS #9).
@@ -77,15 +77,15 @@ export let Oids = module (
     export const MlDsa65: string = "2.16.840.1.101.3.4.3.18";
     export const MlDsa87: string = "2.16.840.1.101.3.4.3.19";
     /// @brief CSOR HashML-DSA-44 with SHA-512.
-    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oids)
+    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
     #Since("0.3.0")
     export const HashMlDsa44WithSha512: string = "2.16.840.1.101.3.4.3.32";
     /// @brief CSOR HashML-DSA-65 with SHA-512.
-    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oids)
+    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
     #Since("0.3.0")
     export const HashMlDsa65WithSha512: string = "2.16.840.1.101.3.4.3.33";
     /// @brief CSOR HashML-DSA-87 with SHA-512.
-    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oids)
+    /// @see [Std.Crypto.Pki.Oids](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Oids)
     #Since("0.3.0")
     export const HashMlDsa87WithSha512: string = "2.16.840.1.101.3.4.3.34";
     export const MlKem512: string = "2.16.840.1.101.3.4.4.1";

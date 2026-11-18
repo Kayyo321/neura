@@ -13,7 +13,7 @@ let sha3 = import:Std.Crypto.Hash.Sha3;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Single-value Bulletproofs range proofs with Dalek's default ristretto255 generators and Merlin framing.
-/// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Bulletproofs)
+/// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
 #Since("0.3.0")
 export let Bulletproofs = module (
     let fail = func<T>(message: string) -> Result<T> => Result<T>.Err(error.custom("crypto.bulletproofs", message));
@@ -61,8 +61,12 @@ export let Bulletproofs = module (
 
     let read_scalar = func(group: ristretto.Group, bytes: uint8[list]) -> Result<uint32[list]> {
         match (group.scalar_canonical(bytes)) {
-            Optional.Some(value) => { return Result<uint32[list]>.Ok(value); },
-            Optional.None => { return fail<uint32[list]>("noncanonical Bulletproofs scalar"); },
+            Optional.Some(value) => {
+                return Result<uint32[list]>.Ok(value);
+            },
+            Optional.None => {
+                return fail<uint32[list]>("noncanonical Bulletproofs scalar");
+            },
         }
         return fail<uint32[list]>("invalid Bulletproofs scalar");
     };
@@ -75,7 +79,9 @@ export let Bulletproofs = module (
                 }
                 return Result<edwards.Point>.Ok(point);
             },
-            Optional.None => { return fail<edwards.Point>("noncanonical Bulletproofs proof point"); },
+            Optional.None => {
+                return fail<edwards.Point>("noncanonical Bulletproofs proof point");
+            },
         }
         return fail<edwards.Point>("invalid Bulletproofs point");
     };
@@ -112,7 +118,7 @@ export let Bulletproofs = module (
     };
 
     let inner_product = func(group: ristretto.Group, left: uint32[list][list], left_at: int, right: uint32[list][list],
-            right_at: int, count: int) -> uint32[list] {
+        right_at: int, count: int) -> uint32[list] {
         let total = zero();
         for (let i = 0; i < count; i++) {
             total = group.scalar_add(total, group.scalar_multiply(left[left_at + i], right[right_at + i]));
@@ -122,7 +128,7 @@ export let Bulletproofs = module (
 
     // Each round publishes cross terms and then folds scalar vectors and their generators.
     let prove_inner_product = func(gens: Generators, transcript: merlin.Transcript, left: uint32[list][list],
-            right: uint32[list][list], inverse_y: uint32[list], w: uint32[list], proof: uint8[list]) -> Result<Unit> {
+        right: uint32[list][list], inverse_y: uint32[list], w: uint32[list], proof: uint8[list]) -> Result<Unit> {
         last group = gens.group;
         let count = left.length;
         inner_domain(transcript, count);
@@ -134,7 +140,6 @@ export let Bulletproofs = module (
             h.append(group.multiply(power, gens.h[i]));
             power = group.scalar_multiply(power, inverse_y);
         }
-
         while (count > 1) {
             last half = count / 2;
             last c_left = inner_product(group, left, 0, right, half, half);
@@ -172,7 +177,7 @@ export let Bulletproofs = module (
     };
 
     let make_proof = func(gens: Generators, transcript: merlin.Transcript, bits: int, value: uint64,
-            blind: uint32[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
+        blind: uint32[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
         last group = gens.group;
         last v = mp.from_bytes_le(word_bytes(value), 8);
         last encoded_v = group.encode(commitment(gens, v, blind));
@@ -287,7 +292,7 @@ export let Bulletproofs = module (
     let part = func(bytes: uint8[list], index: int) -> uint8[list] => words.slice(bytes, 32 * index, 32 * (index + 1));
 
     let delta = func(group: ristretto.Group, bits: int, y: uint32[list], z: uint32[list], z_sq: uint32[list])
-            -> uint32[list] {
+        -> uint32[list] {
         let sum_y = zero();
         let sum_2 = zero();
         let power_y = one();
@@ -303,7 +308,7 @@ export let Bulletproofs = module (
     };
 
     let verification_weights = func(group: ristretto.Group, bits: int, challenges: uint32[list][list],
-            inverses: uint32[list][list]) -> uint32[list][list] {
+        inverses: uint32[list][list]) -> uint32[list][list] {
         let weights: uint32[list][list] = new;
         last rounds = challenges.length;
         for (let i = 0; i < bits; i++) {
@@ -319,7 +324,7 @@ export let Bulletproofs = module (
     };
 
     let verify_proof = func(gens: Generators, transcript: merlin.Transcript, bits: int, encoded_v: uint8[list],
-            proof: uint8[list]) -> Result<bool> {
+        proof: uint8[list]) -> Result<bool> {
         last group = gens.group;
         last rounds = log2_bits(bits);
         last v = read_point(group, encoded_v, true)?;
@@ -411,10 +416,10 @@ export let Bulletproofs = module (
     /// independent unpredictable bytes for production proofs. Degenerate proof points return a Result error.
     /// The caller's Merlin transcript is forked. Scalar multiplication of secret values is branch-free in
     /// source. The runtime does not guarantee constant time.
-    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Bulletproofs)
+    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
     #[NoDiscard, Since("0.3.0")]
     export let prove_with = func(transcript: merlin.Transcript, bits: int, value: uint64,
-            blinding: uint8[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
+        blinding: uint8[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
         check_bits(bits);
         if (random.length != random_length(bits)) {
             trap_with_message("invalid argument: incorrect Bulletproofs randomness length");
@@ -428,10 +433,10 @@ export let Bulletproofs = module (
     };
 
     /// @brief Proves one value using fresh operating system randomness for the proof.
-    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Bulletproofs)
+    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
     #[NoDiscard, Since("0.3.0")]
     export let prove = func(transcript: merlin.Transcript, bits: int, value: uint64, blinding: uint8[list])
-            -> Result<[uint8[list], uint8[list]]> {
+        -> Result<[uint8[list], uint8[list]]> {
         check_bits(bits);
         let random = entropy.os_bytes(random_length(bits))?;
         last result = prove_with(transcript, bits, value, blinding, random);
@@ -443,7 +448,7 @@ export let Bulletproofs = module (
     ///
     /// Widths are 8, 16, 32 and 64. Wrong encodings, mismatched transcripts, and failed equations return false.
     /// The caller's Merlin transcript is forked.
-    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Bulletproofs)
+    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func(transcript: merlin.Transcript, bits: int, commitment: uint8[list], proof: uint8[list]) -> bool {
         check_bits(bits);
@@ -452,8 +457,12 @@ export let Bulletproofs = module (
         }
         let gens: Generators = new(bits);
         match (verify_proof(gens, transcript.fork(), bits, commitment, proof)) {
-            Result.Ok(valid) => { return valid; },
-            Result.Err(_) => { return false; },
+            Result.Ok(valid) => {
+                return valid;
+            },
+            Result.Err(_) => {
+                return false;
+            },
         }
         return false;
     };

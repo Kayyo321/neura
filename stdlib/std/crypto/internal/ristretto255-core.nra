@@ -42,12 +42,14 @@ export let Ristretto255Core = module (
         export let negate = func(p: edwards.Point) -> edwards.Point => curve.negate(p);
         export let select = func(choice: uint32, first: edwards.Point, second: edwards.Point) -> edwards.Point =>
             curve.select(choice, first, second);
+
         export let multiply = func(scalar: uint32[list], point: edwards.Point) -> edwards.Point =>
             curve.multiply(scalar, point);
+
         export let multiply_base = func(scalar: uint32[list]) -> edwards.Point => curve.multiply_base(scalar);
         /// @brief Shared doublings with indexed table reads. Only use this with public scalars.
         export let multiply_two = func(a: uint32[list], p: edwards.Point, b: uint32[list], q: edwards.Point)
-                -> edwards.Point => curve.multiply_two(a, p, b, q);
+            -> edwards.Point => curve.multiply_two(a, p, b, q);
 
         /// @brief The quotient-group equality of RFC 9496 section 4.3.3.
         export let equal = func(p: edwards.Point, q: edwards.Point) -> bool {
@@ -158,11 +160,13 @@ export let Ristretto255Core = module (
             }
             return curve.scalar_canonical(bytes);
         };
+
         export let scalar_bytes = func(scalar: uint32[list]) -> uint8[list] => curve.scalar_bytes(scalar);
         export let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] => curve.order.add(a, b);
         export let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list] => curve.order.sub(a, b);
         export let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list] =>
             curve.order.mul(a, curve.order.to_mont(b));
+
         export let scalar_invert = func(scalar: uint32[list]) -> uint32[list] {
             if (mp.is_zero(scalar) == 1) {
                 trap_with_message("invalid argument: cannot invert a zero ristretto255 scalar");

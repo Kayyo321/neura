@@ -23,7 +23,7 @@ export let PkiPolicyTree = module (
         export let deleted: bool = false;
 
         export let init = func(policy: string, qualifier_set: PolicyQualifier[list], expected_set: string[list],
-                level: int, parent_index: int) {
+            level: int, parent_index: int) {
             valid_policy = policy;
             qualifiers = qualifier_set;
             expected = expected_set;
@@ -48,7 +48,7 @@ export let PkiPolicyTree = module (
         };
 
         let add = func(policy: string, qualifier_set: PolicyQualifier[list], expected_set: string[list], level: int,
-                parent_index: int) {
+            parent_index: int) {
             if (nodes.length >= MaxNodes) {
                 overflowed = true;
                 return;

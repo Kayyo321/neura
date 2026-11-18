@@ -25,7 +25,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// The extensionRequest attribute (PKCS #9, RFC 2985) is read into `extensions`, and challengePassword into
 /// `challenge_password`; every attribute also stays in `attributes`. Call `verify_signature` to check
 /// a parsed request against its own public key.
-/// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Csr)
+/// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
 #Since("0.3.0")
 export let Csr = module (
     /// @brief One Attribute: a type and the DER of each of its values.
@@ -76,8 +76,8 @@ export let Csr = module (
         export last signature: uint8[list];
 
         export let init = func(encoded: uint8[list], info: uint8[list], name: Name, key: SubjectPublicKeyInfo,
-                attrs: Attribute[list], requested: Extension[list], password: Optional<string>,
-                algorithm: AlgorithmIdentifier, signature_bytes: uint8[list]) {
+            attrs: Attribute[list], requested: Extension[list], password: Optional<string>,
+            algorithm: AlgorithmIdentifier, signature_bytes: uint8[list]) {
             der_bytes = encoded;
             info_bytes = info;
             subject = name;
@@ -91,7 +91,7 @@ export let Csr = module (
 
         /// @brief Checks the request's signature under its public key. A supplied verifier overrides
         /// the library's AlgorithmVerifier.
-        /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Csr)
+        /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
         #[NoDiscard, Since("0.3.0")]
         export let verify_signature = func -> SignatureCheck {
             return verify_signature(new algorithm_verifier.AlgorithmVerifier());
@@ -205,7 +205,7 @@ export let Csr = module (
         parse(pem.decode(text, "CERTIFICATE REQUEST")?);
 
     /// @brief Checks the request's signature under its public key using the library verifier or a supplied verifier.
-    /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Csr)
+    /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Csr)
     #[NoDiscard, Since("0.3.0")]
     export let verify_signature = func(request: CertificationRequest) -> SignatureCheck {
         return request.verify_signature();
@@ -231,8 +231,8 @@ export let Csr = module (
         for (let i = 0; i < password.byte_length; i++) {
             last c = password.byte_at(i);
             if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
-                    || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
-                    || c == 61 || c == 63)) {
+                || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
+                || c == 61 || c == 63)) {
                 printable = false;
             }
         }
@@ -246,7 +246,7 @@ export let Csr = module (
     /// module).
     #[NoDiscard, Since("0.3.0")]
     export let build = func(subject: Name, public_key: SubjectPublicKeyInfo, attributes: Attribute[list],
-            algorithm: AlgorithmIdentifier, sign: func(uint8[list]) -> uint8[list]) -> uint8[list] {
+        algorithm: AlgorithmIdentifier, sign: func(uint8[list]) -> uint8[list]) -> uint8[list] {
         let encoded: uint8[list][list] = new;
         for (let a in attributes) {
             encoded.append(a.encode());

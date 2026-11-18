@@ -14,7 +14,7 @@ export let P256HashToCurve = module (
 
     /// @brief Hash to P-256 using sections 5.2 and 8.2 and Appendix F.2 of RFC 9380.
     export let hash_to_point = func(curve: weierstrass.Curve, message: uint8[list], dst: uint8[list])
-            -> weierstrass.Point {
+        -> weierstrass.Point {
         crypto_policy.require(Algorithm.P256);
         if (curve.id != weierstrass.CurveId.P256) {
             trap_with_message("invalid argument: P-256 hash-to-curve needs the P-256 group");
@@ -36,7 +36,7 @@ export let P256HashToCurve = module (
 
     /// @brief Simplified SWU, Appendix F.2. Returns (X:Y:Z) with affine coordinates (X/Z, Y/Z).
     let map = func(curve: weierstrass.Curve, input: uint32[list], b: uint32[list], z: uint32[list],
-            exponent: uint32[list], root: uint32[list]) -> weierstrass.Point {
+        exponent: uint32[list], root: uint32[list]) -> weierstrass.Point {
         last field = curve.field;
         last u = field.to_mont(input);
         last zu2 = field.mul(z, field.sqr(u));
@@ -58,7 +58,7 @@ export let P256HashToCurve = module (
 
     /// @brief Appendix F.2.1.2 for q = 3 mod 4. Returns the residue flag and the appropriate square root.
     let sqrt_ratio = func(field: mp.Modulus, numerator: uint32[list], denominator: uint32[list],
-            exponent: uint32[list], root_negative_z: uint32[list]) -> [uint32, uint32[list]] {
+        exponent: uint32[list], root_negative_z: uint32[list]) -> [uint32, uint32[list]] {
         last uv = field.mul(numerator, denominator);
         last uv3 = field.mul(field.sqr(denominator), uv);
         last y1 = field.mul(field.pow(uv3, exponent), uv);

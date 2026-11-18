@@ -15,7 +15,7 @@ let secret = import:Std.Crypto.Core.SecretBytes;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief The ML-DSA-65 and Ed25519 composite signature suite of draft-ietf-lamps-pq-composite-sigs-19.
-/// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+/// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
 #Since("0.3.0")
 export let Ed25519MlDsa65 = module (
     const MlSet = ml_dsa.ParameterSet.MlDsa65;
@@ -28,13 +28,13 @@ export let Ed25519MlDsa65 = module (
     };
 
     /// @brief The composite public key, encoded as the ML-DSA-65 key followed by the Ed25519 key.
-    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
     #[Final, Since("0.3.0")]
     export let CompositePublicKey = class (
         last encoded: uint8[list];
 
         /// @brief Copies the 1984 public key bytes. A different length traps.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let init = func(bytes: uint8[list]) {
             check_policy();
@@ -45,12 +45,12 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief A copy of the public key bytes.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         /// @brief Compares the encoded public keys by value.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is CompositePublicKey)) {
@@ -66,7 +66,7 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief Hashes the encoded public key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 65;
@@ -77,20 +77,20 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief The composite public key type's name.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override to_string = func -> string => "CompositePublicKey(ML-DSA-65 + Ed25519)";
     );
 
     /// @brief Two 32-byte private key seeds, ML-DSA-65 first, held with explicit wipe support.
-    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
     #[Final, Since("0.3.0")]
     export let CompositePrivateKey = class implements PrivateKey<CompositePrivateKey> (
         last material: secret.SecretBytes;
         last encoded_public_key: uint8[list];
 
         /// @brief Imports the 64-byte private key and derives each public key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let init = func(bytes: uint8[list]) {
             check_policy();
@@ -111,50 +111,50 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief Returns a copy of both seeds, with the post-quantum seed first. A wiped key traps.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites the retained seeds.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether the private key was wiped.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests the same page-locking service as SecretBytes.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief A copy of the encoded public key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let public_key_bytes = func -> uint8[list] => words.copy(encoded_public_key);
 
         /// @brief The associated composite public key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let public_key = func -> CompositePublicKey => new(encoded_public_key);
 
         /// @brief Fixed redaction of private material.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override to_string = func -> string => "CompositePrivateKey(<redacted>)";
     );
 
     /// @brief A composite signer. The interface signs with an empty application context and hedged ML-DSA.
-    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
     #[Final, Since("0.3.0")]
     export let CompositeSigner = class implements Signer<CompositePrivateKey, uint8[list]> (
         last key: CompositePrivateKey;
         last random: drbg.ChaCha20Drbg;
 
         /// @brief Uses OS entropy or the caller's DRBG for ML-DSA randomness.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let init = func(private_key: CompositePrivateKey) {
             check_policy();
@@ -167,13 +167,13 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief The composite algorithm identifier used by CryptoPolicy.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let algorithm = func -> Algorithm => Algorithm.Ed25519MlDsa65;
 
         /// @brief Signs with an application context of up to 255 bytes and explicit 32-byte ML-DSA randomness.
         /// The returned signature is the 3309-byte ML-DSA-65 signature and then the 64-byte Ed25519 signature.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let sign_with = func(message: uint8[list], context: uint8[list], rnd: uint8[list]) -> uint8[list] {
             if (rnd.length != 32) {
@@ -198,13 +198,13 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief Signs with all-zero ML-DSA randomness, the deterministic variant.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let sign_deterministic = func(message: uint8[list], context: uint8[list]) -> uint8[list] =>
             sign_with(message, context, words.zeros(32));
 
         /// @brief Signs with the configured entropy source. Entropy failures propagate as Result errors.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let try_sign = func(message: uint8[list], context: uint8[list]) -> Result<uint8[list]> {
             if (context.length > 255) {
@@ -217,30 +217,34 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief Signs with an empty context. A denied entropy request traps with an unavailable error.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let sign = func(message: uint8[list]) -> uint8[list] {
             match (try_sign(message, new)) {
-                Result.Ok(bytes) => { return bytes; },
-                Result.Err(e) => { trap_with_message("unavailable: composite signing needs entropy: " + e.to_string()); },
+                Result.Ok(bytes) => {
+                    return bytes;
+                },
+                Result.Err(e) => {
+                    trap_with_message("unavailable: composite signing needs entropy: " + e.to_string());
+                },
             }
             trap_with_message("unreachable: composite signing outcome");
         };
 
         /// @brief Fixed redaction of the signing key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override to_string = func -> string => "CompositeSigner(<redacted>)";
     );
 
     /// @brief A verifier which requires both component signatures to verify under the corresponding keys.
-    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
     #[Final, Since("0.3.0")]
     export let CompositeVerifier = class implements Verifier<CompositePublicKey, uint8[list]> (
         last key: CompositePublicKey;
 
         /// @brief Verifies under the supplied composite public key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let init = func(public: CompositePublicKey) {
             check_policy();
@@ -248,35 +252,35 @@ export let Ed25519MlDsa65 = module (
         };
 
         /// @brief The composite algorithm identifier used by CryptoPolicy.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let algorithm = func -> Algorithm => Algorithm.Ed25519MlDsa65;
 
         /// @brief The composite public key.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let public_key = func -> CompositePublicKey => key;
 
         /// @brief Verifies with the empty application context.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
             verify_with_context(message, signature, new);
 
         /// @brief Verifies the message and context. A malformed signature or oversized context is false.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #[NoDiscard, Since("0.3.0")]
         export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list]) -> bool =>
             composite.verify(key.to_bytes(), message, signature, context);
 
         /// @brief The verifier class name.
-        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+        /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override to_string = func -> string => "CompositeVerifier";
     );
 
     /// @brief Imports the public key's 1984-byte encoding, including a canonical Ed25519 public point.
-    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
     #[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(bytes: uint8[list]) -> Result<CompositePublicKey> {
         if (bytes.length != 1984) {
@@ -289,7 +293,7 @@ export let Ed25519MlDsa65 = module (
     };
 
     /// @brief Generates both seeds from OS entropy or a caller's DRBG. Entropy failures propagate.
-    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519MlDsa65)
+    /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
     #[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func -> Result<CompositePrivateKey> {
         check_policy();

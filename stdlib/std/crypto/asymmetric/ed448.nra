@@ -17,7 +17,7 @@ let mp = import:Std.Crypto.Internal.Mp;
 let sha3 = import:Std.Crypto.Hash.Sha3;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Ed448 and Ed448ph signatures of RFC 8032, section 5.2 (Stdlib.md section 20.8).
+/// @brief Ed448 and Ed448ph signatures of RFC 8032, section 5.2 (Stdlib.md section 21.8).
 ///
 /// Signing is deterministic, as RFC 8032 defines it, and every signature carries a context of 0 to 255 bytes
 /// (empty by default). Verification is strict: it rejects a signature whose S is not below L, a public key or
@@ -25,7 +25,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// then checks the cofactorless equation [S]B = R + [k]A by computing [S]B - [k]A and comparing its encoding
 /// with R's bytes. The scalar multiplications are branch-free in source; the runtime does not guarantee
 /// constant time.
-/// @see [Std.Crypto.Asymmetric.Ed448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed448)
+/// @see [Std.Crypto.Asymmetric.Ed448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ed448)
 #Since("0.3.0")
 export let Ed448 = module (
     /// @brief An Ed448 public key: the 57-byte encoding of A. Equal keys have equal bytes. The point is
@@ -102,7 +102,7 @@ export let Ed448 = module (
     /// @brief Signs with an Ed448 private key; it also verifies against the matching public key.
     #[Final, Since("0.3.0")]
     export let Ed448Signer = class implements Signer<Ed448PrivateKey, uint8[list]>,
-            Verifier<Ed448PublicKey, uint8[list]> (
+        Verifier<Ed448PublicKey, uint8[list]> (
         last key: Ed448PrivateKey;
 
         /// @brief A signer over the key.
@@ -171,7 +171,7 @@ export let Ed448 = module (
         /// @brief Whether the signature is a valid Ed448 signature under the context (at most 255 bytes).
         #NoDiscard
         export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list])
-                -> bool {
+            -> bool {
             check_context(context);
             return verify_core(key.to_bytes(), dom4(0, context), message, signature);
         };
@@ -179,7 +179,7 @@ export let Ed448 = module (
         /// @brief Whether the signature is a valid Ed448ph signature under the context.
         #NoDiscard
         export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list])
-                -> bool {
+            -> bool {
             check_context(context);
             return verify_core(key.to_bytes(), dom4(1, context), sha3.shake256(message, 64), signature);
         };
@@ -248,7 +248,7 @@ export let Ed448 = module (
 
     /// @brief Strict verification (see the module) with the given dom4 prefix.
     let verify_core = func(public_bytes: uint8[list], dom: uint8[list], message: uint8[list], signature: uint8[list])
-            -> bool {
+        -> bool {
         if (signature.length != 114) {
             return false;
         }

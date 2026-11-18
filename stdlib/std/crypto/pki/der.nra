@@ -22,7 +22,7 @@ let utf8 = import:Std.Encoding.Utf8;
 ///
 /// Elements are views: an `Element` keeps the input list and its position, and copies bytes only when asked.
 /// The input must not change while elements over it are in use.
-/// @see [Std.Crypto.Pki.Der](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Der)
+/// @see [Std.Crypto.Pki.Der](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Der)
 #Since("0.3.0")
 export let Der = module (
     /// @brief Tag class of universal tags.
@@ -116,7 +116,7 @@ export let Der = module (
 
         /// @brief Records a checked element; `parse` and `Reader` build elements.
         export let init = func(input: uint8[list], at: int, header: int, content_length: int, class_bits: int,
-                is_constructed: bool, number: int, level: int, limit: int) {
+            is_constructed: bool, number: int, level: int, limit: int) {
             data = input;
             offset = at;
             header_length = header;
@@ -482,7 +482,7 @@ export let Der = module (
         /// that the range was already checked in full (as inside a parsed element), so constructed elements
         /// are not checked again; pass false for any other input.
         export let init = func(input: uint8[list], start: int, stop: int, level: int, limit_depth: int,
-                inside_checked: bool) {
+            inside_checked: bool) {
             data = input;
             position = start;
             limit = stop;
@@ -590,7 +590,7 @@ export let Der = module (
     /// @brief Reads and checks one element at `at`, not past `limit`; with `deep`, also checks the contents of
     /// constructed elements.
     let read_header = func(data: uint8[list], at: int, limit: int, depth: int, max_depth: int, deep: bool)
-            -> Result<Element> {
+        -> Result<Element> {
         if (depth > max_depth) {
             return error_at<Element>(ParseErrorKind.OutOfRange, at, "DER nesting too deep");
         }

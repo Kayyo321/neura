@@ -76,7 +76,7 @@ export let HybridKem768 = module (
     };
 
     let combine = func(shared_ml: SecretBytes, shared_x: uint8[list], ciphertext_x: uint8[list], public_x: uint8[list],
-            x_wing: bool) -> SecretBytes {
+        x_wing: bool) -> SecretBytes {
         let combined = words.copy(shared_ml.expose());
         words.append_all(combined, shared_x);
         shared_ml.wipe();
@@ -97,7 +97,7 @@ export let HybridKem768 = module (
     };
 
     export let encapsulate = func(public_key: uint8[list], seed: uint8[list], x_wing: bool)
-            -> Encapsulation<SecretBytes, uint8[list]> {
+        -> Encapsulation<SecretBytes, uint8[list]> {
         if (seed.length != EncapsulationSeedLength) {
             trap_with_message("invalid argument: hybrid KEM encapsulation seed must be 64 bytes");
         }
@@ -118,7 +118,7 @@ export let HybridKem768 = module (
     };
 
     export let decapsulate = func(expanded: uint8[list], ciphertext: uint8[list], public_key: uint8[list], x_wing: bool)
-            -> Result<SecretBytes> {
+        -> Result<SecretBytes> {
         last ciphertext_x = words.slice(ciphertext, MlCiphertextLength, CiphertextLength);
         let private_x = words.slice(expanded, 64, ExpandedSeedLength);
         let shared_x = x25519.x25519(private_x, ciphertext_x);

@@ -12,7 +12,7 @@ let utf8 = import:Std.Encoding.Utf8;
 /// have the preferred name syntax (letters, digits and hyphens, labels of 1 to 63 characters); a dNSName or
 /// reference outside it matches nothing. An IP reference matches an iPAddress entry with the same bytes. No
 /// public-suffix list is consulted.
-/// @see [Std.Crypto.Pki.HostName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-HostName)
+/// @see [Std.Crypto.Pki.HostName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-HostName)
 #Since("0.3.0")
 export let HostName = module (
     /// @brief Whether the certificate's subjectAltName has a dNSName matching the host name. A trailing dot on
@@ -72,7 +72,7 @@ export let HostName = module (
                     if (n.kind == GeneralNameKind.Rfc822Name) {
                         last other_at = last_at(n.text);
                         if (other_at > 0 && n.text.slice(0, other_at) == address.slice(0, at)
-                                && lower(n.text.slice(other_at, n.text.byte_length)) == lower(address.slice(at, address.byte_length))) {
+                            && lower(n.text.slice(other_at, n.text.byte_length)) == lower(address.slice(at, address.byte_length))) {
                             return true;
                         }
                     }

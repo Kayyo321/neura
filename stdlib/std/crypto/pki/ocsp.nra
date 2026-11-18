@@ -32,7 +32,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// future (beyond the allowed skew) and nextUpdate, if present, has not passed; and, when a nonce was sent, when
 /// the response echoes it. Errors are `Custom` with codes ocsp.status, ocsp.no_response, ocsp.responder,
 /// ocsp.signature, ocsp.stale, ocsp.nonce; malformed DER is a `Parse` error.
-/// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ocsp)
+/// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Ocsp)
 #Since("0.3.0")
 export let Ocsp = module (
     /// @brief The CertID hash.
@@ -112,7 +112,7 @@ export let Ocsp = module (
         export last next_update: Optional<instant.Instant>;
 
         export let init = func(id: CertId, cert_status: CertStatus, revoked_at: Optional<instant.Instant>, reason: int,
-                this_time: instant.Instant, next_time: Optional<instant.Instant>) {
+            this_time: instant.Instant, next_time: Optional<instant.Instant>) {
             cert_id = id;
             status = cert_status;
             revocation_time = revoked_at;
@@ -159,8 +159,8 @@ export let Ocsp = module (
         export last certificates: Certificate[list];
 
         export let init = func(tbs: uint8[list], by_name: Optional<Name>, by_key: uint8[list], produced: instant.Instant,
-                items: SingleResponse[list], exts: Extension[list], algorithm: AlgorithmIdentifier, signature_bytes: uint8[list],
-                certs: Certificate[list]) {
+            items: SingleResponse[list], exts: Extension[list], algorithm: AlgorithmIdentifier, signature_bytes: uint8[list],
+            certs: Certificate[list]) {
             tbs_bytes = tbs;
             responder_name = by_name;
             responder_key_hash = by_key;
@@ -624,13 +624,13 @@ export let Ocsp = module (
     /// module describes, at the instant `at` with `skew_seconds` of allowed clock skew. `nonce` is the nonce sent,
     /// or empty when none was. A revoked or unknown status is returned, not an error: the caller decides.
     /// Unless supplied, the verifier is the library's AlgorithmVerifier.
-    /// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ocsp)
+    /// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Ocsp)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func(response: OcspResponse, certificate: Certificate, issuer: Certificate,
-            at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
+        at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
         return verify(response, certificate, issuer, new algorithm_verifier.AlgorithmVerifier(), at, skew_seconds, nonce);
     } or func(response: OcspResponse, certificate: Certificate, issuer: Certificate,
-            verifier: SignatureVerifier, at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
+        verifier: SignatureVerifier, at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
         if (response.status != ResponseStatus.Successful) {
             return failure<SingleResponse>("ocsp.status", "the responder did not answer successfully");
         }
@@ -707,7 +707,7 @@ export let Ocsp = module (
     /// @brief The certificate whose key signs the response: the issuer itself, or a delegated responder (RFC 6960,
     /// section 4.2.2.2).
     let responder = func(basic: BasicResponse, issuer: Certificate, verifier: SignatureVerifier, at: instant.Instant)
-            -> Result<Certificate> {
+        -> Result<Certificate> {
         if (names_responder(basic, issuer)) {
             return Result<Certificate>.Ok(issuer);
         }

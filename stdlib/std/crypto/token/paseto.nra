@@ -20,21 +20,21 @@ let words = import:Std.Crypto.Internal.Words;
 /// supplied separately and does not appear in the token. These operations accept payload bytes;
 /// applications supply their own claim parsing and validation. The tag comparison is branch-free
 /// in source; the runtime does not guarantee constant time.
-/// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+/// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
 #Since("0.3.0")
 export let Paseto = module (
     const LocalHeader = "v4.local.";
     const PublicHeader = "v4.public.";
 
     /// @brief The authenticated payload and footer of an opened token. Accessors return copies.
-    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
     #[Final, Since("0.3.0")]
     export let OpenedToken = class (
         last payload_bytes: uint8[list];
         last footer_bytes: uint8[list];
 
         /// @brief Copies the payload and footer bytes.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let init = func(payload: uint8[list], footer: uint8[list]) {
             payload_bytes = words.copy(payload);
@@ -42,17 +42,17 @@ export let Paseto = module (
         };
 
         /// @brief A copy of the payload.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let payload = func -> uint8[list] => words.copy(payload_bytes);
 
         /// @brief A copy of the authenticated footer, or an empty list when absent.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let footer = func -> uint8[list] => words.copy(footer_bytes);
 
         /// @brief Whether both payloads and both footers are equal byte for byte.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is OpenedToken)) {
@@ -64,7 +64,7 @@ export let Paseto = module (
         };
 
         /// @brief A hash of the payload and footer.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let hash = hashing.combine(17, payload_bytes.length as uint32);
@@ -78,19 +78,19 @@ export let Paseto = module (
         };
 
         /// @brief A fixed placeholder for the token contents.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Paseto.OpenedToken(<redacted>)";
     );
 
     /// @brief PASETO v4.local under a purpose-bound 32-byte key.
-    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
     #[Final, Since("0.3.0")]
     export let Local = class (
         last key: SymmetricKey<Local>;
 
         /// @brief Retains the key. A key of another length traps with invalid argument.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let init = func(local_key: SymmetricKey<Local>) {
             crypto_policy.require(Algorithm.Blake2b);
@@ -102,20 +102,20 @@ export let Paseto = module (
         };
 
         /// @brief Encrypts with a fresh 32-byte OS nonce. Entropy failures are returned.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let encrypt = func(plaintext: uint8[list], footer: uint8[list], implicit_assertion: uint8[list])
-                -> Result<string> {
+            -> Result<string> {
             last nonce = entropy.os_bytes(32)?;
             return Result<string>.Ok(encrypt_with_nonce(plaintext, nonce, footer, implicit_assertion));
         };
 
         /// @brief Encrypts with the given 32-byte nonce; another length traps. Use a fresh random nonce
         /// for every encryption with the same key.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let encrypt_with_nonce = func(plaintext: uint8[list], nonce: uint8[list], footer: uint8[list],
-                implicit_assertion: uint8[list]) -> string {
+            implicit_assertion: uint8[list]) -> string {
             if (nonce.length != 32) {
                 trap_with_message("invalid argument: PASETO v4.local nonce must be 32 bytes");
             }
@@ -129,7 +129,7 @@ export let Paseto = module (
 
         /// @brief Authenticates before decrypting. Returns crypto.token for malformed framing or encoding
         /// and crypto.authentication for a failed tag check.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let decrypt = func(token: string, implicit_assertion: uint8[list]) -> Result<OpenedToken> {
             const [body, footer] = decode(token, "local")?;
@@ -158,75 +158,75 @@ export let Paseto = module (
         };
 
         /// @brief A fixed placeholder for the local key.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Paseto.Local(<redacted>)";
     );
 
     /// @brief A signer producing PASETO v4.public tokens. Use a key dedicated to this purpose.
-    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
     #[Final, Since("0.3.0")]
     export let PublicSigner = class implements Signer<ed25519.Ed25519PrivateKey, string> (
         last signer: ed25519.Ed25519Signer;
 
         /// @brief Retains the Ed25519 private key for issuing v4.public tokens.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let init = func(key: ed25519.Ed25519PrivateKey) {
             signer = new(key);
         };
 
         /// @brief The underlying algorithm, Ed25519.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let algorithm = func -> Algorithm => Algorithm.Ed25519;
 
         /// @brief Signs the payload with no footer or implicit assertion.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let sign = func(message: uint8[list]) -> string => sign_with(message, new, new);
 
         /// @brief Signs the payload and binds the footer and implicit assertion.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let sign_with = func(message: uint8[list], footer: uint8[list], implicit_assertion: uint8[list])
-                -> string {
+            -> string {
             crypto_policy.require(Algorithm.Ed25519);
             last input = pae(new([words.utf8(PublicHeader), message, footer, implicit_assertion]));
             return encode(PublicHeader, words.concat(message, signer.sign(input)), footer);
         };
 
         /// @brief A fixed placeholder for the signing key.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Paseto.PublicSigner(<redacted>)";
     );
 
     /// @brief A verifier accepting only PASETO v4.public tokens.
-    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
     #[Final, Since("0.3.0")]
     export let PublicVerifier = class implements Verifier<ed25519.Ed25519PublicKey, string> (
         last verifier: ed25519.Ed25519Verifier;
 
         /// @brief Retains the Ed25519 verification key.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let init = func(key: ed25519.Ed25519PublicKey) {
             verifier = new(key);
         };
 
         /// @brief The underlying algorithm, Ed25519.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let algorithm = func -> Algorithm => Algorithm.Ed25519;
 
         /// @brief The public verification key.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let public_key = func -> ed25519.Ed25519PublicKey => verifier.public_key();
 
         /// @brief Whether the token authenticates the expected payload with an empty implicit assertion.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let verify = func(message: uint8[list], signature: string) -> bool => match (open(signature, new)) {
             Result.Ok(token) => constant_time.ct_eq(message, token.payload()),
@@ -235,7 +235,7 @@ export let Paseto = module (
 
         /// @brief Verifies the signature and returns the authenticated payload and footer.
         /// Returns crypto.token for malformed framing or encoding and crypto.authentication for a bad signature.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #[NoDiscard, Since("0.3.0")]
         export let open = func(token: string, implicit_assertion: uint8[list]) -> Result<OpenedToken> {
             const [body, footer] = decode(token, "public")?;
@@ -253,7 +253,7 @@ export let Paseto = module (
         };
 
         /// @brief The public verifier's type.
-        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Paseto)
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Paseto.PublicVerifier";
     );
@@ -275,7 +275,7 @@ export let Paseto = module (
     };
 
     let authenticate = func(key: uint8[list], nonce: uint8[list], ciphertext: uint8[list], footer: uint8[list],
-            implicit_assertion: uint8[list]) -> uint8[list] {
+        implicit_assertion: uint8[list]) -> uint8[list] {
         last authentication_key = keyed_hash(key, words.concat(words.utf8("paseto-auth-key-for-aead"), nonce), 32);
         last input = pae(new([words.utf8(LocalHeader), nonce, ciphertext, footer, implicit_assertion]));
         last tag = keyed_hash(authentication_key, input, 32);
@@ -301,7 +301,7 @@ export let Paseto = module (
     let decode = func(token: string, purpose: string) -> Result<[uint8[list], uint8[list]]> {
         last parts = jose.split_dots(token);
         if ((parts.length != 3 && parts.length != 4) || parts[0] != "v4" || parts[1] != purpose
-                || parts[2] == "" || (parts.length == 4 && parts[3] == "")) {
+            || parts[2] == "" || (parts.length == 4 && parts[3] == "")) {
             return jose.fail<[uint8[list], uint8[list]]>("crypto.token", "invalid PASETO version, purpose, or framing");
         }
         last body = jose.decode(parts[2], "crypto.token", "invalid PASETO body encoding")?;

@@ -11,7 +11,7 @@ let rsa = import:Std.Crypto.Asymmetric.Rsa;
 let rsa_core = import:Std.Crypto.Internal.RsaCore;
 
 /// @brief RSAES-OAEP encryption of RFC 8017, section 7.1, with MGF1 over the same hash (Stdlib.md section
-/// 20.8).
+/// 21.8).
 ///
 /// The hash is SHA-256 unless another SHA-2 or SHA-3 hash is chosen. A message may have at most k - 2 hLen - 2
 /// bytes for a k-byte modulus. The seed comes from a `ChaCha20Drbg` given to the object, or else from
@@ -19,7 +19,7 @@ let rsa_core = import:Std.Crypto.Internal.RsaCore;
 /// failure, `Custom` code `crypto.decryption`, whatever went wrong (a value not below n, a failed private
 /// check, a bad label hash, padding or leading byte), and its padding check is branch-free in source, so the
 /// failure reason does not show in its steps (Manger's attack). The runtime does not guarantee constant time.
-/// @see [Std.Crypto.Asymmetric.RsaOaep](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaOaep)
+/// @see [Std.Crypto.Asymmetric.RsaOaep](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaOaep)
 #Since("0.3.0")
 export let RsaOaep = module (
     /// @brief RSA-OAEP with one hash.
@@ -63,7 +63,7 @@ export let RsaOaep = module (
         /// another length traps.
         #NoDiscard
         export let encrypt_with_seed = func(key: rsa.RsaPublicKey, message: uint8[list], label: uint8[list],
-                seed: uint8[list]) -> uint8[list] {
+            seed: uint8[list]) -> uint8[list] {
             last core = key.core;
             last em = rsa_core.oaep_encode(hash, core.k, message, label, seed);
             return rsa_core.i2osp(core, core.apply(rsa_core.os2ip_below(core, em)));
@@ -88,7 +88,7 @@ export let RsaOaep = module (
         /// @brief The message, or `Custom` code `crypto.decryption` for every kind of failure.
         #NoDiscard
         export let decrypt = func(key: rsa.RsaPrivateKey, ciphertext: uint8[list], label: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             last core = key.core;
             last public_core = core.public_core;
             last failure = Result<uint8[list]>.Err(error.custom("crypto.decryption", "decryption failed"));

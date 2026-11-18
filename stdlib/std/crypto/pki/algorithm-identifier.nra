@@ -8,7 +8,7 @@ let oids = import:Std.Crypto.Pki.Oids;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
 /// @brief The X.509 AlgorithmIdentifier and the RSASSA-PSS parameters of RFC 4055 (Stdlib.md section 20.9).
-/// @see [Std.Crypto.Pki.AlgorithmIdentifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmIdentifier)
+/// @see [Std.Crypto.Pki.AlgorithmIdentifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmIdentifier)
 #Since("0.3.0")
 export let AlgorithmIdentifier = module (
     /// @brief An algorithm OID with its optional parameters, kept as DER.

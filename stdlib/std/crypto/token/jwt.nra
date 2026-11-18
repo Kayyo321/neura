@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Time.Clock;
 
 /// @brief The time claims of an authenticated JWT payload (RFC 7519, section 4.1).
-/// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwt)
+/// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwt)
 #Since("0.3.0")
 export let Jwt = module (
     /// @brief Returns the members of an authenticated JWT payload after evaluating its time claims.
@@ -20,10 +20,10 @@ export let Jwt = module (
     ///
     /// The clock is read once when time claims are present and its errors propagate. Negative leeway traps.
     /// Application-specific requirements such as issuer, audience, or maximum token age use the returned members.
-    /// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwt)
+    /// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwt)
     #[NoDiscard, Since("0.3.0")]
     export let validate_claims = func(payload: uint8[list], clock: Clock, leeway_seconds: int64)
-            -> Result<[string, json.JsonValue][list]> {
+        -> Result<[string, json.JsonValue][list]> {
         if (leeway_seconds < 0) {
             trap_with_message("invalid argument: negative JWT leeway");
         }
@@ -65,10 +65,10 @@ export let Jwt = module (
     };
 
     /// @brief Verifies a compact signed JWT with the caller's key before validating its time claims.
-    /// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwt)
+    /// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwt)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func<Alg>(token: string, key: jwk.VerifierKey<Alg>, clock: Clock, leeway_seconds: int64)
-            -> Result<[string, json.JsonValue][list]> {
+        -> Result<[string, json.JsonValue][list]> {
         return validate_claims(jws.verify<Alg>(token, key)?, clock, leeway_seconds);
     };
 

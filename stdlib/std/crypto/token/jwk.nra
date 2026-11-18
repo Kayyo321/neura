@@ -16,33 +16,33 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief JSON Web Keys for JWS verification (RFC 7517, 7518 and 8037).
-/// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+/// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
 #Since("0.3.0")
 export let Jwk = module (
     const InvalidKey = "jose.key";
 
     /// @brief Verification keys carry an expected JOSE algorithm chosen by the caller.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[Sealed, Since("0.3.0")]
     export let VerifierKey = interface<Alg> (
         /// @brief The expected protected header's `alg`.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         let jose_algorithm = func -> string;
 
         /// @brief Verifies the signature over the JWS signing input.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool;
     );
 
     /// @brief The HMAC SHA-2 choices for JWS.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #Since("0.3.0")
     export let HmacAlgorithm = enum (Hs256, Hs384, Hs512);
 
     /// @brief The RSA verification choices for JWS. PSS uses an MGF1 digest and a salt the size of the hash.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #Since("0.3.0")
     export let RsaAlgorithm = enum (Rs256, Rs384, Rs512, Ps256, Ps384, Ps512);
 
@@ -111,14 +111,14 @@ export let Jwk = module (
     };
 
     /// @brief An HMAC JWS verification key. The minimum key length is the length of the hash output.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[Final, Since("0.3.0")]
     export let HmacKey = class implements VerifierKey<HmacKey> (
         last secret_key: secret.SecretBytes;
         last variant: HmacAlgorithm;
 
         /// @brief Copies a key with a caller-selected HMAC algorithm.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let init = func(key: uint8[list], alg: HmacAlgorithm) {
             crypto_policy.require(Algorithm.Hmac);
@@ -131,12 +131,12 @@ export let Jwk = module (
         };
 
         /// @brief The configured HMAC algorithm's JOSE name.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let jose_algorithm = func -> string => hmac_name(variant);
 
         /// @brief Checks a full-length HMAC. Comparison is branch-free in source; the runtime does not guarantee constant time.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #[NoDiscard, Since("0.3.0")]
         export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool {
             last key = secret_key.expose();
@@ -148,25 +148,25 @@ export let Jwk = module (
         };
 
         /// @brief Overwrites the bytes held by this key.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let wipe = func => secret_key.wipe();
 
         /// @brief Fixed redacted display.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override to_string = func -> string => "HmacKey(<redacted>)";
     );
 
     /// @brief An RSA public key restricted to one JOSE signature algorithm.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[Final, Since("0.3.0")]
     export let RsaKey = class implements VerifierKey<RsaKey> (
         last public_key: rsa.RsaPublicKey;
         last variant: RsaAlgorithm;
 
         /// @brief Restricts a public RSA key to a particular JOSE algorithm. The modulus must have at least 2048 bits.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let init = func(key: rsa.RsaPublicKey, alg: RsaAlgorithm) {
             crypto_policy.require(is_pss(alg) ? Algorithm.RsaPss : Algorithm.RsaPkcs1v15);
@@ -179,12 +179,12 @@ export let Jwk = module (
         };
 
         /// @brief The configured RSA algorithm's JOSE name.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let jose_algorithm = func -> string => rsa_name(variant);
 
         /// @brief Checks an RSA signature with the configured algorithm.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #[NoDiscard, Since("0.3.0")]
         export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool {
             last hash = rsa_hash(variant);
@@ -195,7 +195,7 @@ export let Jwk = module (
         };
 
         /// @brief Equality by public key and JOSE algorithm.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is RsaKey)) {
@@ -206,25 +206,25 @@ export let Jwk = module (
         };
 
         /// @brief Hash of the public key and JOSE algorithm.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 => public_key.hash_code() ^ jose_algorithm().hash_code();
 
         /// @brief Displays the JOSE algorithm and modulus size.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override to_string = func -> string =>
             "RsaKey(" + jose_algorithm() + ", " + public_key.bits().to_string() + " bits)";
     );
 
     /// @brief An EC verification key bound to the JWS algorithm of its curve.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[Final, Since("0.3.0")]
     export let EcKey = class implements VerifierKey<EcKey> (
         last public_key: ecdsa.EcPublicKey;
 
         /// @brief Binds a checked EC public key to ES256, ES384, ES512, or ES256K.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let init = func(key: ecdsa.EcPublicKey) {
             crypto_policy.require(ecdsa.algorithm_of(key.curve));
@@ -233,41 +233,41 @@ export let Jwk = module (
         };
 
         /// @brief The JOSE algorithm name for this key's curve.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let jose_algorithm = func -> string => ec_name(public_key.curve);
 
         /// @brief Checks the JWS fixed-width ECDSA signature r || s.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #[NoDiscard, Since("0.3.0")]
         export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool =>
             new ecdsa.EcdsaVerifier(public_key, ec_hash(public_key.curve)).verify_raw(input, signature);
 
         /// @brief Equality by curve and public key.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool =>
             other is EcKey && public_key.equals((other as EcKey).public_key);
 
         /// @brief Hash of the public key.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 => public_key.hash_code();
 
         /// @brief Displays the JOSE algorithm name.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override to_string = func -> string => "EcKey(" + jose_algorithm() + ")";
     );
 
     /// @brief An Ed25519 verification key for EdDSA in JWS (RFC 8037).
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[Final, Since("0.3.0")]
     export let Ed25519Key = class implements VerifierKey<Ed25519Key> (
         last public_key: ed25519.Ed25519PublicKey;
 
         /// @brief Binds a checked Ed25519 public key to the EdDSA header identifier.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let init = func(key: ed25519.Ed25519PublicKey) {
             crypto_policy.require(Algorithm.Ed25519);
@@ -275,18 +275,18 @@ export let Jwk = module (
         };
 
         /// @brief The EdDSA header identifier of RFC 8037.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let jose_algorithm = func -> string => "EdDSA";
 
         /// @brief Checks the Ed25519 signature over the JWS signing input.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #[NoDiscard, Since("0.3.0")]
         export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool =>
             new ed25519.Ed25519Verifier(public_key).verify(input, signature);
 
         /// @brief RFC 7638 SHA-256 thumbprint of the public members.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #[NoDiscard, Since("0.3.0")]
         export let thumbprint = func -> uint8[list] {
             last canonical = "{\"crv\":\"Ed25519\",\"kty\":\"OKP\",\"x\":" + jose.quote(jose.encode(public_key.to_bytes())) + "}";
@@ -294,18 +294,18 @@ export let Jwk = module (
         };
 
         /// @brief Equality by public key.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool =>
             other is Ed25519Key && public_key.equals((other as Ed25519Key).public_key);
 
         /// @brief Hash of the public key.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 => public_key.hash_code();
 
         /// @brief The key type's name.
-        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Ed25519Key";
     );
@@ -321,8 +321,12 @@ export let Jwk = module (
             return jose.fail<Unit>(InvalidKey, "the key's use must allow signatures");
         }
         match (json.member(members, "key_ops")) {
-            Optional.Some(value) => { return verification_operation(value); },
-            Optional.None => { return Result<Unit>.Ok(Unit.Value); },
+            Optional.Some(value) => {
+                return verification_operation(value);
+            },
+            Optional.None => {
+                return Result<Unit>.Ok(Unit.Value);
+            },
         }
         return jose.fail<Unit>(InvalidKey, "unrecognized key_ops");
     };
@@ -343,7 +347,9 @@ export let Jwk = module (
                             operations.append(operation);
                             verify = verify || operation == "verify";
                         },
-                        _ => { return jose.fail<Unit>(InvalidKey, "key_ops must contain strings"); },
+                        _ => {
+                            return jose.fail<Unit>(InvalidKey, "key_ops must contain strings");
+                        },
                     }
                 }
                 if (verify) {
@@ -356,7 +362,7 @@ export let Jwk = module (
     };
 
     /// @brief Imports an oct JWK of sufficient length for the caller-selected HMAC algorithm.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[NoDiscard, Since("0.3.0")]
     export let parse_hmac = func(text: string, alg: HmacAlgorithm) -> Result<HmacKey> {
         last object = jose.parse_object(text, InvalidKey)?;
@@ -375,13 +381,13 @@ export let Jwk = module (
     };
 
     /// @brief Imports an RSA JWK with a modulus of at least 2048 bits and binds it to the given JOSE algorithm.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[NoDiscard, Since("0.3.0")]
     export let parse_rsa = func(text: string, alg: RsaAlgorithm) -> Result<RsaKey> {
         last object = jose.parse_object(text, InvalidKey)?;
         metadata(object, "RSA", rsa_name(alg))?;
         if (!crypto_policy.allows(is_pss(alg) ? Algorithm.RsaPss : Algorithm.RsaPkcs1v15)
-                || !crypto_policy.allows(rsa_hash(alg))) {
+            || !crypto_policy.allows(rsa_hash(alg))) {
             return jose.fail<RsaKey>(InvalidKey, "the crypto policy denies this algorithm");
         }
         last modulus = jose.required_bytes(object, "n", InvalidKey)?;
@@ -397,7 +403,7 @@ export let Jwk = module (
     };
 
     /// @brief Imports a checked EC JWK for the given curve and its JOSE signature algorithm.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[NoDiscard, Since("0.3.0")]
     export let parse_ec = func(text: string, curve: ecdsa.Curve) -> Result<EcKey> {
         last object = jose.parse_object(text, InvalidKey)?;
@@ -420,7 +426,7 @@ export let Jwk = module (
     };
 
     /// @brief Imports an OKP JWK whose curve is Ed25519 and whose algorithm is EdDSA.
-    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwk)
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[NoDiscard, Since("0.3.0")]
     export let parse_ed25519 = func(text: string) -> Result<Ed25519Key> {
         last object = jose.parse_object(text, InvalidKey)?;

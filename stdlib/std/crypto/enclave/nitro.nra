@@ -22,7 +22,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// PCR values. A signature-only check is available for inspecting historical or debug evidence.
 /// This module handles ES384 reports with the AWS document fields and certificate bundle. It makes no host
 /// requests during parsing or verification.
-/// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+/// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
 #Since("0.3.0")
 export let Nitro = module (
     const MaxReportBytes = 32768;
@@ -48,17 +48,17 @@ export let Nitro = module (
     };
 
     /// @brief A numbered SHA-384 PCR measurement.
-    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     #[Final, Since("0.3.0")]
     export let Measurement = class (
         /// @brief The PCR number from 0 to 31.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export last index: int;
         last digest: uint8[list];
 
         /// @brief Copies a 48-byte measurement. A wrong index or length traps.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let init = func(register: int, bytes: uint8[list]) {
             if (register < 0 || register > 31 || bytes.length != DigestBytes) {
@@ -69,12 +69,12 @@ export let Nitro = module (
         };
 
         /// @brief A copy of the SHA-384 value.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(digest);
 
         /// @brief Whether the PCR numbers and measurements match.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is Measurement)) {
@@ -85,26 +85,26 @@ export let Nitro = module (
         };
 
         /// @brief A hash of the index and contents.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 => hash_bytes(digest, index as uint32);
 
         /// @brief The PCR index.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Nitro.Measurement(" + index.to_string() + ")";
     );
 
     /// @brief The decoded, signed claims. Use verify to authenticate and check the caller's policy.
-    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     #[Final, Since("0.3.0")]
     export let Document = class (
         /// @brief The issuing Nitro hypervisor module.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export last module_id: string;
         /// @brief Signed issuance time in milliseconds after the Unix epoch.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export last timestamp_millis: uint64;
         last registers: Measurement[list];
@@ -115,10 +115,10 @@ export let Nitro = module (
         last encoded: uint8[list];
 
         /// @brief Records parsed evidence. Construction alone establishes no trust in the claims.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let init = func(module_name: string, timestamp: uint64, pcrs: Measurement[list],
-                nonce_bytes, user_bytes, key_bytes: Optional<uint8[list]>, cert, report: uint8[list]) {
+            nonce_bytes, user_bytes, key_bytes: Optional<uint8[list]>, cert, report: uint8[list]) {
             module_id = module_name;
             timestamp_millis = timestamp;
             let copy: Measurement[list] = new;
@@ -134,7 +134,7 @@ export let Nitro = module (
         };
 
         /// @brief A PCR by index when the report includes it.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let pcr = func(index: int) -> Optional<Measurement> {
             for (let measurement in registers) {
@@ -146,7 +146,7 @@ export let Nitro = module (
         };
 
         /// @brief A copy of the register list.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let pcrs = func -> Measurement[list] {
             let copy: Measurement[list] = new;
@@ -157,32 +157,32 @@ export let Nitro = module (
         };
 
         /// @brief A copy of the optional challenge nonce.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let nonce = func -> Optional<uint8[list]> => copy_optional(request_nonce);
 
         /// @brief A copy of optional signed application data.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let user_data = func -> Optional<uint8[list]> => copy_optional(enclave_data);
 
         /// @brief A copy of the optional application public key.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let public_key = func -> Optional<uint8[list]> => copy_optional(enclave_key);
 
         /// @brief A copy of the infrastructure signing certificate in DER.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let certificate_der = func -> uint8[list] => words.copy(signing_certificate);
 
         /// @brief A copy of the original encoded report.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         /// @brief Whether the encodings match.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is Document)) {
@@ -192,12 +192,12 @@ export let Nitro = module (
         };
 
         /// @brief A hash of the original encoding.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 => hash_bytes(encoded, 384);
 
         /// @brief A fixed name for the decoded evidence.
-        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+        /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Nitro.Document";
     );
@@ -244,7 +244,7 @@ export let Nitro = module (
             }
             position += width;
             if ((width == 1 && value < 24) || (width == 2 && value <= 255)
-                    || (width == 4 && value <= 65535) || (width == 8 && value <= 4294967295)) {
+                || (width == 4 && value <= 65535) || (width == 8 && value <= 4294967295)) {
                 return malformed<uint64>("non-minimal Nitro CBOR argument");
             }
             return Result<uint64>.Ok(value);
@@ -407,7 +407,7 @@ export let Nitro = module (
             }
         }
         if (payload.module_id == "" || !payload.sha384 || payload.timestamp == 0 || payload.pcrs.length == 0
-                || payload.cert.length == 0 || !bundle_present) {
+            || payload.cert.length == 0 || !bundle_present) {
             return malformed<Payload>("missing or unsupported required Nitro claim");
         }
         return Result<Payload>.Ok(payload);
@@ -446,7 +446,7 @@ export let Nitro = module (
     /// accepts a bounded break-terminated claim map, and caps the report at 32 KiB, CA bundle at eight
     /// certificates, and
     /// individual DER and optional binary fields at 1024 bytes. Unrecognized or repeated claims fail.
-    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(report: uint8[list]) -> Result<Document> => Result<Document>.Ok((read_report(report)?).document);
 
@@ -484,10 +484,10 @@ export let Nitro = module (
 
     /// @brief Checks the Nitro COSE ES384 signature and the X.509 path at the explicit instant. The trusted
     /// root DER must be provisioned independently by the caller. Use verify for freshness and policy checks.
-    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     #[NoDiscard, Since("0.3.0")]
     export let verify_signed = func(report: uint8[list], trusted_root_der: uint8[list], at: instant.Instant)
-            -> Result<Document> {
+        -> Result<Document> {
         if (at.nanos < 0 || at.nanos >= 1000000000) {
             trap_with_message("invalid argument: Nitro verification needs a normalized instant");
         }
@@ -545,7 +545,7 @@ export let Nitro = module (
 
     let check_policy_arguments = func(expected_nonce: uint8[list], expected: Measurement[list], max_age_millis: int64) {
         if (expected_nonce.length == 0 || expected_nonce.length > MaxFieldBytes || expected.length == 0
-                || expected.length > 32 || max_age_millis < 0) {
+            || expected.length > 32 || max_age_millis < 0) {
             trap_with_message("invalid argument: Nitro requires a nonce, provisioned PCRs, and a nonnegative maximum age");
         }
         let seen: uint32 = 0;
@@ -585,10 +585,10 @@ export let Nitro = module (
     /// duplicate expected index, or all-zero PCR policy traps.
     /// Comparisons of nonce and measurement bytes are branch-free in source. The runtime does not guarantee
     /// constant time.
-    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func(report: uint8[list], trusted_root_der: uint8[list], at: instant.Instant,
-            expected_nonce: uint8[list], expected_pcrs: Measurement[list], max_age_millis: int64) -> Result<Document> {
+        expected_nonce: uint8[list], expected_pcrs: Measurement[list], max_age_millis: int64) -> Result<Document> {
         check_policy_arguments(expected_nonce, expected_pcrs, max_age_millis);
         last document = verify_signed(report, trusted_root_der, at)?;
         if (!fresh(document.timestamp_millis, at, max_age_millis)) {
@@ -624,7 +624,7 @@ export let Nitro = module (
 
     /// @brief Requests a report from the Nitro Secure Module.
     /// @stub the runtime has no Nitro Secure Module attestation host operation
-    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Nitro)
+    /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
     #[NoDiscard, Since("0.3.0")]
     export let request_attestation = func(nonce, user_data, public_key: uint8[list]) -> Result<uint8[list]> {
         trap_with_message("unsupported: Std.Crypto.Enclave.Nitro.request_attestation is not implemented in Neura 0.3.0 "

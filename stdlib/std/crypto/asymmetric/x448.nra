@@ -13,14 +13,14 @@ let hashing = import:Std.Core.Hash;
 let montgomery = import:Std.Crypto.Internal.Montgomery;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief X448 key agreement of RFC 7748 (Stdlib.md section 20.8).
+/// @brief X448 key agreement of RFC 7748 (Stdlib.md section 21.8).
 ///
 /// A private key is 56 random bytes; the function clamps them, as RFC 7748, section 5 says. A shared secret
 /// that is all zero, which a small-order peer key forces, is an error (RFC 7748, section 6.2), so a caller can
 /// never use it as a key by mistake. Any 56 bytes are a public key: values at or above p are reduced, as the
 /// RFC requires. The ladder is branch-free in source; the runtime does not
 /// guarantee constant time.
-/// @see [Std.Crypto.Asymmetric.X448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X448)
+/// @see [Std.Crypto.Asymmetric.X448](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-X448)
 #Since("0.3.0")
 export let X448 = module (
     /// @brief The X448 key-agreement primitive, for the policy and for `PrivateKey<X448>`.

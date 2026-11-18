@@ -9,13 +9,15 @@ let oid_module = import:Std.Crypto.Pki.Oid;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
 /// @brief The GeneralName CHOICE of RFC 5280, section 4.2.1.6 (Stdlib.md section 20.9).
-/// @see [Std.Crypto.Pki.GeneralName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-GeneralName)
+/// @see [Std.Crypto.Pki.GeneralName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-GeneralName)
 #Since("0.3.0")
 export let GeneralName = module (
     /// @brief The alternatives, in the order of their context tags [0] to [8].
     #Since("0.3.0")
-    export let GeneralNameKind = enum (OtherName, Rfc822Name, DnsName, X400Address, DirectoryName, EdiPartyName, Uri,
-        IpAddress, RegisteredId);
+    export let GeneralNameKind = enum (
+        OtherName, Rfc822Name, DnsName, X400Address, DirectoryName, EdiPartyName, Uri,
+        IpAddress, RegisteredId
+    );
 
     /// @brief One general name. `text` holds rfc822Name, dNSName and uniformResourceIdentifier (IA5String);
     /// `bytes` holds iPAddress (4 or 16 bytes, or 8 or 32 with a mask in name constraints) and the content of
@@ -33,7 +35,7 @@ export let GeneralName = module (
         /// @brief Records a checked name; `parse` and the `dns`, `ip`, `email`, `uri` and `directory_name`
         /// functions build names.
         export let init = func(which: GeneralNameKind, value_text: string, value_bytes: uint8[list],
-                dir: Optional<names.Name>, id: Optional<Oid>, encoded: uint8[list]) {
+            dir: Optional<names.Name>, id: Optional<Oid>, encoded: uint8[list]) {
             kind = which;
             text = value_text;
             bytes = value_bytes;

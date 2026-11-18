@@ -47,7 +47,7 @@ export let Montgomery = module (
     /// @brief The ladder of RFC 7748, section 5, over `bits` scalar bits, with a24 = (A - 2) / 4 (the RFC's
     /// formula z_2 = E (AA + a24 E)).
     let ladder = func(f: mp.Modulus, a24_value: uint32, k: uint8[list], u: uint8[list], bits: int, length: int)
-            -> uint8[list] {
+        -> uint8[list] {
         last n = f.n;
         last x1 = f.to_mont(mp.from_bytes_le(u, n));
         last a24 = f.to_mont(mp.small(a24_value, n));

@@ -17,7 +17,7 @@ let mp = import:Std.Crypto.Internal.Mp;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Ed25519, Ed25519ctx and Ed25519ph signatures of RFC 8032, section 5.1 (Stdlib.md section 20.8).
+/// @brief Ed25519, Ed25519ctx and Ed25519ph signatures of RFC 8032, section 5.1 (Stdlib.md section 21.8).
 ///
 /// Signing is deterministic, as RFC 8032 defines it. Verification is strict: it rejects a signature whose S is
 /// not below L, a public key or R that is not the canonical encoding of a curve point (y at or above p, or x
@@ -25,7 +25,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// cofactorless equation [S]B = R + [k]A by computing [S]B - [k]A and comparing its encoding with R's bytes.
 /// These are the rules of libsodium's `crypto_sign_verify_detached`, so both accept the same signatures. The
 /// scalar multiplications are branch-free in source; the runtime does not guarantee constant time.
-/// @see [Std.Crypto.Asymmetric.Ed25519](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ed25519)
+/// @see [Std.Crypto.Asymmetric.Ed25519](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ed25519)
 #Since("0.3.0")
 export let Ed25519 = module (
     /// @brief An Ed25519 public key: the 32-byte encoding of A. Equal keys have equal bytes. The point is
@@ -102,7 +102,7 @@ export let Ed25519 = module (
     /// @brief Signs with an Ed25519 private key; it also verifies against the matching public key.
     #[Final, Since("0.3.0")]
     export let Ed25519Signer = class implements Signer<Ed25519PrivateKey, uint8[list]>,
-            Verifier<Ed25519PublicKey, uint8[list]> (
+        Verifier<Ed25519PublicKey, uint8[list]> (
         last key: Ed25519PrivateKey;
 
         /// @brief A signer over the key.
@@ -171,7 +171,7 @@ export let Ed25519 = module (
         /// another length traps).
         #NoDiscard
         export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list])
-                -> bool {
+            -> bool {
             check_context(context, false);
             return verify_core(key.to_bytes(), dom2(0, context), message, signature);
         };
@@ -179,7 +179,7 @@ export let Ed25519 = module (
         /// @brief Whether the signature is a valid Ed25519ph signature (context of at most 255 bytes).
         #NoDiscard
         export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list])
-                -> bool {
+            -> bool {
             check_context(context, true);
             return verify_core(key.to_bytes(), dom2(1, context), sha2.sha512(message), signature);
         };
@@ -245,7 +245,7 @@ export let Ed25519 = module (
 
     /// @brief Strict verification (see the module) with the given dom2 prefix.
     let verify_core = func(public_bytes: uint8[list], dom: uint8[list], message: uint8[list], signature: uint8[list])
-            -> bool {
+        -> bool {
         if (signature.length != 64) {
             return false;
         }

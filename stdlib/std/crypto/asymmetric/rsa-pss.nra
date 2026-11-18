@@ -14,20 +14,20 @@ let rsa_core = import:Std.Crypto.Internal.RsaCore;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief RSASSA-PSS signatures of RFC 8017, section 8.1, with MGF1 over the same hash (Stdlib.md section
-/// 20.8).
+/// 21.8).
 ///
 /// The hash is SHA-256 unless another SHA-2 or SHA-3 hash is chosen, and the salt length is the hash length
 /// unless another is chosen (0 gives deterministic signatures). The salt comes from a `ChaCha20Drbg` given to
 /// the signer, or else from `Entropy.os_bytes`; `sign_with_salt` takes it directly for known-answer tests.
 /// Verification takes a fixed salt length, or any length with `RsaPssVerifier(key, hash, -1)`. A signature
 /// is exactly the modulus length; any other length is false.
-/// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaPss)
+/// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
 #Since("0.3.0")
 export let RsaPss = module (
     /// @brief Signs with RSASSA-PSS; it also verifies against the matching public key.
     #[Final, Since("0.3.0")]
     export let RsaPssSigner = class implements Signer<rsa.RsaPrivateKey, uint8[list]>,
-            Verifier<rsa.RsaPublicKey, uint8[list]> (
+        Verifier<rsa.RsaPublicKey, uint8[list]> (
         last key: rsa.RsaPrivateKey;
         /// @brief The hash of the message and of MGF1.
         export last hash: Algorithm;
@@ -129,7 +129,7 @@ export let RsaPss = module (
         /// @brief The hash of the message.
         export last hash: Algorithm;
         /// @brief The digest used by MGF1.
-        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaPss)
+        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
         #Since("0.3.0")
         export last mask_hash: Algorithm;
         /// @brief The salt length, or -1 for any.
@@ -137,7 +137,7 @@ export let RsaPss = module (
 
         /// @brief A verifier with SHA-256 and a 32-byte salt, or the given digest and salt length (-1 accepts
         /// any). MGF1 uses the message digest unless an explicit MGF1 digest is supplied.
-        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaPss)
+        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaPss)
         #Since("0.3.0")
         export let init = func(public_key: rsa.RsaPublicKey) {
             key = public_key;

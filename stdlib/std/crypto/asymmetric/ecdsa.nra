@@ -18,7 +18,7 @@ let weierstrass = import:Std.Crypto.Internal.Weierstrass;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief ECDSA over P-256, P-384, P-521 and secp256k1 with deterministic nonces (RFC 6979), and the elliptic-
-/// curve keys that Std.Crypto.Asymmetric.Ecdh and Hpke share (Stdlib.md section 20.8).
+/// curve keys that Std.Crypto.Asymmetric.Ecdh and Hpke share (Stdlib.md section 21.8).
 ///
 /// Signing derives its nonce from the private key and the message digest with HMAC_DRBG (RFC 6979, section
 /// 3.2), so no random generator is needed and a faulty one cannot leak the key. A signature is a DER
@@ -29,7 +29,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// SHA-256 for the four curves; any SHA-2 or SHA-3 hash can be chosen. For secp256k1 a signer can normalize
 /// s to the lower half (`low_s`) and a verifier can require it, as Bitcoin does. The point arithmetic uses
 /// complete formulas and is branch-free in source; the runtime does not guarantee constant time.
-/// @see [Std.Crypto.Asymmetric.Ecdsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ecdsa)
+/// @see [Std.Crypto.Asymmetric.Ecdsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Ecdsa)
 #Since("0.3.0")
 export let Ecdsa = module (
     /// @brief The curves.
@@ -377,7 +377,7 @@ export let Ecdsa = module (
 
     /// @brief ECDSA verification of [r, s], both from 1 to n - 1.
     let verify_core = func(g: weierstrass.Curve, key: EcPublicKey, digest: uint8[list], r: uint32[list],
-            s: uint32[list], require_low_s: bool) -> bool {
+        s: uint32[list], require_low_s: bool) -> bool {
         last q = g.order;
         if (require_low_s && mp.less(mp.shift_right(q.m, 1), s) == 1) {
             return false;

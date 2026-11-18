@@ -171,7 +171,7 @@ export let BiscuitDatalog = module (
     };
 
     let bind_terms = func(pattern: Predicate, fact: Predicate, bindings: [string, Term][list], budget: Budget)
-            -> Result<bool> {
+        -> Result<bool> {
         for (let i = 0; i < pattern.terms.length; i++) {
             budget.step()?;
             last term = pattern.terms[i];
@@ -196,7 +196,7 @@ export let BiscuitDatalog = module (
 
     // A successful continuation can stop the search early for checks and policies.
     let visit = func(query: Query, index: int, facts: Predicate[list], bindings: [string, Term][list],
-            on_match: func([string, Term][list]) -> Result<bool>, budget: Budget) -> Result<bool> {
+        on_match: func([string, Term][list]) -> Result<bool>, budget: Budget) -> Result<bool> {
         if (index == query.body.length) {
             return on_match(bindings);
         }
@@ -206,7 +206,7 @@ export let BiscuitDatalog = module (
             if (pattern.name == fact.name && pattern.terms.length == fact.terms.length) {
                 last previous = bindings.length;
                 if ((bind_terms(pattern, fact, bindings, budget)?)
-                        && (visit(query, index + 1, facts, bindings, on_match, budget)?)) {
+                    && (visit(query, index + 1, facts, bindings, on_match, budget)?)) {
                     return Result<bool>.Ok(true);
                 }
                 while (bindings.length > previous) {
@@ -222,7 +222,9 @@ export let BiscuitDatalog = module (
         for (let term in head.terms) {
             if (term.kind == Kind.Variable) {
                 match (bound(bindings, term.text, budget)?) {
-                    Optional.Some(value) => { terms.append(value); },
+                    Optional.Some(value) => {
+                        terms.append(value);
+                    },
                     Optional.None => {
                         return fail<Predicate>("biscuit.format", "unbound variable in rule head");
                     },
@@ -249,7 +251,7 @@ export let BiscuitDatalog = module (
     };
 
     let close = func(base: Predicate[list], added: Predicate[list], rules: Rule[list], budget: Budget)
-            -> Result<Predicate[list]> {
+        -> Result<Predicate[list]> {
         let facts: Predicate[list] = new;
         for (let fact in base) {
             facts.append(fact);
@@ -280,8 +282,8 @@ export let BiscuitDatalog = module (
     let matches = func(queries: Query[list], facts: Predicate[list], budget: Budget) -> Result<bool> {
         for (let query in queries) {
             if (visit(query, 0, facts, new, func(bindings: [string, Term][list]) -> Result<bool> {
-                    return Result<bool>.Ok(true);
-                }, budget)?) {
+                return Result<bool>.Ok(true);
+            }, budget)?) {
                 return Result<bool>.Ok(true);
             }
         }

@@ -1,5 +1,5 @@
 /// @brief The ASN.1 BIT STRING value (Stdlib.md section 20.9).
-/// @see [Std.Crypto.Pki.BitString](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-BitString)
+/// @see [Std.Crypto.Pki.BitString](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-BitString)
 #Since("0.3.0")
 export let BitString = module (
     /// @brief A bit string: whole bytes, of which the last `unused_bits` low-order bits are not part of the

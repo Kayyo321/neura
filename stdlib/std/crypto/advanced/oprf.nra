@@ -18,11 +18,11 @@ let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 /// @brief Oblivious PRFs in RFC 9497 using the ristretto255-SHA512 ciphersuite and single-element evaluation.
 /// Context and wire data are bound to the selected mode. Bind a verifiable client to an authenticated
 /// server public key. The runtime does not guarantee constant-time interpretation of these operations.
-/// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+/// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
 #Since("0.3.0")
 export let Oprf = module (
     /// @brief The base, verifiable and partially oblivious modes, in RFC 9497 order.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #Since("0.3.0")
     export let Mode = enum (Base, Verifiable, Partial);
 
@@ -102,7 +102,7 @@ export let Oprf = module (
     };
 
     let finish = func(group: ristretto.Group, mode: Mode, input: uint8[list], info: uint8[list],
-            element: edwards.Point) -> uint8[list] {
+        element: edwards.Point) -> uint8[list] {
         let framed: uint8[list] = new;
         add_frame(framed, input);
         if (mode == Mode.Partial) {
@@ -116,7 +116,7 @@ export let Oprf = module (
     };
 
     let composite_weight = func(group: ristretto.Group, mode: Mode, public_key, input, output: edwards.Point)
-            -> uint32[list] {
+        -> uint32[list] {
         let seed_input: uint8[list] = new;
         add_frame(seed_input, group.encode(public_key));
         add_frame(seed_input, context("Seed-", mode));
@@ -131,7 +131,7 @@ export let Oprf = module (
     };
 
     let challenge = func(group: ristretto.Group, mode: Mode, public_key, m, z, t2, t3: edwards.Point)
-            -> uint32[list] {
+        -> uint32[list] {
         let transcript: uint8[list] = new;
         for (let point in [public_key, m, z, t2, t3]) {
             add_frame(transcript, group.encode(point));
@@ -141,7 +141,7 @@ export let Oprf = module (
     };
 
     let prove = func(group: ristretto.Group, mode: Mode, k, random: uint32[list], public_key, input, output: edwards.Point)
-            -> uint8[list] {
+        -> uint8[list] {
         last weight = composite_weight(group, mode, public_key, input, output);
         last m = group.multiply(weight, input);
         last z = group.multiply(k, m);
@@ -153,7 +153,7 @@ export let Oprf = module (
     };
 
     let proof_valid = func(group: ristretto.Group, mode: Mode, public_key, input, output: edwards.Point,
-            proof: uint8[list]) -> Result<bool> {
+        proof: uint8[list]) -> Result<bool> {
         if (proof.length != 64) {
             return fail<bool>("the two DLEQ proof scalars must be 64 bytes");
         }
@@ -169,7 +169,7 @@ export let Oprf = module (
     };
 
     /// @brief The evaluated element and the encoded DLEQ proof. The proof is empty in base mode.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, Since("0.3.0")]
     export let Evaluation = class (
         last element: uint8[list];
@@ -182,17 +182,17 @@ export let Oprf = module (
         };
 
         /// @brief Canonical 32-byte evaluated element.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let evaluated_element = func -> uint8[list] => words.copy(element);
 
         /// @brief Canonical 64-byte proof, or an empty list in base mode.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let encoded_proof = func -> uint8[list] => words.copy(proof);
 
         /// @brief Compares the evaluated element and proof by value.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is Evaluation)) {
@@ -203,7 +203,7 @@ export let Oprf = module (
         };
 
         /// @brief Hashes the evaluated element and proof.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 49;
@@ -217,13 +217,13 @@ export let Oprf = module (
         };
 
         /// @brief The response type without the wire data.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Oprf.Evaluation";
     );
 
     /// @brief One client exchange. The state owns the input and blind until finalization or discard.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, NotThreadSafe, Since("0.3.0")]
     export let BlindState = class (
         last group: ristretto.Group;
@@ -236,7 +236,7 @@ export let Oprf = module (
 
         #Internal
         export let init = func(curve: ristretto.Group, selected: Mode, private_input, nonce, metadata: uint8[list],
-                blinded: edwards.Point, verifier_key: edwards.Point) {
+            blinded: edwards.Point, verifier_key: edwards.Point) {
             group = curve;
             mode = selected;
             input = new secret.SecretBytes(private_input);
@@ -247,12 +247,12 @@ export let Oprf = module (
         };
 
         /// @brief The 32-byte request sent to the server.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let blinded_element = func -> uint8[list] => group.encode(element);
 
         /// @brief Overwrites the retained input and blind. A discarded exchange cannot be finalized.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let discard = func {
             input.wipe();
@@ -260,13 +260,13 @@ export let Oprf = module (
         };
 
         /// @brief Whether finalization consumed the exchange or the caller discarded it.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let is_spent = func -> bool => blind.is_wiped();
 
         /// @brief Checks the server response and returns the 64-byte PRF result. Each attempt consumes
         /// this state, including malformed or unauthenticated responses. A spent state traps.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let finalize = func(evaluated_element, proof: uint8[list]) -> Result<uint8[list]> {
             if (is_spent()) {
@@ -292,13 +292,13 @@ export let Oprf = module (
         };
 
         /// @brief A fixed placeholder for the private exchange.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Oprf.BlindState(<redacted>)";
     );
 
     /// @brief Configures the mode and an authenticated server public key for verifiable modes.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, Since("0.3.0")]
     export let Client = class (
         last group: ristretto.Group = new;
@@ -307,7 +307,7 @@ export let Oprf = module (
 
         /// @brief In base mode, pass an empty public key. In other modes, pass the server's canonical
         /// non-identity key. An invalid configured key traps.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let init = func(selected: Mode, server_key: uint8[list]) {
             crypto_policy.require(Algorithm.Oprf);
@@ -324,7 +324,7 @@ export let Oprf = module (
 
         /// @brief Blinds a private input using a supplied canonical nonzero scalar for a deterministic run.
         /// Use empty info outside partially oblivious mode.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let blind_with = func(input, info, nonce: uint8[list]) -> Result<BlindState> {
             if (!valid_lengths(mode, input, info)) {
@@ -356,29 +356,33 @@ export let Oprf = module (
         };
 
         /// @brief Blinds a private input using OS entropy or a caller's DRBG.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let blind = func(input, info: uint8[list]) -> Result<BlindState> =>
             randomized_blind(input, info, func -> Result<uint8[list]> => entropy.os_bytes(32))
-        or func(input, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<BlindState> =>
-            randomized_blind(input, info, new func -> Result<uint8[list]> => Result<uint8[list]>.Ok(random.fill(32)));
+            or func(input, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<BlindState> =>
+                randomized_blind(input, info, new func -> Result<uint8[list]> => Result<uint8[list]>.Ok(random.fill(32)));
 
         /// @brief The client type without a printed key or transcript.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Oprf.Client";
     );
 
     let trusted_key = func(group: ristretto.Group, server_key: uint8[list]) -> edwards.Point {
         match (read_element(group, server_key)) {
-            Result.Ok(point) => { return point; },
-            Result.Err(_) => { trap_with_message("invalid argument: invalid OPRF server public key"); },
+            Result.Ok(point) => {
+                return point;
+            },
+            Result.Err(_) => {
+                trap_with_message("invalid argument: invalid OPRF server public key");
+            },
         }
         trap_with_message("unreachable: OPRF server key parsing");
     };
 
     /// @brief A private server key for one RFC 9497 mode.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, Since("0.3.0")]
     export let Server = class implements PrivateKey<Server> (
         last group: ristretto.Group = new;
@@ -387,7 +391,7 @@ export let Oprf = module (
         last public_point: edwards.Point;
 
         /// @brief Imports a canonical nonzero server scalar for the selected mode.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let init = func(selected: Mode, scalar: uint8[list]) {
             crypto_policy.require(Algorithm.Oprf);
@@ -397,27 +401,27 @@ export let Oprf = module (
         };
 
         /// @brief A copy of the secret server scalar.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites the retained server scalar.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether wipe was called.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests page locking through SecretBytes.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief The canonical public key for configuring a verifiable client.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let public_key_bytes = func -> uint8[list] => group.encode(public_point);
 
@@ -454,7 +458,7 @@ export let Oprf = module (
 
         /// @brief Evaluates one blinded element with an explicit fresh proof nonce. In base mode pass
         /// an empty nonce and info. Reusing a proof nonce can disclose the server key.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let evaluate_with = func(encoded, info, proof_nonce: uint8[list]) -> Result<Evaluation> {
             if (!valid_lengths(mode, encoded, info)) {
@@ -464,7 +468,7 @@ export let Oprf = module (
         };
 
         let randomized_evaluate = func(encoded, info: uint8[list], source: func() -> Result<uint8[list]>)
-                -> Result<Evaluation> {
+            -> Result<Evaluation> {
             if (!valid_lengths(mode, encoded, info)) {
                 return fail<Evaluation>("the request or info does not fit the selected mode");
             }
@@ -478,15 +482,15 @@ export let Oprf = module (
         };
 
         /// @brief Evaluates under the server key, using OS entropy or a caller's DRBG when a proof is needed.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let evaluate = func(encoded, info: uint8[list]) -> Result<Evaluation> =>
             randomized_evaluate(encoded, info, func -> Result<uint8[list]> => entropy.os_bytes(32))
-        or func(encoded, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<Evaluation> =>
-            randomized_evaluate(encoded, info, new func -> Result<uint8[list]> => Result<uint8[list]>.Ok(random.fill(32)));
+            or func(encoded, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<Evaluation> =>
+                randomized_evaluate(encoded, info, new func -> Result<uint8[list]> => Result<uint8[list]>.Ok(random.fill(32)));
 
         /// @brief Computes the 64-byte PRF result for a known input without running the blinded protocol.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let full_evaluate = func(input, info: uint8[list]) -> Result<uint8[list]> {
             if (!valid_lengths(mode, input, info)) {
@@ -502,14 +506,14 @@ export let Oprf = module (
         };
 
         /// @brief A fixed placeholder for the private server key.
-        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Oprf.Server(<redacted>)";
     );
 
     /// @brief RFC 9497 DeriveKeyPair with a 32-byte seed and separate key-derivation info.
     /// The info is bound to the derived key and is independent of POPRF evaluation info.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[NoDiscard, Since("0.3.0")]
     export let derive_key_pair = func(mode: Mode, seed, info: uint8[list]) -> Result<Server> {
         crypto_policy.require(Algorithm.Oprf);
@@ -542,7 +546,7 @@ export let Oprf = module (
     };
 
     /// @brief Generates a server key from OS entropy or a caller's DRBG. Entropy failures propagate.
-    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oprf)
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func(mode: Mode) -> Result<Server> {
         crypto_policy.require(Algorithm.Oprf);

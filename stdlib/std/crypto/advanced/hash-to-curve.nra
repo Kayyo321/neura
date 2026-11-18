@@ -5,20 +5,20 @@ let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 
 /// @brief RFC 9380 hash-to-curve suites for ristretto255 and P-256, plus SHA-512 XMD.
 /// The P-256 mapping uses branch-free field selection in source; the runtime does not guarantee constant time.
-/// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-HashToCurve)
+/// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
 #Since("0.3.0")
 export let HashToCurve = module (
     /// @brief Expands with SHA-512 and the supplied domain tag, including hashed tags longer than 255 bytes.
     ///
     /// An empty domain tag or an output length outside 0 through 16,320 bytes traps.
-    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-HashToCurve)
+    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
     #[NoDiscard, Since("0.3.0")]
     export let expand_message_xmd_sha512 = func(message: uint8[list], dst: uint8[list], length: int) -> uint8[list] =>
         xmd.expand_sha512(message, dst, length);
 
     /// @brief The 32-byte encoding of a point derived with ristretto255_XMD:SHA-512_R255MAP_RO_.
     /// The caller supplies the protocol's nonempty domain separation tag.
-    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-HashToCurve)
+    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
     #[NoDiscard, Since("0.3.0")]
     export let hash_to_ristretto255 = func(message: uint8[list], dst: uint8[list]) -> uint8[list] {
         let group: ristretto.Group = new;
@@ -28,7 +28,7 @@ export let HashToCurve = module (
     /// @brief The RFC 9380 P256_XMD:SHA-256_SSWU_RO_ suite with the protocol's nonempty domain separation tag.
     /// Returns SEC1 uncompressed by default or compressed when requested. The identity is encoded as 0x00.
     /// An empty domain tag traps.
-    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-HashToCurve)
+    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
     #[NoDiscard, Since("0.3.0")]
     export let hash_to_p256 = func(message: uint8[list], dst: uint8[list]) -> uint8[list] =>
         hash_to_p256(message, dst, false)

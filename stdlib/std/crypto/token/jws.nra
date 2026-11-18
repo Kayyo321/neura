@@ -7,7 +7,7 @@ let json = import:Std.Encoding.Json;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Compact JSON Web Signatures (RFC 7515), with caller-selected verification keys.
-/// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jws)
+/// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
 #Since("0.3.0")
 export let Jws = module (
     const InvalidHeader = "jws.header";
@@ -33,7 +33,7 @@ export let Jws = module (
     /// @brief Verifies a compact JWS and returns the authenticated payload. The key sets the only allowed
     /// algorithm. Unknown critical extensions, unsecured tokens, duplicate header members and noncanonical
     /// base64url fail. Header-supplied keys and key locators do not grant trust.
-    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jws)
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func<Alg>(token: string, key: jwk.VerifierKey<Alg>) -> Result<uint8[list]> {
         last parts = jose.split_dots(token);
@@ -49,7 +49,7 @@ export let Jws = module (
     };
 
     /// @brief Signs a compact JWS with the caller's Ed25519 private key and a standard EdDSA protected header.
-    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jws)
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
     #[NoDiscard, Since("0.3.0")]
     export let sign_ed25519 = func(payload: uint8[list], key: ed25519.Ed25519PrivateKey) -> string {
         last signer = new ed25519.Ed25519Signer(key);

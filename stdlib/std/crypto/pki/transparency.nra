@@ -31,7 +31,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// tree sizes and indexes above 2^31 - 1 are refused (`ct.range`), because that module counts with `int`.
 /// Errors are `Custom` codes ct.version, ct.log_id, ct.signature, ct.unsupported, ct.range and ct.proof; malformed
 /// input is a `Parse` error.
-/// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Transparency)
+/// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Transparency)
 #Since("0.3.0")
 export let Transparency = module (
     /// @brief LogEntryType of RFC 6962, section 3.1.
@@ -56,7 +56,7 @@ export let Transparency = module (
         export last encoded: uint8[list];
 
         export let init = func(sct_version: int, id: uint8[list], time: uint64, ext: uint8[list], hash: int, sig_alg: int,
-                sig: uint8[list], bytes: uint8[list]) {
+            sig: uint8[list], bytes: uint8[list]) {
             version = sct_version;
             log_id = id;
             timestamp = time;
@@ -296,7 +296,7 @@ export let Transparency = module (
     /// timestamp, entry type and signed entry, and the SCT's extensions.
     #[NoDiscard, Since("0.3.0")]
     export let signed_data = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
-            issuer: Optional<Certificate>) -> Result<uint8[list]> {
+        issuer: Optional<Certificate>) -> Result<uint8[list]> {
         let out: uint8[list] = new([0, 0]);
         words.append64_be(out, sct.timestamp);
         words.append_all(out, signed_entry(entry, certificate, issuer)?);
@@ -307,13 +307,13 @@ export let Transparency = module (
     /// @brief Verifies the SCT under the log's key: the log ID must be the SHA-256 of the key's
     /// SubjectPublicKeyInfo, and the signature must verify over `signed_data`. Unless supplied, the verifier
     /// is the library's AlgorithmVerifier.
-    /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Transparency)
+    /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Transparency)
     #[NoDiscard, Since("0.3.0")]
     export let verify_sct = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
-            issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
+        issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
         return verify_sct(sct, entry, certificate, issuer, log_key, new algorithm_verifier.AlgorithmVerifier());
     } or func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
-            issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier) -> Result<Unit> {
+        issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier) -> Result<Unit> {
         if (!same(sha2.sha256(log_key.der_bytes), sct.log_id)) {
             return failure<Unit>("ct.log_id", "the SCT's log ID is not this log's key");
         }
@@ -322,7 +322,7 @@ export let Transparency = module (
     };
 
     let check = func(algorithm: Optional<AlgorithmIdentifier>, key: SubjectPublicKeyInfo, data: uint8[list],
-            signature: uint8[list], verifier: SignatureVerifier) -> Result<Unit> {
+        signature: uint8[list], verifier: SignatureVerifier) -> Result<Unit> {
         match (algorithm) {
             Optional.Some(id) => {
                 if (id.oid.matches(oids.EcdsaWithSha256) && key.key_algorithm != KeyAlgorithm.Ec) {
@@ -345,12 +345,12 @@ export let Transparency = module (
     };
 
     /// @brief Verifies a signed tree head under the log's key using the library verifier or a supplied verifier.
-    /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Transparency)
+    /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Transparency)
     #[NoDiscard, Since("0.3.0")]
     export let verify_sth = func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
         return verify_sth(sth, log_key, new algorithm_verifier.AlgorithmVerifier());
     } or func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier)
-            -> Result<Unit> {
+        -> Result<Unit> {
         return check(algorithm_of(sth.hash_algorithm, sth.signature_algorithm), log_key, sth.signed_data(), sth.signature,
             verifier);
     };
@@ -359,7 +359,7 @@ export let Transparency = module (
     /// TimestampedEntry. Its leaf hash is `merkle.leaf_hash<Sha256>(leaf)`.
     #[NoDiscard, Since("0.3.0")]
     export let leaf_input = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
-            issuer: Optional<Certificate>) -> Result<uint8[list]> {
+        issuer: Optional<Certificate>) -> Result<uint8[list]> {
         let out: uint8[list] = new([0, 0]);
         words.append64_be(out, sct.timestamp);
         words.append_all(out, signed_entry(entry, certificate, issuer)?);
@@ -374,7 +374,7 @@ export let Transparency = module (
     /// @brief Whether the audit path proves the leaf hash at `index` in the tree of `tree_size` with the root.
     #[NoDiscard, Since("0.3.0")]
     export let verify_inclusion = func(leaf_hash_bytes: uint8[list], index: int64, tree_size: int64,
-            proof: uint8[list][list], root: uint8[list]) -> Result<Unit> {
+        proof: uint8[list][list], root: uint8[list]) -> Result<Unit> {
         if (index < 0 || index > 2147483647 || tree_size < 0 || tree_size > 2147483647) {
             return failure<Unit>("ct.range", "tree sizes and indexes above 2^31 - 1 are not supported");
         }
@@ -388,7 +388,7 @@ export let Transparency = module (
     /// tree of `new_size` with `new_root`.
     #[NoDiscard, Since("0.3.0")]
     export let verify_consistency = func(old_size: int64, new_size: int64, old_root: uint8[list], new_root: uint8[list],
-            proof: uint8[list][list]) -> Result<Unit> {
+        proof: uint8[list][list]) -> Result<Unit> {
         if (old_size < 0 || old_size > 2147483647 || new_size < 0 || new_size > 2147483647) {
             return failure<Unit>("ct.range", "tree sizes above 2^31 - 1 are not supported");
         }

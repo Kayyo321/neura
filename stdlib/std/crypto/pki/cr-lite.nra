@@ -19,7 +19,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// A cascade answers exactly only for the certificates it was built over; `check` therefore takes the issuers the
 /// filter covers, and a certificate outside them is `NotCovered`, never `NotRevoked`. Checking that the
 /// certificate was logged before the filter was built (its SCT timestamps) is the caller's part.
-/// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-CrLite)
+/// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
 #Since("0.3.0")
 export let CrLite = module (
     /// @brief The hash of a cascade's layers.
@@ -58,7 +58,7 @@ export let CrLite = module (
         export last encoded: uint8[list];
 
         export let init = func(format_version: int, is_inverted: bool, salt_bytes: uint8[list], algorithm: CascadeHash,
-                filters: BloomLayer[list], bytes: uint8[list]) {
+            filters: BloomLayer[list], bytes: uint8[list]) {
             version = format_version;
             inverted = is_inverted;
             salt = salt_bytes;
@@ -310,7 +310,7 @@ export let CrLite = module (
     /// when the cascade holds its key, else `NotRevoked`. The cascade must hold the revoked certificates.
     #[NoDiscard, Since("0.3.0")]
     export let check = func(cascade: FilterCascade, certificate: Certificate, issuer: Certificate,
-            covered_issuers: uint8[list][list]) -> Decision {
+        covered_issuers: uint8[list][list]) -> Decision {
         if (covered_issuers.length > 0) {
             last issuer_hash = sha2.sha256(issuer.public_key.der_bytes);
             let covered = false;

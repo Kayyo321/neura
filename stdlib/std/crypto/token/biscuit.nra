@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Unit;
 let.promote _ = import:Std.Crypto.Algorithm;
 
 /// @brief Verifies Ed25519 Biscuit tokens with v3.0 Datalog and evaluates positive authorization policies.
-/// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+/// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Biscuit)
 #Since("0.3.0")
 export let Biscuit = module (
     /// @brief Checks the signed chain and its open or sealed proof using an explicitly trusted root key.
@@ -16,7 +16,7 @@ export let Biscuit = module (
     /// Accepts wire-format bytes with Datalog v3.0, signature payload versions 0 and 1, and Ed25519 keys.
     /// Bounds token size and parser work, and rejects unknown fields and unsupported Datalog constructs.
     /// The caller uses authorize for access decisions.
-    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Biscuit)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func(token: uint8[list], root: ed25519.Ed25519PublicKey) -> Result<Unit> {
         if (!crypto_policy.allows(Algorithm.Ed25519)) {
@@ -33,7 +33,7 @@ export let Biscuit = module (
     /// predicate terms. A literal true authorizer query always matches. Explicit scope annotations, implicit
     /// revocation_id facts, comments, general expressions, and third-party blocks are unsupported.
     /// Default scopes isolate each attenuation block from the authorizer and from other attenuation blocks.
-    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Biscuit)
     #[NoDiscard, Since("0.3.0")]
     export let authorize = func(token: uint8[list], root: ed25519.Ed25519PublicKey, code: string) -> Result<Unit> {
         if (!crypto_policy.allows(Algorithm.Ed25519)) {

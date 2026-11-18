@@ -5,7 +5,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// @brief RFC 9380 expand_message_xmd over a fixed-length streaming digest. Internal.
 export let HashToCurveXmd = module (
     export let expand = func<H: StreamingDigest<H>>(message: uint8[list], dst: uint8[list], length: int)
-            -> uint8[list] {
+        -> uint8[list] {
         last width = H.output_length();
         if (length < 0 || length > 65535 || length > 255 * width) {
             trap_with_message("invalid argument: hash-to-curve XMD output length");

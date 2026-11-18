@@ -37,7 +37,7 @@ let policy_tree = import:Std.Crypto.Internal.PkiPolicyTree;
 /// subjectAltName when the subject is empty, authority and subject key identifiers present where required and
 /// never critical, critical basicConstraints in CA certificates, critical nameConstraints only in CA certificates,
 /// critical policyConstraints, a non-critical authorityInfoAccess, and keyCertSign only with cA.
-/// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PathValidation)
+/// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PathValidation)
 #Since("0.3.0")
 export let PathValidation = module (
     /// @brief The most comparisons of names against name-constraint subtrees for one certificate; a certificate
@@ -75,7 +75,7 @@ export let PathValidation = module (
         export let min_rsa_bits: int = 2048;
 
         /// @brief Options for validation at the instant using the library verifier or a supplied verifier.
-        /// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PathValidation)
+        /// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PathValidation)
         #Since("0.3.0")
         export let init = func(at: instant.Instant) {
             time = at;
@@ -152,7 +152,7 @@ export let PathValidation = module (
         export let edge_results: bool[list] = new;
 
         export let init = func(end_entity: Certificate, pool: Certificate[list], trusted: Certificate[list],
-                settings: ValidationOptions) {
+            settings: ValidationOptions) {
             leaf = end_entity;
             intermediates = pool;
             anchors = trusted;
@@ -178,7 +178,7 @@ export let PathValidation = module (
     /// paths fail, the error of the first is returned.
     #[NoDiscard, Since("0.3.0")]
     export let validate = func(leaf: Certificate, intermediates: Certificate[list], anchors: Certificate[list],
-            options: ValidationOptions) -> Result<ValidatedPath> {
+        options: ValidationOptions) -> Result<ValidatedPath> {
         if (anchors.length == 0) {
             return failure<ValidatedPath>("pki.no_path", "no trust anchors");
         }
@@ -232,7 +232,7 @@ export let PathValidation = module (
                 return Optional<ValidatedPath>.None;
             }
             if ((!candidate.is_self_issued() && used + 1 > search.options.max_intermediates) || in_path(path, candidate)
-                    || !could_issue(current, candidate) || !signature_ok(search, current, candidate)) {
+                || !could_issue(current, candidate) || !signature_ok(search, current, candidate)) {
                 continue;
             }
             path.append(candidate);
@@ -326,7 +326,7 @@ export let PathValidation = module (
     /// @brief Section 6.1 over path[0] (the leaf) to path[length - 1], under the anchor. Signatures were
     /// checked while the path was built.
     let check_path = func(path: Certificate[list], anchor: Certificate, options: ValidationOptions)
-            -> Result<ValidatedPath> {
+        -> Result<ValidatedPath> {
         last n = path.length;
         check_anchor(anchor, options)?;
         // Section 6.1.2.
@@ -577,7 +577,7 @@ export let PathValidation = module (
     let check_key = func(cert: Certificate, options: ValidationOptions) -> Result<Unit> {
         last key = cert.public_key;
         if ((key.key_algorithm == KeyAlgorithm.Rsa || key.key_algorithm == KeyAlgorithm.RsaPss)
-                && key.key_bits() < options.min_rsa_bits) {
+            && key.key_bits() < options.min_rsa_bits) {
             return failure<Unit>("pki.weak_key", "RSA key below " + options.min_rsa_bits.to_string() + " bits in "
                 + cert.subject.to_string());
         }
@@ -744,8 +744,8 @@ export let PathValidation = module (
                     return failure<Unit>("pki.profile", "keyCertSign without cA: " + cert.subject.to_string());
                 }
                 if (signature_only(cert.public_key.key_algorithm) && (ku.has(extensions.KeyEncipherment)
-                        || ku.has(extensions.DataEncipherment) || ku.has(extensions.KeyAgreement)
-                        || ku.has(extensions.EncipherOnly) || ku.has(extensions.DecipherOnly))) {
+                    || ku.has(extensions.DataEncipherment) || ku.has(extensions.KeyAgreement)
+                    || ku.has(extensions.EncipherOnly) || ku.has(extensions.DecipherOnly))) {
                     return failure<Unit>("pki.profile", "encipherment or agreement usage on a signature-only key: " + cert.subject.to_string());
                 }
             },

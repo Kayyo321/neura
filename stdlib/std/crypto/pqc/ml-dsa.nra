@@ -15,7 +15,7 @@ let prehash = import:Std.Crypto.Internal.PqcPrehash;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief ML-DSA, the module-lattice signature scheme of FIPS 204, in its three parameter sets (Stdlib.md
-/// section 20.9).
+/// section 21.9).
 ///
 /// `MlDsaSigner` implements `Signer` and `MlDsaVerifier` implements `Verifier`. Signing is hedged by default:
 /// the 32-byte `rnd` comes from a `ChaCha20Drbg` given to the signer, or else from `Entropy.os_bytes`. Every
@@ -25,7 +25,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// representative mu computed elsewhere) is offered for protocols and tests that need it. Only the comparison
 /// of the commitment hash c-tilde in verification is branch-free in source; signing branches on secret values
 /// (reduction, norm checks, rejection), and the runtime does not guarantee constant time in any case.
-/// @see [Std.Crypto.Pqc.MlDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MlDsa)
+/// @see [Std.Crypto.Pqc.MlDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-MlDsa)
 #Since("0.3.0")
 export let MlDsa = module (
     /// @brief The parameter sets of FIPS 204, section 4: ML-DSA-44, ML-DSA-65 and ML-DSA-87.
@@ -312,7 +312,7 @@ export let MlDsa = module (
         /// SHA-3 and SHAKE algorithms of Std.Crypto.Hash) and the given 32-byte rnd.
         #NoDiscard
         export let sign_prehash_with = func(message: uint8[list], context: uint8[list], hash: Algorithm,
-                rnd: uint8[list]) -> uint8[list] {
+            rnd: uint8[list]) -> uint8[list] {
             check(context, rnd);
             return sign_internal(prehash.formatted(1, context, prehash.digest_info(hash, message)), rnd);
         };
@@ -410,7 +410,7 @@ export let MlDsa = module (
         /// @brief HashML-DSA.Verify (FIPS 204, Algorithm 5) with the pre-hash function `hash`.
         #NoDiscard
         export let verify_prehash = func(message: uint8[list], signature: uint8[list], context: uint8[list],
-                hash: Algorithm) -> bool {
+            hash: Algorithm) -> bool {
             if (context.length > 255) {
                 return false;
             }

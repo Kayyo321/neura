@@ -4,7 +4,7 @@ let keccak = import:Std.Crypto.Internal.Keccak;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Merlin v1.0 transcript operations using STROBE-128 and Keccak-f[1600].
-/// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+/// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
 #Since("0.3.0")
 export let Merlin = module (
     const Rate: int = 166;
@@ -13,7 +13,7 @@ export let Merlin = module (
     const Prf: uint8 = 7;
 
     /// @brief A mutable transcript with an application domain label and independent STROBE state.
-    /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+    /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
     #[Final, Since("0.3.0")]
     export let Transcript = class (
         let state: uint8[list] = words.zeros(200);
@@ -22,7 +22,7 @@ export let Merlin = module (
         last permutation: keccak.Permutation = new;
 
         /// @brief Starts a transcript and appends the application label under dom-sep.
-        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
         #Since("0.3.0")
         export let init = func(application: uint8[list]) {
             crypto_policy.require(Algorithm.Merlin);
@@ -86,7 +86,7 @@ export let Merlin = module (
         };
 
         /// @brief Appends a labeled byte string, framing its length as uint32 little-endian.
-        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
         #Since("0.3.0")
         export let append_message = func(label: uint8[list], message: uint8[list]) {
             metadata(label, message.length);
@@ -95,7 +95,7 @@ export let Merlin = module (
         };
 
         /// @brief Appends a labeled uint64 in little-endian order.
-        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
         #Since("0.3.0")
         export let append_u64 = func(label: uint8[list], value: uint64) {
             let encoded: uint8[list] = new;
@@ -105,7 +105,7 @@ export let Merlin = module (
 
         /// @brief Derives a challenge at the current state and advances the transcript.
         /// A negative length traps.
-        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
         #[NoDiscard, Since("0.3.0")]
         export let challenge_bytes = func(label: uint8[list], length: int) -> uint8[list] {
             if (length < 0) {
@@ -123,7 +123,7 @@ export let Merlin = module (
         };
 
         /// @brief Creates an independent copy at the same transcript position.
-        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
         #[NoDiscard, Since("0.3.0")]
         export let fork = func -> Transcript {
             let copy: Transcript = new(new);
@@ -134,7 +134,7 @@ export let Merlin = module (
         };
 
         /// @brief Omits the transcript state.
-        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Merlin)
+        /// @see [Std.Crypto.Advanced.Merlin](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Merlin)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Merlin.Transcript(<redacted>)";
     );

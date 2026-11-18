@@ -1,3 +1,4 @@
+// test-options: --gpu=off
 let.promote _ = import:Std.Crypto.Algorithm;
 let constant_time = import:Std.Crypto.Core.ConstantTime;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
@@ -101,6 +102,7 @@ let CoreTests = module (
         test.assert(!crypto_policy.allowed_by(fips, Algorithm.ChaCha20Poly1305));
         test.assert(!crypto_policy.allowed_by(fips, Algorithm.Argon2id));
         test.assert(!crypto_policy.allowed_by(fips, Algorithm.Sha1));
+        test.assert(!crypto_policy.allowed_by(fips, Algorithm.Hpke));
         last cnsa = crypto_policy.Policy.Cnsa2_0;
         test.assert(crypto_policy.allowed_by(cnsa, Algorithm.Aes256Gcm));
         test.assert(crypto_policy.allowed_by(cnsa, Algorithm.Sha384));

@@ -24,7 +24,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// the QE report signature and attestation-key binding, and the quote signature. The policy entry point
 /// additionally requires signed collateral validation by a caller-supplied verifier for Intel TCB status,
 /// QE identity, and CRLs, and binds the report to the caller's expected measurement and REPORTDATA.
-/// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+/// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
 #Since("0.3.0")
 export let Dcap = module (
     const MaxQuoteBytes = 65536;
@@ -39,7 +39,7 @@ export let Dcap = module (
     const PckExtension = "1.2.840.113741.1.13.1";
 
     /// @brief The two supported DCAP quote formats.
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #Since("0.3.0")
     export let Platform = enum (Sgx, Tdx);
 
@@ -52,15 +52,15 @@ export let Dcap = module (
     let zero = func(bytes: uint8[list]) -> bool => constant_time.ct_eq(bytes, words.zeros(bytes.length));
 
     /// @brief The decoded quote and its embedded evidence. Use the verification entry points to establish trust.
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #[Final, Since("0.3.0")]
     export let Quote = class (
         /// @brief The trusted execution environment named by the header.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
         export last platform: Platform;
         /// @brief The Intel PCK certification data type.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
         export last certification_type: int;
         last encoded: uint8[list];
@@ -69,7 +69,7 @@ export let Dcap = module (
         last certification: uint8[list];
 
         /// @brief Stores the parsed quote fields. Wrong report body or QE report width traps.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
         export let init = func(tee: Platform, kind: int, original, report, qe_bytes, cert_bytes: uint8[list]) {
             if (report.length != body_size(tee) || qe_bytes.length != SgxReportLength) {
@@ -84,32 +84,32 @@ export let Dcap = module (
         };
 
         /// @brief A copy of the original quote.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         /// @brief A copy of the raw application-enclave or trust-domain report body.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let report_body = func -> uint8[list] => words.copy(body);
 
         /// @brief A copy of the raw SGX quoting-enclave report used for collateral validation.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let qe_report = func -> uint8[list] => words.copy(qe);
 
         /// @brief A copy of the PCK certification data.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let certification_data = func -> uint8[list] => words.copy(certification);
 
         /// @brief A copy of the 64-byte application REPORTDATA field.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let report_data = func -> uint8[list] => words.slice(body, body.length - 64, body.length);
 
         /// @brief The initial measurement, MRENCLAVE for SGX or MRTD for TDX.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let measurement = func -> uint8[list] {
             last offset = platform == Platform.Sgx ? 64 : 136;
@@ -117,19 +117,19 @@ export let Dcap = module (
         };
 
         /// @brief Whether the application's report indicates debug mode.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #[NoDiscard, Since("0.3.0")]
         export let debug = func -> bool => platform == Platform.Sgx ? (body[48] & 2) != 0 : (body[120] & 1) != 0;
 
         /// @brief Whether the original encodings are equal.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             return other is Quote && constant_time.ct_eq(encoded, (other as Quote).to_bytes());
         };
 
         /// @brief A hash of the quote bytes.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 484;
@@ -140,7 +140,7 @@ export let Dcap = module (
         };
 
         /// @brief The platform name.
-        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Dcap.Quote(" + platform.to_string() + ")";
     );
@@ -221,8 +221,8 @@ export let Dcap = module (
         last cert_type = u16(bytes, cert_header);
         last cert_len = words.load32_le(bytes, cert_header + 2);
         if (cert_type < 1 || cert_type > 7 || cert_type == QeReportCertificationType
-                || cert_len == 0 || cert_len > (MaxCertificateBytes as uint32)
-                || cert_len != ((bytes.length - cert_header - 6) as uint32)) {
+            || cert_len == 0 || cert_len > (MaxCertificateBytes as uint32)
+            || cert_len != ((bytes.length - cert_header - 6) as uint32)) {
             return malformed<Evidence>("invalid DCAP PCK certification data");
         }
 
@@ -235,7 +235,7 @@ export let Dcap = module (
     };
 
     /// @brief Parses an SGX v3 or TDX v4 quote, checking declared lengths and refusing trailing bytes.
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(quote: uint8[list]) -> Result<Quote> => Result<Quote>.Ok((read_quote(quote)?).quote);
 
@@ -290,8 +290,8 @@ export let Dcap = module (
 
     let is_pck = func(pck: certificate.Certificate) -> bool {
         if (pck.version != 3 || pck.is_ca() || !has_usage(pck, extensions.DigitalSignature)
-                || pck.public_key.key_algorithm != public_keys.KeyAlgorithm.Ec
-                || pck.public_key.parameter_set != "P-256") {
+            || pck.public_key.key_algorithm != public_keys.KeyAlgorithm.Ec
+            || pck.public_key.parameter_set != "P-256") {
             return false;
         }
         return match (pck.extension(PckExtension)) {
@@ -327,7 +327,7 @@ export let Dcap = module (
             return fail<uint8[list]>("crypto.attestation_certificate", "invalid Intel PCK signing certificate");
         }
         if (!valid_serial(pck) || !valid_serial(issuer) || !valid_serial(root)
-                || !has_usage(issuer, extensions.KeyCertSign) || !has_usage(root, extensions.KeyCertSign)) {
+            || !has_usage(issuer, extensions.KeyCertSign) || !has_usage(root, extensions.KeyCertSign)) {
             return fail<uint8[list]>("crypto.attestation_certificate", "invalid Intel DCAP certificate serial or CA key usage");
         }
         let options = new path.ValidationOptions(at);
@@ -360,10 +360,10 @@ export let Dcap = module (
     /// @brief Authenticates the quote and its QE report with a type-5 PCK chain against the supplied root.
     /// PCK certificate validity is checked at the caller's instant. This entry point is for signed evidence
     /// inspection. The separate verify operation also requires caller-authenticated collateral and a challenge.
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #[NoDiscard, Since("0.3.0")]
     export let verify_signed = func(quote: uint8[list], trusted_root_der: uint8[list], at: instant.Instant)
-            -> Result<Quote> {
+        -> Result<Quote> {
         last evidence = read_quote(quote)?;
         let _ = authenticate(evidence, trusted_root_der, at)?;
         return Result<Quote>.Ok(evidence.quote);
@@ -372,7 +372,7 @@ export let Dcap = module (
     /// @brief The caller's verifier for authenticated Intel collateral. Check Intel-signed TCB information,
     /// QE identity and root and PCK CRLs, their validity at the supplied instant, and their correspondence to
     /// the quote and authenticated PCK certificate. For TDX, include the TDX module identity and security SVN.
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #Since("0.3.0")
     export let CollateralVerifier = interface (
         /// @brief Validates the platform's collateral. A failed or incomplete validation returns an error.
@@ -383,20 +383,20 @@ export let Dcap = module (
     /// @brief Authenticates the quote, checks the expected platform, initial measurement and challenge-bearing
     /// REPORTDATA, rules out debug mode, and requires successful validation by the supplied collateral verifier.
     /// The caller supplies a fresh expected REPORTDATA value and the trusted Intel root.
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func(quote: uint8[list], trusted_root_der: uint8[list], at: instant.Instant,
-            expected_platform: Platform, expected_measurement, expected_report_data: uint8[list],
-            collateral: CollateralVerifier) -> Result<Quote> {
+        expected_platform: Platform, expected_measurement, expected_report_data: uint8[list],
+        collateral: CollateralVerifier) -> Result<Quote> {
         if (expected_measurement.length != measurement_size(expected_platform) || expected_report_data.length != 64
-                || zero(expected_measurement) || zero(expected_report_data)) {
+            || zero(expected_measurement) || zero(expected_report_data)) {
             trap_with_message("invalid argument: DCAP requires a platform measurement and a fresh 64-byte REPORTDATA value");
         }
         last evidence = read_quote(quote)?;
         last pck = authenticate(evidence, trusted_root_der, at)?;
         last claims = evidence.quote;
         if (claims.platform != expected_platform || claims.debug()
-                || !constant_time.ct_eq(claims.measurement(), expected_measurement)) {
+            || !constant_time.ct_eq(claims.measurement(), expected_measurement)) {
             return fail<Quote>("crypto.attestation_measurement", "DCAP platform, debug mode or measurement fails policy");
         }
         if (!constant_time.ct_eq(claims.report_data(), expected_report_data)) {
@@ -408,7 +408,7 @@ export let Dcap = module (
 
     /// @brief Retrieves a quote from an Intel quoting device.
     /// @stub the runtime has no SGX or TDX quote-generation host operation
-    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Dcap)
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
     #[NoDiscard, Since("0.3.0")]
     export let request_quote = func(platform: Platform, report_data: uint8[list]) -> Result<uint8[list]> {
         trap_with_message("unsupported: Std.Crypto.Enclave.Dcap.request_quote is not implemented in Neura 0.3.0 "

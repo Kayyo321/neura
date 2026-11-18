@@ -20,38 +20,38 @@ let words = import:Std.Crypto.Internal.Words;
 /// including an all-zero result for low-order inputs. ML-KEM implicit rejection stays in place.
 /// The X25519 ladder and the ML-KEM rejection-key selection are branch-free in source. The runtime
 /// does not guarantee constant time.
-/// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+/// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
 #Since("0.3.0")
 export let XWing = module (
     /// @brief The public key, in bytes.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #Since("0.3.0")
     export const PublicKeyLength = hybrid.PublicKeyLength;
 
     /// @brief The private-key seed, in bytes.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #Since("0.3.0")
     export const PrivateKeyLength = 32;
 
     /// @brief The ciphertext, in bytes.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #Since("0.3.0")
     export const CiphertextLength = hybrid.CiphertextLength;
 
     /// @brief The shared secret, in bytes.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #Since("0.3.0")
     export const SharedSecretLength = 32;
 
     /// @brief A 1216-byte X-Wing public key containing the ML-KEM-768 encapsulation key followed by the X25519 share.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #[Final, Since("0.3.0")]
     export let XWingPublicKey = class (
         last encoded: uint8[list];
 
         /// @brief Validates and copies the public key. Invalid bytes trap. Use `parse_public_key` for
         /// untrusted input.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let init = func(bytes: uint8[list]) {
             crypto_policy.require(Algorithm.XWing);
@@ -65,12 +65,12 @@ export let XWing = module (
         };
 
         /// @brief A copy of the encoded key.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         /// @brief Whether the other key has the same type and bytes.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is XWingPublicKey)) {
@@ -80,7 +80,7 @@ export let XWing = module (
         };
 
         /// @brief A hash of the encoded key bytes.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let h: uint32 = 768;
@@ -91,20 +91,20 @@ export let XWing = module (
         };
 
         /// @brief The type and size, without the key contents.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override to_string = func -> string => "XWingPublicKey(1216 bytes)";
     );
 
     /// @brief A private key stored as X-Wing's 32-byte private-key encoding.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #[Final, Since("0.3.0")]
     export let XWingPrivateKey = class implements PrivateKey<XWing> (
         last material: SecretBytes;
         last public_encoded: uint8[list];
 
         /// @brief Derives the key from the 32-byte X-Wing seed. A wrong length traps.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let init = func(seed: uint8[list]) {
             crypto_policy.require(Algorithm.XWing);
@@ -115,51 +115,51 @@ export let XWing = module (
         };
 
         /// @brief A copy of the private-key seed. Traps after wiping.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let expose = func -> uint8[list] => words.copy(material.expose());
 
         /// @brief Overwrites the stored seed and invalidates it.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let wipe = func => material.wipe();
 
         /// @brief Whether the private-key seed has been invalidated.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let is_wiped = func -> bool => material.is_wiped();
 
         /// @brief Requests the same storage lock as SecretBytes.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let lock = func => material.lock();
 
         /// @brief A copy of the encoded public key.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
 
         /// @brief The matching X-Wing public key.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let public_key = func -> XWingPublicKey => new(public_encoded);
 
         /// @brief A fixed placeholder for the private key.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override to_string = func -> string => "XWingPrivateKey(<redacted>)";
     );
 
     /// @brief X-Wing key generation, encapsulation and decapsulation.
-    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+    /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
     #[Final, Since("0.3.0")]
     export let XWing = class implements KeyEncapsulation<XWingPublicKey, XWingPrivateKey,
-            SecretBytes, uint8[list]> (
+        SecretBytes, uint8[list]> (
         let generator: drbg.ChaCha20Drbg;
         let has_generator: bool = false;
 
         /// @brief Uses OS entropy or a caller's generator.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let init = func {
             crypto_policy.require(Algorithm.XWing);
@@ -170,7 +170,7 @@ export let XWing = module (
         };
 
         /// @brief The policy identifier.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let algorithm = func -> Algorithm => Algorithm.XWing;
 
@@ -182,12 +182,12 @@ export let XWing = module (
         };
 
         /// @brief Deterministic key generation from the 32-byte X-Wing seed. A wrong length traps.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let key_pair_from_seed = func(seed: uint8[list]) -> XWingPrivateKey => new(seed);
 
         /// @brief Generates a private key, or reports an entropy failure.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let generate_key_pair = func -> Result<XWingPrivateKey> {
             let seed = random_bytes(PrivateKeyLength)?;
@@ -197,7 +197,7 @@ export let XWing = module (
         };
 
         /// @brief Checks a received public key's length and ML-KEM modulus. Returns a Result error on failure.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let parse_public_key = func(bytes: uint8[list]) -> Result<XWingPublicKey> {
             hybrid.validate_public_key(bytes, true)?;
@@ -206,13 +206,13 @@ export let XWing = module (
 
         /// @brief Deterministic encapsulation. The seed is the 32-byte ML-KEM input m followed by the
         /// 32-byte ephemeral X25519 scalar. Another length traps.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let encapsulate_with = func(public_key: XWingPublicKey, seed: uint8[list])
-                -> Encapsulation<SecretBytes, uint8[list]> => hybrid.encapsulate(public_key.to_bytes(), seed, true);
+            -> Encapsulation<SecretBytes, uint8[list]> => hybrid.encapsulate(public_key.to_bytes(), seed, true);
 
         /// @brief Encapsulates with fresh randomness, or reports an entropy failure.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #[NoDiscard, Since("0.3.0")]
         export let try_encapsulate = func(public_key: XWingPublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             let seed = random_bytes(hybrid.EncapsulationSeedLength)?;
@@ -223,7 +223,7 @@ export let XWing = module (
 
         /// @brief Encapsulates with fresh randomness. An entropy failure traps. Use `try_encapsulate`
         /// to handle that failure.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let encapsulate = func(public_key: XWingPublicKey) -> Encapsulation<SecretBytes, uint8[list]> {
             match (try_encapsulate(public_key)) {
@@ -237,7 +237,7 @@ export let XWing = module (
         };
 
         /// @brief Recovers the shared secret, or returns an error for a wrong-length ciphertext.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let decapsulate = func(private_key: XWingPrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes> {
             if (ciphertext.length != CiphertextLength) {
@@ -252,7 +252,7 @@ export let XWing = module (
         };
 
         /// @brief The scheme name.
-        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XWing)
+        /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override to_string = func -> string => "X-Wing";
     );

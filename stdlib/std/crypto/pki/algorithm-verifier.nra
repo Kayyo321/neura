@@ -17,24 +17,24 @@ let rsa = import:Std.Crypto.Asymmetric.Rsa;
 let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
 
 /// @brief Signature verification for certificates, certification requests, OCSP and Certificate Transparency.
-/// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+/// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
 #Since("0.3.0")
 export let AlgorithmVerifier = module (
     /// @brief Dispatches by signature OID. Unknown or policy-denied algorithms give UnsupportedAlgorithm.
     /// Mismatched keys, malformed parameters and failed signature checks give Invalid.
-    /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+    /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
     #[Final, Since("0.3.0")]
     export let AlgorithmVerifier = class implements SignatureVerifier (
         /// @brief Creates a stateless verifier with the library's algorithm dispatch.
-        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
         #Since("0.3.0")
         export let init = func {};
 
         /// @brief Checks the signature under the supplied key and signature AlgorithmIdentifier.
-        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
         #[NoDiscard, Since("0.3.0")]
         export let verify_signature = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
-                signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
             last dotted = algorithm.oid.dotted;
             if (dotted == oids.RsaSsaPss) {
                 return verify_pss(algorithm, key, signed, signature);
@@ -54,18 +54,22 @@ export let AlgorithmVerifier = module (
                 return verify_composite(algorithm, key, signed, signature);
             }
             match (ml_set(dotted)) {
-                Optional.Some(set) => { return verify_ml(set, algorithm, key, signed, signature); },
+                Optional.Some(set) => {
+                    return verify_ml(set, algorithm, key, signed, signature);
+                },
                 Optional.None => {},
             }
             match (slh_set(dotted)) {
-                Optional.Some(set) => { return verify_slh(set, algorithm, key, signed, signature); },
+                Optional.Some(set) => {
+                    return verify_slh(set, algorithm, key, signed, signature);
+                },
                 Optional.None => {},
             }
             return SignatureCheck.UnsupportedAlgorithm;
         };
 
         /// @brief The verifier's class name.
-        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-AlgorithmVerifier)
         #Since("0.3.0")
         export let.override to_string = func -> string => "AlgorithmVerifier";
     );
@@ -76,7 +80,7 @@ export let AlgorithmVerifier = module (
         key.key_bits() >= 2048 || crypto_policy.allows(Algorithm.Rsa1024);
 
     let verify_pkcs1 = func(hash: Algorithm, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
-            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
         if (!crypto_policy.allows(Algorithm.RsaPkcs1v15) || !crypto_policy.allows(hash)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
@@ -105,11 +109,11 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_pss_parameters = func(params: RsaPssParameters, key: SubjectPublicKeyInfo, signed: uint8[list],
-            signature: uint8[list]) -> SignatureCheck {
+        signature: uint8[list]) -> SignatureCheck {
         last hash = digest_oid(params.hash.dotted);
         last mask_hash = digest_oid(params.mask_hash.dotted);
         if (hash == Algorithm.Sha1 || mask_hash == Algorithm.Sha1 || !crypto_policy.allows(hash)
-                || !crypto_policy.allows(mask_hash) || !rsa_allowed(key)) {
+            || !crypto_policy.allows(mask_hash) || !rsa_allowed(key)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         if (!pss_key_permits(key, params)) {
@@ -123,7 +127,7 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_pss = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
-            signature: uint8[list]) -> SignatureCheck {
+        signature: uint8[list]) -> SignatureCheck {
         if (!crypto_policy.allows(Algorithm.RsaPss)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
@@ -154,7 +158,7 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_ecdsa_curve = func(curve: ecdsa.Curve, hash: Algorithm, key: SubjectPublicKeyInfo, signed: uint8[list],
-            signature: uint8[list]) -> SignatureCheck {
+        signature: uint8[list]) -> SignatureCheck {
         if (!crypto_policy.allows(ecdsa.algorithm_of(curve))) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
@@ -165,7 +169,7 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_ecdsa = func(hash: Algorithm, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
-            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
         if (!crypto_policy.allows(hash)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
@@ -179,7 +183,7 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_ed = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
-            signature: uint8[list]) -> SignatureCheck {
+        signature: uint8[list]) -> SignatureCheck {
         last is_25519 = algorithm.oid.matches(oids.Ed25519);
         if (!crypto_policy.allows(is_25519 ? Algorithm.Ed25519 : Algorithm.Ed448)) {
             return SignatureCheck.UnsupportedAlgorithm;
@@ -200,7 +204,7 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_ml = func(set: ml_dsa.ParameterSet, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
-            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
         last which = match (set) {
             ml_dsa.ParameterSet.MlDsa44 => Algorithm.MlDsa44,
             ml_dsa.ParameterSet.MlDsa65 => Algorithm.MlDsa65,
@@ -231,7 +235,7 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_slh = func(set: slh_dsa.ParameterSet, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
-            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
         if (!crypto_policy.allows(Algorithm.SlhDsa)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
@@ -245,9 +249,9 @@ export let AlgorithmVerifier = module (
     };
 
     let verify_composite = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
-            signature: uint8[list]) -> SignatureCheck {
+        signature: uint8[list]) -> SignatureCheck {
         if (!crypto_policy.allows(Algorithm.Ed25519MlDsa65) || !crypto_policy.allows(Algorithm.Ed25519)
-                || !crypto_policy.allows(Algorithm.MlDsa65) || !crypto_policy.allows(Algorithm.Sha512)) {
+            || !crypto_policy.allows(Algorithm.MlDsa65) || !crypto_policy.allows(Algorithm.Sha512)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {

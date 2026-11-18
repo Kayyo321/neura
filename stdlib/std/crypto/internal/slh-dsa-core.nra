@@ -21,26 +21,27 @@ export let SlhDsaCore = module (
     let Sha512 = class (
         let constants: uint64[list] = new([
             4794697086780616226, 8158064640168781261, 13096744586834688815, 16840607885511220156,
-        4131703408338449720, 6480981068601479193, 10538285296894168987, 12329834152419229976,
-        15566598209576043074, 1334009975649890238, 2608012711638119052, 6128411473006802146,
-        8268148722764581231, 9286055187155687089, 11230858885718282805, 13951009754708518548,
-        16472876342353939154, 17275323862435702243, 1135362057144423861, 2597628984639134821,
-        3308224258029322869, 5365058923640841347, 6679025012923562964, 8573033837759648693,
-        10970295158949994411, 12119686244451234320, 12683024718118986047, 13788192230050041572,
-        14330467153632333762, 15395433587784984357, 489312712824947311, 1452737877330783856,
-        2861767655752347644, 3322285676063803686, 5560940570517711597, 5996557281743188959,
-        7280758554555802590, 8532644243296465576, 9350256976987008742, 10552545826968843579,
-        11727347734174303076, 12113106623233404929, 14000437183269869457, 14369950271660146224,
-        15101387698204529176, 15463397548674623760, 17586052441742319658, 1182934255886127544,
-        1847814050463011016, 2177327727835720531, 2830643537854262169, 3796741975233480872,
-        4115178125766777443, 5681478168544905931, 6601373596472566643, 7507060721942968483,
-        8399075790359081724, 8693463985226723168, 9568029438360202098, 10144078919501101548,
-        10430055236837252648, 11840083180663258601, 13761210420658862357, 14299343276471374635,
-        14566680578165727644, 15097957966210449927, 16922976911328602910, 17689382322260857208,
-        500013540394364858, 748580250866718886, 1242879168328830382, 1977374033974150939,
-        2944078676154940804, 3659926193048069267, 4368137639120453308, 4836135668995329356,
-        5532061633213252278, 6448918945643986474, 6902733635092675308, 7801388544844847127
+            4131703408338449720, 6480981068601479193, 10538285296894168987, 12329834152419229976,
+            15566598209576043074, 1334009975649890238, 2608012711638119052, 6128411473006802146,
+            8268148722764581231, 9286055187155687089, 11230858885718282805, 13951009754708518548,
+            16472876342353939154, 17275323862435702243, 1135362057144423861, 2597628984639134821,
+            3308224258029322869, 5365058923640841347, 6679025012923562964, 8573033837759648693,
+            10970295158949994411, 12119686244451234320, 12683024718118986047, 13788192230050041572,
+            14330467153632333762, 15395433587784984357, 489312712824947311, 1452737877330783856,
+            2861767655752347644, 3322285676063803686, 5560940570517711597, 5996557281743188959,
+            7280758554555802590, 8532644243296465576, 9350256976987008742, 10552545826968843579,
+            11727347734174303076, 12113106623233404929, 14000437183269869457, 14369950271660146224,
+            15101387698204529176, 15463397548674623760, 17586052441742319658, 1182934255886127544,
+            1847814050463011016, 2177327727835720531, 2830643537854262169, 3796741975233480872,
+            4115178125766777443, 5681478168544905931, 6601373596472566643, 7507060721942968483,
+            8399075790359081724, 8693463985226723168, 9568029438360202098, 10144078919501101548,
+            10430055236837252648, 11840083180663258601, 13761210420658862357, 14299343276471374635,
+            14566680578165727644, 15097957966210449927, 16922976911328602910, 17689382322260857208,
+            500013540394364858, 748580250866718886, 1242879168328830382, 1977374033974150939,
+            2944078676154940804, 3659926193048069267, 4368137639120453308, 4836135668995329356,
+            5532061633213252278, 6448918945643986474, 6902733635092675308, 7801388544844847127
         ]);
+
         let schedule: uint64[list] = new;
         let state: uint64[list] = new;
 
@@ -274,7 +275,7 @@ export let SlhDsaCore = module (
 
         let get_word = func(adrs: uint8[list], at: int) -> uint32 =>
             ((adrs[at] as uint32) << 24) | ((adrs[at + 1] as uint32) << 16) | ((adrs[at + 2] as uint32) << 8)
-                | (adrs[at + 3] as uint32);
+            | (adrs[at + 3] as uint32);
 
         let set_type_and_clear = func(adrs: uint8[list], kind: int) {
             set_word(adrs, 16, kind as uint32);
@@ -524,7 +525,7 @@ export let SlhDsaCore = module (
 
         /// @brief wots_sign (Algorithm 7), appended to `out`.
         let wots_sign = func(out: uint8[list], message: uint8[list], sk_seed: uint8[list], pk_seed: uint8[list],
-                adrs: uint8[list]) {
+            adrs: uint8[list]) {
             last digits = wots_digits(message);
             for (let i = 0; i < len; i++) {
                 last secret = wots_secret(sk_seed, pk_seed, adrs, i);
@@ -535,7 +536,7 @@ export let SlhDsaCore = module (
 
         /// @brief wots_pkFromSig (Algorithm 8) for the signature at `at`.
         let wots_pk_from_sig = func(sig: uint8[list], at: int, message: uint8[list], pk_seed: uint8[list],
-                adrs: uint8[list]) -> uint8[list] {
+            adrs: uint8[list]) -> uint8[list] {
             last digits = wots_digits(message);
             let ends: uint8[list] = new;
             for (let i = 0; i < len; i++) {
@@ -565,7 +566,7 @@ export let SlhDsaCore = module (
 
         /// @brief xmss_sign (Algorithm 10), appended to `out`.
         let xmss_sign = func(out: uint8[list], message: uint8[list], sk_seed: uint8[list], idx: int, pk_seed: uint8[list],
-                adrs: uint8[list]) {
+            adrs: uint8[list]) {
             let auth: uint8[list] = new;
             for (let j = 0; j < hp; j++) {
                 last sibling = (idx >> j) ^ 1;
@@ -579,7 +580,7 @@ export let SlhDsaCore = module (
 
         /// @brief xmss_pkFromSig (Algorithm 11) for the XMSS signature at `at`.
         let xmss_pk_from_sig = func(idx: int, sig: uint8[list], at: int, message: uint8[list], pk_seed: uint8[list],
-                adrs: uint8[list]) -> uint8[list] {
+            adrs: uint8[list]) -> uint8[list] {
             set_type_and_clear(adrs, WotsHash);
             set_word(adrs, 20, idx as uint32);
             let node = wots_pk_from_sig(sig, at, message, pk_seed, adrs);
@@ -606,7 +607,7 @@ export let SlhDsaCore = module (
 
         /// @brief ht_sign (Algorithm 12), appended to `out`.
         let ht_sign = func(out: uint8[list], message: uint8[list], sk_seed: uint8[list], pk_seed: uint8[list],
-                idx_tree: uint64, idx_leaf: int) {
+            idx_tree: uint64, idx_leaf: int) {
             let adrs = words.zeros(32);
             let tree = idx_tree;
             let leaf = idx_leaf;
@@ -629,7 +630,7 @@ export let SlhDsaCore = module (
 
         /// @brief ht_verify (Algorithm 13) for the hypertree signature at `at`.
         let ht_verify = func(message: uint8[list], sig: uint8[list], at: int, pk_seed: uint8[list], idx_tree: uint64,
-                idx_leaf: int, pk_root: uint8[list]) -> bool {
+            idx_leaf: int, pk_root: uint8[list]) -> bool {
             let adrs = words.zeros(32);
             let tree = idx_tree;
             let leaf = idx_leaf;
@@ -693,7 +694,7 @@ export let SlhDsaCore = module (
 
         /// @brief fors_pkFromSig (Algorithm 17) for the FORS signature at `at`.
         let fors_pk_from_sig = func(sig: uint8[list], at: int, md: uint8[list], pk_seed: uint8[list], adrs: uint8[list])
-                -> uint8[list] {
+            -> uint8[list] {
             last indices = base_2b(md, 0, a, k);
             let roots: uint8[list] = new;
             for (let i = 0; i < k; i++) {

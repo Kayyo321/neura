@@ -27,7 +27,7 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 /// (section 4.1.1.2), each extension at most once (section 4.2), and every extension this module knows parsed
 /// into its typed field. Unknown extensions stay in `extensions` with their criticality; path validation refuses
 /// an unknown critical one. Profile rules about criticality and names are checked by path validation, not here.
-/// @see [Std.Crypto.Pki.Certificate](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Certificate)
+/// @see [Std.Crypto.Pki.Certificate](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-Certificate)
 #Since("0.3.0")
 export let Certificate = module (
     /// @brief The parts of a certificate while it is read. Internal to the parser.

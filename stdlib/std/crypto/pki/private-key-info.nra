@@ -25,7 +25,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// The PBKDF2 default PRF, HMAC-SHA-1, is refused as `crypto.unsupported`: Std.Crypto has no public SHA-1.
 /// A wrong password or altered ciphertext is `crypto.authentication`; CBC cannot always tell a wrong password
 /// from a damaged key, and both fail.
-/// @see [Std.Crypto.Pki.PrivateKeyInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PrivateKeyInfo)
+/// @see [Std.Crypto.Pki.PrivateKeyInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PrivateKeyInfo)
 #Since("0.3.0")
 export let PrivateKeyInfo = module (
     /// @brief A OneAsymmetricKey: version 0 (v1) or 1 (v2, which may carry the public key).
@@ -42,7 +42,7 @@ export let PrivateKeyInfo = module (
         export last public_key: Optional<uint8[list]>;
 
         export let init = func(version_number: int, id: AlgorithmIdentifier, key: secret_bytes.SecretBytes,
-                attribute_der: uint8[list], public_bytes: Optional<uint8[list]>) {
+            attribute_der: uint8[list], public_bytes: Optional<uint8[list]>) {
             version = version_number;
             algorithm = id;
             private_key = key;
@@ -97,7 +97,7 @@ export let PrivateKeyInfo = module (
         export last encrypted_data: uint8[list];
 
         export let init = func(encoded: uint8[list], salt_bytes: uint8[list], count: int, length: int, prf_id: Oid,
-                cipher_id: Oid, iv_bytes: uint8[list], icv: int, data: uint8[list]) {
+            cipher_id: Oid, iv_bytes: uint8[list], icv: int, data: uint8[list]) {
             der_bytes = encoded;
             salt = salt_bytes;
             iterations = count;
@@ -192,7 +192,7 @@ export let PrivateKeyInfo = module (
     };
 
     let derive = func(prf: string, password: uint8[list], salt: uint8[list], iterations: int, length: int)
-            -> Result<uint8[list]> {
+        -> Result<uint8[list]> {
         if (prf == oids.HmacWithSha256) {
             return Result<uint8[list]>.Ok(pbkdf2.derive<sha2.Sha256>(password, salt, iterations, length));
         }
@@ -345,12 +345,12 @@ export let PrivateKeyInfo = module (
     /// 12-byte nonce in `iv`). The keyLength field is omitted. A bad argument traps with "invalid argument: ...".
     #[NoDiscard, Since("0.3.0")]
     export let encrypt = func(info: PrivateKeyInfo, password: uint8[list], salt: uint8[list], iterations: int,
-            prf: string, cipher: string, iv: uint8[list]) -> EncryptedPrivateKeyInfo {
+        prf: string, cipher: string, iv: uint8[list]) -> EncryptedPrivateKeyInfo {
         if (iterations < 1 || salt.length == 0) {
             trap_with_message("invalid argument: PBES2 needs a salt and at least one iteration");
         }
         if (!(prf == oids.HmacWithSha224 || prf == oids.HmacWithSha256 || prf == oids.HmacWithSha384
-                || prf == oids.HmacWithSha512)) {
+            || prf == oids.HmacWithSha512)) {
             trap_with_message("invalid argument: unsupported PBKDF2 PRF");
         }
         last gcm_mode = is_gcm(cipher);
@@ -387,7 +387,7 @@ export let PrivateKeyInfo = module (
     /// PBKDF2-HMAC-SHA-256 and AES-256-GCM.
     #[NoDiscard, Since("0.3.0")]
     export let encrypt_random = func(info: PrivateKeyInfo, password: uint8[list], iterations: int)
-            -> Result<EncryptedPrivateKeyInfo> {
+        -> Result<EncryptedPrivateKeyInfo> {
         last salt = entropy.os_bytes(16)?;
         last nonce = entropy.os_bytes(12)?;
         return Result<EncryptedPrivateKeyInfo>.Ok(encrypt(info, password, salt, iterations, oids.HmacWithSha256,
@@ -395,7 +395,7 @@ export let PrivateKeyInfo = module (
     };
 
     let must_derive = func(prf: string, password: uint8[list], salt: uint8[list], iterations: int, length: int)
-            -> uint8[list] {
+        -> uint8[list] {
         match (derive(prf, password, salt, iterations, length)) {
             Result.Ok(key) => {
                 return key;

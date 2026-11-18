@@ -20,7 +20,7 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 let weierstrass = import:Std.Crypto.Internal.Weierstrass;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Hybrid Public Key Encryption of RFC 9180 (Stdlib.md section 20.8): the four modes (base, psk, auth,
+/// @brief Hybrid Public Key Encryption of RFC 9180 (Stdlib.md section 21.8): the four modes (base, psk, auth,
 /// auth_psk), DHKEM over X25519, X448, P-256, P-384 and P-521 with their HKDFs, the KDFs HKDF-SHA256, -SHA384
 /// and -SHA512, and the AEADs AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305 and export-only.
 ///
@@ -32,13 +32,16 @@ let words = import:Std.Crypto.Internal.Words;
 /// X448 private key keeps the bytes it was made from; the function clamps them when it uses them. A context
 /// seals or opens messages in order: each success advances the sequence number, a failed `open` does not. The
 /// sequence number is a 64-bit count, far below the RFC's limit of 2^96 - 1, so the limit is never reached.
-/// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hpke)
+/// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
 #Since("0.3.0")
 export let Hpke = module (
     /// @brief The KEMs of RFC 9180, section 7.1.
     #Since("0.3.0")
-    export let Kem = enum (DhKemP256HkdfSha256, DhKemP384HkdfSha384, DhKemP521HkdfSha512, DhKemX25519HkdfSha256,
-        DhKemX448HkdfSha512);
+    export let Kem = enum (
+        DhKemP256HkdfSha256, DhKemP384HkdfSha384, DhKemP521HkdfSha512, DhKemX25519HkdfSha256,
+        DhKemX448HkdfSha512
+    );
+
     /// @brief The KDFs of RFC 9180, section 7.2.
     #Since("0.3.0")
     export let Kdf = enum (HkdfSha256, HkdfSha384, HkdfSha512);
@@ -176,12 +179,12 @@ export let Hpke = module (
 
     /// @brief LabeledExtract of RFC 9180, section 4.
     let labeled_extract = func(kdf: Kdf, suite_id: uint8[list], salt: uint8[list], label: string, ikm: uint8[list])
-            -> uint8[list] => extract(kdf, salt, concat(new([words.utf8("HPKE-v1"), suite_id, words.utf8(label), ikm])));
+        -> uint8[list] => extract(kdf, salt, concat(new([words.utf8("HPKE-v1"), suite_id, words.utf8(label), ikm])));
 
     /// @brief LabeledExpand of RFC 9180, section 4.
     let labeled_expand = func(kdf: Kdf, suite_id: uint8[list], prk: uint8[list], label: string, info: uint8[list],
-            length: int) -> uint8[list] =>
-        expand(kdf, prk, concat(new([i2osp2(length), words.utf8("HPKE-v1"), suite_id, words.utf8(label), info])), length);
+        length: int) -> uint8[list] =>
+            expand(kdf, prk, concat(new([i2osp2(length), words.utf8("HPKE-v1"), suite_id, words.utf8(label), info])), length);
 
     let kem_suite = func(kem: Kem) -> uint8[list] => concat(new([words.utf8("KEM"), i2osp2(kem_id(kem))]));
 
@@ -446,7 +449,7 @@ export let Hpke = module (
         /// is `Custom` code `crypto.key_agreement`. Keys of another KEM trap.
         #NoDiscard
         export let encapsulate_with = func(public_key: HpkePublicKey, ephemeral: HpkePrivateKey)
-                -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             check_kem(public_key.kem, ephemeral.kem);
             last dh = diffie_hellman(kem, ephemeral.expose(), public_key.to_bytes());
             if (dh.length == 0) {
@@ -460,7 +463,7 @@ export let Hpke = module (
         /// @brief AuthEncap(pkR, skS) with the given ephemeral key.
         #NoDiscard
         export let auth_encapsulate_with = func(public_key: HpkePublicKey, sender: HpkePrivateKey,
-                ephemeral: HpkePrivateKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            ephemeral: HpkePrivateKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             check_kem(public_key.kem, ephemeral.kem);
             check_kem(sender.kem, kem);
             last first = diffie_hellman(kem, ephemeral.expose(), public_key.to_bytes());
@@ -490,7 +493,7 @@ export let Hpke = module (
         /// @brief AuthEncap(pkR, skS) with a fresh ephemeral key.
         #NoDiscard
         export let try_auth_encapsulate = func(public_key: HpkePublicKey, sender: HpkePrivateKey)
-                -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            -> Result<Encapsulation<SecretBytes, uint8[list]>> {
             match (ephemeral_key()) {
                 Result.Ok(ephemeral) => {
                     return auth_encapsulate_with(public_key, sender, ephemeral);
@@ -531,7 +534,7 @@ export let Hpke = module (
         /// @brief AuthDecap(enc, skR, pkS).
         #NoDiscard
         export let auth_decapsulate = func(private_key: HpkePrivateKey, ciphertext: uint8[list], sender: HpkePublicKey)
-                -> Result<SecretBytes> {
+            -> Result<SecretBytes> {
             check_kem(private_key.kem, kem);
             check_kem(sender.kem, kem);
             if (!public_key_ok(kem, ciphertext)) {
@@ -575,7 +578,7 @@ export let Hpke = module (
         export last exporter_secret: uint8[list];
 
         export let init = func(suite: uint8[list], schedule_kdf: Kdf, schedule_aead: Aead, aead_key: uint8[list],
-                nonce: uint8[list], exporter: uint8[list]) {
+            nonce: uint8[list], exporter: uint8[list]) {
             suite_id = suite;
             kdf = schedule_kdf;
             aead = schedule_aead;
@@ -751,7 +754,7 @@ export let Hpke = module (
         /// @brief KeySchedule of RFC 9180, section 5.1. PSK inputs that do not fit the mode trap
         /// (VerifyPSKInputs).
         let schedule = func(mode: Mode, shared_secret: uint8[list], info: uint8[list], psk: uint8[list],
-                psk_id: uint8[list]) -> Schedule {
+            psk_id: uint8[list]) -> Schedule {
             last with_psk = mode == Mode.Psk || mode == Mode.AuthPsk;
             if ((psk.length == 0) != (psk_id.length == 0)) {
                 trap_with_message("invalid argument: HPKE psk and psk_id must both be given or both be empty");
@@ -781,7 +784,7 @@ export let Hpke = module (
         /// auth modes, and `sender` holds the sender's key in the auth modes (and is empty otherwise).
         #NoDiscard
         export let setup_sender_with = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
-                psk_id: uint8[list], sender: HpkePrivateKey[list], ephemeral: HpkePrivateKey) -> Result<SenderContext> {
+            psk_id: uint8[list], sender: HpkePrivateKey[list], ephemeral: HpkePrivateKey) -> Result<SenderContext> {
             last auth = mode == Mode.Auth || mode == Mode.AuthPsk;
             if (auth != (sender.length == 1)) {
                 trap_with_message("invalid argument: an HPKE sender key is needed exactly in the auth modes");
@@ -802,7 +805,7 @@ export let Hpke = module (
         /// @brief SetupS of any mode with a fresh ephemeral key (see `setup_sender_with`).
         #NoDiscard
         export let setup_sender = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
-                psk_id: uint8[list], sender: HpkePrivateKey[list]) -> Result<SenderContext> {
+            psk_id: uint8[list], sender: HpkePrivateKey[list]) -> Result<SenderContext> {
             match (dhkem.ephemeral_key()) {
                 Result.Ok(ephemeral) => {
                     return setup_sender_with(mode, public_key, info, psk, psk_id, sender, ephemeral);
@@ -821,24 +824,24 @@ export let Hpke = module (
         /// @brief SetupPSKS.
         #NoDiscard
         export let setup_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
-                psk_id: uint8[list]) -> Result<SenderContext> => setup_sender(Mode.Psk, public_key, info, psk, psk_id, new);
+            psk_id: uint8[list]) -> Result<SenderContext> => setup_sender(Mode.Psk, public_key, info, psk, psk_id, new);
 
         /// @brief SetupAuthS.
         #NoDiscard
         export let setup_auth_sender = func(public_key: HpkePublicKey, info: uint8[list], sender: HpkePrivateKey)
-                -> Result<SenderContext> => setup_sender(Mode.Auth, public_key, info, new, new, new([sender]));
+            -> Result<SenderContext> => setup_sender(Mode.Auth, public_key, info, new, new, new([sender]));
 
         /// @brief SetupAuthPSKS.
         #NoDiscard
         export let setup_auth_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
-                psk_id: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext> =>
-            setup_sender(Mode.AuthPsk, public_key, info, psk, psk_id, new([sender]));
+            psk_id: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext> =>
+                setup_sender(Mode.AuthPsk, public_key, info, psk, psk_id, new([sender]));
 
         /// @brief SetupR of any mode: `sender` holds the sender's public key in the auth modes (and is empty
         /// otherwise). A malformed `enc` or a failed Diffie-Hellman is `Custom` code `crypto.invalid_ciphertext`.
         #NoDiscard
         export let setup_receiver = func(mode: Mode, enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
-                psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey[list]) -> Result<ReceiverContext> {
+            psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey[list]) -> Result<ReceiverContext> {
             last auth = mode == Mode.Auth || mode == Mode.AuthPsk;
             if (auth != (sender.length == 1)) {
                 trap_with_message("invalid argument: an HPKE sender key is needed exactly in the auth modes");
@@ -857,30 +860,30 @@ export let Hpke = module (
         /// @brief SetupBaseR.
         #NoDiscard
         export let setup_base_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list])
-                -> Result<ReceiverContext> => setup_receiver(Mode.Base, enc, private_key, info, new, new, new);
+            -> Result<ReceiverContext> => setup_receiver(Mode.Base, enc, private_key, info, new, new, new);
 
         /// @brief SetupPSKR.
         #NoDiscard
         export let setup_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
-                psk: uint8[list], psk_id: uint8[list]) -> Result<ReceiverContext> =>
-            setup_receiver(Mode.Psk, enc, private_key, info, psk, psk_id, new);
+            psk: uint8[list], psk_id: uint8[list]) -> Result<ReceiverContext> =>
+                setup_receiver(Mode.Psk, enc, private_key, info, psk, psk_id, new);
 
         /// @brief SetupAuthR.
         #NoDiscard
         export let setup_auth_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
-                sender: HpkePublicKey) -> Result<ReceiverContext> =>
-            setup_receiver(Mode.Auth, enc, private_key, info, new, new, new([sender]));
+            sender: HpkePublicKey) -> Result<ReceiverContext> =>
+                setup_receiver(Mode.Auth, enc, private_key, info, new, new, new([sender]));
 
         /// @brief SetupAuthPSKR.
         #NoDiscard
         export let setup_auth_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
-                psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext> =>
-            setup_receiver(Mode.AuthPsk, enc, private_key, info, psk, psk_id, new([sender]));
+            psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext> =>
+                setup_receiver(Mode.AuthPsk, enc, private_key, info, psk, psk_id, new([sender]));
 
         /// @brief Single-shot base-mode encryption (RFC 9180, section 6.1).
         #NoDiscard
         export let seal = func(public_key: HpkePublicKey, info: uint8[list], aad: uint8[list], plaintext: uint8[list])
-                -> Result<SealedMessage> {
+            -> Result<SealedMessage> {
             match (setup_base_sender(public_key, info)) {
                 Result.Ok(context) => {
                     return Result<SealedMessage>.Ok(new SealedMessage(context.enc, context.seal(aad, plaintext)));
@@ -894,7 +897,7 @@ export let Hpke = module (
         /// @brief Single-shot base-mode decryption (RFC 9180, section 6.1).
         #NoDiscard
         export let open = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], aad: uint8[list],
-                ciphertext: uint8[list]) -> Result<uint8[list]> {
+            ciphertext: uint8[list]) -> Result<uint8[list]> {
             match (setup_base_receiver(enc, private_key, info)) {
                 Result.Ok(context) => {
                     return context.open(aad, ciphertext);

@@ -13,7 +13,7 @@ let hashing = import:Std.Core.Hash;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief ML-KEM, the module-lattice key-encapsulation mechanism of FIPS 203, in its three parameter sets
-/// (Stdlib.md section 20.9).
+/// (Stdlib.md section 21.9).
 ///
 /// `MlKem` implements `KeyEncapsulation`. Every randomized operation has a deterministic form for known-answer
 /// tests and derivations: `key_pair_from_seed(d, z)` and `encapsulate_with(public_key, m)`. The convenience
@@ -23,7 +23,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// key is made from bytes. Only the comparison of the re-encryption and the choice of the implicit-rejection
 /// key are branch-free in source; the sampling, reduction and decoding code branches on secret values, and
 /// the runtime does not guarantee constant time in any case.
-/// @see [Std.Crypto.Pqc.MlKem](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MlKem)
+/// @see [Std.Crypto.Pqc.MlKem](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-MlKem)
 #Since("0.3.0")
 export let MlKem = module (
     /// @brief The parameter sets of FIPS 203, section 8: ML-KEM-512, ML-KEM-768 and ML-KEM-1024.
@@ -245,7 +245,7 @@ export let MlKem = module (
         /// key of another parameter set, traps.
         #NoDiscard
         export let encapsulate_with = func(public_key: MlKemPublicKey, m: uint8[list])
-                -> Encapsulation<SecretBytes, uint8[list]> {
+            -> Encapsulation<SecretBytes, uint8[list]> {
             check_set(public_key.parameter_set);
             if (m.length != 32) {
                 trap_with_message("invalid argument: ML-KEM randomness m must be 32 bytes");

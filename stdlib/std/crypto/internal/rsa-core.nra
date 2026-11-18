@@ -63,7 +63,7 @@ export let RsaCore = module (
 
         /// @brief The key from n, e and p, q, dP, dQ, qInv as limbs (each of its natural size).
         export let init = func(public_part: PublicCore, prime_p: uint32[list], prime_q: uint32[list],
-                exponent_p: uint32[list], exponent_q: uint32[list], coefficient: uint32[list]) {
+            exponent_p: uint32[list], exponent_q: uint32[list], coefficient: uint32[list]) {
             public_core = public_part;
             p = new(prime_p);
             q = new(prime_q);
@@ -154,7 +154,7 @@ export let RsaCore = module (
     /// @brief EMSA-PSS-VERIFY (RFC 8017, section 9.1.2) with a fixed salt length, or any salt length when
     /// `salt_length` is -1. MGF1 may use a separate digest.
     export let pss_verify = func(hash: Algorithm, mask_hash: Algorithm, digest: uint8[list], em: uint8[list], em_bits: int,
-            salt_length: int) -> bool {
+        salt_length: int) -> bool {
         last h_len = asym_hash.output_length(hash);
         last em_len = (em_bits + 7) / 8;
         if (em.length != em_len || em_len < h_len + 2 || (salt_length >= 0 && em_len < h_len + salt_length + 2)) {
@@ -195,7 +195,7 @@ export let RsaCore = module (
     /// @brief EME-OAEP encoding (RFC 8017, section 7.1.1, step 2) of the message with the label and the seed
     /// (hLen bytes) for a k-byte modulus. A message too long traps with `invalid argument`.
     export let oaep_encode = func(hash: Algorithm, k: int, message: uint8[list], label: uint8[list], seed: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         last h_len = asym_hash.output_length(hash);
         if (message.length > k - 2 * h_len - 2) {
             trap_with_message("invalid argument: message too long for RSA-OAEP with this key and hash");
