@@ -1,0 +1,17 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Socket\.Internal\.HostCalls\.tls_connect is not implemented in Neura 0\.3\.0
+// TlsConnector.connect calls the host's TLS client service, which this runtime lacks.
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let config = import:Std.Net.Tls.TlsConfig;
+let tls_connector = import:Std.Net.Tls.TlsConnector;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last target = result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:443"), "address");
+        last client = result.expect<config.TlsConfig>(config.builder().build_client(), "config");
+        let _ = new tls_connector.TlsConnector(target, client).connect();
+        return program.ExitCode.Ok;
+    };
+);

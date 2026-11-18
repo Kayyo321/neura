@@ -1,0 +1,21 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Socket\.Internal\.HostCalls\.tls_accept is not implemented in Neura 0\.3\.0
+// run-options: --allow-net
+// Binding works; accepting calls the host's TLS server service, which this runtime lacks.
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let tls_acceptor = import:Std.Net.Tls.TlsAcceptor;
+let config = import:Std.Net.Tls.TlsConfig;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last builder = config.builder();
+        builder.set_certificate("server.pem", "server.key");
+        last server = result.expect<config.TlsConfig>(builder.build_server(), "config");
+        last loopback = result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:0"), "address");
+        last acceptor = result.expect<tls_acceptor.TlsAcceptor>(tls_acceptor.bind(loopback, server), "bind");
+        let _ = acceptor.accept();
+        return program.ExitCode.Ok;
+    };
+);

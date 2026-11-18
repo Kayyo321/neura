@@ -1,0 +1,338 @@
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief TLS configuration: a builder that validates a client or server configuration, and the immutable
+/// `TlsConfig` that `TlsConnector` and `TlsAcceptor` use.
+///
+/// Only TLS 1.2 and TLS 1.3 exist here. `build_client` and `build_server` report the first problem as a Custom
+/// error with the code `tls.config`:
+///
+/// - the lowest version above the highest;
+/// - an ALPN protocol name that is empty or longer than 255 bytes, or a list whose encoding (each name with a
+///   one-byte length) exceeds 65,535 bytes (RFC 7301 section 3.1);
+/// - a server name (SNI, RFC 6066 section 3) that is not an ASCII DNS host name of dot-separated labels of 1 to
+///   63 letters, digits and hyphens, not starting or ending with a hyphen, at most 253 bytes, without a
+///   trailing dot; or that is an IPv4 or IPv6 literal, which SNI does not allow ("Literal IPv4 and IPv6
+///   addresses are not permitted in HostName"). Internationalized names are given as A-labels (`xn--`);
+/// - a certificate file without its key file or the reverse;
+/// - for a server: no certificate and key, or a server name; for a client: a client-CA file (which only a
+///   server uses to require client certificates);
+/// - a negative handshake timeout.
+///
+/// Files are paths to PEM files the host reads; they are not opened here. The CA file of a client replaces the
+/// system trust store; empty means the system store. A client certificate makes the connection mutual TLS.
+/// @see [Std.Net.Tls.TlsConfig](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-TlsConfig)
+#Since("0.3.0")
+export let TlsConfig = module (
+    /// @brief A TLS protocol version.
+    export let TlsVersion = enum (Tls12, Tls13);
+
+    /// @brief Whether a configuration is for the connecting or the accepting side.
+    export let TlsRole = enum (Client, Server);
+
+    /// @brief A validated TLS configuration.
+    #Final
+    export let TlsConfig = class (
+        /// @brief Client or server.
+        export last role: TlsRole;
+        /// @brief The lowest version accepted.
+        export last min_version: TlsVersion;
+        /// @brief The highest version offered.
+        export last max_version: TlsVersion;
+        /// @brief The ALPN protocols, most preferred first.
+        last protocols: string[list];
+        /// @brief The SNI and verification name of a client; empty to use the dialed host.
+        export last server_name: string;
+        /// @brief The CA bundle (PEM) a client verifies the server with; empty for the system store.
+        export last ca_file: string;
+        /// @brief The PEM certificate chain this side presents; empty when none.
+        export last certificate_file: string;
+        /// @brief The PEM private key of the certificate; empty when none.
+        export last key_file: string;
+        /// @brief A server's CA bundle for client certificates; non-empty requires mutual TLS.
+        export last client_ca_file: string;
+        /// @brief The longest a handshake may take; zero waits without limit.
+        export last handshake_timeout: Duration;
+
+        /// @brief Use `TlsConfigBuilder`.
+        export let init = func(for_role: TlsRole, lowest: TlsVersion, highest: TlsVersion, alpn: string[list],
+            name: string, ca: string, certificate: string, key: string, client_ca: string, timeout: Duration) {
+            role = for_role;
+            min_version = lowest;
+            max_version = highest;
+            protocols = alpn;
+            server_name = name;
+            ca_file = ca;
+            certificate_file = certificate;
+            key_file = key;
+            client_ca_file = client_ca;
+            handshake_timeout = timeout;
+        };
+
+        /// @brief The ALPN protocols, most preferred first. A copy.
+        #NoDiscard
+        export let alpn = func -> string[list] {
+            let copy: string[list] = new;
+            for (let name in protocols) {
+                copy.append(name);
+            }
+            return copy;
+        };
+
+        /// @brief True when this side presents a certificate as a client (mutual TLS) or requires one as a server.
+        #Pure
+        export let is_mutual = func -> bool =>
+            role == TlsRole.Client ? certificate_file.byte_length > 0 : client_ca_file.byte_length > 0;
+
+        /// @brief True when both TLS 1.2 and 1.3 are allowed, the range the host's basic TLS service negotiates.
+        #Pure
+        export let allows_both_versions = func -> bool =>
+            min_version == TlsVersion.Tls12 && max_version == TlsVersion.Tls13;
+
+        /// @brief Equal when every setting is.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is TlsConfig)) {
+                return false;
+            }
+            last that = other as TlsConfig;
+            return role == that.role && min_version == that.min_version && max_version == that.max_version
+                && same_names(protocols, that.protocols) && server_name == that.server_name
+                && ca_file == that.ca_file && certificate_file == that.certificate_file && key_file == that.key_file
+                && client_ca_file == that.client_ca_file
+                && handshake_timeout.to_nanos() == that.handshake_timeout.to_nanos();
+        };
+
+        /// @brief A hash consistent with equals.
+        export let.override hash_code = func -> uint32 {
+            let h = hashing.combine(role.to_string().hash_code(), min_version.to_string().hash_code());
+            h = hashing.combine(h, max_version.to_string().hash_code());
+            for (let name in protocols) {
+                h = hashing.combine(h, name.hash_code());
+            }
+            h = hashing.combine(h, server_name.hash_code());
+            h = hashing.combine(h, ca_file.hash_code());
+            h = hashing.combine(h, certificate_file.hash_code());
+            h = hashing.combine(h, key_file.hash_code());
+            return hashing.combine(h, client_ca_file.hash_code());
+        };
+
+        /// @brief Text such as "TlsConfig(Client, Tls12..Tls13, alpn h2,http/1.1, sni example.com)". File
+        /// paths are named; their contents are never read here.
+        export let.override to_string = func -> string {
+            let text = "TlsConfig(" + role.to_string() + ", " + min_version.to_string() + ".."
+                + max_version.to_string();
+            if (protocols.length > 0) {
+                text = text + ", alpn " + strings.join(protocols, ",");
+            }
+            if (server_name.byte_length > 0) {
+                text = text + ", sni " + server_name;
+            }
+            if (is_mutual()) {
+                text = text + ", mutual";
+            }
+            return text + ")";
+        };
+    );
+
+    /// @brief Collects settings; `build_client` or `build_server` validates them. Setting a value again replaces
+    /// it.
+    #[Final, NotThreadSafe]
+    export let TlsConfigBuilder = class (
+        /// @brief The lowest version.
+        let lowest: TlsVersion = TlsVersion.Tls12;
+        /// @brief The highest version.
+        let highest: TlsVersion = TlsVersion.Tls13;
+        /// @brief The ALPN list.
+        let protocols: string[list] = new;
+        /// @brief The server name.
+        let name: string = "";
+        /// @brief The CA file.
+        let ca: string = "";
+        /// @brief The certificate file.
+        let certificate: string = "";
+        /// @brief The key file.
+        let key: string = "";
+        /// @brief The client-CA file.
+        let client_ca: string = "";
+        /// @brief The handshake timeout.
+        let timeout: Duration = of_nanos(0);
+
+        /// @brief The versions accepted, from `lowest` through `highest` (default TLS 1.2 through 1.3).
+        export let set_versions = func(lowest_version: TlsVersion, highest_version: TlsVersion) {
+            lowest = lowest_version;
+            highest = highest_version;
+        };
+
+        /// @brief The ALPN protocols, most preferred first (for example "h2", "http/1.1").
+        export let set_alpn = func(names: string[list]) {
+            let copy: string[list] = new;
+            for (let protocol in names) {
+                copy.append(protocol);
+            }
+            protocols = copy;
+        };
+
+        /// @brief The SNI name a client sends and verifies the certificate against; empty uses the host.
+        export let set_server_name = func(host_name: string) {
+            name = host_name;
+        };
+
+        /// @brief The PEM CA bundle a client trusts instead of the system store.
+        export let set_ca_file = func(path: string) {
+            ca = path;
+        };
+
+        /// @brief The PEM certificate chain and private key this side presents (a server's identity, or a
+        /// client's for mutual TLS).
+        export let set_certificate = func(certificate_path: string, key_path: string) {
+            certificate = certificate_path;
+            key = key_path;
+        };
+
+        /// @brief A server's PEM CA bundle for client certificates; setting it requires mutual TLS.
+        export let set_client_ca_file = func(path: string) {
+            client_ca = path;
+        };
+
+        /// @brief The longest a handshake may take; zero waits without limit.
+        export let set_handshake_timeout = func(limit: Duration) {
+            timeout = limit;
+        };
+
+        /// @brief A validated client configuration, or a `tls.config` error.
+        #NoDiscard
+        export let build_client = func -> Result<TlsConfig> {
+            check_common()?;
+            if (client_ca.byte_length > 0) {
+                return invalid("a client configuration has no client-CA file");
+            }
+            if (name.byte_length > 0) {
+                check_server_name(name)?;
+            }
+            return Result<TlsConfig>.Ok(new TlsConfig(TlsRole.Client, lowest, highest, protocols, name, ca,
+                certificate, key, client_ca, timeout));
+        };
+
+        /// @brief A validated server configuration, or a `tls.config` error.
+        #NoDiscard
+        export let build_server = func -> Result<TlsConfig> {
+            check_common()?;
+            if (certificate.byte_length == 0) {
+                return invalid("a server needs a certificate and key");
+            }
+            if (name.byte_length > 0) {
+                return invalid("a server configuration has no server name");
+            }
+            return Result<TlsConfig>.Ok(new TlsConfig(TlsRole.Server, lowest, highest, protocols, name, ca,
+                certificate, key, client_ca, timeout));
+        };
+
+        /// @brief Text such as "TlsConfigBuilder".
+        export let.override to_string = func -> string => "TlsConfigBuilder";
+
+        /// @brief The checks shared by both roles.
+        let check_common = func -> Result<Unit> {
+            if (lowest == TlsVersion.Tls13 && highest == TlsVersion.Tls12) {
+                return problem("the lowest version is above the highest");
+            }
+            check_alpn(protocols)?;
+            if ((certificate.byte_length == 0) != (key.byte_length == 0)) {
+                return problem("a certificate needs its key file and a key its certificate file");
+            }
+            if (timeout.to_nanos() < 0) {
+                return problem("the handshake timeout is negative");
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+    );
+
+    /// @brief An empty builder: TLS 1.2 through 1.3, no ALPN, the system trust store, no certificate.
+    #NoDiscard
+    export let builder = func -> TlsConfigBuilder => new TlsConfigBuilder();
+
+    /// @brief Ok when `names` is a valid ALPN list (RFC 7301 section 3.1), else a `tls.config` error.
+    #NoDiscard
+    export let check_alpn = func(names: string[list]) -> Result<Unit> {
+        let total = 0;
+        for (let protocol in names) {
+            if (protocol.byte_length < 1 || protocol.byte_length > 255) {
+                return problem("an ALPN protocol name must be 1 through 255 bytes");
+            }
+            total += protocol.byte_length + 1;
+        }
+        if (total > 65535) {
+            return problem("the ALPN list is longer than 65535 bytes");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Ok when `name` is a valid SNI host name (RFC 6066 section 3, see the module documentation), else
+    /// a `tls.config` error.
+    #NoDiscard
+    export let check_server_name = func(name: string) -> Result<Unit> {
+        if (name.byte_length < 1 || name.byte_length > 253) {
+            return problem("the server name must be 1 through 253 bytes");
+        }
+        if (strings.ends_with(name, ".")) {
+            return problem("the server name ends with a dot");
+        }
+        match (ips.parse(name)) {
+            Result.Ok(_) => {
+                return problem("the server name is an IP address, which SNI does not allow");
+            },
+            Result.Err(_) => {},
+        }
+        for (let label in strings.split(name, ".")) {
+            if (!is_label(label)) {
+                return problem("the server name is not a DNS host name: " + name);
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief True when both lists hold the same names in the same order.
+    #Pure
+    let same_names = func(a: string[list], b: string[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        let i = 0;
+        while (i < a.length) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+            i++;
+        }
+        return true;
+    };
+
+    /// @brief True for a label of 1 to 63 letters, digits and hyphens that neither starts nor ends with a hyphen.
+    #Pure
+    let is_label = func(label: string) -> bool {
+        last n = label.byte_length;
+        if (n < 1 || n > 63 || label.byte_at(0) == 45 || label.byte_at(n - 1) == 45) {
+            return false;
+        }
+        let i = 0;
+        while (i < n) {
+            last c = label.byte_at(i);
+            last alnum = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+            if (!alnum && c != 45) {
+                return false;
+            }
+            i++;
+        }
+        return true;
+    };
+
+    /// @brief A `tls.config` failure of a check.
+    let problem = func(text: string) -> Result<Unit> => Result<Unit>.Err(errors.custom("tls.config", text));
+
+    /// @brief A `tls.config` failure.
+    let invalid = func(text: string) -> Result<TlsConfig> => Result<TlsConfig>.Err(errors.custom("tls.config", text));
+);

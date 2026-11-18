@@ -1,0 +1,128 @@
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let resolver = import:Std.Net.Tls.DynamicCertResolver;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// Std.Net.Tls.DynamicCertResolver: bundle checks and rotation driven by an injected loader, change detector
+// and clock.
+let ResolverTests = module (
+    const Leaf: string = "-----BEGIN CERTIFICATE-----\nMIIBleaf\n-----END CERTIFICATE-----\n";
+    const Intermediate: string = "-----BEGIN CERTIFICATE-----\nMIIBmid\n-----END CERTIFICATE-----\n";
+    const Key: string = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIsecret\n-----END PRIVATE KEY-----\n";
+    const EcKey: string = "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIsecret2\n-----END EC PRIVATE KEY-----\n";
+
+    // Serves a scripted sequence of bundles and change answers.
+    let Source = class (
+        export let chain: string = Leaf;
+        export let key: string = Key;
+        export let fail_next: bool = false;
+        export let dirty: bool = false;
+        export let loads: int = 0;
+        export let checks: int = 0;
+
+        export let load = func -> result.Result<resolver.CertificateBundle> {
+            loads++;
+            if (fail_next) {
+                fail_next = false;
+                return result.Result<resolver.CertificateBundle>.Err(error.custom("test.load", "disk unreadable"));
+            }
+            return resolver.bundle(chain, key, Intermediate);
+        };
+
+        export let changed = func -> result.Result<bool> {
+            checks++;
+            last answer = dirty;
+            dirty = false;
+            return result.Result<bool>.Ok(answer);
+        };
+
+        export let.override to_string = func -> string => "Source";
+    );
+
+    let code_of = func(failure: error.Error) -> string => match (error.root_cause(failure)) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_bundle_checks_and_redaction = func {
+        last bundle = test.assert_ok<resolver.CertificateBundle>(resolver.bundle(Leaf + Intermediate, EcKey, Leaf));
+        test.assert_equal<int>(2, bundle.chain_length());
+        test.assert_equal<int>(1, bundle.trust_anchor_count());
+        test.assert_equal_string("CertificateBundle(2 certificates, key redacted, 1 trust anchors)", bundle.to_string());
+        test.assert(!bundle.to_string().contains("secret"));
+        test.assert_equal_string("tls.certificate", code_of(test.assert_err<resolver.CertificateBundle>(
+            resolver.bundle("-----BEGIN CERTIFICATE-----\nMIIB", Key, ""))));
+        test.assert_equal_string("tls.certificate", code_of(test.assert_err<resolver.CertificateBundle>(
+            resolver.bundle(Leaf, "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----\n", ""))));
+        test.assert_equal_string("tls.certificate", code_of(test.assert_err<resolver.CertificateBundle>(
+            resolver.bundle(Leaf, Key, "not pem"))));
+        test.assert(bundle.equals(test.assert_ok<resolver.CertificateBundle>(resolver.bundle(Leaf + Intermediate, EcKey,
+            Leaf))));
+        test.assert(!bundle.equals(test.assert_ok<resolver.CertificateBundle>(resolver.bundle(Leaf + Intermediate, Key,
+            Leaf))));
+    };
+
+    export let test_poll_respects_the_interval = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last source = new Source();
+        last rotating = test.assert_ok<resolver.DynamicCertResolver>(resolver.create(new bound(source.load), new bound(source.changed), clock,
+            duration.of_seconds(30)));
+        test.assert_equal_int64(0, rotating.generation());
+        test.assert_equal<int>(1, source.loads);
+        source.dirty = true;
+        source.chain = Leaf + Intermediate;
+        // Before the interval has passed the detector is not asked.
+        clock.advance(duration.of_seconds(29));
+        test.assert(!test.assert_ok<bool>(rotating.poll()));
+        test.assert_equal<int>(0, source.checks);
+        clock.advance(duration.of_seconds(1));
+        test.assert(test.assert_ok<bool>(rotating.poll()));
+        test.assert_equal<int>(1, source.checks);
+        test.assert_equal_int64(1, rotating.generation());
+        test.assert_equal<int>(2, rotating.current().chain_length());
+        // No change reported: no reload.
+        clock.advance(duration.of_seconds(30));
+        test.assert(!test.assert_ok<bool>(rotating.poll()));
+        test.assert_equal<int>(2, source.loads);
+        test.assert_equal_string("DynamicCertResolver(generation 1, CertificateBundle(2 certificates, key redacted, "
+            + "1 trust anchors))", rotating.to_string());
+    };
+
+    export let test_failed_reload_keeps_the_current_bundle = func {
+        last clock = fixed_clock.of(instant.Epoch);
+        last source = new Source();
+        last rotating = test.assert_ok<resolver.DynamicCertResolver>(resolver.create(new bound(source.load), new bound(source.changed), clock,
+            duration.of_seconds(0)));
+        last before = rotating.current();
+        source.fail_next = true;
+        source.dirty = true;
+        last failure = test.assert_err<bool>(rotating.poll());
+        test.assert_equal_string("test.load", code_of(failure));
+        test.assert_equal_string("certificate reload failed; generation 0 stays in use: disk unreadable",
+            error.message(failure));
+        test.assert(rotating.current().equals(before));
+        // An invalid bundle is refused the same way.
+        source.key = "garbage";
+        last invalid = test.assert_err<bool>(rotating.reload());
+        test.assert_equal_string("tls.certificate", code_of(invalid));
+        test.assert_equal_int64(0, rotating.generation());
+        // A valid new key rotates.
+        source.key = EcKey;
+        test.assert(test.assert_ok<bool>(rotating.reload()));
+        test.assert_equal_int64(1, rotating.generation());
+        test.assert(!rotating.current().equals(before));
+        // Reloading identical material is not a swap.
+        test.assert(!test.assert_ok<bool>(rotating.reload()));
+        test.assert_equal_int64(1, rotating.generation());
+    };
+
+    export let test_first_load_must_succeed = func {
+        last source = new Source();
+        source.fail_next = true;
+        test.assert_err<resolver.DynamicCertResolver>(resolver.create(new bound(source.load), new bound(source.changed),
+            fixed_clock.of(instant.Epoch), duration.of_seconds(1)));
+    };
+);

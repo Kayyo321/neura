@@ -1,0 +1,142 @@
+let config = import:Std.Net.Tls.TlsConfig;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Std.Net.Tls.TlsConfig: building and validating client and server configurations.
+let ConfigTests = module (
+    let problem_of = func(failure: error.Error) -> string {
+        last code = match (failure) {
+            error.Error.Custom(detail) => detail.code(),
+            _ => "",
+        };
+        test.assert_equal_string("tls.config", code);
+        return error.message(failure);
+    };
+
+    let client_problem = func(builder: config.TlsConfigBuilder) -> string =>
+        problem_of(test.assert_err<config.TlsConfig>(builder.build_client()));
+
+    let server_problem = func(builder: config.TlsConfigBuilder) -> string =>
+        problem_of(test.assert_err<config.TlsConfig>(builder.build_server()));
+
+    export let test_default_client = func {
+        last built = test.assert_ok<config.TlsConfig>(config.builder().build_client());
+        test.assert(built.role == config.TlsRole.Client);
+        test.assert(built.allows_both_versions());
+        test.assert(!built.is_mutual());
+        test.assert_equal<int>(0, built.alpn().length);
+        test.assert_equal_string("", built.ca_file);
+        test.assert_equal_string("TlsConfig(Client, Tls12..Tls13)", built.to_string());
+    };
+
+    export let test_client_with_alpn_sni_and_mutual_tls = func {
+        last builder = config.builder();
+        last protocols: string[list] = new(["h2", "http/1.1"]);
+        builder.set_alpn(protocols);
+        builder.set_server_name("api.example.com");
+        builder.set_ca_file("/etc/ca.pem");
+        builder.set_certificate("/etc/client.pem", "/etc/client.key");
+        builder.set_versions(config.TlsVersion.Tls13, config.TlsVersion.Tls13);
+        builder.set_handshake_timeout(duration.of_seconds(10));
+        last built = test.assert_ok<config.TlsConfig>(builder.build_client());
+        test.assert(built.is_mutual());
+        test.assert(!built.allows_both_versions());
+        test.assert_equal_string("h2", built.alpn()[0]);
+        test.assert_equal_string("TlsConfig(Client, Tls13..Tls13, alpn h2,http/1.1, sni api.example.com, mutual)",
+            built.to_string());
+        test.assert_equal_int64(10000000000, built.handshake_timeout.to_nanos());
+        // The builder copies the list: changing the caller's list later changes nothing.
+        protocols.append("h3");
+        test.assert_equal<int>(2, built.alpn().length);
+        test.assert_equal<int>(2, test.assert_ok<config.TlsConfig>(builder.build_client()).alpn().length);
+    };
+
+    export let test_server_configuration = func {
+        last builder = config.builder();
+        builder.set_certificate("/etc/server.pem", "/etc/server.key");
+        builder.set_alpn(new(["h2"]));
+        last plain = test.assert_ok<config.TlsConfig>(builder.build_server());
+        test.assert(plain.role == config.TlsRole.Server);
+        test.assert(!plain.is_mutual());
+        builder.set_client_ca_file("/etc/clients.pem");
+        last mutual = test.assert_ok<config.TlsConfig>(builder.build_server());
+        test.assert(mutual.is_mutual());
+        test.assert(!mutual.equals(plain));
+        test.assert(mutual.equals(test.assert_ok<config.TlsConfig>(builder.build_server())));
+        test.assert_equal<uint32>(mutual.hash_code(), test.assert_ok<config.TlsConfig>(builder.build_server()).hash_code());
+    };
+
+    export let test_role_rules = func {
+        test.assert_equal_string("a server needs a certificate and key", server_problem(config.builder()));
+        last named = config.builder();
+        named.set_certificate("c.pem", "k.pem");
+        named.set_server_name("example.com");
+        test.assert_equal_string("a server configuration has no server name", server_problem(named));
+        last client_ca = config.builder();
+        client_ca.set_client_ca_file("clients.pem");
+        test.assert_equal_string("a client configuration has no client-CA file", client_problem(client_ca));
+        last half = config.builder();
+        half.set_certificate("c.pem", "");
+        test.assert_equal_string("a certificate needs its key file and a key its certificate file", client_problem(half));
+    };
+
+    export let test_versions_and_timeout = func {
+        last reversed = config.builder();
+        reversed.set_versions(config.TlsVersion.Tls13, config.TlsVersion.Tls12);
+        test.assert_equal_string("the lowest version is above the highest", client_problem(reversed));
+        last only12 = config.builder();
+        only12.set_versions(config.TlsVersion.Tls12, config.TlsVersion.Tls12);
+        test.assert(!test.assert_ok<config.TlsConfig>(only12.build_client()).allows_both_versions());
+        last negative = config.builder();
+        negative.set_handshake_timeout(duration.of_nanos(-1));
+        test.assert_equal_string("the handshake timeout is negative", client_problem(negative));
+    };
+
+    // RFC 7301 section 3.1: opaque ProtocolName<1..2^8-1>; ProtocolName protocol_name_list<2..2^16-1>.
+    export let test_alpn_limits = func {
+        test.assert_ok<unit.Unit>(config.check_alpn(new([strings.repeat("a", 255)])));
+        test.assert_equal_string("an ALPN protocol name must be 1 through 255 bytes",
+            problem_of(test.assert_err<unit.Unit>(config.check_alpn(new([""])))));
+        test.assert_equal_string("an ALPN protocol name must be 1 through 255 bytes",
+            problem_of(test.assert_err<unit.Unit>(config.check_alpn(new([strings.repeat("a", 256)])))));
+        // 257 names of 254 bytes take 257 * 255 = 65,535 bytes; one more byte is too many.
+        let names: string[list] = new;
+        let i = 0;
+        while (i < 257) {
+            names.append(strings.repeat("p", 254));
+            i++;
+        }
+        test.assert_ok<unit.Unit>(config.check_alpn(names));
+        names.append("x");
+        test.assert_equal_string("the ALPN list is longer than 65535 bytes",
+            problem_of(test.assert_err<unit.Unit>(config.check_alpn(names))));
+    };
+
+    // RFC 6066 section 3: a DNS host name without a trailing dot; IP literals are not permitted.
+    export let test_server_names = func {
+        test.assert_ok<unit.Unit>(config.check_server_name("example.com"));
+        test.assert_ok<unit.Unit>(config.check_server_name("xn--bcher-kva.example"));
+        test.assert_ok<unit.Unit>(config.check_server_name("localhost"));
+        test.assert_ok<unit.Unit>(config.check_server_name("a-b.c9"));
+        test.assert_equal_string("the server name ends with a dot",
+            problem_of(test.assert_err<unit.Unit>(config.check_server_name("example.com."))));
+        test.assert_equal_string("the server name is an IP address, which SNI does not allow",
+            problem_of(test.assert_err<unit.Unit>(config.check_server_name("192.0.2.1"))));
+        test.assert_equal_string("the server name is an IP address, which SNI does not allow",
+            problem_of(test.assert_err<unit.Unit>(config.check_server_name("2001:db8::1"))));
+        for (let bad in ["-a.example", "a-.example", "a..example", "a_b.example", "bü.example", "a b"]) {
+            test.assert_equal_string("the server name is not a DNS host name: " + bad,
+                problem_of(test.assert_err<unit.Unit>(config.check_server_name(bad))));
+        }
+        test.assert_ok<unit.Unit>(config.check_server_name(strings.repeat("a", 63) + ".example"));
+        test.assert_err<unit.Unit>(config.check_server_name(strings.repeat("a", 64) + ".example"));
+        test.assert_equal_string("the server name must be 1 through 253 bytes",
+            problem_of(test.assert_err<unit.Unit>(config.check_server_name(strings.repeat("a.", 127) + "a"))));
+        last builder = config.builder();
+        builder.set_server_name("10.0.0.1");
+        test.assert_equal_string("the server name is an IP address, which SNI does not allow", client_problem(builder));
+    };
+);
