@@ -102,9 +102,9 @@ neura-server-host [options] <image.nvr>
 | `--config <key>=<value>` | A configuration value. Repeatable | |
 | `--config-file <file>` | `key=value` lines; `#` starts a comment | |
 | `--config-env-prefix <prefix>` | The environment variable `<prefix><key>` overrides the file and `--config` | |
-| `--max-workers N` | S-1, requests executing at once (1 to 1,024) | 8 |
+| `--max-workers N` | S-1, requests executing at once (1 to 1,024). A request's worker holds its slot until the host has reaped it | 8 |
 | `--ready-workers N` | S-2, workers started ahead that have loaded and verified the image and executed nothing (0 to 64) | 2 |
-| `--max-queue N` | S-3, requests waiting for a worker; beyond it, 503 with `Retry-After: 1` | 64 |
+| `--max-queue N` | S-3, requests waiting for a worker; beyond it, 503 with `Retry-After: 1`. With 0, a request that follows a response at once can find the slot still held by the exiting worker and be refused | 64 |
 | `--max-connections N` | S-4, open connections | 1,024 |
 | `--max-head-bytes N` | S-5, request line and fields; beyond it, 431 | 16,384 |
 | `--max-body-bytes N` | S-6, request body after decoding; beyond it, 413 | 1,048,576 |
@@ -113,6 +113,7 @@ neura-server-host [options] <image.nvr>
 | `--drain-timeout SECONDS` | S-12, how long a drain waits for requests in flight | 30 |
 | `--max-steps N` | NVM steps one request's execution may take (1 to 2^62); past it the execution traps and the answer is 500 | 100,000,000 |
 | `--worker-tier 0\|1\|2`, `--worker-jit off\|on\|auto` | The highest execution tier and the native compilation of each worker, as `neura run --tier` and `--jit` | 2, auto |
+| `--worker-start zygote\|exec` | How workers start (below): forked from a zygote that loaded the image once, or each with `exec` | `zygote` on Linux, `exec` elsewhere |
 | `--admin-listen <address>:<port>` | The admin listener (below). Repeatable; give it a loopback address | none |
 | `--allow-fs[=prefix,...]`, `--allow-net`, `--allow-env` | Grant the workers that capability group | denied |
 | `--record-dir <directory>` | Record each request's host requests to `<request id>.trace` | |
@@ -122,13 +123,24 @@ The host prints one `admin on` line per admin listener, one `listening on` line 
 
 Before it listens, the host runs one worker with a *startup check*: `Context.serve` answers it with 204 without calling the handler. If `serve` fails or the worker does not exit with status 0, the host does not listen and exits with status 1.
 
+## Worker start
+
+Every request still gets a new process that has run no Neura code and serves that one request. What differs is how the process gets its loaded image:
+
+- **zygote** (Linux): at startup the host starts one helper process, the zygote (`neura-zygote` in `ps`), which reads the image, computes its SHA-256, loads it and verifies it once, and then waits. For each worker the host passes it the worker's end of a new channel and the zygote forks; the fork is made with `CLONE_PARENT`, so the worker is a child of the host, which waits for it, limits it and kills it like any other worker. The zygote has one thread, runs no Neura code and holds no request data, so a forked worker starts in the same state a worker started with `exec` reaches after its verification. A zygote that ends is replaced, up to three times; after that, or when one cannot start, the host starts workers with `exec` and logs it.
+- **exec**: each worker is `neura-server-host --worker` started with `posix_spawn`, and reads, hashes, loads and verifies the image itself.
+
+Forked workers share the zygote's address-space layout: address-space layout randomization differs between the host and its workers, but not from one worker to the next. A program that must not share its layout with other requests' workers runs with `--worker-start exec`.
+
+A worker holds its S-1 slot from its assignment until the host has reaped it, so the host's workers, exited or not, never outnumber S-1 plus S-2, and with the zygote the host's process tree never exceeds S-1 + S-2 + 2 processes. The host learns that a worker exited from its `pidfd` (Linux 5.3 and later; elsewhere it looks every 2 ms).
+
 ## Requests and failures
 
 The host rejects before any worker runs: a malformed request line or field, a folded field, a missing or repeated `Host`, both `Content-Length` and `Transfer-Encoding` (400); a transfer coding other than `chunked` or an unknown method (501); a head over S-5 (431); a `Content-Length` over S-6 (413). It answers `Expect: 100-continue` before it reads the body. Requests on one connection are served one at a time, in order, with keep-alive.
 
 A request is given to a worker at the end of its head, and its body streams to the worker as the client sends it; the worker starts running at once. A chunked body that grows past S-6, or whose chunk syntax is wrong, is found while it streams: the worker is killed and the answer is 413 or 400 if nothing was sent. The response streams back to the client as the worker produces it, once the request body has been received; a handler that answers before reading the body has the rest read and discarded, and the connection is kept. A client that stops reading slows the worker down: each write waits for the client (backpressure), within S-8.
 
-A ready worker whose process has ended is never given a request: the host discards it and uses another, and logs it. Because a worker runs no Neura code before it takes its assignment, this never runs a request twice; a worker that ends after its assignment is not replaced, and its request is answered as below.
+A ready worker whose process has ended is never given a request: the host discards it and uses another, and logs it. The same holds for a worker whose channel refuses the assignment itself; when its replacement refuses too, the answer is 500 and no third worker is tried. Because a worker runs no Neura code before it takes its assignment, this never runs a request twice; a worker that ends after its assignment is not replaced, and its request is answered as below.
 
 | Event | Answer |
 | --- | --- |
@@ -161,7 +173,7 @@ With `--admin-listen 127.0.0.1:9090` the host answers, outside worker admission 
 | --- | --- |
 | `GET /livez` | 200 `ok` while the host process runs |
 | `GET /readyz` | 200 `ready` after the startup check passed and the listeners are bound; 503 `starting` before, 503 `draining` during the drain |
-| `GET /metrics` | The Prometheus text format (version 0.0.4): `neura_http_responses_total` by status class, `neura_http_rejected_total`, `neura_http_timeouts_total`, `neura_worker_starts_total`, `neura_worker_abnormal_exits_total`, `neura_worker_retries_total`, the gauges `neura_http_in_flight`, `neura_workers_running`, `neura_workers_ready`, `neura_requests_waiting`, `neura_ready`, and every counter and gauge the program set with `Context.count` and `Context.gauge` |
+| `GET /metrics` | The Prometheus text format (version 0.0.4): `neura_http_responses_total` by status class, `neura_http_rejected_total`, `neura_http_timeouts_total`, `neura_worker_starts_total`, `neura_worker_abnormal_exits_total`, `neura_worker_retries_total`, the gauges `neura_http_in_flight`, `neura_workers_running` (slots in use, each held until its worker is reaped), `neura_workers_ready`, `neura_requests_waiting`, `neura_ready`, and every counter and gauge the program set with `Context.count` and `Context.gauge` |
 
 Another method is 405, another path 404. An application metric name is `[A-Za-z_:][A-Za-z0-9_:]*` of at most 128 bytes, keeps the kind it was first used with, and the host keeps at most 1,024 of them; a name past that answers `TooLarge`. The listener has no authentication: bind it to loopback or a private network.
 
