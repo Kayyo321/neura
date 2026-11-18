@@ -231,6 +231,12 @@ public:
         else if (!no_content) head += "Content-Length: " + std::to_string(*length) + "\r\n";
         if (close_) head += "Connection: close\r\n";
         head += "\r\n";
+        // A head with a known, small body is held back and sent with it, so
+        // a buffered response leaves in one write.
+        if (!chunked_ && !suppress_ && *length_ != 0 && *length_ <= coalesce_bytes) {
+            pending_ = std::move(head);
+            return StreamStatus::Ready;
+        }
         return result(stream_.write_all(head, deadline_));
     }
 
@@ -239,6 +245,13 @@ public:
         if (length_ && bytes.size() > *length_ - written_) return fail();
         written_ += bytes.size();
         if (suppress_ || bytes.empty()) return StreamStatus::Ready;
+        if (!pending_.empty()) {
+            pending_.append(bytes);
+            if (written_ < *length_) return StreamStatus::Ready;
+            const auto status = stream_.write_all(pending_, deadline_);
+            pending_.clear();
+            return result(status);
+        }
         if (!chunked_) return result(stream_.write_all(bytes, deadline_));
         std::string frame = hex(bytes.size());
         frame += "\r\n";
@@ -251,6 +264,11 @@ public:
         if (!started_ || finished_ || failed_) return fail();
         if (length_ && written_ != *length_) return fail();
         finished_ = true;
+        if (!pending_.empty()) {
+            const auto status = stream_.write_all(pending_, deadline_);
+            pending_.clear();
+            if (status != StreamStatus::Ready) return fail(status);
+        }
         if (chunked_ && !suppress_) return result(stream_.write_all("0\r\n\r\n", deadline_));
         return StreamStatus::Ready;
     }
@@ -279,7 +297,9 @@ private:
     bool invalid_ = false;
     bool suppress_ = false;
     bool chunked_ = false;
+    static constexpr std::uint64_t coalesce_bytes = 64 * 1024;
     StreamStatus failure_ = StreamStatus::Ready;
+    std::string pending_;
     std::optional<std::uint64_t> length_;
     std::uint64_t written_ = 0;
 };

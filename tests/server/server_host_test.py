@@ -408,6 +408,29 @@ def test_deadline_from_head(args, image):
         host.stop()
 
 
+def test_keep_alive_latency(args, image):
+    # A response leaves without waiting for the client's delayed
+    # acknowledgement (TCP_NODELAY, and the head sent with a small body):
+    # with Nagle's algorithm each keep-alive response took about 40 ms.
+    host = Host(args, image)
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
+        times = []
+        for n in range(40):
+            started = time.perf_counter()
+            connection.request("GET", f"/info?n={n}")
+            response = connection.getresponse()
+            response.read()
+            times.append(time.perf_counter() - started)
+            time.sleep(0.01)
+        connection.close()
+        times.sort()
+        median = times[len(times) // 2]
+        check(median < 0.03, f"keep-alive median latency {median * 1000:.1f} ms")
+    finally:
+        host.stop()
+
+
 def test_admin(args, image):
     host = Host(args, image, "--admin-listen", "127.0.0.1:0")
     try:
@@ -602,7 +625,7 @@ def main():
         print(build.stdout + build.stderr)
         return 1
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
-             test_deadline_from_head, test_admin, test_dead_ready_worker, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:
             continue

@@ -5,6 +5,8 @@
 #include <cerrno>
 #include <climits>
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 
@@ -19,6 +21,12 @@ inline bool configure(int descriptor) {
     const int enabled = 1;
     if (::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) < 0) return false;
 #endif
+    // A response is written as whole pieces (head and body, or one chunk);
+    // Nagle's algorithm would hold a piece back until the client's delayed
+    // acknowledgement of the previous one, about 40 ms on Linux. Not a TCP
+    // socket (a test's socket pair): nothing to turn off.
+    const int no_delay = 1;
+    (void)::setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof no_delay);
     return true;
 }
 

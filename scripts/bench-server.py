@@ -319,6 +319,7 @@ def main():
     parser.add_argument("--report")
     args = parser.parse_args()
     args.work = args.work or tempfile.mkdtemp(prefix="bench-server-")
+    os.makedirs(args.work, exist_ok=True)
     image = Path(args.work) / "test-server.nvr"
     subprocess.run([args.neura, "build", str(SOURCE / "tests/server/fixtures/test-server.nra"), "-o", str(image)],
                    check=True)
