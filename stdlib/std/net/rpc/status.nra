@@ -331,8 +331,12 @@ export let Status = module (
         export let.override message = func -> string => status.to_string();
 
         /// @brief Equal when the statuses are.
-        export let.override equals = func(other: class) -> bool =>
-            other is RpcFailure && status.equals((other as RpcFailure).status);
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: RpcFailure) {
+                return false;
+            }
+            return status.equals(that.status);
+        };
 
         /// @brief The status's hash.
         export let.override hash_code = func -> uint32 => status.hash_code();

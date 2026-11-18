@@ -265,8 +265,12 @@ export let ProtoWire = module (
         };
 
         /// @brief Equal when the number and wire type are.
-        export let.override equals = func(other: class) -> bool =>
-            other is FieldKey && (other as FieldKey).field == field && (other as FieldKey).wire_type == wire_type;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FieldKey) {
+                return false;
+            }
+            return that.field == field && that.wire_type == wire_type;
+        };
 
         /// @brief Combines the number and wire type.
         export let.override hash_code = func -> uint32 =>

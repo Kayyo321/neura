@@ -54,8 +54,12 @@ export let Baggage = module (
         };
 
         /// @brief Equal when the key and value are.
-        export let.override equals = func(other: class) -> bool =>
-            other is Property && to_header() == (other as Property).to_header();
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Property) {
+                return false;
+            }
+            return to_header() == that.to_header();
+        };
 
         /// @brief The hash of the encoded form.
         export let.override hash_code = func -> uint32 => strings.hash(to_header());
@@ -107,8 +111,12 @@ export let Baggage = module (
         };
 
         /// @brief Equal when the encoded members are.
-        export let.override equals = func(other: class) -> bool =>
-            other is Entry && to_header() == (other as Entry).to_header();
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Entry) {
+                return false;
+            }
+            return to_header() == that.to_header();
+        };
 
         /// @brief The hash of the encoded member.
         export let.override hash_code = func -> uint32 => strings.hash(to_header());

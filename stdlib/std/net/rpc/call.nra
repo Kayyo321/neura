@@ -43,8 +43,12 @@ export let Call = module (
         };
 
         /// @brief Equal when the service and method are (case-sensitive).
-        export let.override equals = func(other: class) -> bool =>
-            other is MethodPath && (other as MethodPath).service == service && (other as MethodPath).method == method;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: MethodPath) {
+                return false;
+            }
+            return that.service == service && that.method == method;
+        };
 
         /// @brief Combines both parts.
         export let.override hash_code = func -> uint32 =>

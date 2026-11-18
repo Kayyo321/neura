@@ -151,8 +151,12 @@ export let Ebpf = module (
         };
 
         /// @brief Equal when the handles are.
-        export let.override equals = func(other: class) -> bool =>
-            other is LoadedProgram && handle == (other as LoadedProgram).handle;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: LoadedProgram) {
+                return false;
+            }
+            return handle == that.handle;
+        };
 
         /// @brief The low bits of the handle.
         export let.override hash_code = func -> uint32 => (handle & 4294967295) as uint32;
@@ -177,8 +181,12 @@ export let Ebpf = module (
         };
 
         /// @brief Equal when the handles are.
-        export let.override equals = func(other: class) -> bool =>
-            other is LoadedMap && handle == (other as LoadedMap).handle;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: LoadedMap) {
+                return false;
+            }
+            return handle == that.handle;
+        };
 
         /// @brief The low bits of the handle.
         export let.override hash_code = func -> uint32 => (handle & 4294967295) as uint32;

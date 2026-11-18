@@ -41,7 +41,12 @@ export let Deadline = module (
         };
 
         /// @brief Equal when the readings are.
-        export let.override equals = func(other: class) -> bool => other is Deadline && (other as Deadline).at.equals(at);
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Deadline) {
+                return false;
+            }
+            return that.at.equals(at);
+        };
 
         /// @brief The reading's hash.
         export let.override hash_code = func -> uint32 => at.hash_code();
