@@ -167,7 +167,7 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 
 ## Web bundles
 
-`scripts/build-web-bundle.py --image app.nvr --id org.example.app --out dist/web` assembles the static directory of [Projects](../design/Projects030.md#bundles) from a built image and the browser runtime. It stands in for `neura build` of a `web` target until the project tools exist, and it adds no stylesheet or asset.
+`scripts/build-web-bundle.py --image app.nvr --id org.example.app --out dist/web` assembles the static directory of [Projects](../design/Projects030.md#bundles) from a built image and the browser runtime. It stands in for `neura build` of a `web` target until the project tools exist. `--source app.nra` runs `neura build` first (`--neura` names the executable). The stylesheets and assets that the build listed in `<image>.styles.json` ([Stylesheets](../apps/Css.md#build-output-and-order)) are copied at their paths, `styles/<sha256>.css` and `assets/<sha256>.<extension>`, after their digests and sizes are checked; the stylesheets are linked from `index.html` in the listed order, and only those are `initial`. [Your first Neura web app](../apps/WebApp.md) walks through it.
 
 | File | Content |
 | --- | --- |
@@ -175,6 +175,7 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 | `bundle.json` | Canonical JSON (sorted keys, no whitespace): `schema` 1, `kind` `web`, `id`, `name`, `version`, `image`, `files` (path, SHA-256, byte length, media type, `initial`), `requires` (`browser_adapter` 1, `ui_host` 1), `capabilities`, `origins`, `limits` (`W-1`), `contracts`, `csp`, `routing` |
 | `boot.<sha256>.mjs`, `nvm.<sha256>.js`, `ui.<sha256>.mjs`, `dom.<sha256>.mjs`, `ui-wire.<sha256>.mjs`, `nvm.<sha256>.mjs` | The browser host, with each import renamed to the file's digest name |
 | `nvm.<sha256>.wasm`, `app.<sha256>.nvr` | The runtime and the image |
+| `styles/<sha256>.css`, `assets/<sha256>.<extension>` | The image's stylesheets and assets, when it has any |
 
 The policy is `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`, and the same text is the `csp` field. The boot module fetches the image and `nvm.wasm` with their `integrity`, so a changed file stops the start. It compiles `nvm.wasm` by streaming when the host sends `application/wasm` and from bytes otherwise, runs the image with `browserHost` and a `UiHost` and `HistoryHost`, and sets `data-neura-state` on the root element to `running`, `completed`, `failed` or `unsupported`. A trap shows the failure banner with the trap's diagnostic. With `--routing history` the script writes `404.html` and says that the host must serve it for unknown paths.
 
@@ -183,4 +184,4 @@ The script does not yet refuse an image whose imports fall outside the groups a 
 ## Not provided in the browser yet
 
 - Recording and replaying a browser run. The services' requests and answers are explicit on the wire, so a trace can be written by the adapter; no trace format for the browser exists yet.
-- `neura.http.fetch`, gesture actions, and a model host for `neura run`: the UI services are not registered by the native runner, so a native run of an image that imports them fails to bind.
+- `neura.http.fetch`, gesture actions, and a model host for `neura run`. The native runner binds the UI and history services and answers each with error 14, so an image that imports `Std.Web` loads natively and `web.mount` returns `Err`.

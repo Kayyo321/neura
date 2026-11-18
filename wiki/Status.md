@@ -30,9 +30,9 @@ Arrays use [activation and static regions](Collections#array-lifetime). An owned
 
 ## Application platform development
 
-[HTML factories](HtmlFactories) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. [Stylesheets](Stylesheets) are module-level constants, inline or from files, with CSS-module names, bundled imports and assets, and a fixed link order that the build writes beside the image. [State and components](StateAndComponents) are library code in `Std.Ui`: `ui.State<T>` of deeply immutable values, subscriptions, components with slots, and roots whose turns render and commit over a `ui.Host`, tested on the in-memory `Std.Ui.ModelHost`. A root's commit is validated and reconciled by library code that issues the host operations in their fixed order. The browser and desktop hosts, commands, controls, routing, contracts, application packaging and full render effect checks are not implemented.
+[HTML factories](HtmlFactories) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. [Stylesheets](Stylesheets) are module-level constants, inline or from files, with CSS-module names, bundled imports and assets, and a fixed link order that the build writes beside the image. [State and components](StateAndComponents) are library code in `Std.Ui`: `ui.State<T>` of deeply immutable values, subscriptions, components with slots, and roots whose turns render and commit over a `ui.Host`, tested on the in-memory `Std.Ui.ModelHost`. A root's commit is validated and reconciled by library code that issues the host operations in their fixed order; a child component that renders alone commits only its own nodes. `Std.Web.mount` runs a component tree in a browser page over the runtime's UI services, checked end to end in headless Chromium and Firefox, and `scripts/build-web-bundle.py` bundles an application with its stylesheets for any static host ([Your first Neura web app](FirstWebApp)). The desktop host, commands, controls, routing, contracts, `neura build` of a `web` target and full render effect checks are not implemented.
 
-The browser runtime runs an image in a page under Node, headless Chromium and headless Firefox: `nvm.wasm` at tiers 0 to 2, waits and timers without polling, and the [UI and history host services](Providers#ui-services) with their commit and event encodings. Library state and components (`Std.Ui`, `Std.Web`), `neura.http.fetch`, web bundles, recording and replay in the browser, and Safari are not implemented yet.
+The browser runtime runs an image in a page under Node, headless Chromium and headless Firefox: `nvm.wasm` at tiers 0 to 2, waits and timers without polling, and the [UI and history host services](Providers#ui-services) with their commit and event encodings. `Std.Web.mount` drives these services from Neura, and static web bundles hold an image, its stylesheets and the runtime. `neura.http.fetch`, recording and replay in the browser, and Safari are not implemented yet.
 
 ## Outside this release
 
@@ -111,6 +111,7 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 | `concurrency/monitor.nra` | Compiles and runs; a monitor shared by tasks, an `#Immutable` value class, and `#Pure` and `#ThreadSafe` functions ([Tags](Tags#implemented-tags)). `backend-cli` builds and runs it. |
 | `types/frozen-list.nra` | Compiles and runs; a `FrozenList` copied from an array, a derived list, and for-each ([Collections](Collections#frozenlist)). |
 | `apps/components.nra` | Compiles and runs; a `ui.State`, a component with a click handler, and a root on the model host ([State and components](StateAndComponents)). |
+| `apps/web-counter/app.nra` | Compiles; runs in a browser page, where `app-web-browser` bundles it and checks that it mounts with its stylesheet. Run natively it reports that the `ui` services are not granted ([Your first Neura web app](FirstWebApp)). |
 
 
 ## Editor tooling candidate

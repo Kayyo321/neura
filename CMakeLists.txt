@@ -689,6 +689,15 @@ if(BUILD_TESTING)
     add_test(NAME app-ui-reconcile COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/reconcile.py" "$<TARGET_FILE:neura>")
     set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 300)
+    # A Neura application in headless Chromium and Firefox through Std.Web.mount. It needs the browser
+    # runtime of the wasm-runtime preset (configure with -DNEURA_WASM_HOST=ON, build the neura_wasm target),
+    # Node, and the browsers; without them it is skipped.
+    set(NEURA_WEB_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/wasm-runtime" CACHE PATH
+        "Directory holding nvm.wasm and nvm.mjs for the browser checks")
+    add_test(NAME app-web-browser COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/app-check.py" --neura "$<TARGET_FILE:neura>"
+        --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
+    set_tests_properties(app-web-browser PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

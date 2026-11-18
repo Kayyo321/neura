@@ -42,10 +42,11 @@ if(NOT examples)
 endif()
 # A program cannot both spawn a task and use native bindings
 # (docs/lang/Concurrency.md, C15), and the examples include one of each, so
-# the concurrency examples are checked as programs of their own.
+# the concurrency examples, and the web applications whose roots run in a
+# scope, are checked as programs of their own.
 set(concurrency_examples ${examples})
-list(FILTER concurrency_examples INCLUDE REGEX "/examples/concurrency/")
-list(FILTER examples EXCLUDE REGEX "/examples/concurrency/")
+list(FILTER concurrency_examples INCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
+list(FILTER examples EXCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
 if(NOT concurrency_examples)
     message(FATAL_ERROR "No concurrency examples were found")
 endif()
