@@ -319,6 +319,25 @@ let Named = interface (
 );
 ''')
 
+    def test_derivations(self):
+        # docs/design/Records030.md, Formatter: a derivation's type arguments
+        # are written like any generic's, and its mappings one per line.
+        source = '''let A=derive json.Codec < User >;
+let B=derive json.Codec<Variant<int>>{};
+let C=derive json.Codec<Variant<[int,bool]> > {field User.name:"display_name";variant Mode.Fast : "fast";};
+let derive=1;
+let after=derive<2;
+'''
+        self.assertEqual(self.formatted(source), '''let A = derive json.Codec<User>;
+let B = derive json.Codec<Variant<int>> {};
+let C = derive json.Codec<Variant<[int, bool]>> {
+    field User.name: "display_name";
+    variant Mode.Fast: "fast";
+};
+let derive = 1;
+let after = derive < 2;
+''')
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

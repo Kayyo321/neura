@@ -242,6 +242,9 @@ private:
         if (value.cast_target) type(*value.cast_target);
         types(value.interfaces);
         if (value.initializer) expression(*value.initializer);
+        // `derive G<T> { ... }`: its mappings hold no '<' or '>', so every
+        // angle in the declaration belongs to the generator's type arguments.
+        if (value.derive) angle_span(value.span);
         for (const auto& generic : value.generics) types(generic.bounds);
         for (const auto& parameter : value.parameters) {
             type(parameter.type);
