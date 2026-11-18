@@ -64,7 +64,7 @@ export let SchemaBuilder = module (
         let text = "CREATE TABLE " + table + " (";
         let first = true;
         for (let field in type.fields) {
-            if (attributes.skipped(field)) {
+            if (attributes.skipped(field) || !field.exported) {
                 continue;
             }
             let column = model.descriptor_of(field.type_ordinal);
@@ -169,7 +169,7 @@ export let SchemaBuilder = module (
         let text = "message " + proto_name(type) + " {\n";
         let number = 1;
         for (let field in type.fields) {
-            if (attributes.skipped(field)) {
+            if (attributes.skipped(field) || !field.exported) {
                 continue;
             }
             last field_type = model.descriptor_of(field.type_ordinal);
@@ -285,7 +285,7 @@ export let SchemaBuilder = module (
         last properties: [string, JsonValue][list] = new;
         last required: JsonValue[list] = new;
         for (let field in type.fields) {
-            if (attributes.skipped(field)) {
+            if (attributes.skipped(field) || !field.exported) {
                 continue;
             }
             last wire = attributes.serial_name(field);

@@ -123,7 +123,6 @@ public:
             if (name == "construct") need_construct_ = true;
             if (name == "invoke") need_invoke_ = true;
         }
-        build_functions();
         for (auto* site : sites) {
             if (site->text != "proxy") continue;
             const auto& face = site->type_arguments.empty() ? site->type : site->type_arguments.front();
@@ -131,6 +130,7 @@ public:
             if (k < 0) throw Diagnostic(site->span, "this interface cannot be proxied").with_code("E1300");
             make_proxy(k, site->span);
         }
+        build_functions();
         for (auto* site : sites) *site = expand_site(*site);
         // The unpack functions are made while sites expand; their bodies hold no
         // Reflect node.
@@ -317,6 +317,9 @@ private:
                               : tag <= 13 ? TypeKind::Float : TypeKind::String;
             types_.push_back(IrType{kind, name, no_symbol, {}});
         }
+        // `class` is always described: a live object of a class outside the
+        // universe answers as it, never as nil.
+        if (valid(root_)) ordinal(symbol(root_).type);
         for (auto& body : program_.bodies) collect_allocations(body.instructions);
         for (const auto& constant : program_.static_constants) collect_allocations({constant.value});
         for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
@@ -863,7 +866,7 @@ private:
                     if (field.getter != no_symbol) flags += 'g';
                     if (field.setter != no_symbol) flags += 's';
                     result += "F\t" + escape(field.name) + "\t" + std::to_string(ord_or_any(field.type)) + "\t" + flags +
-                              "\n" + (pol == Policy::Full ? tags(symbol(field.symbol)) : "");
+                              "\n" + tags(symbol(field.symbol));
                 }
                 if (symbol(id).kind == SymbolKind::Class && !abstract(id)) {
                     const auto inits = constructors(id);
@@ -877,7 +880,7 @@ private:
                         const auto& item = symbol(method);
                         std::string flags;
                         if (item.exported) flags += 'e';
-                        if (invocable(method)) flags += 'v';
+                        if (item.exported && invocable(method)) flags += 'v';
                         result += "M\t" + escape(item.name) + "\t" + std::to_string(ord_or_any(item.type)) + "\t" +
                                   flags + "\n" + tags(item) + params(method);
                     }
@@ -1174,7 +1177,7 @@ private:
         // The dynamic ordinal of an any: its tag, or its class, a box giving
         // its content's ordinal; nil is 0.
         {
-            auto builder = function("$reflect_ordinal", int_type, {{"value", any_type}});
+            auto builder = function("$reflect_ordinal", int_type, {{"value", any_type}, {"fallback", int_type}});
             const auto source = local(builder.id, "$source", any_type);
             builder.body.push_back(initialize(source, load(builder.parameters[0])));
             for (std::uint32_t tag = 1; tag <= 14; ++tag)
@@ -1197,16 +1200,17 @@ private:
                 candidates.emplace_back(depth, k);
             }
             std::ranges::stable_sort(candidates, [](const auto& a, const auto& b) { return a.first > b.first; });
+            // A proxy answers as its interface.
+            for (const auto& [k, proxy] : proxies_) candidates.emplace_back(1, k);
+            std::ranges::stable_sort(candidates, [](const auto& a, const auto& b) { return a.first > b.first; });
             for (const auto& [depth, k] : candidates) {
                 (void)depth;
-                const auto cls = boxed(types_[k]) ? boxes_.at(k) : types_[k].symbol;
+                const auto cls = proxies_.contains(k) ? proxies_.at(k) : boxed(types_[k]) ? boxes_.at(k) : types_[k].symbol;
                 classes.push_back(branch(class_is(load(object), symbol(cls).type), {ret(integer(k))}));
             }
-            // A class the universe left out still answers as its nearest
-            // ancestor in it, or as `class`.
-            const auto root_ordinal = index_.find(type_identity(symbol(root_).type));
-            classes.push_back(branch(class_is(load(object), symbol(root_).type),
-                                     {ret(integer(root_ordinal == index_.end() ? 0 : root_ordinal->second))}));
+            // A live object of a class the universe left out answers as the
+            // caller's static type, as typeof does (`class` for an any).
+            classes.push_back(branch(class_is(load(object), symbol(root_).type), {ret(load(builder.parameters[1]))}));
             builder.body.push_back(branch(any_tag_is(source, 0), std::move(classes)));
             builder.body.push_back(ret(integer(0)));
             ordinal_function_ = builder.id;
@@ -1257,8 +1261,13 @@ private:
                 statements.push_back(initialize(held, std::move(object)));
                 for (std::size_t i = 0; i < members.size(); ++i) {
                     if (!usable(members[i].type)) continue;
-                    statements.push_back(branch(binary("==", load(get.parameters[2]), integer(static_cast<std::int64_t>(i))),
-                                                {ret(pack(read_member(load(held), members[i]), members[i].type, get.id))}));
+                    const auto selected = binary("==", load(get.parameters[2]), integer(static_cast<std::int64_t>(i)));
+                    if (!members[i].exported) {
+                        statements.push_back(branch(selected, {trap("reflection: field " + members[i].name + " of " +
+                                                                    describe(type).name + " is not exported")}));
+                        continue;
+                    }
+                    statements.push_back(branch(selected, {ret(pack(read_member(load(held), members[i]), members[i].type, get.id))}));
                 }
                 return statements;
             }, nil_target, false));
@@ -1270,6 +1279,11 @@ private:
                     const auto& member = members[i];
                     const auto selected = binary("==", load(set.parameters[2]), integer(static_cast<std::int64_t>(i)));
                     const bool writable = pol == Policy::Full || pol == Policy::Layout;
+                    if (!member.exported) {
+                        statements.push_back(branch(selected, {trap("reflection: field " + member.name + " of " +
+                                                                    describe(type).name + " is not exported")}));
+                        continue;
+                    }
                     if (!writable || member.constant || member.last || (member.getter != no_symbol && member.setter == no_symbol) ||
                         !usable(member.type)) {
                         statements.push_back(branch(selected, {trap("reflection: field " + member.name + " of " +
@@ -1455,10 +1469,10 @@ private:
                         kinds.push_back(ord_or_any(symbol(parameter).type));
                         if (!this->usable(symbol(parameter).type)) usable = false;
                     }
-                    if (!usable) {
+                    if (!usable || !symbol(inits[j]).exported) {
                         statements.push_back(branch(binary("==", load(build.parameters[1]), integer(static_cast<std::int64_t>(j))),
                                                     {trap("reflection: constructor " + std::to_string(j) + " of " + name +
-                                                          " cannot be called dynamically")}));
+                                                          (usable ? " is not exported" : " cannot be called dynamically"))}));
                         continue;
                     }
                     const auto init = inits[j];
@@ -1610,6 +1624,11 @@ private:
                 for (std::size_t m = 0; m < all.size(); ++m) {
                     const auto method = all[m];
                     const auto selected = binary("==", load(build.parameters[2]), integer(static_cast<std::int64_t>(m)));
+                    if (!symbol(method).exported) {
+                        statements.push_back(branch(selected, {trap("reflection: method " + symbol(method).name + " of " +
+                                                                    name + " is not exported")}));
+                        continue;
+                    }
                     if (!invocable(method)) {
                         statements.push_back(branch(selected, {trap("reflection: method " + symbol(method).name + " of " +
                                                                     name + " cannot be invoked dynamically")}));
@@ -1670,10 +1689,13 @@ private:
         if (name == "ordinal") {
             const auto& operand = args.front();
             const auto k = ord_or_any(operand.type);
+            const auto root_ordinal = ord_or_any(symbol(root_).type);
             if (operand.type.kind == TypeKind::Any) {
-                result = call_function(ordinal_function_, {std::move(args.front())});
+                result = call_function(ordinal_function_, {std::move(args.front()), integer(root_ordinal)});
             } else if (operand.type.kind == TypeKind::Object) {
-                result = call_function(ordinal_function_, {with(make(IrOp::AnyPack, span, any_type), {std::move(args.front())})});
+                const auto fallback = k < 0 ? root_ordinal : k;
+                result = call_function(ordinal_function_, {with(make(IrOp::AnyPack, span, any_type), {std::move(args.front())}),
+                                                            integer(fallback)});
             } else {
                 // A value type: its static ordinal, the operand still evaluated.
                 auto scoped = make(IrOp::ScopedValue, span, int_type);

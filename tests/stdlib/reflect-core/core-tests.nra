@@ -56,6 +56,12 @@ let Box = class<T> (
     };
 );
 
+let reflectables = import:Std.Reflect.Core.Reflectable;
+
+let Holder = class (
+    export static let kept: Base = new Base();
+);
+
 let CoreTests = module (
     // Vectors: python3 -c "import hashlib; print(hashlib.sha256(b'abc').hexdigest()[:32])" and the same for
     // b'7:Point@core-tests.nra'; the halves are the two 16-digit groups read as unsigned integers.
@@ -191,5 +197,23 @@ let CoreTests = module (
         test.assert(registry.at(point.ordinal) == point);
         test.assert(registry.find_name("NoSuchType") == nil);
         test.assert(types.of_info(typeof(new Point(0, 0))) == point);
+    };
+
+    export let test_reflectable = func() -> void {
+        test.assert(reflectables.descriptor<Point>() == types.of<Point>());
+        test.assert_equal_string("Circle", reflectables.descriptor_of(new Circle() as Shape).name);
+        test.assert_equal_int32(2, reflectables.cursor(new Point(1, 2)).child(1).value().get<int32>());
+    };
+
+    // The descriptor of a value agrees with typeof, which describes an object of a class it cannot name by its
+    // static type (Expressions030 ec829ffd).
+    export let test_descriptor_agrees_with_typeof = func() -> void {
+        last anonymous: Base = new class : Base ( export let extra: int32 = 1; )();
+        test.assert(types.of_value(anonymous).info() === typeof(anonymous));
+        test.assert(types.of_value(Holder.kept).info() === typeof(Holder.kept));
+        last shape: Shape = new Circle();
+        test.assert(types.of_value(shape).info() === typeof(shape));
+        last none: Shape = nil;
+        test.assert(types.of_value(none).info() === typeof(none));
     };
 );

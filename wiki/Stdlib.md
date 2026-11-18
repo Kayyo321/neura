@@ -187,6 +187,7 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Reflect.Core.MemoryLayout`](Stdlib-Reflect-MemoryLayout) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-MemoryLayout#exported-declarations) |
 | [`Std.Reflect.Core.ReflectPolicy`](Stdlib-Reflect-ReflectPolicy) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-ReflectPolicy#exported-declarations) |
 | [`Std.Reflect.Core.TypeRegistry`](Stdlib-Reflect-TypeRegistry) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-TypeRegistry#exported-declarations) |
+| [`Std.Reflect.Core.Reflectable`](Stdlib-Reflect-Reflectable) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Reflectable#exported-declarations) |
 | [`Std.Reflect.Type.TypeDescriptor`](Stdlib-Reflect-TypeDescriptor) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-TypeDescriptor#exported-declarations) |
 | [`Std.Reflect.Member.Members`](Stdlib-Reflect-Members) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-Members#exported-declarations) |
 | [`Std.Reflect.Member.ValueCursor`](Stdlib-Reflect-ValueCursor) | [Std.Reflect](Stdlib-Design#20-stdreflect) | [Declarations](Stdlib-Reflect-ValueCursor#exported-declarations) |

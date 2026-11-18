@@ -51,6 +51,18 @@ let Row = class (
     export let tiny: int8 = 0;
 );
 
+let policies = import:Std.Reflect.Core.ReflectPolicy;
+
+let Vault = class implements policies.Layout (
+    export let name: string = "v";
+    #Sensitive
+    export let key: string = "k";
+    let hidden: int32 = 3;
+    export let init = func { };
+);
+
+let Login = record (user: string, #Sensitive password: string);
+
 let Node = class (
     export let name: string = "";
     export let next: Node = nil;
@@ -182,5 +194,17 @@ let CodecTests = module (
             "CREATE TABLE rows (\n    count BIGINT NOT NULL,\n    note TEXT,\n    tiny SMALLINT NOT NULL\n);",
             schemas.sql_table(types.of<Row>(), "rows"));
     };
-);
 
+    export let test_layout_policy_keeps_field_tags_and_hides_unexported_fields = func() -> void {
+        last vault = new Vault();
+        test.assert_equal_string("{\"name\":\"v\",\"key\":\"<redacted>\"}", bridge.encode(variants.of(vault)));
+    };
+
+    export let test_a_record_with_a_sensitive_component_is_not_rebuilt = func() -> void {
+        last text = bridge.encode(variants.of(new Login("ada", "secret")));
+        test.assert_equal_string("{\"user\":\"ada\",\"password\":\"<redacted>\"}", text);
+        last problem = test.assert_err(bridge.decode(text, types.of<Login>()));
+        test.assert(problem.to_string().contains("reflect.json.missing"));
+        test.assert(problem.to_string().contains("$.password"));
+    };
+);

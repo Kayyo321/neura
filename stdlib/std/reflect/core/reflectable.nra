@@ -1,0 +1,27 @@
+let model = import:Std.Reflect.Internal.Model;
+let cursors = import:Std.Reflect.Member.ValueCursor;
+
+/// @brief The root contract of reflection (docs/design/Reflect030.md, The packages). Every type of a program is
+/// reflectable without declaring anything: the compiler describes each type the program reaches, so this module
+/// is the contract's operations rather than an interface a class implements. A class narrows what is kept with
+/// `Std.Reflect.Core.ReflectPolicy`.
+/// @see [Std.Reflect.Core.Reflectable](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Reflectable)
+#Since("0.3.0")
+export let Reflectable = module (
+    /// @brief The static descriptor of `T`.
+    #Since("0.3.0")
+    export let descriptor = func<T>() -> model.TypeDescriptor => model.descriptor_for<T>();
+
+    /// @brief The descriptor of the value's type: its dynamic class for a reference.
+    #Since("0.3.0")
+    export let descriptor_of = func<T>(value: T) -> model.TypeDescriptor => model.variant_of(value).descriptor();
+
+    /// @brief A read-only cursor at the root of the value, bound to its descriptor.
+    #Since("0.3.0")
+    export let cursor = func<T>(value: T) -> cursors.ValueCursor => cursors.at(model.variant_of(value));
+
+    /// @brief A writable cursor at the field path `steps` of the value.
+    #Since("0.3.0")
+    export let cursor_mut = func<T>(value: T, steps: int[list]) -> cursors.ValueCursorMut =>
+        new cursors.ValueCursorMut(model.variant_of(value), steps);
+);

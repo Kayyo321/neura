@@ -25,9 +25,11 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// record as an object with one member per field in declaration order, a list or tuple as an array, `Optional` as
 /// `null` or the value, any other enum as `{"variant": name, "payload": [...]}` (no `payload` for a fieldless
 /// variant), and nil as `null`. Field tags: `#SerialName("wire")` renames a member, `#Skip` leaves it out, and
-/// `#Sensitive` writes `"<redacted>"` (such a field cannot be decoded and keeps its default). Decoding builds a
-/// record or class with the constructor whose parameters all name fields (a record's generated one), or with a
-/// constructor that takes no arguments and then sets each writable field. A reference cycle traps.
+/// `#Sensitive` writes `"<redacted>"`; unexported fields are left out. Decoding builds a record or class with the
+/// constructor whose parameters all name fields (a record's generated one), or with a constructor that takes no
+/// arguments and then sets each writable exported field; a `#Sensitive` or `#Skip` field keeps the value that
+/// constructor gave it, and a record with such a component cannot be decoded (`reflect.json.missing`). A reference
+/// cycle traps.
 /// @see [Std.Reflect.Codec.JsonBridge](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-JsonBridge)
 #Since("0.3.0")
 export let JsonBridge = module (
@@ -128,7 +130,7 @@ export let JsonBridge = module (
             open.append(value);
             last members: [string, JsonValue][list] = new;
             for (let field in type.fields) {
-                if (attributes.skipped(field)) {
+                if (attributes.skipped(field) || !field.exported) {
                     continue;
                 }
                 last wire = attributes.serial_name(field);
@@ -333,6 +335,11 @@ export let JsonBridge = module (
             for (let parameter in constructor.parameters) {
                 last field = type.field(parameter.name);
                 last at = path + "." + attributes.serial_name(field);
+                if (attributes.sensitive(field) || attributes.skipped(field) || !field.exported) {
+                    // Encoding left the value out or wrote a placeholder, so nothing can rebuild it.
+                    return failure("reflect.json.missing", at, "a #Sensitive, #Skip or unexported field is not " +
+                                   "written as JSON, so " + type.name + " cannot be rebuilt by its constructor");
+                }
                 match (wire_member(members, field)) {
                     Optional.Some(item) => {
                         match (decode_value(item, model.descriptor_of(field.type_ordinal), at)) {
@@ -361,7 +368,7 @@ export let JsonBridge = module (
             }
             last made = model.construct(type.ordinal, constructor.index, new);
             for (let field in type.fields) {
-                if (!field.writable() || attributes.skipped(field) || attributes.sensitive(field)) {
+                if (!field.writable() || !field.exported || attributes.skipped(field) || attributes.sensitive(field)) {
                     continue;
                 }
                 last at = path + "." + attributes.serial_name(field);

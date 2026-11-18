@@ -2,6 +2,7 @@
 // arguments packed into Variants and results unpacked to the method's type, and forwarding to a real object.
 let.promote optional = import:Std.Core.Optional;
 let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let types = import:Std.Reflect.Type.TypeDescriptor;
 let variants = import:Std.Reflect.Dynamic.Variant;
 let test = import:Std.Test;
 
@@ -100,5 +101,12 @@ let ProxyTests = module (
         last greeter = proxies.create<Greeter>(new Recorder());
         test.assert(greeter is Greeter);
         test.assert(!(greeter is Real));
+    };
+
+    export let test_a_proxy_is_described_as_its_interface = func() -> void {
+        last greeter = proxies.create<Greeter>(new Recorder());
+        last described = types.of_value(greeter);
+        test.assert_equal_string("Greeter", described.name);
+        test.assert(!variants.of(greeter).is_nil());
     };
 );

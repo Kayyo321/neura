@@ -116,10 +116,10 @@ export let Model = module (
         /// @brief The declared type's name.
         export let type_name = func -> string => name_of(type_ordinal);
 
-        /// @brief Whether `set` can write the field: not `const` or `last`, not read-only through a getter, and
-        /// its class keeps its layout.
+        /// @brief Whether `set` can write the field: exported, not `const` or `last`, not read-only through a
+        /// getter, and its class keeps its layout.
         export let writable = func -> bool =>
-            !is_const && !is_last && (!has_getter || has_setter) &&
+            exported && !is_const && !is_last && (!has_getter || has_setter) &&
             descriptor(owner).policy != policies.Level.Strip;
 
         /// @brief Whether the field is a property: read and written through accessors rather than storage.

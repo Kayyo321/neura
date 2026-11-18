@@ -29,5 +29,5 @@ The following public declarations are taken from the module source; each links t
   Walks `root` with `visitor`; the result is `Stop` when the visitor stopped the walk.
 - **Walk.WalkEngine** · [`export let walk_mut = func(root: model.Variant, visitor: ReflectMutVisitor)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/codec/walk.nra#L43)
   Walks the fields of every object under `root`, letting `visitor` replace each field's value.
-- **Walk.WalkEngine** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/codec/walk.nra#L115)
+- **Walk.WalkEngine** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/codec/walk.nra#L121)
 <!-- END SOURCE API -->

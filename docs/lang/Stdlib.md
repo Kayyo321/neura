@@ -1464,6 +1464,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency.md) s
 | `Std.Reflect.Core.MemoryLayout` | The NVR representation of a type: value words, form, whether it is plain data, scalar bit width. |
 | `Std.Reflect.Core.ReflectPolicy` | Marker interfaces `Strip` and `Layout` that a class implements to keep less; `Full` otherwise. Two markers are E1302. |
 | `Std.Reflect.Core.TypeRegistry` | Every universe type by ordinal, `TypeId` or qualified name. |
+| `Std.Reflect.Core.Reflectable` | The root contract as operations: the descriptor of a type or value and cursors bound to a value. |
 | `Std.Reflect.Type.TypeKind`, `Std.Reflect.Type.TypeDescriptor` | The kind of a type, and its descriptor: names, identity, layout, policy, base, interfaces, generic origin and arguments, fields (base fields first), variants with payloads, constructors, instance methods, element types and tags. `of<T>()`, `of_value(value)` (the dynamic class of a reference), `of_ordinal`, `of_info`. |
 | `Std.Reflect.Member.Members`, `Std.Reflect.Member.ValueCursor` | `FieldInfo` (flags, property accessors, tags), `VariantInfo`, `MethodInfo`, `ParamInfo`, `ConstructorInfo`, `Visibility`, `FieldFlags`; cursors that read and write a value by a path of member indexes. |
 | `Std.Reflect.Attribute.Attributes` | Tags as runtime attributes with their arguments as written; `serial_name`, `skipped` and `sensitive` read `#SerialName`, `#Skip` and `#Sensitive`. |
@@ -1472,7 +1473,7 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency.md) s
 | `Std.Reflect.Ffi.Abi`, `Std.Reflect.Ffi.ForeignCall` | C struct layouts and argument classes for a declared target triple (System V x86-64, AAPCS64, Windows x64, wasm32); native functions called with `Variant` arguments through `Std.DynamicForeign` (needs the native capability). |
 | `Std.Reflect.Proxy.DynamicProxy` | `create<I>(handler)`: an object implementing the interface `I` whose calls reach an `InvocationHandler`; `forward` to call a reflected object. An interface with a property, a static requirement, or a generic or variadic method is E1300. |
 
-Limits: an array lives in its region and has no dynamic value (E1301 where one is packed; array fields are skipped), and neither do scope-bound values and primitive references. Generic and variadic methods are not listed, and static functions and the root methods are not invocable. A proxy reports its dynamic type as `class`. `long double`, bit fields and packed structs have no C layout. [reflection.nra](../../examples/types/reflection.nra) uses descriptors, the JSON bridge, a field write and a proxy.
+Limits: an array lives in its region and has no dynamic value (E1301 where one is packed; array fields are skipped), and neither do scope-bound values and primitive references. Dynamic access reaches exported members only. Reflection caches parsed descriptors in module state, so a spawned task cannot call it (E0601). Generic and variadic methods are not listed, and static functions and the root methods are not invocable. A proxy reports its dynamic type as `class`. `long double`, bit fields and packed structs have no C layout. [reflection.nra](../../examples/types/reflection.nra) uses descriptors, the JSON bridge, a field write and a proxy.
 
 <!-- example: check -->
 ```neura
