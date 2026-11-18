@@ -1,0 +1,99 @@
+// Browser waits (docs/runtime/Providers.md, "Scheduling"): three tasks sleep
+// 200 ms each and overlap, a scope deadline cancels a long sleep, and a
+// connection the browser does not grant fails at once with CapabilityDenied.
+// The elapsed-time bounds are generous so that a busy machine still passes.
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let streams = import:Std.Net.TcpStream;
+let system_clock = import:Std.Time.SystemClock;
+
+let describe = func(label: string, problem: errors.Error) -> string {
+    return match (problem) {
+        errors.Error.Io { kind, message, path } => label + ": " + errors.io_kind_name(kind),
+        _ => label + ": another error",
+    };
+};
+
+let sleeper = func(label: int, millis: int64, out: channels.Sender<string>) {
+    match (system_clock.create().sleep(durations.of_millis(millis))) {
+        result.Result.Ok(_) => {
+            out.send("slept " + label.to_string());
+        },
+        result.Result.Err(problem) => {
+            out.send(describe("sleep " + label.to_string(), problem));
+        },
+    }
+};
+
+let connector = func(out: channels.Sender<string>) {
+    match (streams.connect("127.0.0.1", 9, durations.of_seconds(5))) {
+        result.Result.Ok(stream) => {
+            out.send("connect: connected");
+            stream.close();
+        },
+        result.Result.Err(problem) => {
+            out.send(describe("connect", problem));
+        },
+    }
+};
+
+let now = func -> int64 {
+    return match (system_clock.create().monotonic()) {
+        result.Result.Ok(reading) => reading.to_nanos(),
+        result.Result.Err(_) => 0,
+    };
+};
+
+let show = func(results: channels.Receiver<string>) {
+    match (results.receive()) {
+        channels.Received.Value(text) => {
+            console.print_line(text);
+        },
+        _ => {
+            console.print_line("no result");
+        },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let woke = channels.open<string>(3);
+        let started = now();
+        scope {
+            spawn sleeper(1, 200, woke[0]);
+            spawn sleeper(2, 200, woke[0]);
+            spawn sleeper(3, 200, woke[0]);
+            for (let i: int = 0; i < 3; i++) {
+                match (woke[1].receive()) {
+                    channels.Received.Value(text) => {},
+                    _ => {
+                        console.print_line("a sleeper sent nothing");
+                    },
+                }
+            }
+        }
+        let elapsed = now() - started;
+        console.print_line("three sleeps overlapped: " + (elapsed >= 200000000 && elapsed < 550000000).to_string());
+
+        let sleeps = channels.open<string>(1);
+        let connects = channels.open<string>(1);
+        scope (deadline) {
+            match (deadline.cancel_after(durations.of_millis(100))) {
+                result.Result.Ok(_) => {},
+                result.Result.Err(problem) => {
+                    console.print_line(describe("deadline", problem));
+                },
+            }
+            spawn sleeper(4, 60000, sleeps[0]);
+            spawn connector(connects[0]);
+            show(connects[1]);
+            show(sleeps[1]);
+        }
+        console.print_line("scope closed");
+        return program.ExitCode.Ok;
+    };
+);

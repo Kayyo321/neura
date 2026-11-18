@@ -187,8 +187,8 @@ if(NEURA_WASM_RUNTIME)
         set_target_properties(neura_wasm PROPERTIES OUTPUT_NAME nvm SUFFIX .mjs)
         target_link_libraries(neura_wasm PRIVATE neura_nvm)
         set(neura_wasm_exports
-            _malloc _free _neura_wasm_open _neura_wasm_close _neura_wasm_error
-            _neura_wasm_advance _neura_wasm_respond _neura_wasm_clock
+            _malloc _free _neura_wasm_interface _neura_wasm_open _neura_wasm_close _neura_wasm_error
+            _neura_wasm_advance _neura_wasm_respond _neura_wasm_deliver _neura_wasm_clock
             _neura_wasm_has_proof _neura_wasm_prove_idle)
         list(JOIN neura_wasm_exports "','" neura_wasm_exports)
         target_link_options(neura_wasm PRIVATE

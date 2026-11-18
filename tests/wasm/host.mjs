@@ -31,12 +31,12 @@ function collect(module, image, oracle, options, budget, doIdle, kernelBoundarie
     const run = new NvmExecution(module, image, {
         ...options,
         host: {
-            console(line, sequence) { received.push([sequence, line]); },
-            clockWall(sequence) {
+            console(line, { sequence }) { received.push([sequence, line]); },
+            clockWall({ sequence }) {
                 received.push([sequence, 'wall']);
                 return { seconds: 1794252615n, nanos: 250000000 };
             },
-            clockMonotonic(sequence) {
+            clockMonotonic({ sequence }) {
                 received.push([sequence, 'monotonic']);
                 return sequence === 3n ? 9007199254740992n : 9007199254740993n;
             },
@@ -61,7 +61,7 @@ function collect(module, image, oracle, options, budget, doIdle, kernelBoundarie
             previous = event.steps;
             if (event.kind === 'host') {
                 equal(run.proveOneIdle(), null, 'proof while a host request is pending');
-                run.serveRequest();
+                if (run.serveRequest() !== undefined) throw new Error('a synchronous service answered later');
                 continue;
             }
             if (event.kind === 'yield') {
@@ -95,7 +95,18 @@ async function main() {
     const sha256 = await read('sha256.nvr');
     const sorting = await read('sorting.nvr');
     const state = await read('kernelState.nvr');
-    rejects(() => new NvmExecution(module, hello), /neura.console.write_line/);
+    // An ungranted service binds and is answered by the runtime with error 14.
+    const ungranted = new NvmExecution(module, hello);
+    try {
+        for (;;) {
+            const event = ungranted.advanceSlice();
+            if (event.kind === 'host') throw new Error('an ungranted service reached the host');
+            if (event.kind === 'completed' || event.kind === 'trapped') break;
+        }
+    } finally {
+        ungranted.close();
+    }
+    rejects(() => new NvmExecution({ ...module, _neura_wasm_interface: () => 2 }, hello), /adapter interface 1/);
     rejects(() => new NvmExecution(module, hello.subarray(0, 5)), /magic|header|truncated|short/i);
     const outcomes = [];
     for (const [name, image, options] of [
