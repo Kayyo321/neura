@@ -91,10 +91,10 @@ export let Ipv4Addr = module (
 
         /// @brief Tests whether another address is an `Ipv4Addr` with the same value.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Ipv4Addr)) {
+            if (other is not that: Ipv4Addr) {
                 return false;
             }
-            return bits == (other as Ipv4Addr).bits;
+            return bits == that.bits;
         };
 
         /// @brief Combines 17 with the value.
@@ -104,8 +104,8 @@ export let Ipv4Addr = module (
         /// @brief The dotted-decimal form, for example `192.0.2.1`.
         #Pure
         export let.override to_string = func -> string =>
-            octet(0).to_string() + "." + octet(1).to_string() + "." + octet(2).to_string() + "."
-            + octet(3).to_string();
+            octet(0).to_string() .. "." .. octet(1).to_string() .. "." .. octet(2).to_string() .. "."
+            .. octet(3).to_string();
 
         /// @brief Octet `index` (0 is the most significant) as an int.
         let octet = func(index: int) -> int => ((bits >> ((3 - index) * 8) as uint32) & 255) as int;

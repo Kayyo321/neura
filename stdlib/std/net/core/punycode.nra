@@ -95,7 +95,7 @@ export let Punycode = module (
             n++;
         }
         let [valid, text] = string.from_utf8(output);
-        if (!valid) {
+        if (not valid) {
             trap_with_message("invalid state: punycode output is not ASCII");
         }
         return Result<string>.Ok(text);

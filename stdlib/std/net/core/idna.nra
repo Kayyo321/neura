@@ -52,7 +52,7 @@ export let Idna = module (
         for (let i = 0; i < labels.length; i++) {
             last label = labels[i];
             if (i > 0) {
-                text += ".";
+                text ..= ".";
             }
             last lowered = strings.to_ascii_lower(label.text);
             if (strings.starts_with(lowered, "xn--")) {
@@ -70,7 +70,7 @@ export let Idna = module (
             }
         }
         if (ends_with_root(domain)) {
-            text += ".";
+            text ..= ".";
         }
         return Result<string>.Ok(text);
     };
@@ -149,7 +149,7 @@ export let Idna = module (
         let text = "";
         for (let i = 0; i < labels.length; i++) {
             if (i > 0) {
-                text += ".";
+                text ..= ".";
             }
             text += label_to_ascii(labels[i], std3)?;
         }
@@ -157,7 +157,7 @@ export let Idna = module (
             return failed(ParseErrorKind.OutOfRange, 0, "domain name longer than 253 bytes");
         }
         if (ends_with_root(domain)) {
-            text += ".";
+            text ..= ".";
         }
         return Result<string>.Ok(text);
     };
@@ -173,9 +173,9 @@ export let Idna = module (
             }
             if (needs_mapping(s)) {
                 return failed(ParseErrorKind.InvalidCharacter, label.offset,
-                    "U+" + hex4(s) + " needs UTS 46 mapping or is disallowed");
+                    "U+" .. hex4(s) .. " needs UTS 46 mapping or is disallowed");
             }
-            if (std3 && s < 128 && !is_ldh(s)) {
+            if (std3 && s < 128 && not is_ldh(s)) {
                 return failed(ParseErrorKind.InvalidCharacter, label.offset,
                     "STD3 rules allow only letters, digits, and '-'");
             }
@@ -191,7 +191,7 @@ export let Idna = module (
         } else {
             match (punycode.encode(scalars)) {
                 Result.Ok(value) => {
-                    result = "xn--" + value;
+                    result = "xn--" .. value;
                 },
                 Result.Err(e) => {
                     return failed(ParseErrorKind.OutOfRange, label.offset, "label too long to encode");
@@ -212,7 +212,7 @@ export let Idna = module (
                 kind: ParseErrorKind.InvalidCharacter, offset: offset, message: "label starts or ends with '-'"
             });
         }
-        if (!is_ace && count >= 4 && scalars[2] == 45 && scalars[3] == 45) {
+        if (not is_ace && count >= 4 && scalars[2] == 45 && scalars[3] == 45) {
             return Result<int>.Err(Error.Parse {
                 kind: ParseErrorKind.InvalidCharacter, offset: offset, message: "'--' in the third and fourth positions"
             });
@@ -250,7 +250,7 @@ export let Idna = module (
             Result.Ok(value) => value == body,
             Result.Err(e) => false,
         };
-        if (!non_ascii || !same) {
+        if (not non_ascii || not same) {
             return Result<int>.Err(Error.Parse {
                 kind: ParseErrorKind.Syntax, offset: offset,
                 message: "xn-- label is not a canonical encoding of a non-ASCII label"
@@ -307,7 +307,7 @@ export let Idna = module (
             value = value / 16;
         }
         while (text.byte_length < 4) {
-            text = "0" + text;
+            text = "0" .. text;
         }
         return text;
     };

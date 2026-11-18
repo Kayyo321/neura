@@ -112,7 +112,7 @@ export let PrefixTrie = module (
         export let size = func -> int => count;
 
         /// @brief `PrefixTrie(size N)`; the entries are not listed.
-        export let.override to_string = func -> string => "PrefixTrie(size " + count.to_string() + ")";
+        export let.override to_string = func -> string => "PrefixTrie(size " .. count.to_string() .. ")";
 
         /// @brief The node of `block`, or -1 when the path is missing.
         let find = func(block: cidr.CidrBlock) -> int {

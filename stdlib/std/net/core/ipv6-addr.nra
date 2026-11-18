@@ -73,9 +73,7 @@ export let Ipv6Addr = module (
         /// None for any other address.
         #[NoDiscard, Pure]
         export let to_ipv4_mapped = func -> Optional<v4.Ipv4Addr> {
-            if (!is_ipv4_mapped()) {
-                return Optional<v4.Ipv4Addr>.None;
-            }
+            return Optional<v4.Ipv4Addr>.None unless is_ipv4_mapped();
             return Optional<v4.Ipv4Addr>.Some(new v4.Ipv4Addr((low & 4294967295) as uint32));
         };
 
@@ -125,10 +123,9 @@ export let Ipv6Addr = module (
 
         /// @brief Tests whether another object is an `Ipv6Addr` with the same value and zone.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Ipv6Addr)) {
+            if (other is not address: Ipv6Addr) {
                 return false;
             }
-            last address = other as Ipv6Addr;
             return high == address.high && low == address.low && zone == address.zone;
         };
 
@@ -143,7 +140,7 @@ export let Ipv6Addr = module (
         export let.override to_string = func -> string {
             let text = "";
             if (is_ipv4_mapped()) {
-                text = "::ffff:" + (new v4.Ipv4Addr((low & 4294967295) as uint32)).to_string();
+                text = "::ffff:" .. (new v4.Ipv4Addr((low & 4294967295) as uint32)).to_string();
             } else {
                 // The longest run of zero groups of length 2 or more; the first one wins a tie.
                 let best_start = -1;
@@ -165,11 +162,11 @@ export let Ipv6Addr = module (
                 let i = 0;
                 while (i < 8) {
                     if (i == best_start) {
-                        text += "::";
+                        text ..= "::";
                         i += best_length;
                     } else {
                         if (i > 0 && i != best_start + best_length) {
-                            text += ":";
+                            text ..= ":";
                         }
                         text += hex_group(group(i));
                         i++;
@@ -177,7 +174,7 @@ export let Ipv6Addr = module (
                 }
             }
             if (zone.byte_length > 0) {
-                text = text + "%" + zone;
+                text ..= "%" .. zone;
             }
             return text;
         };
@@ -297,7 +294,7 @@ export let Ipv6Addr = module (
         if (compressed && count > 7) {
             return failed(ParseErrorKind.Syntax, end, "'::' with eight groups");
         }
-        if (!compressed && count != 8) {
+        if (not compressed && count != 8) {
             return failed(ParseErrorKind.Syntax, end, "an address needs eight groups or '::'");
         }
         last groups: int[list] = new;
@@ -414,7 +411,7 @@ export let Ipv6Addr = module (
     /// @brief Moves an embedded IPv4 parse error to its offset in the whole text.
     let shifted = func(r: Result<v4.Ipv4Addr>, start: int) -> Result<Ipv6Addr> => match (r) {
         Result.Err(Error.Parse { kind, offset, message }) =>
-            failed(kind, start + offset, "in the IPv4 part: " + message),
+            failed(kind, start + offset, "in the IPv4 part: " .. message),
         Result.Err(e) => Result<Ipv6Addr>.Err(e),
         Result.Ok(_) => failed(ParseErrorKind.Syntax, start, "unreachable"),
     };

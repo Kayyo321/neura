@@ -50,7 +50,7 @@ export let PercentEncoding = module (
             EncodeSet.PathSegment => is_pchar(b),
             EncodeSet.Path => is_pchar(b) || b == 47,
             EncodeSet.Query => is_pchar(b) || b == 47 or 63,
-            EncodeSet.QueryComponent => (is_pchar(b) || b == 47 or 63) && !(b == 38 or 61 or 43),
+            EncodeSet.QueryComponent => (is_pchar(b) || b == 47 or 63) && not (b == 38 or 61 or 43),
             EncodeSet.Fragment => is_pchar(b) || b == 47 or 63,
             EncodeSet.Form => (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57)
                 || b == 42 or 45 or 46 or 95,
@@ -120,9 +120,7 @@ export let PercentEncoding = module (
         while (i < count) {
             last b = text.byte_at(i);
             if (b == 37) {
-                if (!is_triplet(text, i)) {
-                    return i;
-                }
+                return i unless is_triplet(text, i);
                 i += 3;
             } else if (is_allowed(b, set)) {
                 i++;
@@ -157,7 +155,7 @@ export let PercentEncoding = module (
             }
         }
         let [valid, result] = string.from_utf8(output);
-        if (!valid) {
+        if (not valid) {
             trap_with_message("invalid state: percent-encoding normalization broke UTF-8");
         }
         return result;
@@ -209,9 +207,7 @@ export let PercentEncoding = module (
             last b = text.byte_at(i);
             offsets.append(i);
             if (b == 37) {
-                if (!is_triplet(text, i)) {
-                    return i;
-                }
+                return i unless is_triplet(text, i);
                 output.append(((hex_value(text.byte_at(i + 1)) * 16) + hex_value(text.byte_at(i + 2))) as uint8);
                 i += 3;
             } else if (plus_as_space && b == 43) {
@@ -310,7 +306,7 @@ export let PercentEncoding = module (
     /// @brief The text of bytes known to be ASCII.
     let ascii_text = func(bytes: uint8[list]) -> string {
         let [valid, result] = string.from_utf8(bytes);
-        if (!valid) {
+        if (not valid) {
             trap_with_message("invalid state: percent-encoded output is not ASCII");
         }
         return result;

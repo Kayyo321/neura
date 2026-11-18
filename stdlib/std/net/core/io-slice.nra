@@ -123,7 +123,7 @@ export let IoSlice = module (
 
         /// @brief `IoSlice(offset N, length M)`; the bytes are not shown.
         export let.override to_string = func -> string =>
-            "IoSlice(offset " + first.to_string() + ", length " + count.to_string() + ")";
+            "IoSlice(offset " .. first.to_string() .. ", length " .. count.to_string() .. ")";
     );
 
     /// @brief An ordered list of views to be written as one gather (writev-style) vector.
@@ -174,7 +174,7 @@ export let IoSlice = module (
 
         /// @brief `IoSliceList(N slices, M bytes)`.
         export let.override to_string = func -> string =>
-            "IoSliceList(" + items.length.to_string() + " slices, " + total_length_of(items).to_string() + " bytes)";
+            "IoSliceList(" .. items.length.to_string() .. " slices, " .. total_length_of(items).to_string() .. " bytes)";
     );
 
     /// @brief The view of the whole list.

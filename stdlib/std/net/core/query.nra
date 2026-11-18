@@ -46,10 +46,9 @@ export let Query = module (
 
         /// @brief Pairs are equal when keys are equal and both values are absent or equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is QueryPair)) {
+            if (other is not pair: QueryPair) {
                 return false;
             }
-            last pair = other as QueryPair;
             return key == pair.key && optional.equals<string>(value, pair.value);
         };
 
@@ -141,12 +140,12 @@ export let Query = module (
             for (let pair in entries) {
                 if (pair.key != key) {
                     replaced.append(pair);
-                } else if (!placed) {
+                } else if (not placed) {
                     replaced.append(new QueryPair(key, optional.Optional<string>.Some(value)));
                     placed = true;
                 }
             }
-            if (!placed) {
+            if (not placed) {
                 replaced.append(new QueryPair(key, optional.Optional<string>.Some(value)));
             }
             replace_entries(replaced);
@@ -167,7 +166,7 @@ export let Query = module (
             let text = "";
             for (let i = 0; i < entries.length; i++) {
                 if (i > 0) {
-                    text += "&";
+                    text ..= "&";
                 }
                 last pair = entries[i];
                 text += encode_pair(this_key: pair.key, this_value: pair.value, mode: mode);
@@ -191,17 +190,14 @@ export let Query = module (
 
         /// @brief Two queries are equal when their pairs are equal in order.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is QueryString)) {
+            if (other is not query: QueryString) {
                 return false;
             }
-            last query = other as QueryString;
             if (query.size() != entries.length) {
                 return false;
             }
             for (let i = 0; i < entries.length; i++) {
-                if (!entries[i].equals(query.pair_at(i))) {
-                    return false;
-                }
+                return false unless entries[i].equals(query.pair_at(i));
             }
             return true;
         };
@@ -282,21 +278,21 @@ export let Query = module (
 
         /// @brief The node as `name{values}[children]`, for diagnostics.
         export let.override to_string = func -> string {
-            let text = name + "{";
+            let text = name .. "{";
             for (let i = 0; i < values.length; i++) {
                 if (i > 0) {
-                    text += ",";
+                    text ..= ",";
                 }
                 text += values[i];
             }
-            text += "}[";
+            text ..= "}[";
             for (let i = 0; i < children.length; i++) {
                 if (i > 0) {
-                    text += " ";
+                    text ..= " ";
                 }
                 text += children[i].to_string();
             }
-            return text + "]";
+            return text .. "]";
         };
     );
 
@@ -396,7 +392,7 @@ export let Query = module (
         last set = mode == QueryMode.Form ? percent.EncodeSet.Form : percent.EncodeSet.QueryComponent;
         last key_text = percent.encode(this_key, set);
         return match (this_value) {
-            optional.Optional.Some(v) => key_text + "=" + percent.encode(v, set),
+            optional.Optional.Some(v) => key_text .. "=" .. percent.encode(v, set),
             optional.Optional.None => key_text,
         };
     };

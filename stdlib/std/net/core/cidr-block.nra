@@ -33,7 +33,7 @@ export let CidrBlock = module (
         export let init = func(address: ips.IpAddr, prefix: int) {
             last problem = check(address, prefix);
             if (problem != "") {
-                trap_with_message("CidrBlock: " + problem);
+                trap_with_message("CidrBlock: " .. problem);
             }
             network = address;
             prefix_length = prefix;
@@ -59,10 +59,9 @@ export let CidrBlock = module (
 
         /// @brief Tests whether another object is a `CidrBlock` with an equal network and prefix length.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is CidrBlock)) {
+            if (other is not block: CidrBlock) {
                 return false;
             }
-            last block = other as CidrBlock;
             return prefix_length == block.prefix_length && ips.equals(network, block.network);
         };
 
@@ -74,7 +73,7 @@ export let CidrBlock = module (
         /// @brief `network/prefix`, for example `10.0.0.0/8` or `2001:db8::/32`.
         #Pure
         export let.override to_string = func -> string =>
-            ips.to_string(network) + "/" + prefix_length.to_string();
+            ips.to_string(network) .. "/" .. prefix_length.to_string();
     );
 
     /// @brief The block of `ip` with the host bits cleared and any zone dropped; traps when the prefix is out
@@ -130,7 +129,7 @@ export let CidrBlock = module (
                 return Result<CidrBlock>.Err(e);
             },
         }
-        if (!lenient) {
+        if (not lenient) {
             for (let i = 0; i < slash; i++) {
                 if (text.byte_at(i) == 37) {
                     return failed(ParseErrorKind.Syntax, i, "a network cannot have a zone");
@@ -156,7 +155,7 @@ export let CidrBlock = module (
             return failed(ParseErrorKind.OutOfRange, start, "prefix length too long for the family");
         }
         last network = masked(ip, prefix);
-        if (!lenient && !ips.equals(network, without_zone(ip))) {
+        if (not lenient && not ips.equals(network, without_zone(ip))) {
             return failed(ParseErrorKind.Syntax, slash, "host bits are set");
         }
         return Result<CidrBlock>.Ok(new CidrBlock(network, prefix));
@@ -174,9 +173,7 @@ export let CidrBlock = module (
         if (has_zone) {
             return "a network cannot have a zone";
         }
-        if (!ips.equals(masked(address, prefix), address)) {
-            return "host bits are set";
-        }
+        return "host bits are set" unless ips.equals(masked(address, prefix), address);
         return "";
     };
 

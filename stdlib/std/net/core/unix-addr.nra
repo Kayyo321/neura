@@ -32,7 +32,7 @@ export let UnixAddr = module (
         export let init = func(name: string, abstract_namespace: bool) {
             last problem = check(name, abstract_namespace);
             if (problem != "") {
-                trap_with_message("UnixAddr: " + problem);
+                trap_with_message("UnixAddr: " .. problem);
             }
             path = name;
             is_abstract = abstract_namespace;
@@ -44,10 +44,9 @@ export let UnixAddr = module (
 
         /// @brief Tests whether another object is a `UnixAddr` of the same kind and name.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is UnixAddr)) {
+            if (other is not address: UnixAddr) {
                 return false;
             }
-            last address = other as UnixAddr;
             return is_abstract == address.is_abstract && path == address.path;
         };
 
@@ -86,7 +85,7 @@ export let UnixAddr = module (
         if (name.byte_length > MaxNameBytes) {
             return failed(ParseErrorKind.OutOfRange, start + MaxNameBytes, "Unix socket name longer than 107 bytes");
         }
-        if (!abstract_namespace) {
+        if (not abstract_namespace) {
             for (let i = 0; i < name.byte_length; i++) {
                 if (name.byte_at(i) == 0) {
                     return failed(ParseErrorKind.InvalidCharacter, i, "NUL byte in a Unix socket path");
@@ -104,7 +103,7 @@ export let UnixAddr = module (
         if (name.byte_length > MaxNameBytes) {
             return "name longer than 107 bytes";
         }
-        if (!abstract_namespace) {
+        if (not abstract_namespace) {
             for (let i = 0; i < name.byte_length; i++) {
                 if (name.byte_at(i) == 0) {
                     return "NUL byte in a path";

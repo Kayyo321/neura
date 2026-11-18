@@ -55,11 +55,11 @@ export let Urn = module (
         /// URN-equivalence compares (RFC 8141 section 3.1). Percent-encoded bytes are not decoded.
         #Pure
         export let equivalence_key = func -> string =>
-            "urn:" + strings.to_ascii_lower(nid) + ":" + uppercase_triplets(nss);
+            "urn:" .. strings.to_ascii_lower(nid) .. ":" .. uppercase_triplets(nss);
 
         /// @brief The assigned name `urn:<NID>:<NSS>` as written, without the optional components.
         #Pure
-        export let assigned_name = func -> string => scheme + ":" + nid + ":" + nss;
+        export let assigned_name = func -> string => scheme .. ":" .. nid .. ":" .. nss;
 
         /// @brief The NSS with percent-encoding decoded. Errors as in PercentEncoding.decode.
         #NoDiscard
@@ -67,10 +67,10 @@ export let Urn = module (
 
         /// @brief URN-equivalence (RFC 8141 section 3).
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Urn)) {
+            if (other is not that: Urn) {
                 return false;
             }
-            return equivalence_key() == (other as Urn).equivalence_key();
+            return equivalence_key() == that.equivalence_key();
         };
 
         /// @brief The hash of the equivalence key, consistent with equals.
@@ -94,7 +94,7 @@ export let Urn = module (
         if (length == 0) {
             return failed(ParseErrorKind.Empty, 0, "empty URN");
         }
-        if (length < 4 || !strings.equals_ignore_ascii_case(text.slice(0, 4), "urn:")) {
+        if (length < 4 || not strings.equals_ignore_ascii_case(text.slice(0, 4), "urn:")) {
             return failed(ParseErrorKind.Syntax, 0, "a URN starts with \"urn:\"");
         }
         // NID: (alphanum) 0*30(ldh) (alphanum), then ':'.
@@ -121,7 +121,7 @@ export let Urn = module (
         let q = optional.Optional<string>.None;
         let f = optional.Optional<string>.None;
         if (position < length && text.byte_at(position) == 63) {
-            if (position + 1 >= length || !(text.byte_at(position + 1) == 43 or 61)) {
+            if (position + 1 >= length || not (text.byte_at(position + 1) == 43 or 61)) {
                 return failed(ParseErrorKind.Syntax, position, "'?' must start '?+' or '?='");
             }
             if (text.byte_at(position + 1) == 43) {
