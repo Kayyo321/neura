@@ -104,6 +104,8 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 | `tags/download.nra` | Compiles and runs; tags on `last` fields, accessors, and anonymous classes. `backend-cli` builds and runs it optimized and unoptimized. |
 | `tags/tags.nra` | Compiles and runs; it uses implemented and informational [tags](Tags.md). `ir-optimization-cli` builds it with and without optimization and compares the output and the step counts. |
 | `concurrency/monitor.nra` | Compiles and runs; a monitor shared by tasks, an `#Immutable` value class, and `#Pure` and `#ThreadSafe` functions ([Tags](Tags.md#implemented-tags)). `backend-cli` builds and runs it. |
+| `types/frozen-list.nra` | Compiles and runs; a `FrozenList` copied from an array, a derived list, and for-each ([Collections](Collections.md#frozenlist)). |
+| `apps/components.nra` | Compiles and runs; a `ui.State`, a component with a click handler, and a root on the model host ([State and components](../apps/Components.md)). |
 
 
 ## Editor tooling candidate

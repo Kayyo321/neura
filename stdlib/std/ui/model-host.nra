@@ -18,12 +18,18 @@ export let ModelHost = module (
         export last deliver: func() -> void;
 
         export let init = func(listener: uint64, target: ui.Component, coalesce: bool, deliver: func() -> void) => set;
+
+        /// @brief `Step(listener N)`.
+        export let.override to_string = func -> string => "Step(listener " + listener.to_string() + ")";
     );
 
     /// @brief The steps posted by one `wait`.
     #[Final, NotThreadSafe]
     let Batch = class (
         export last steps: Step[list] = new;
+
+        /// @brief `Batch(` the number of steps `)`.
+        export let.override to_string = func -> string => "Batch(" + steps.length.to_string() + " steps)";
     );
 
     /// @brief A host whose document is memory and whose events are scripted.

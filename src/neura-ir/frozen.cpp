@@ -202,6 +202,10 @@ std::optional<MutablePart> mutable_part(const IrProgram& program, const IrType& 
             return std::nullopt;
         case TypeKind::Enum: {
             if (!valid(program, item.symbol)) return MutablePart{"an unknown enum", std::nullopt};
+            // A generic enum's payloads name its type parameters: check the arguments.
+            for (const auto& argument : item.arguments) {
+                if (auto found = find(argument)) return found;
+            }
             if (!visiting.insert(item.symbol).second) return std::nullopt;
             for (const auto& variant : program.symbols) {
                 if (variant.kind != SymbolKind::Variant || variant.owner != item.symbol) continue;

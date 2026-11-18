@@ -314,7 +314,7 @@ A program that passed an `ImmutableList` to another task or stored one as shared
 | 1, 2, 3, 4, 5, 6, 7 | `tests/stdlib/ui-state` (`test_state_values`, `test_notifications`, `test_equality_suppresses`, `test_update_in_subscriber_is_queued`), `tests/ui/components/accepted.nra` |
 | 8, 9, 10, 11, 12, 48 | `tests/stdlib/ui-state` (`test_turn_renders_once`, `test_child_renders_alone`, `test_unmount_discards_events`, `test_coalescing`, `test_overflow`) on the model host |
 | 16, 17, 18, 43 | `tests/stdlib/frozen` (with a model-based test against a list), `tests/stdlib/frozen/traps/get-out-of-range.nra` |
-| 25, 26, 28, 29, 31 | `tests/ui/components`, `tests/ui/frozen`; the storage half of 31 in `tests/apps/frozen/storage.py` |
+| 25, 26, 28, 29, 31 | `tests/ui/components`, `tests/ui/frozen`, and for 26 and 29 the `frozen-string-builder` and `spawned-ui-state` rejections of `tests/frontend.cmake`; the storage half of 31 in `tests/apps/frozen/storage.py` |
 | 44 | `tests/stdlib/ui-state/traps/update-loop.nra` |
 | 13 to 15, 19 to 24, 27, 30, 32 to 42, 45 to 47 | Not implemented: commands, codecs, contracts, `neura.http.fetch`, `E1010`, and the transfer of a `FrozenList` |
 
@@ -328,5 +328,5 @@ A program that passed an `ImmutableList` to another task or stored one as shared
 6. `equal:` is `ui.with_equality<T>(initial, same)`; `ui.component` takes `(state, render)` without `styles` until a stylesheet value exists.
 7. Mounting is `ui.mount(host, target, component)` over the `ui.Host` interface (`open`, `commit`, `wait`, `resynchronize`, `reset`, `close`); a commit carries the turn's renders as component and view pairs. `Std.Web.mount` keeps its final signature as a stub, and `desktop.mount` waits for the desktop window type.
 8. A change made between turns renders in the next turn. A faulted root ends `run`; `reset` asks the host to empty the root, renders every component again and lets `run` continue.
-9. An event is stale when its component has unmounted or its generation has changed; removing one listener of a still-mounted component is the host's part. The overflow notice is queued as a marker before the next accepted event, and the host resynchronizes controlled values when the marker's turn runs.
+9. An event is stale when its component has unmounted or its generation has changed; removing one listener of a still-mounted component is the host's part. The overflow notice is queued as a marker before the next accepted event, and the host resynchronizes controlled values when the marker's turn runs; the input events it posts then are delivered before the events that arrived after the overflow.
 10. When a commit is refused (`Invalid`), components mounted or unmounted by that turn's renders stay so; only the host keeps its previous view. A component embedded by two parents traps with `a component is mounted twice`.

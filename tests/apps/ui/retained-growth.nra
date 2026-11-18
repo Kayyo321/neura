@@ -1,5 +1,7 @@
 // B-W9 (Apps030): mount and unmount a component 100 or 10,000 times, with ten
-// state updates per cycle, on the model host. retained.py compares the runs.
+// clicks per cycle, each a turn that updates, renders and commits, on the
+// model host. retained.py builds it with 100 and with 10,000 cycles and compares
+// the runs.
 let console = import:Std.Io.Console;
 let model = import:Std.Ui.ModelHost;
 let program = import:Std.Program;
@@ -12,20 +14,25 @@ let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
 
 let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        last cycles = args.length > 0 ? 10000 : 100;
+        last cycles = 100;
         let host = new model.Host();
         let state = new ui.State<int32>(0);
+        let add = new func(event: ui.ClickEvent) {
+            state.set(state.get() + 1);
+        };
         for (let cycle = 0; cycle < cycles; cycle++) {
             let top = ui.component<int32>(state, new func(value: int32) -> ui.View =>
                 counter_view(value, func(event: ui.ClickEvent) {}));
             let root = result.expect<ui.Root>(ui.mount(host, "#app", top), "mount");
             for (let i = 0; i < 10; i++) {
-                state.set(i);
+                host.click(1, top, add);
+                host.end_batch();
             }
+            root.run();
             root.close();
             host.clear_log();
         }
-        console.print_line("subscriptions " + state.subscriber_count().to_string());
+        console.print_line("subscriptions " + state.subscriber_count().to_string() + ", value " + state.get().to_string());
         return program.ExitCode.Ok;
     };
 );

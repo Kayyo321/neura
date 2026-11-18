@@ -1,0 +1,19 @@
+// A FrozenList copied from an array, a derived list, and for-each
+// (docs/lang/Collections.md#frozenlist).
+let console = import:Std.Io.Console;
+let frozen = import:Std.Collections.Frozen;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let source: string[] = ["bolt", "nut"];
+        let parts = frozen.copy_of<string>(source);
+        source[0] = "gear";
+        let more = parts.appended("washer");
+        console.print_line(parts.to_string() + " " + more.to_string());
+        for (let part: string in more) {
+            console.print_line(part);
+        }
+        return program.ExitCode.Ok;
+    };
+);

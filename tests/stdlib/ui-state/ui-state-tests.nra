@@ -266,12 +266,15 @@ let UiStateTests = module (
         host.input_on_resynchronize(3, top, new func(event: ui.InputEvent) {
             trace.append("input " + event.value);
         }, "typed");
-        host.click(1, top, add);
+        host.click(1, top, new func(event: ui.ClickEvent) {
+            trace.append("next click");
+            state.set(state.get() + 1);
+        });
         host.end_batch();
         root.run();
         test.assert_equal_int32(1, host.refused);
         test.assert_equal_int32(1025, state.get());
-        test.assert_equal_string("overflow 1; input typed", join(trace));
+        test.assert_equal_string("overflow 1; input typed; next click", join(trace));
         test.assert(root.stats().dropped == 1);
         test.assert(!root.is_overloaded());
     };

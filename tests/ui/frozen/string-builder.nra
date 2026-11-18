@@ -1,5 +1,0 @@
-// A FrozenList of StringBuilder (E0580; Components030 case 26).
-let frozen = import:Std.Collections.Frozen;
-let builder = import:Std.Core.StringBuilder;
-
-let parts = frozen.empty<builder.StringBuilder>();

@@ -234,6 +234,9 @@ export let Ui = module (
         export last listener: func(T) -> void;
 
         export let init = func(handle: Subscription, listener: func(T) -> void) => set;
+
+        /// @brief `Subscriber(` and its subscription `)`.
+        export let.override to_string = func -> string => "Subscriber(" + handle.to_string() + ")";
     );
 
     /// @brief One value of a deeply immutable type, observed by subscribers in one task.
@@ -465,6 +468,20 @@ export let Ui = module (
 
         /// @brief The kind and the message.
         export let.override to_string = func -> string => kind.to_string() + ": " + message;
+
+        /// @brief Another diagnostic with equal fields.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Diagnostic)) {
+                return false;
+            }
+            last that = other as Diagnostic;
+            return kind == that.kind && message == that.message && slot == that.slot && index == that.index
+                && key == that.key;
+        };
+
+        /// @brief Combines the hashes of the fields.
+        export let.override hash_code = func -> uint32 =>
+            kind.hash_code() ^ message.hash_code() ^ slot.hash_code() ^ index.hash_code() ^ key.hash_code();
     );
 
     /// @brief What a host did with a commit: applied it, or refused it and kept the previous view.
@@ -485,6 +502,9 @@ export let Ui = module (
 
         #Internal
         export let init = func(component: Component, view: View) => set;
+
+        /// @brief `Rendered(` the component `)`.
+        export let.override to_string = func -> string => "Rendered(" + component.to_string() + ")";
     );
 
     /// @brief The renders of one turn, parents before children, sent to the host as one request.
@@ -495,6 +515,10 @@ export let Ui = module (
 
         #Internal
         export let init = func(sequence: uint64, rendered: Rendered[list]) => set;
+
+        /// @brief `Commit(` the sequence number and the number of renders `)`.
+        export let.override to_string = func -> string =>
+            "Commit(" + sequence.to_string() + ", " + rendered.length.to_string() + " renders)";
     );
 
     /// @brief The services a root needs from the document or window that shows it. The web, desktop
@@ -526,6 +550,14 @@ export let Ui = module (
 
         export let init = func(listener: uint64, target: Component, generation: uint64, coalesce: bool,
                                deliver: func() -> void, overflow: uint32) => set;
+
+        /// @brief `QueuedEvent(` the listener, or the overflow count `)`.
+        export let.override to_string = func -> string {
+            if (overflow > 0) {
+                return "QueuedEvent(overflow " + overflow.to_string() + ")";
+            }
+            return "QueuedEvent(listener " + listener.to_string() + ")";
+        };
     );
 
     /// @brief Counts that show what a root holds and has done.
@@ -549,6 +581,17 @@ export let Ui = module (
             "components " + components.to_string() + ", subscriptions " + subscriptions.to_string() + ", queued "
             + queued.to_string() + ", turns " + turns.to_string() + ", renders " + renders.to_string() + ", commits "
             + commits.to_string() + ", dropped " + dropped.to_string() + ", discarded " + discarded.to_string();
+
+        /// @brief Other stats with equal counts.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is RootStats)) {
+                return false;
+            }
+            return to_string() == (other as RootStats).to_string();
+        };
+
+        /// @brief The hash of the counts' text.
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
     );
 
     /// @brief A mounted component tree and its event loop. One turn takes the next event, calls its
@@ -567,6 +610,8 @@ export let Ui = module (
         let failure_handler: func(RenderFailure) -> void;
         let overflow_handler: func(RootEvent) -> void;
         let has_overflow_handler: bool = false;
+        let resynchronizing: bool = false;
+        let resynchronized: QueuedEvent[list] = new;
         let sequence: uint64 = 0;
         let turn_total: uint64 = 0;
         let render_total: uint64 = 0;
@@ -627,6 +672,11 @@ export let Ui = module (
             if (closed) {
                 return false;
             }
+            if (resynchronizing) {
+                last current = target == nil ? 0 : target.generation();
+                resynchronized.append(new QueuedEvent(listener, target, current, false, deliver, 0));
+                return true;
+            }
             if (coalesce) {
                 for (let i = 0; i < queue.length; i++) {
                     last queued = queue[i];
@@ -669,7 +719,18 @@ export let Ui = module (
                     last handler = overflow_handler;
                     handler(RootEvent.InputOverflow(event.overflow));
                 }
+                // The resynchronized inputs come before the events queued after the overflow.
+                resynchronizing = true;
                 host.resynchronize(instance);
+                resynchronizing = false;
+                if (resynchronized.length > 0) {
+                    last merged = resynchronized;
+                    for (let i = 0; i < queue.length; i++) {
+                        merged.append(queue[i]);
+                    }
+                    queue = merged;
+                    resynchronized = new;
+                }
                 flush();
                 return !closed;
             }

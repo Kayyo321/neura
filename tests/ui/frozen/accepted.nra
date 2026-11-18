@@ -33,3 +33,8 @@ let rows = html(parts: frozen.FrozenList<string>) {
 };
 
 let view = rows(frozen.of<string>("bolt", "nut"));
+
+// A generic enum of immutable arguments.
+let optional = import:Std.Core.Optional;
+
+let maybe = new ui.State<optional.Optional<string>>(optional.Optional<string>.None);
