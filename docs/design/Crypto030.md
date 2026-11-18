@@ -34,6 +34,10 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | Item (spec section) | Tier | Vectors and notes | Status |
 | --- | --- | --- | --- |
 | Base contracts (2.0) | contracts | toy implementations | implemented |
+| `Secret<T>`, `SecretBytes`, `SecretKey<Alg>` (2.1): redacted text, explicit `wipe`, constant-time comparison, no content `equals` | logic | unit tests | implemented |
+| Page locking, swap exclusion and zeroization on drop (2.1) | stub (`lock`) | not provided by this runtime | stub |
+| `ct_eq`, `ct_select`, `ct_less` (2.1) | logic | edge values (0, 2^32-1, neighbours) | implemented; branch-free in source; the runtime does not guarantee constant time |
+| `CryptoPolicy` `Modern`, `Fips140_3`, `Cnsa2_0` (2.1) | logic | table tests and a trap | implemented at run time; compile-time enforcement is outside 0.3.0 |
 
 ## Runtime needs
 
@@ -41,6 +45,7 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 
 | Stub | Host operation needed |
 | --- | --- |
+| `SecretBytes.lock`, `Secret.lock` (and `SecretKey.lock`) | `neura.memory.lock` (new host service, version 1): arguments: the handle of a heap object holding a byte list; results: `Ok` when the runtime has moved the list's storage to locked pages (`mlock`/`VirtualLock`), excluded from core dumps, and promises to zero the storage when the object is reclaimed or the run ends, or `Error(uint32)` with code 12 (out of memory or lock limit) or 14 (capability denied). The collector must then not copy the storage. Capability group: a new `memory` group, granted by default. Record/replay: the call has no observable result besides success, so a trace records only the status. |
 
 ## Decisions taken without the owner
 

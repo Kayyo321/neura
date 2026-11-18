@@ -105,6 +105,11 @@ Hashes, MACs, key derivation, authenticated encryption, and secure random genera
 | --- | --- | --- |
 | [`Std.Crypto.AeadCipher`](Stdlib-Crypto-AeadCipher) | [Contracts](Stdlib-Crypto-AeadCipher#detailed-contracts) | [Declarations](Stdlib-Crypto-AeadCipher#exported-declarations) |
 | [`Std.Crypto.Algorithm`](Stdlib-Crypto-Algorithm) | [Contracts](Stdlib-Crypto-Algorithm#detailed-contracts) | [Declarations](Stdlib-Crypto-Algorithm#exported-declarations) |
+| [`Std.Crypto.Core.ConstantTime`](Stdlib-Crypto-ConstantTime) | [Contracts](Stdlib-Crypto-ConstantTime#detailed-contracts) | [Declarations](Stdlib-Crypto-ConstantTime#exported-declarations) |
+| [`Std.Crypto.Core.CryptoPolicy`](Stdlib-Crypto-CryptoPolicy) | [Contracts](Stdlib-Crypto-CryptoPolicy#detailed-contracts) | [Declarations](Stdlib-Crypto-CryptoPolicy#exported-declarations) |
+| [`Std.Crypto.Core.SecretBytes`](Stdlib-Crypto-SecretBytes) | [Contracts](Stdlib-Crypto-SecretBytes#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretBytes#exported-declarations) |
+| [`Std.Crypto.Core.SecretKey`](Stdlib-Crypto-SecretKey) | [Contracts](Stdlib-Crypto-SecretKey#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretKey#exported-declarations) |
+| [`Std.Crypto.Core.Secret`](Stdlib-Crypto-Secret) | [Contracts](Stdlib-Crypto-Secret#detailed-contracts) | [Declarations](Stdlib-Crypto-Secret#exported-declarations) |
 | [`Std.Crypto.CryptographicPrimitive`](Stdlib-Crypto-CryptographicPrimitive) | [Contracts](Stdlib-Crypto-CryptographicPrimitive#detailed-contracts) | [Declarations](Stdlib-Crypto-CryptographicPrimitive#exported-declarations) |
 | [`Std.Crypto.ExtendableOutput`](Stdlib-Crypto-ExtendableOutput) | [Contracts](Stdlib-Crypto-ExtendableOutput#detailed-contracts) | [Declarations](Stdlib-Crypto-ExtendableOutput#exported-declarations) |
 | [`Std.Crypto.KeyEncapsulation`](Stdlib-Crypto-KeyEncapsulation) | [Contracts](Stdlib-Crypto-KeyEncapsulation#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyEncapsulation#exported-declarations) |
@@ -338,3 +343,4 @@ The [complete specification](Stdlib-Design) has these sections.
 - [19. `Std.Concurrent`](Stdlib-Design#19-stdconcurrent)
 - [20. `Std.Crypto`](Stdlib-Design#20-stdcrypto)
   - [20.1 Contracts](Stdlib-Design#201-contracts)
+  - [20.2 `Std.Crypto.Core`](Stdlib-Design#202-stdcryptocore)

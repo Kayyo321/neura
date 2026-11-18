@@ -1476,3 +1476,13 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 | `Signer`, `Verifier` | `Signer<PrivKey, Sig>` has `sign(message) -> Sig`. `Verifier<PubKey, Sig>` has `public_key()` and `verify(message, signature) -> bool`. |
 | `KeyEncapsulation` | `encapsulate(public_key) -> Encapsulation<SharedSecret, Ciphertext>` and `decapsulate(private_key, ciphertext) -> Result<SharedSecret>`. |
 | `KeyStoreProvider` | `KeyStoreProvider<KeyHandle>`: `provider_name`, `generate_key(algorithm, label)`, `sign`, `wrap_key`, `unwrap_key` and `delete_key`, each returning a `Result`. |
+
+### 20.2 `Std.Crypto.Core`
+
+| Module | Contract |
+| --- | --- |
+| `SecretBytes` | Holds a private copy of the bytes it is given. `expose()` returns the held list, `wipe()` overwrites it with zeros, and `length()` stays readable. `ct_equals(other)` compares contents without a data-dependent branch. `equals` and `hash_code` keep the identity defaults, so contents are never compared or hashed by accident. `to_string` is `SecretBytes(<n> bytes, <redacted>)`. `lock()` is a stub. |
+| `Secret` | `Secret<T>` wraps any value with an `eraser` function that `wipe()` calls once, because generic code cannot overwrite a value of unknown type. `zero_bytes` is the eraser for byte lists. `to_string` is `Secret(<redacted>)`, and `lock()` is a stub. |
+| `SecretKey` | `SecretKey<Alg>` implements `SymmetricKey<Alg>` over a `SecretBytes`. A cipher constructor that takes a `SymmetricKey<AesGcm>` rejects a key typed for another algorithm at compile time. |
+| `ConstantTime` | `ct_eq(a, b)` on byte lists (a length difference returns false at once, because lengths are public), `ct_eq_uint32`, `ct_less` and `ct_select` on `uint32` (results 0 or 1), and `ct_select_bytes`. Branch-free in source; the runtime does not guarantee constant time. |
+| `CryptoPolicy` | One process-wide `Policy`, which is `Modern` (the default), `Fips140_3` or `Cnsa2_0`. `set_policy`, `policy`, `allows(algorithm)`, `allowed_by(policy, algorithm)`, and `require(algorithm)`, which traps with `denied: <Algorithm> is not allowed under the <Policy> policy`. Each primitive calls `require` when it is created. `Modern` denies `Md5`, `Sha1` and `Rsa1024`. `Fips140_3` allows the FIPS-approved algorithms: SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2, and the approved public-key and post-quantum schemes. `Cnsa2_0` allows AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The policy is checked at run time only. Set it before tasks start. |
