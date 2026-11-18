@@ -4,6 +4,7 @@ let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.Algorithm;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
 let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
 let hmac = import:Std.Crypto.Mac.Hmac;
 let jose = import:Std.Crypto.Internal.JoseJson;
@@ -15,7 +16,7 @@ let secret = import:Std.Crypto.Core.SecretBytes;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief JSON Web Keys for JWS verification (RFC 7517, 7518 and 8037).
+/// @brief JSON Web Keys for JWS verification and octet signing (RFC 7517, 7518, 8037 and 9864).
 /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
 #Since("0.3.0")
 export let Jwk = module (
@@ -58,7 +59,8 @@ export let Jwk = module (
         HmacAlgorithm.Hs512 => "HS512",
     };
 
-    let rsa_hash = func(alg: RsaAlgorithm) -> Algorithm => match (alg) {
+    #[Internal, Hidden]
+    export let rsa_hash = func(alg: RsaAlgorithm) -> Algorithm => match (alg) {
         RsaAlgorithm.Rs256 => Algorithm.Sha256,
         RsaAlgorithm.Ps256 => Algorithm.Sha256,
         RsaAlgorithm.Rs384 => Algorithm.Sha384,
@@ -66,7 +68,8 @@ export let Jwk = module (
         _ => Algorithm.Sha512,
     };
 
-    let rsa_name = func(alg: RsaAlgorithm) -> string => match (alg) {
+    #[Internal, Hidden]
+    export let rsa_name = func(alg: RsaAlgorithm) -> string => match (alg) {
         RsaAlgorithm.Rs256 => "RS256",
         RsaAlgorithm.Rs384 => "RS384",
         RsaAlgorithm.Rs512 => "RS512",
@@ -75,23 +78,27 @@ export let Jwk = module (
         RsaAlgorithm.Ps512 => "PS512",
     };
 
-    let is_pss = func(alg: RsaAlgorithm) -> bool =>
+    #[Internal, Hidden]
+    export let is_pss = func(alg: RsaAlgorithm) -> bool =>
         alg == RsaAlgorithm.Ps256 || alg == RsaAlgorithm.Ps384 || alg == RsaAlgorithm.Ps512;
 
-    let hash_length = func(hash: Algorithm) -> int => match (hash) {
+    #[Internal, Hidden]
+    export let hash_length = func(hash: Algorithm) -> int => match (hash) {
         Algorithm.Sha256 => 32,
         Algorithm.Sha384 => 48,
         _ => 64,
     };
 
-    let ec_name = func(curve: ecdsa.Curve) -> string => match (curve) {
+    #[Internal, Hidden]
+    export let ec_name = func(curve: ecdsa.Curve) -> string => match (curve) {
         ecdsa.Curve.P256 => "ES256",
         ecdsa.Curve.P384 => "ES384",
         ecdsa.Curve.P521 => "ES512",
         ecdsa.Curve.Secp256k1 => "ES256K",
     };
 
-    let ec_hash = func(curve: ecdsa.Curve) -> Algorithm => match (curve) {
+    #[Internal, Hidden]
+    export let ec_hash = func(curve: ecdsa.Curve) -> Algorithm => match (curve) {
         ecdsa.Curve.P384 => Algorithm.Sha384,
         ecdsa.Curve.P521 => Algorithm.Sha512,
         _ => Algorithm.Sha256,
@@ -110,6 +117,14 @@ export let Jwk = module (
         _ => 32,
     };
 
+    let require_hmac = func(alg: HmacAlgorithm, length: int) {
+        crypto_policy.require(Algorithm.Hmac);
+        crypto_policy.require(hmac_hash(alg));
+        if (length < hash_length(hmac_hash(alg))) {
+            trap_with_message("invalid argument: JWS HMAC key is shorter than the hash output");
+        }
+    };
+
     /// @brief An HMAC JWS verification key. The minimum key length is the length of the hash output.
     /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[Final, Since("0.3.0")]
@@ -121,11 +136,7 @@ export let Jwk = module (
         /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let init = func(key: uint8[list], alg: HmacAlgorithm) {
-            crypto_policy.require(Algorithm.Hmac);
-            crypto_policy.require(hmac_hash(alg));
-            if (key.length < hash_length(hmac_hash(alg))) {
-                trap_with_message("invalid argument: JWS HMAC key is shorter than the hash output");
-            }
+            require_hmac(alg, key.length);
             secret_key = new secret.SecretBytes(key);
             variant = alg;
         };
@@ -156,6 +167,48 @@ export let Jwk = module (
         /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override to_string = func -> string => "HmacKey(<redacted>)";
+    );
+
+    /// @brief An octet signing key restricted to one HMAC SHA-2 algorithm in JWS.
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+    #[Final, Since("0.3.0")]
+    export let HmacSigningKey = class (
+        last secret_key: secret.SecretBytes;
+        last variant: HmacAlgorithm;
+
+        /// @brief Copies key material for signing. It must be at least as long as the configured hash output.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let init = func(key: uint8[list], alg: HmacAlgorithm) {
+            require_hmac(alg, key.length);
+            secret_key = new secret.SecretBytes(key);
+            variant = alg;
+        };
+
+        /// @brief The configured JWS algorithm name.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let jose_algorithm = func -> string => hmac_name(variant);
+
+        #[Hidden, Internal]
+        export let sign_input = func(input: uint8[list]) -> uint8[list] {
+            last key = secret_key.expose();
+            return match (variant) {
+                HmacAlgorithm.Hs256 => hmac.mac<sha2.Sha256>(key, input),
+                HmacAlgorithm.Hs384 => hmac.mac<sha2.Sha384>(key, input),
+                HmacAlgorithm.Hs512 => hmac.mac<sha2.Sha512>(key, input),
+            };
+        };
+
+        /// @brief Overwrites the key held by this instance.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let wipe = func => secret_key.wipe();
+
+        /// @brief A fixed redacted display.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "HmacSigningKey(<redacted>)";
     );
 
     /// @brief An RSA public key restricted to one JOSE signature algorithm.
@@ -309,7 +362,49 @@ export let Jwk = module (
         export let.override to_string = func -> string => "Ed25519Key";
     );
 
-    let metadata = func(members: [string, json.JsonValue][list], kind: string, alg: string) -> Result<Unit> {
+    /// @brief A JWS verification key for the fully specified Ed448 algorithm (RFC 9864).
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+    #[Final, Since("0.3.0")]
+    export let Ed448Key = class implements VerifierKey<Ed448Key> (
+        last public_key: ed448.Ed448PublicKey;
+
+        /// @brief Binds a checked Ed448 public key to the Ed448 header identifier.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let init = func(key: ed448.Ed448PublicKey) {
+            crypto_policy.require(Algorithm.Ed448);
+            public_key = key;
+        };
+
+        /// @brief The Ed448 header identifier.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let jose_algorithm = func -> string => "Ed448";
+
+        /// @brief Checks a pure Ed448 signature with the empty JOSE context.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool =>
+            new ed448.Ed448Verifier(public_key).verify(input, signature);
+
+        /// @brief Equality by public key.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool =>
+            other is Ed448Key && public_key.equals((other as Ed448Key).public_key);
+
+        /// @brief Hash of the public key.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 => public_key.hash_code();
+
+        /// @brief The key type's name.
+        /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Ed448Key";
+    );
+
+    let metadata = func(members: [string, json.JsonValue][list], kind: string, alg: string, required: string = "verify") -> Result<Unit> {
         if ((jose.required_text(members, "kty", InvalidKey)?) != kind) {
             return jose.fail<Unit>(InvalidKey, "the key type does not match this algorithm");
         }
@@ -321,7 +416,7 @@ export let Jwk = module (
         }
         match (json.member(members, "key_ops")) {
             Optional.Some(value) => {
-                return verification_operation(value);
+                return require_operation(value, required);
             },
             Optional.None => {
                 return Result<Unit>.Ok(Unit.Value);
@@ -330,53 +425,71 @@ export let Jwk = module (
         return jose.fail<Unit>(InvalidKey, "unrecognized key_ops");
     };
 
-    let verification_operation = func(value: json.JsonValue) -> Result<Unit> {
+    let require_operation = func(value: json.JsonValue, required: string) -> Result<Unit> {
         match (value) {
             json.JsonValue.Array(items) => {
                 let operations: string[list] = new;
-                let verify = false;
+                let allowed = false;
                 for (let item in items) {
                     match (item) {
                         json.JsonValue.Text(operation) => {
+                            if (required == "sign" && operation != "sign" && operation != "verify") {
+                                return jose.fail<Unit>(InvalidKey, "the signing key's operations must be for signatures");
+                            }
                             for (let previous in operations) {
                                 if (operation == previous) {
                                     return jose.fail<Unit>(InvalidKey, "key_ops must not repeat an operation");
                                 }
                             }
                             operations.append(operation);
-                            verify = verify || operation == "verify";
+                            allowed = allowed || operation == required;
                         },
                         _ => {
                             return jose.fail<Unit>(InvalidKey, "key_ops must contain strings");
                         },
                     }
                 }
-                if (verify) {
+                if (allowed) {
                     return Result<Unit>.Ok(Unit.Value);
                 }
             },
             _ => {},
         }
-        return jose.fail<Unit>(InvalidKey, "key_ops must authorize verification");
+        return jose.fail<Unit>(InvalidKey, required == "sign" ? "key_ops must authorize signing" : "key_ops must authorize verification");
+    };
+
+    let read_hmac = func(text: string, alg: HmacAlgorithm, operation: string) -> Result<uint8[list]> {
+        last object = jose.parse_object(text, InvalidKey)?;
+        metadata(object, "oct", hmac_name(alg), operation)?;
+        if (not crypto_policy.allows(Algorithm.Hmac) || not crypto_policy.allows(hmac_hash(alg))) {
+            return jose.fail<uint8[list]>(InvalidKey, "the crypto policy denies this algorithm");
+        }
+        let key = jose.required_bytes(object, "k", InvalidKey)?;
+        if (key.length < hash_length(hmac_hash(alg))) {
+            words.wipe(key);
+            return jose.fail<uint8[list]>(InvalidKey, "the HMAC key is shorter than the hash output");
+        }
+        return Result<uint8[list]>.Ok(key);
     };
 
     /// @brief Imports an oct JWK of sufficient length for the caller-selected HMAC algorithm.
     /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
     #[NoDiscard, Since("0.3.0")]
     export let parse_hmac = func(text: string, alg: HmacAlgorithm) -> Result<HmacKey> {
-        last object = jose.parse_object(text, InvalidKey)?;
-        metadata(object, "oct", hmac_name(alg))?;
-        if (not crypto_policy.allows(Algorithm.Hmac) || not crypto_policy.allows(hmac_hash(alg))) {
-            return jose.fail<HmacKey>(InvalidKey, "the crypto policy denies this algorithm");
-        }
-        let key = jose.required_bytes(object, "k", InvalidKey)?;
-        if (key.length < hash_length(hmac_hash(alg))) {
-            words.wipe(key);
-            return jose.fail<HmacKey>(InvalidKey, "the HMAC key is shorter than the hash output");
-        }
+        let key = read_hmac(text, alg, "verify")?;
         last parsed = new HmacKey(key, alg);
         words.wipe(key);
         return Result<HmacKey>.Ok(parsed);
+    };
+
+    /// @brief Imports an oct JWK for signing. A present key_ops must include sign and contain only signature operations.
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_hmac_signing = func(text: string, alg: HmacAlgorithm) -> Result<HmacSigningKey> {
+        let key = read_hmac(text, alg, "sign")?;
+        last parsed = new HmacSigningKey(key, alg);
+        words.wipe(key);
+        return Result<HmacSigningKey>.Ok(parsed);
     };
 
     /// @brief Imports an RSA JWK with a modulus of at least 2048 bits and binds it to the given JOSE algorithm.
@@ -435,5 +548,18 @@ export let Jwk = module (
         }
         last bytes = jose.required_bytes(object, "x", InvalidKey)?;
         return Result<Ed25519Key>.Ok(new Ed25519Key(ed25519.parse_public_key(bytes)?));
+    };
+
+    /// @brief Imports an OKP JWK for the fully specified Ed448 algorithm.
+    /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_ed448 = func(text: string) -> Result<Ed448Key> {
+        last object = jose.parse_object(text, InvalidKey)?;
+        metadata(object, "OKP", "Ed448")?;
+        if ((jose.required_text(object, "crv", InvalidKey)?) != "Ed448" || not crypto_policy.allows(Algorithm.Ed448)) {
+            return jose.fail<Ed448Key>(InvalidKey, "the Ed448 curve is required and must be allowed by policy");
+        }
+        last bytes = jose.required_bytes(object, "x", InvalidKey)?;
+        return Result<Ed448Key>.Ok(new Ed448Key(ed448.parse_public_key(bytes)?));
     };
 );

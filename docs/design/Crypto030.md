@@ -110,7 +110,7 @@ Verification runs in Neura and shares the asymmetric and post-quantum primitives
 
 | Item (spec section) | Tier | Vectors and notes | Status |
 | --- | --- | --- | --- |
-| JWK and compact JWS (2.10) | KAT | RFC 7515 A.1–A.5, RFC 7517 A.1/A.3, RFC 7520 4.1–4.4 and RFC 8037. Algorithm substitution, HMAC/RSA confusion, unsecured tokens, malformed critical headers and tampered tags are refused. | implemented |
+| JWK and compact JWS (2.10) | KAT | RFC 7515 A.1–A.5, RFC 7517 A.1/A.3, RFC 7520 4.1–4.4 and RFC 8037. Typed signing verifies exact HMAC, RS and PS cookbook outputs, RFC 6979 ECDSA with OpenSSL and Ed448 with RFC 8032 and RFC 9864. Tests refuse algorithm substitutions, HMAC/RSA confusion, malformed protected headers, wrong-width salt and wiped RSA keys. | implemented for the compact profiles |
 | JWT time claims (2.10) | logic + KAT | RFC 7519 claims, an authenticated RFC 7515 token, a fixed clock, and clock capability denial. | implemented |
 | Compact JWE direct and AES Key Wrap (2.10) | KAT | RFC 3394, RFC 7516 A.3, RFC 7518 CBC-HMAC, RFC 7520 5.6, and independent Python cryptography checks. Tests include failed authentication and AES-CBC padding failure. | implemented |
 | PASETO v4.local and v4.public (2.10) | KAT | All 17 pinned official v4 records. Exact local encryption and public signatures, plus rejection of altered tags, footer and assertion mismatches, wrong purpose, and invalid encodings. | implemented |

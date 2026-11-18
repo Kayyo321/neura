@@ -1,0 +1,15 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: JWS PS signing needs a PS algorithm, a hash-sized salt, and a modulus-width factor
+// run-options: --gpu=off --deny-entropy --max-steps 5000000000
+let cases = import:JwsSigningTestCases;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let key = cases.rsa_key(0);
+        let _ = jws.sign_rsa_with_salt(new, key, jwk.RsaAlgorithm.Ps256, new, cases.factor(key, 2));
+        return program.ExitCode.Ok;
+    };
+);

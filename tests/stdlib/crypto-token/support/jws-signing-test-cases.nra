@@ -1,0 +1,33 @@
+let hex = import:Std.Encoding.Hex;
+let jose = import:Std.Encoding.Base64;
+let jwk = import:Std.Crypto.Token.Jwk;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JwsSigningVectors;
+
+export let JwsSigningTestCases = module (
+    export let bytes = func(encoded: string) -> uint8[list] => test.assert_ok(hex.decode(encoded));
+    export let text = func(encoded: string) -> string => test.assert_ok(utf8.decode(bytes(encoded)));
+    export let base64 = func(value: uint8[list]) -> string => jose.encode_url_unpadded(value);
+
+    export let rsa_key = func(index: int) -> rsa.RsaPrivateKey {
+        last rows = vectors.rsa_keys;
+        last offset = index * 9;
+        return new rsa.RsaPrivateKey(bytes(rows[offset]), bytes(rows[offset + 1]), bytes(rows[offset + 2]),
+            bytes(rows[offset + 3]), bytes(rows[offset + 4]), bytes(rows[offset + 5]), bytes(rows[offset + 6]),
+            bytes(rows[offset + 7]));
+    };
+
+    export let rsa_public = func(index: int, algorithm: jwk.RsaAlgorithm) -> jwk.RsaKey =>
+        test.assert_ok(jwk.parse_rsa(text(vectors.rsa_keys[index * 9 + 8]), algorithm));
+
+    export let factor = func(key: rsa.RsaPrivateKey, value: uint8) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 1; i < key.public_key.modulus().length; i++) {
+            out.append(0);
+        }
+        out.append(value);
+        return out;
+    };
+);
