@@ -41,6 +41,7 @@ Ada
 | `Std.Digest` | `Crc32`, `Sha256` |
 | `Std.Io` | `Console`, `Closeable`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer` |
 | `Std.Fs` | `Path`, `File`, `Fs` |
+| `Std.Desktop` | `Desktop`: `Registry`, `Dispatcher`, `Context`, `Window`, `Call`, `Event`, `run_application` (0.3.0) |
 | `Std.Net` | `TcpStream`, `TcpListener` |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |

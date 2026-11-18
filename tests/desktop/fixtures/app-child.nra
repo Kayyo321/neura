@@ -1,0 +1,58 @@
+let console = import:Std.Io.Console;
+let desktop = import:Std.Desktop;
+let program = import:Std.Program;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+// The native child of the desktop application fixture (tests/desktop/app_test.js). Its standard output is the
+// channel to the window host, so it logs only to standard error.
+let AppChild = module:program.Entry (
+    last registry = new desktop.Registry(new(["fixture.echo", "fixture.fail", "fixture.open", "fixture.quit",
+        "fixture.title", "fixture.trap", "fixture.unserved"]));
+
+    /// @brief Opens the first window and serves the bridge until the application ends.
+    let start = func(context: desktop.Context) -> Result<Unit> {
+        match (context.open_window("Fixture", 640, 480)) {
+            Result.Ok(window) => { console.eprintln("child: opened {}", window.to_string()); },
+            Result.Err(problem) => { return Result<Unit>.Err(problem); },
+        }
+        last dispatcher = new desktop.Dispatcher(registry);
+        dispatcher.add("fixture.echo", func(call: desktop.Call) -> Result<uint8[list]> =>
+            Result<uint8[list]>.Ok(call.request));
+        dispatcher.add("fixture.fail", func(call: desktop.Call) -> Result<uint8[list]> =>
+            Result<uint8[list]>.Err(errors.Error.Io { kind: errors.IoErrorKind.PermissionDenied, message: "refused by the fixture", path: "" }));
+        dispatcher.add("fixture.title", func(call: desktop.Call) -> Result<uint8[list]> {
+            let [valid, title] = string.from_utf8(call.request);
+            match (call.window.set_title(title)) {
+                Result.Ok(_) => { return Result<uint8[list]>.Ok(strings.to_bytes("titled")); },
+                Result.Err(problem) => { return Result<uint8[list]>.Err(problem); },
+            }
+            return Result<uint8[list]>.Ok(strings.to_bytes("unreachable"));
+        });
+        dispatcher.add("fixture.open", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (context.open_window_at("Second", 320, 240, 100, 100, "/second.html")) {
+                Result.Ok(window) => { return Result<uint8[list]>.Ok(strings.to_bytes(window.handle.to_string())); },
+                Result.Err(problem) => { return Result<uint8[list]>.Err(problem); },
+            }
+            return Result<uint8[list]>.Ok(strings.to_bytes("unreachable"));
+        });
+        dispatcher.add("fixture.quit", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (context.quit(7)) {
+                Result.Ok(_) => {},
+                Result.Err(problem) => { return Result<uint8[list]>.Err(problem); },
+            }
+            return Result<uint8[list]>.Ok(strings.to_bytes("quitting"));
+        });
+        dispatcher.add("fixture.trap", func(call: desktop.Call) -> Result<uint8[list]> {
+            trap_with_message("fixture trap in a bridge operation");
+            return Result<uint8[list]>.Ok(call.request);
+        });
+        return context.run(dispatcher);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return desktop.run_application(registry, start);
+    };
+);

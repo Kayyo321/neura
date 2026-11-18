@@ -163,6 +163,12 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Math.BigInteger`](Stdlib-Math-BigInteger) | [Contracts](Stdlib-Math-BigInteger#detailed-contracts) | [Declarations](Stdlib-Math-BigInteger#exported-declarations) |
 | [`Std.Math.Math`](Stdlib-Math-Math) | [Contracts](Stdlib-Math-Math#detailed-contracts) | [Declarations](Stdlib-Math-Math#exported-declarations) |
 
+### `Std.Desktop`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Desktop`](Stdlib-Desktop) | [Contracts](Stdlib-Desktop#detailed-contracts) | [Declarations](Stdlib-Desktop#exported-declarations) |
+
 ### `Std.Net`
 
 | Module | Detailed contracts | Exported declarations |
