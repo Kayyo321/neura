@@ -1,0 +1,544 @@
+let base64 = import:Std.Encoding.Base64;
+let calls = import:Std.Net.Rpc.Call;
+let.promote _ = import:Std.Time.Duration;
+let codecs = import:Std.Net.Rpc.Codec;
+let errors = import:Std.Core.Error;
+let framing = import:Std.Net.Rpc.Framing;
+let meta = import:Std.Net.Rpc.Metadata;
+let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+let statuses = import:Std.Net.Rpc.Status;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+let web = import:Std.Net.Rpc.GrpcWeb;
+
+/// @brief The gRPC engine: a client channel, a server, and streaming calls, over an injected HTTP exchange.
+///
+/// `GrpcServer` routes `Call.WireRequest`s to handlers by method path and answers `Call.WireResponse`s, for native
+/// gRPC (`handle`) and gRPC-Web, binary and text (`handle_web`). `GrpcChannel` is a `Service<RpcRequest,
+/// RpcResponse>` over a transport `Service<WireRequest, WireResponse>`, so filters such as
+/// `Std.Net.Rpc.Deadline.DeadlineFilter` wrap it. Over an in-memory transport (a server's `as_transport`) every
+/// call kind runs for real with whole bodies: unary, server streaming, client streaming, and bidirectional
+/// streaming in which all requests are sent before responses are read. HTTP/2 and HTTP/3 transports, which would
+/// interleave requests and responses on a live stream, are stubs: the runtime has no HTTP/2 or HTTP/3 service.
+/// @see [Std.Net.Rpc.Grpc](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Grpc)
+#Since("0.3.0")
+export let Grpc = module (
+    /// @brief The HTTP version a host transport would use.
+    export let Protocol = enum (Http2, Http3);
+
+    /// @brief The server's side of one call: the request messages to read and the responses to send.
+    #[Final, NotThreadSafe]
+    export let ServerStream = class (
+        /// @brief The request.
+        export last request: calls.RpcRequest;
+        /// @brief The index of the next request message.
+        let next_index: int = 0;
+        /// @brief The responses sent so far.
+        export last sent: uint8[list][list] = new;
+        /// @brief Response header metadata.
+        export last headers: meta.Metadata = meta.empty();
+        /// @brief Custom trailing metadata.
+        export last trailers: meta.Metadata = meta.empty();
+
+        /// @brief A stream over `call`.
+        export let init = func(call: calls.RpcRequest) {
+            request = call;
+        };
+
+        /// @brief The next request message, or `None` after the client's last one.
+        #NoDiscard
+        export let receive = func -> optional.Optional<uint8[list]> {
+            if (next_index >= request.messages.length) {
+                return optional.Optional<uint8[list]>.None;
+            }
+            next_index++;
+            return optional.Optional<uint8[list]>.Some(request.messages[next_index - 1]);
+        };
+
+        /// @brief Sends one response message.
+        export let send = func(message: uint8[list]) {
+            sent.append(message);
+        };
+
+        /// @brief The method and the counts.
+        export let.override to_string = func -> string => "ServerStream(" + request.path.to_string() + ", "
+            + sent.length.to_string() + " sent)";
+    );
+
+    /// @brief A streaming handler: reads requests from and sends responses to a `ServerStream`, then ends with
+    /// OK (`Ok`) or with the status of its error.
+    export let StreamHandler = interface (
+        /// @brief Runs the call.
+        let handle = func(stream: ServerStream) -> Result<Unit>;
+    );
+
+    /// @brief A streaming handler that runs a function.
+    #Final
+    export let FunctionStreamHandler = class implements StreamHandler (
+        /// @brief The function.
+        last body: func(ServerStream) -> Result<Unit>;
+
+        /// @brief Wraps `run`.
+        export let init = func(run: func(ServerStream) -> Result<Unit>) {
+            body = run;
+        };
+
+        /// @brief Runs the function.
+        export let handle = func(stream: ServerStream) -> Result<Unit> => body(stream);
+
+        /// @brief `FunctionStreamHandler`.
+        export let.override to_string = func -> string => "FunctionStreamHandler";
+    );
+
+    /// @brief Routes calls to handlers by method path.
+    ///
+    /// A unary handler is a `Service<RpcRequest, RpcResponse>` and gets exactly one request message (any other
+    /// count is UNIMPLEMENTED, statuscodes.md "Request cardinality violation"); a stream handler gets every
+    /// message. An unknown method is UNIMPLEMENTED; a non-gRPC content type is HTTP 415 (PROTOCOL-HTTP2.md); a
+    /// handler error ends the call with `Status.of_error` of it.
+    #[Final, NotThreadSafe]
+    export let GrpcServer = class (
+        /// @brief Registered paths, parallel to the handlers.
+        last paths: string[list] = new;
+        /// @brief Unary handlers (`None` for a stream handler).
+        last unary: optional.Optional<Service<calls.RpcRequest, calls.RpcResponse>>[list] = new;
+        /// @brief Stream handlers (`None` for a unary handler).
+        last streaming: optional.Optional<StreamHandler>[list] = new;
+        /// @brief The largest request message accepted.
+        last max_message_size: int;
+
+        /// @brief A server accepting messages up to `max_size` bytes.
+        export let init = func(max_size: int) {
+            max_message_size = max_size;
+        };
+
+        /// @brief Registers a unary handler for `path`, replacing an earlier one.
+        export let add_unary = func(path: calls.MethodPath, handler: Service<calls.RpcRequest, calls.RpcResponse>) {
+            last at = remove(path.to_string());
+            paths.append(path.to_string());
+            unary.append(optional.Optional<Service<calls.RpcRequest, calls.RpcResponse>>.Some(handler));
+            streaming.append(optional.Optional<StreamHandler>.None);
+        };
+
+        /// @brief Registers a streaming handler for `path`, replacing an earlier one.
+        export let add_streaming = func(path: calls.MethodPath, handler: StreamHandler) {
+            last at = remove(path.to_string());
+            paths.append(path.to_string());
+            unary.append(optional.Optional<Service<calls.RpcRequest, calls.RpcResponse>>.None);
+            streaming.append(optional.Optional<StreamHandler>.Some(handler));
+        };
+
+        /// @brief The registered method paths in registration order.
+        #NoDiscard
+        export let methods = func -> string[list] {
+            last out: string[list] = new;
+            for (let p in paths) {
+                if (p.byte_length > 0) {
+                    out.append(p);
+                }
+            }
+            return out;
+        };
+
+        /// @brief Answers one native gRPC request.
+        #NoDiscard
+        export let handle = func(wire: calls.WireRequest) -> calls.WireResponse {
+            last content_type = optional.value_or<string>(wire.header("content-type"), "");
+            if (!calls.is_grpc_content_type(content_type)) {
+                return new calls.WireResponse(415, new, new, new);
+            }
+            last subtype = subtype_of(content_type, calls.GrpcContentType);
+            return calls.encode_response(dispatch(wire), subtype);
+        };
+
+        /// @brief Answers one gRPC-Web request (`application/grpc-web[+fmt]` or `application/grpc-web-text[+fmt]`):
+        /// the trailers travel as the body's last frame, and the text variant is base64 both ways.
+        #NoDiscard
+        export let handle_web = func(wire: calls.WireRequest) -> calls.WireResponse {
+            last content_type = strings.to_ascii_lower(optional.value_or<string>(wire.header("content-type"), ""));
+            last text = strings.starts_with(content_type, web.TextContentType);
+            if (!text && !strings.starts_with(content_type, web.ContentType)) {
+                return new calls.WireResponse(415, new, new, new);
+            }
+            last prefix = text ? web.TextContentType : web.ContentType;
+            let subtype = subtype_of(content_type, prefix);
+            let body = wire.body;
+            if (text) {
+                last decoded = string.from_utf8(wire.body);
+                match (web.decode_text(decoded[0] ? decoded[1] : "?")) {
+                    Result.Ok(bytes) => {
+                        body = bytes;
+                    },
+                    Result.Err(e) => {
+                        return web_response(calls.status_response(statuses.of(statuses.Code.Internal,
+                            "malformed grpc-web-text body")), prefix, subtype, text);
+                    },
+                }
+            }
+            last native = new calls.WireRequest(wire.headers, body);
+            return web_response(dispatch(native), prefix, subtype, text);
+        };
+
+        /// @brief The server as an in-memory transport for a `GrpcChannel`.
+        #NoDiscard
+        export let as_transport = func -> Service<calls.WireRequest, calls.WireResponse> =>
+            new ServerTransport(new bound(handle));
+
+        /// @brief Serves on a host HTTP/2 or HTTP/3 listener at `port` until the listener closes.
+        #NoDiscard
+        export let serve = func(port: int, protocol: Protocol) -> Result<Unit> =>
+            host_serve(port, protocol, new bound(handle));
+
+        /// @brief The number of methods.
+        export let.override to_string = func -> string => "GrpcServer(" + paths.length.to_string() + " methods)";
+
+        /// @brief Runs the handler of a request and returns its response.
+        let dispatch = func(wire: calls.WireRequest) -> calls.RpcResponse {
+            match (calls.decode_request(wire, max_message_size)) {
+                Result.Err(e) => {
+                    return calls.status_response(statuses.of_error(e));
+                },
+                Result.Ok(request) => {
+                    return route(request);
+                },
+            }
+        };
+
+        /// @brief Finds and runs the handler of a decoded request.
+        let route = func(request: calls.RpcRequest) -> calls.RpcResponse {
+            last key = request.path.to_string();
+            for (let i = 0; i < paths.length; i++) {
+                if (paths[i] == key) {
+                    return run(i, request);
+                }
+            }
+            return calls.status_response(statuses.of(statuses.Code.Unimplemented, "unknown method " + key));
+        };
+
+        /// @brief Runs handler `index`.
+        let run = func(index: int, request: calls.RpcRequest) -> calls.RpcResponse {
+            match (unary[index]) {
+                optional.Optional.Some(service) => {
+                    if (request.messages.length != 1) {
+                        return calls.status_response(statuses.of(statuses.Code.Unimplemented,
+                            "unary method received " + request.messages.length.to_string() + " messages"));
+                    }
+                    return match (service.call(request)) {
+                        Result.Ok(response) => response,
+                        Result.Err(e) => calls.status_response(statuses.of_error(e)),
+                    };
+                },
+                optional.Optional.None => {
+                },
+            }
+            last stream = new ServerStream(request);
+            last handler = optional.expect<StreamHandler>(streaming[index], "stream handler");
+            last outcome = match (handler.handle(stream)) {
+                Result.Ok(u) => statuses.ok(),
+                Result.Err(e) => statuses.of_error(e),
+            };
+            return new calls.RpcResponse(stream.headers, stream.sent, outcome, stream.trailers);
+        };
+
+        /// @brief Removes the entry for `key`; returns whether one existed.
+        let remove = func(key: string) -> bool {
+            for (let i = 0; i < paths.length; i++) {
+                if (paths[i] == key) {
+                    paths[i] = "";
+                    return true;
+                }
+            }
+            return false;
+        };
+    );
+
+    /// @brief A transport that calls a server's `handle`.
+    #Final
+    export let ServerTransport = class implements Service<calls.WireRequest, calls.WireResponse> (
+        /// @brief The server's handler.
+        last handler: func(calls.WireRequest) -> calls.WireResponse;
+
+        /// @brief Wraps `handle`.
+        export let init = func(handle: func(calls.WireRequest) -> calls.WireResponse) {
+            handler = handle;
+        };
+
+        /// @brief Runs the handler.
+        export let call = func(request: calls.WireRequest) -> Result<calls.WireResponse> =>
+            Result<calls.WireResponse>.Ok(handler(request));
+
+        /// @brief `ServerTransport`.
+        export let.override to_string = func -> string => "ServerTransport";
+    );
+
+    /// @brief A client channel to one authority over a transport.
+    ///
+    /// `call` sends one request and returns the response whatever its status; `unary` and the streaming helpers
+    /// turn a non-OK status into a `Status` error. A transport failure that is not a status error becomes
+    /// UNAVAILABLE (statuscodes.md "Connection failure").
+    #[Final, NotThreadSafe]
+    export let GrpcChannel = class implements Service<calls.RpcRequest, calls.RpcResponse> (
+        /// @brief The `:authority`.
+        export last authority: string;
+        /// @brief The `:scheme`.
+        export last scheme: string;
+        /// @brief The content subtype sent, such as `proto`.
+        export last subtype: string;
+        /// @brief The HTTP exchange.
+        last transport: Service<calls.WireRequest, calls.WireResponse>;
+        /// @brief The largest response message accepted.
+        last max_message_size: int;
+
+        /// @brief A channel with every part given.
+        export let init = func(host: string, uri_scheme: string, content_subtype: string,
+            exchange: Service<calls.WireRequest, calls.WireResponse>, max_size: int) {
+            authority = host;
+            scheme = uri_scheme;
+            subtype = content_subtype;
+            transport = exchange;
+            max_message_size = max_size;
+        };
+
+        /// @brief Sends `request` and returns the response with its status.
+        export let call = func(request: calls.RpcRequest) -> Result<calls.RpcResponse> {
+            last wire = calls.encode_request(request, authority, scheme, subtype);
+            return match (transport.call(wire)) {
+                Result.Ok(answer) => calls.decode_response(answer, max_message_size),
+                Result.Err(e) => Result<calls.RpcResponse>.Err(as_status_error(e)),
+            };
+        };
+
+        /// @brief A unary call: exactly one response message on OK, otherwise the status as an error.
+        #NoDiscard
+        export let unary = func(path: calls.MethodPath, message: uint8[list], call_metadata: meta.Metadata,
+            budget: optional.Optional<Duration>) -> Result<uint8[list]> {
+            last response = ok_response(call(calls.unary_request(path, message, call_metadata, budget))?)?;
+            if (response.messages.length != 1) {
+                return Result<uint8[list]>.Err(statuses.error(statuses.Code.Unimplemented,
+                    "unary method answered " + response.messages.length.to_string() + " messages"));
+            }
+            return Result<uint8[list]>.Ok(response.messages[0]);
+        };
+
+        /// @brief A streaming call of any kind: sends every message of `messages`, then returns every response
+        /// message on OK, otherwise the status as an error.
+        #NoDiscard
+        export let stream = func(path: calls.MethodPath, messages: uint8[list][list], call_metadata: meta.Metadata,
+            budget: optional.Optional<Duration>) -> Result<uint8[list][list]> {
+            last response = ok_response(call(new calls.RpcRequest(path, call_metadata, messages, budget))?)?;
+            return Result<uint8[list][list]>.Ok(response.messages);
+        };
+
+        /// @brief Opens a client stream to `path`; messages are sent when it is closed.
+        #NoDiscard
+        export let open = func(path: calls.MethodPath, call_metadata: meta.Metadata) -> ClientStream =>
+            new ClientStream(new bound(call), path, call_metadata);
+
+        /// @brief The authority and subtype.
+        export let.override to_string = func -> string => "GrpcChannel(" + authority + ", " + subtype + ")";
+    );
+
+    /// @brief The client's side of a streaming call over a whole-body exchange: `send` queues requests,
+    /// `close_send` performs the call, then `receive` yields the responses and `status` the final status.
+    #[Final, NotThreadSafe]
+    export let ClientStream = class (
+        /// @brief The channel's call function.
+        last caller: func(calls.RpcRequest) -> Result<calls.RpcResponse>;
+        /// @brief The method.
+        export last path: calls.MethodPath;
+        /// @brief The request metadata.
+        last call_metadata: meta.Metadata;
+        /// @brief Queued requests.
+        last outgoing: uint8[list][list] = new;
+        /// @brief The response once closed.
+        let response: optional.Optional<calls.RpcResponse> = optional.Optional<calls.RpcResponse>.None;
+        /// @brief The next response index.
+        let next_index: int = 0;
+
+        /// @brief A stream that calls `run`.
+        export let init = func(run: func(calls.RpcRequest) -> Result<calls.RpcResponse>, method_path: calls.MethodPath,
+            request_metadata: meta.Metadata) {
+            caller = run;
+            path = method_path;
+            call_metadata = request_metadata;
+        };
+
+        /// @brief Queues a request; after `close_send` it traps with "invalid state: stream closed".
+        export let send = func(message: uint8[list]) {
+            if (optional.is_some<calls.RpcResponse>(response)) {
+                trap_with_message("invalid state: stream closed");
+            }
+            outgoing.append(message);
+        };
+
+        /// @brief Ends the requests and performs the call; fails only when the exchange fails.
+        #NoDiscard
+        export let close_send = func -> Result<Unit> {
+            last answer = caller(new calls.RpcRequest(path, call_metadata, outgoing, optional.Optional<Duration>.None))?;
+            response = optional.Optional<calls.RpcResponse>.Some(answer);
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The next response message, or `None` at the end (or before `close_send`).
+        #NoDiscard
+        export let receive = func -> optional.Optional<uint8[list]> {
+            match (response) {
+                optional.Optional.Some(answer) => {
+                    if (next_index >= answer.messages.length) {
+                        return optional.Optional<uint8[list]>.None;
+                    }
+                    next_index++;
+                    return optional.Optional<uint8[list]>.Some(answer.messages[next_index - 1]);
+                },
+                optional.Optional.None => {
+                    return optional.Optional<uint8[list]>.None;
+                },
+            }
+        };
+
+        /// @brief The final status, `None` before `close_send`.
+        #NoDiscard
+        export let status = func -> optional.Optional<statuses.RpcStatus> => match (response) {
+            optional.Optional.Some(answer) => optional.Optional<statuses.RpcStatus>.Some(answer.status),
+            optional.Optional.None => optional.Optional<statuses.RpcStatus>.None,
+        };
+
+        /// @brief The method and queued count.
+        export let.override to_string = func -> string => "ClientStream(" + path.to_string() + ", "
+            + outgoing.length.to_string() + " queued)";
+    );
+
+    /// @brief A typed unary call through `codec`s for the request and response.
+    #NoDiscard
+    export let call_unary = func<Req, Resp>(channel: GrpcChannel, path: calls.MethodPath, request: Req,
+        request_codec: codecs.RpcCodec<Req>, response_codec: codecs.RpcCodec<Resp>, call_metadata: meta.Metadata,
+        budget: optional.Optional<Duration>) -> Result<Resp> {
+        last bytes = channel.unary(path, request_codec.encode(request), call_metadata, budget)?;
+        return match (response_codec.decode(bytes)) {
+            Result.Ok(value) => Result<Resp>.Ok(value),
+            Result.Err(e) => Result<Resp>.Err(statuses.error(statuses.Code.Internal, "error parsing response: "
+                + errors.message(e))),
+        };
+    };
+
+    /// @brief A unary handler from a function over message bytes.
+    #NoDiscard
+    export let unary_handler = func(body: func(uint8[list]) -> Result<uint8[list]>)
+        -> Service<calls.RpcRequest, calls.RpcResponse> => new BytesHandler(body);
+
+    /// @brief A unary handler over the request's one message.
+    #Final
+    export let BytesHandler = class implements Service<calls.RpcRequest, calls.RpcResponse> (
+        /// @brief The function.
+        last body: func(uint8[list]) -> Result<uint8[list]>;
+
+        /// @brief Wraps `run`.
+        export let init = func(run: func(uint8[list]) -> Result<uint8[list]>) {
+            body = run;
+        };
+
+        /// @brief Runs the function on the first message.
+        export let call = func(request: calls.RpcRequest) -> Result<calls.RpcResponse> =>
+            Result<calls.RpcResponse>.Ok(calls.unary_response(body(request.messages[0])?));
+
+        /// @brief `BytesHandler`.
+        export let.override to_string = func -> string => "BytesHandler";
+    );
+
+    /// @brief A channel over a host HTTP/2 or HTTP/3 connection to `authority` (`host:port`), TLS when `tls`.
+    #NoDiscard
+    export let connect = func(authority: string, protocol: Protocol, tls: bool, subtype: string)
+        -> Result<GrpcChannel> {
+        last handle = host_connect(authority, protocol, tls)?;
+        return Result<GrpcChannel>.Ok(new GrpcChannel(authority, tls ? "https" : "http", subtype,
+            new HostTransport(handle), framing.DefaultMaxMessageSize));
+    };
+
+    /// @brief A transport over a host HTTP/2 or HTTP/3 connection handle.
+    #Final
+    export let HostTransport = class implements Service<calls.WireRequest, calls.WireResponse> (
+        /// @brief The host connection handle.
+        last handle: int64;
+
+        /// @brief Wraps `connection`.
+        export let init = func(connection: int64) {
+            handle = connection;
+        };
+
+        /// @brief One exchange on a new stream of the connection.
+        export let call = func(request: calls.WireRequest) -> Result<calls.WireResponse> =>
+            host_exchange(handle, request);
+
+        /// @brief The handle.
+        export let.override to_string = func -> string => "HostTransport(" + handle.to_string() + ")";
+    );
+
+    /// @brief The status error of a transport failure: a status error as is, otherwise UNAVAILABLE.
+    #NoDiscard
+    export let as_status_error = func(problem: errors.Error) -> errors.Error => match (problem) {
+        errors.Error.Custom(detail) => detail is statuses.RpcFailure ? problem
+            : statuses.error(statuses.Code.Unavailable, errors.message(problem)),
+        _ => statuses.error(statuses.Code.Unavailable, errors.message(problem)),
+    };
+
+    /// @brief The response when its status is OK, otherwise the status as an error.
+    let ok_response = func(response: calls.RpcResponse) -> Result<calls.RpcResponse> {
+        if (!response.status.is_ok()) {
+            return Result<calls.RpcResponse>.Err(statuses.to_error(response.status));
+        }
+        return Result<calls.RpcResponse>.Ok(response);
+    };
+
+    /// @brief The subtype after `prefix+` in a content type, `proto` when absent.
+    let subtype_of = func(content_type: string, prefix: string) -> string {
+        last lower = strings.to_ascii_lower(content_type);
+        if (strings.starts_with(lower, prefix + "+")) {
+            last rest = lower.slice(prefix.byte_length + 1, lower.byte_length);
+            last semi = strings.index_of(rest, ";");
+            return semi < 0 ? rest : rest.slice(0, semi);
+        }
+        return "proto";
+    };
+
+    /// @brief A gRPC-Web response: headers without status, body frames then the trailer frame, base64 for text.
+    let web_response = func(response: calls.RpcResponse, prefix: string, subtype: string, text: bool)
+        -> calls.WireResponse {
+        last headers: [string, string][list] = new;
+        headers.append(["content-type", prefix + "+" + subtype]);
+        for (let pair in response.headers.entries()) {
+            headers.append(pair);
+        }
+        last body: uint8[list] = new;
+        for (let message in response.messages) {
+            framing.append_frame(body, 0, message);
+        }
+        last trailers = statuses.to_trailers(response.status);
+        trailers.add_all(response.trailers);
+        for (let b in web.encode_trailers(trailers)) {
+            body.append(b);
+        }
+        last sent = text ? strings.to_bytes(web.encode_text(body)) : body;
+        return new calls.WireResponse(200, headers, sent, new);
+    };
+
+    /// @brief Host binding for `connect`: opens an HTTP/2 (ALPN h2) or HTTP/3 connection.
+    /// @stub no HTTP/2 or HTTP/3 client transport in this runtime
+    let host_connect = func(authority: string, protocol: Protocol, tls: bool) -> Result<int64> {
+        trap_with_message("unsupported: Std.Net.Rpc.Grpc.connect is not implemented in Neura 0.3.0 (no HTTP/2 or HTTP/3 client transport in this runtime)");
+    };
+
+    /// @brief Host binding for `HostTransport.call`: sends the request on a new stream and reads the response.
+    /// @stub no HTTP/2 or HTTP/3 client transport in this runtime
+    let host_exchange = func(connection: int64, request: calls.WireRequest) -> Result<calls.WireResponse> {
+        trap_with_message("unsupported: Std.Net.Rpc.Grpc.HostTransport.call is not implemented in Neura 0.3.0 (no HTTP/2 or HTTP/3 client transport in this runtime)");
+    };
+
+    /// @brief Host binding for `GrpcServer.serve`: listens and answers each request stream with `handler`.
+    /// @stub no HTTP/2 or HTTP/3 server transport in this runtime
+    let host_serve = func(port: int, protocol: Protocol, handler: func(calls.WireRequest) -> calls.WireResponse)
+        -> Result<Unit> {
+        trap_with_message("unsupported: Std.Net.Rpc.Grpc.GrpcServer.serve is not implemented in Neura 0.3.0 (no HTTP/2 or HTTP/3 server transport in this runtime)");
+    };
+);

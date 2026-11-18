@@ -1,0 +1,205 @@
+let errors = import:Std.Core.Error;
+let.promote json = import:Std.Encoding.Json;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief Serialization formats for RPC messages, decoupled from framing (`Std.Net.Rpc.Framing`).
+///
+/// An `RpcCodec<T>` turns a `T` into message bytes and back and names its content subtype, the part after
+/// `application/grpc+`. `RawCodec` passes bytes through; `JsonCodec` writes `Std.Encoding.Json` values;
+/// `MappedJsonCodec<T>` maps a type through `to_json`/`from_json` functions (the derived
+/// `Std.Encoding.Json.Codec<T>` of docs/design/Records030.md is not available in this release); `ProtoCodec<T>`
+/// maps a type through functions over `Std.Net.Rpc.ProtoWire`. FlatBuffers and Cap'n Proto codecs are stubs:
+/// this release has no schema compiler or runtime for them.
+/// @see [Std.Net.Rpc.Codec](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Rpc-Codec)
+#Since("0.3.0")
+export let Codec = module (
+    /// @brief Encodes messages of type `T` to bytes and decodes them back.
+    export let RpcCodec = interface<T> (
+        /// @brief The message bytes of `value`.
+        let encode = func(value: T) -> uint8[list];
+        /// @brief The value of message bytes, or a decoding failure.
+        let decode = func(bytes: uint8[list]) -> Result<T>;
+        /// @brief The content subtype, such as `proto` or `json`.
+        let subtype = func -> string;
+    );
+
+    /// @brief The gRPC content type of a codec: `application/grpc+<subtype>`.
+    #NoDiscard
+    export let content_type = func<T>(codec: RpcCodec<T>) -> string => "application/grpc+" + codec.subtype();
+
+    /// @brief Bytes as they are; subtype `proto` by default, since raw gRPC payloads are usually protobuf.
+    #Final
+    export let RawCodec = class implements RpcCodec<uint8[list]> (
+        /// @brief The subtype reported.
+        last name: string;
+
+        /// @brief A raw codec reporting `subtype_name`.
+        export let init = func(subtype_name: string) {
+            name = subtype_name;
+        };
+
+        /// @brief The bytes unchanged.
+        export let encode = func(value: uint8[list]) -> uint8[list] => value;
+
+        /// @brief The bytes unchanged.
+        export let decode = func(bytes: uint8[list]) -> Result<uint8[list]> => Result<uint8[list]>.Ok(bytes);
+
+        /// @brief The subtype given.
+        export let subtype = func -> string => name;
+
+        /// @brief `RawCodec(subtype)`.
+        export let.override to_string = func -> string => "RawCodec(" + name + ")";
+    );
+
+    /// @brief JSON values as UTF-8 JSON text (RFC 8259), subtype `json`.
+    #Final
+    export let JsonCodec = class implements RpcCodec<JsonValue> (
+        /// @brief A JSON codec.
+        export let init = func {
+        };
+
+        /// @brief The compact JSON text of the value.
+        export let encode = func(value: JsonValue) -> uint8[list] => strings.to_bytes(json.write(value));
+
+        /// @brief Parses UTF-8 JSON text.
+        export let decode = func(bytes: uint8[list]) -> Result<JsonValue> {
+            last text = string.from_utf8(bytes);
+            if (!text[0]) {
+                return Result<JsonValue>.Err(errors.Error.Encoding { offset: 0, message: "JSON message is not UTF-8" });
+            }
+            return json.parse(text[1]);
+        };
+
+        /// @brief `json`.
+        export let subtype = func -> string => "json";
+
+        /// @brief `JsonCodec`.
+        export let.override to_string = func -> string => "JsonCodec";
+    );
+
+    /// @brief A type mapped to JSON through two functions, subtype `json`.
+    #Final
+    export let MappedJsonCodec = class<T> implements RpcCodec<T> (
+        /// @brief Maps a value to JSON.
+        last to_json: func(T) -> JsonValue;
+        /// @brief Maps JSON to a value or fails.
+        last from_json: func(JsonValue) -> Result<T>;
+
+        /// @brief A codec from the two mappings.
+        export let init = func(write: func(T) -> JsonValue, read: func(JsonValue) -> Result<T>) {
+            to_json = write;
+            from_json = read;
+        };
+
+        /// @brief The JSON text of the mapped value.
+        export let encode = func(value: T) -> uint8[list] => strings.to_bytes(json.write(to_json(value)));
+
+        /// @brief Parses JSON text, then maps it.
+        export let decode = func(bytes: uint8[list]) -> Result<T> {
+            last text = string.from_utf8(bytes);
+            if (!text[0]) {
+                return Result<T>.Err(errors.Error.Encoding { offset: 0, message: "JSON message is not UTF-8" });
+            }
+            return from_json(json.parse(text[1])?);
+        };
+
+        /// @brief `json`.
+        export let subtype = func -> string => "json";
+
+        /// @brief `MappedJsonCodec`.
+        export let.override to_string = func -> string => "MappedJsonCodec";
+    );
+
+    /// @brief A type mapped to protobuf through a writer function and a reader function, subtype `proto`.
+    #Final
+    export let ProtoCodec = class<T> implements RpcCodec<T> (
+        /// @brief Writes a value's fields.
+        last writer: func(T, proto.ProtoWriter) -> void;
+        /// @brief Reads a value from a message.
+        last reader: func(proto.ProtoReader) -> Result<T>;
+
+        /// @brief A codec from the two functions.
+        export let init = func(write: func(T, proto.ProtoWriter) -> void, read: func(proto.ProtoReader) -> Result<T>) {
+            writer = write;
+            reader = read;
+        };
+
+        /// @brief The protobuf bytes of the value.
+        export let encode = func(value: T) -> uint8[list] {
+            last w = proto.writer();
+            writer(value, w);
+            return w.to_bytes();
+        };
+
+        /// @brief Reads the value from protobuf bytes.
+        export let decode = func(bytes: uint8[list]) -> Result<T> => reader(proto.reader(bytes));
+
+        /// @brief `proto`.
+        export let subtype = func -> string => "proto";
+
+        /// @brief `ProtoCodec`.
+        export let.override to_string = func -> string => "ProtoCodec";
+    );
+
+    /// @brief A FlatBuffers codec for the table type named `table` (subtype `flatbuffers`).
+    #Final
+    export let FlatBuffersCodec = class<T> implements RpcCodec<T> (
+        /// @brief The fully qualified table type.
+        export last table: string;
+
+        /// @brief A codec for `table_name`.
+        export let init = func(table_name: string) {
+            table = table_name;
+        };
+
+        /// @brief The FlatBuffers bytes of the value.
+        /// @stub no FlatBuffers schema compiler or runtime in this release
+        export let encode = func(value: T) -> uint8[list] {
+            trap_with_message("unsupported: Std.Net.Rpc.Codec.FlatBuffersCodec.encode is not implemented in Neura 0.3.0 (no FlatBuffers schema compiler or runtime in this release)");
+        };
+
+        /// @brief The value of FlatBuffers bytes.
+        /// @stub no FlatBuffers schema compiler or runtime in this release
+        export let decode = func(bytes: uint8[list]) -> Result<T> {
+            trap_with_message("unsupported: Std.Net.Rpc.Codec.FlatBuffersCodec.decode is not implemented in Neura 0.3.0 (no FlatBuffers schema compiler or runtime in this release)");
+        };
+
+        /// @brief `flatbuffers`.
+        export let subtype = func -> string => "flatbuffers";
+
+        /// @brief `FlatBuffersCodec(table)`.
+        export let.override to_string = func -> string => "FlatBuffersCodec(" + table + ")";
+    );
+
+    /// @brief A Cap'n Proto codec for the struct type named `struct_name` (subtype `capnp`).
+    #Final
+    export let CapnProtoCodec = class<T> implements RpcCodec<T> (
+        /// @brief The fully qualified struct type.
+        export last struct_name: string;
+
+        /// @brief A codec for `name`.
+        export let init = func(name: string) {
+            struct_name = name;
+        };
+
+        /// @brief The Cap'n Proto bytes of the value.
+        /// @stub no Cap'n Proto schema compiler or runtime in this release
+        export let encode = func(value: T) -> uint8[list] {
+            trap_with_message("unsupported: Std.Net.Rpc.Codec.CapnProtoCodec.encode is not implemented in Neura 0.3.0 (no Cap'n Proto schema compiler or runtime in this release)");
+        };
+
+        /// @brief The value of Cap'n Proto bytes.
+        /// @stub no Cap'n Proto schema compiler or runtime in this release
+        export let decode = func(bytes: uint8[list]) -> Result<T> {
+            trap_with_message("unsupported: Std.Net.Rpc.Codec.CapnProtoCodec.decode is not implemented in Neura 0.3.0 (no Cap'n Proto schema compiler or runtime in this release)");
+        };
+
+        /// @brief `capnp`.
+        export let subtype = func -> string => "capnp";
+
+        /// @brief `CapnProtoCodec(struct)`.
+        export let.override to_string = func -> string => "CapnProtoCodec(" + struct_name + ")";
+    );
+);
