@@ -8,6 +8,7 @@
 #include "server/http_listener.hpp"
 #include "server/json_line.hpp"
 #include "server/request_worker.hpp"
+#include "server/sql_host.hpp"
 #include "server/worker_messages.hpp"
 #include "util/sha256.hpp"
 
@@ -77,8 +78,11 @@ constexpr std::string_view usage =
     "  --allow-fs[=prefix,...], --allow-net, --allow-env\n"
     "                                 grant the workers that group (default: none)\n"
     "  --record-dir <directory>       record each request's host requests to <id>.trace\n"
+    "  --sql-pool <name>=<url>        an SQL pool: sqlite:<path> or postgresql://... (repeatable);\n"
+    "                                 settings and passwords are sql.<name>.* configuration keys\n"
     "  --no-startup-check             skip the startup check request\n"
     "\n"
+    "neura-server-host migrate [options] <image.nvr> applies the pools' pending migrations and exits.\n"
     "SIGTERM and SIGINT drain and exit; SIGHUP reloads the TLS files.\n";
 
 // ---------------------------------------------------------------------------
@@ -100,6 +104,11 @@ struct HostOptions {
     neura::nvm::Capabilities capabilities;
     std::optional<fs::path> record_directory;
     bool startup_check = true;
+    // SQL pools (docs/runtime/Sql.md): --sql-pool values; the sql.* keys
+    // move from `config` to the pools and never reach a worker.
+    std::vector<std::string> sql_pools;
+    fs::path config_base = fs::current_path();
+    bool migrate_only = false;
 };
 
 std::uint64_t parse_count(std::string_view option, std::string_view text, std::uint64_t low, std::uint64_t high) {
@@ -219,6 +228,10 @@ HostOptions read_options(int argc, char** argv) {
             options.record_directory = fs::absolute(value_of(i, arg, "--record-dir"));
         } else if (arg == "--no-startup-check") {
             options.startup_check = false;
+        } else if (is(arg, "--sql-pool")) {
+            options.sql_pools.push_back(value_of(i, arg, "--sql-pool"));
+        } else if (i == 1 && arg == "migrate") {
+            options.migrate_only = true;
         } else if (arg.starts_with('-')) {
             throw std::runtime_error("unknown option: " + std::string(arg) + "\n" + std::string(usage));
         } else if (!options.image.empty()) {
@@ -228,7 +241,9 @@ HostOptions read_options(int argc, char** argv) {
         }
     }
     if (options.image.empty()) throw std::runtime_error(std::string(usage));
-    if (options.endpoints.empty()) throw std::runtime_error("at least one --listen or --tls-listen is required");
+    if (options.endpoints.empty() && !options.migrate_only) {
+        throw std::runtime_error("at least one --listen or --tls-listen is required");
+    }
     if (!tls_endpoints.empty()) {
         if (!options.certificate || !options.key) throw std::runtime_error("--tls-listen needs --cert and --key");
         for (const auto index : tls_endpoints) {
@@ -238,6 +253,7 @@ HostOptions read_options(int argc, char** argv) {
         throw std::runtime_error("--cert and --key are used only with --tls-listen");
     }
     for (const auto& file : config_files) read_config_file(file, options);
+    if (!config_files.empty()) options.config_base = fs::absolute(config_files.back()).parent_path();
     for (const auto& text : config_values) {
         const auto equals = text.find('=');
         if (equals == std::string::npos || equals == 0) throw std::runtime_error("--config expects key=value");
@@ -272,8 +288,8 @@ std::atomic<bool> draining{false};
 
 class Host {
 public:
-    Host(HostOptions options, fs::path executable)
-        : options_(std::move(options)), executable_(std::move(executable)) {
+    Host(HostOptions options, fs::path executable, SqlHost& sql)
+        : options_(std::move(options)), executable_(std::move(executable)), sql_(sql) {
         const auto bytes = neura::runner::read_file(options_.image);
         neura::util::Sha256 digest;
         digest.update(std::span<const std::uint8_t>(bytes));
@@ -497,6 +513,7 @@ private:
         }
         if (caps.net) arguments.emplace_back("--allow-net");
         if (caps.env) arguments.emplace_back("--allow-env");
+        if (caps.sql) arguments.emplace_back("--allow-sql");
         if (options_.record_directory) arguments.push_back("--record-dir=" + options_.record_directory->string());
         arguments.push_back("--max-response-bytes=" + std::to_string(options_.limits.http.response_bytes));
         arguments.push_back(options_.image.string());
@@ -575,6 +592,9 @@ private:
                      Clock::time_point deadline) {
         Outcome outcome;
         auto& channel = *worker.channel;
+        // The request's SQL leases; leaving this function, by any path,
+        // rolls back and returns them.
+        const auto sql_session = sql_.session(deadline);
         const auto assign = worker::encode_assign(request);
         if (channel.send(FrameKind::Assign, assign, deadline) != Channel::Status::Ok) {
             outcome.timed_out = channel.status() == Channel::Status::TimedOut;
@@ -618,7 +638,10 @@ private:
                 outcome.body.append(frame->body.begin(), frame->body.end());
                 break;
             case FrameKind::Call:
-                if (channel.send(FrameKind::Return, answer_call(frame->body), deadline) != Channel::Status::Ok) {
+                if (channel.send(FrameKind::Return,
+                                 is_sql_call(frame->body) ? SqlHost::answer(sql_session.get(), frame->body)
+                                                          : answer_call(frame->body),
+                                 deadline) != Channel::Status::Ok) {
                     return outcome;
                 }
                 break;
@@ -654,6 +677,13 @@ private:
         }
         const std::string key(reinterpret_cast<const char*>(body.data()) + 12, get(8));
         std::optional<std::string> value;
+        // SQL settings and passwords stay in the host.
+        if (key.starts_with("sql.")) {
+            put(0);
+            out.push_back(0);
+            put(0);
+            return out;
+        }
         if (options_.env_prefix) {
             if (const char* text = std::getenv((*options_.env_prefix + key).c_str())) value = text;
         }
@@ -726,6 +756,7 @@ private:
 
     HostOptions options_;
     fs::path executable_;
+    SqlHost& sql_;
     worker::ImageDigest image_digest_{};
     std::uint64_t id_prefix_ = 0;
     std::atomic<std::uint64_t> sequence_{0};
@@ -780,7 +811,23 @@ struct Active {
 
 int serve(HostOptions options, const char* argv0) {
     install_signals();
-    auto host = std::make_unique<Host>(options, host_executable(argv0));
+    // SQL pools and migrations, before any worker exists.
+    SqlHost sql(options.sql_pools, options.config, options.config_base);
+    {
+        std::vector<std::string> messages;
+        const auto problem = sql.prepare(options.migrate_only, messages);
+        for (const auto& message : messages) std::cerr << json_log_line(2, {}, message, {}) << std::flush;
+        if (problem) {
+            std::cerr << "neura-server-host: " << *problem << '\n';
+            return 1;
+        }
+    }
+    if (options.migrate_only) {
+        std::cout << "neura-server-host: migrations are up to date" << std::endl;
+        return 0;
+    }
+    if (sql.enabled()) options.capabilities.sql = true;
+    auto host = std::make_unique<Host>(options, host_executable(argv0), sql);
     if (options.startup_check && !host->check_startup()) {
         std::cerr << "neura-server-host: the startup check failed; not listening\n";
         return 1;
@@ -875,6 +922,8 @@ int worker_main(int argc, char** argv) {
             options.capabilities.net = true;
         } else if (arg == "--allow-env") {
             options.capabilities.env = true;
+        } else if (arg == "--allow-sql") {
+            options.capabilities.sql = true;
         } else if (arg.starts_with("--record-dir=")) {
             options.record_directory = std::string(arg.substr(13));
         } else if (arg.starts_with("--max-response-bytes=")) {

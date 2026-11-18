@@ -1,0 +1,1343 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let immutable = import:Std.Collections.ImmutableList;
+let signed = import:Std.Core.Int64;
+let unsigned = import:Std.Core.UInt64;
+let variadic = import:Std.Core.Variadic;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Io.Closeable;
+
+/// @brief SQL databases through the host's connection pools (docs/runtime/Sql.md).
+///
+/// The connections live in the host: neura-server-host owns the pools its configuration declares, and a
+/// request's execution holds only leases, which the host rolls back and returns when the request ends.
+/// `neura run` and `neura test` serve the same calls with `--sql-pool name=url`. SQLite and PostgreSQL are
+/// the providers.
+///
+/// SQL is a string and values are parameters, written `$1`, `$2`, ... for both databases. The statement
+/// methods take the parameters as trailing arguments: strings, integers (as Int), floats (as Float),
+/// Booleans, and `Value` objects for NULL and bytes. An unsigned integer above the int64 range is
+/// InvalidInput, never narrowed.
+///
+/// ```neura
+/// let sql = import:Std.Data.Sql;
+/// let.promote _ = import:Std.Core.Result;
+///
+/// let count_parts = func(pool: sql.Pool, owner: string) -> Result<int64> {
+///     return match (pool.query_one("SELECT count(*) AS n FROM parts WHERE owner = $1", owner)) {
+///         Result.Ok(row) => row.int64("n"),
+///         Result.Err(problem) => Result<int64>.Err(problem),
+///     };
+/// };
+/// ```
+///
+/// Every failure is an `Error.Custom` holding a `SqlError`; `kind_of` reads its `ErrorKind`. Calls do not
+/// overlap other tasks of the execution: a statement holds the execution until it ends or its request's
+/// deadline interrupts it.
+/// @see [Std.Data.Sql](https://github.com/Kayyo321/neura/wiki/Stdlib-Data-Sql)
+#Since("0.3.0")
+export let Sql = module (
+    // ---------------------------------------------------------------------------------------------------
+    // Host services (docs/runtime/Sql.md, "Host services"). Values cross as four parallel lists: kinds,
+    // bits, the Text values and the Bytes values.
+
+    /// @brief Host success without a value or an unsigned host error code.
+    let DoneOutcome = enum (Ok, Error(uint32));
+    /// @brief A handle or a count, or an unsigned host error code.
+    let NumberOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief A page: column names, the four value lists, and whether more rows exist.
+    let PageOutcome = enum (
+        Ok([string[list], uint8[list], uint64[list], string[list], uint8[list][list], bool]),
+        Error(uint32)
+    );
+    /// @brief An open cursor's handle and column names.
+    let CursorOutcome = enum (Ok([int64, string[list]]), Error(uint32));
+    /// @brief Fetched rows as the four value lists, and whether more rows exist.
+    let RowsOutcome = enum (Ok([uint8[list], uint64[list], string[list], uint8[list][list], bool]), Error(uint32));
+    /// @brief The detail text of the last failed SQL call.
+    let TextOutcome = enum (Ok(string), Error(uint32));
+
+    /// @brief Fails with NotFound when the host has no pool of that name.
+    let host_pool = func(name: string) -> DoneOutcome host("neura.sql.pool", 1);
+    /// @brief Leases a connection, waiting at most `wait_nanos` (0: the pool's S-10 timeout).
+    let host_acquire = func(pool: string, wait_nanos: int64) -> NumberOutcome host("neura.sql.acquire", 1);
+    /// @brief Returns a leased connection, rolling back an open transaction.
+    let host_release = func(connection: int64) -> DoneOutcome host("neura.sql.release", 1);
+    /// @brief Begins a transaction on the connection.
+    let host_begin = func(connection: int64) -> DoneOutcome host("neura.sql.begin", 1);
+    /// @brief Commits the connection's transaction.
+    let host_commit = func(connection: int64) -> DoneOutcome host("neura.sql.commit", 1);
+    /// @brief Rolls back the connection's transaction.
+    let host_rollback = func(connection: int64) -> DoneOutcome host("neura.sql.rollback", 1);
+    /// @brief Runs one statement and answers the affected row count.
+    let host_execute = func(connection: int64, text: string, kinds: uint8[list], bits: uint64[list],
+                            texts: string[list], blobs: uint8[list][list]) -> NumberOutcome
+        host("neura.sql.execute", 1);
+    /// @brief Runs one statement and answers at most `limit` rows.
+    let host_query = func(connection: int64, text: string, kinds: uint8[list], bits: uint64[list],
+                          texts: string[list], blobs: uint8[list][list], limit: int) -> PageOutcome
+        host("neura.sql.query", 1);
+    /// @brief Runs one statement whose rows are fetched in pages.
+    let host_open_cursor = func(connection: int64, text: string, kinds: uint8[list], bits: uint64[list],
+                                texts: string[list], blobs: uint8[list][list]) -> CursorOutcome
+        host("neura.sql.open_cursor", 1);
+    /// @brief Up to `max` further rows of a cursor.
+    let host_fetch = func(cursor: int64, max: int) -> RowsOutcome host("neura.sql.fetch", 1);
+    /// @brief Closes a cursor.
+    let host_close_cursor = func(cursor: int64) -> DoneOutcome host("neura.sql.close_cursor", 1);
+    /// @brief The detail of the most recent failed SQL call of this execution.
+    let host_detail = func() -> TextOutcome host("neura.sql.detail", 1);
+
+    // ---------------------------------------------------------------------------------------------------
+    // Errors
+
+    /// @brief What went wrong. Host codes map as docs/runtime/Sql.md lists. The library adds NotFound (no
+    /// row for `query_one`, no such column) and InvalidInput (a closed connection, transaction or cursor, a
+    /// NULL or a value that does not convert).
+    export let ErrorKind = enum (
+        NotFound, InvalidInput, PermissionDenied, ConnectionFailed, ConnectionLost, TimedOut, Unsupported,
+        CapabilityDenied, Cancelled, TooLarge, Busy, OutcomeUnknown, PoolExhausted, ConstraintViolation,
+        Serialization, Other
+    );
+
+    /// @brief A failed SQL operation: its kind, what was attempted, and the database's detail (a constraint,
+    /// column or type name, or its message; never row data).
+    #Final
+    export let SqlError = class:errors.ErrorDetail (
+        /// @brief The kind of failure.
+        export last kind: ErrorKind;
+        /// @brief What the library was doing, such as "execute".
+        export last action: string;
+        /// @brief The database's or the host's detail; may be empty.
+        export last detail: string;
+
+        /// @brief Builds an error; the library makes these.
+        export let init = func(error_kind: ErrorKind, action_text: string, detail_text: string) {
+            super.init();
+            kind = error_kind;
+            action = action_text;
+            detail = detail_text;
+        };
+
+        /// @brief "sql." and the kind in lower case with underscores, such as sql.constraint_violation.
+        #Pure
+        export let.override code = func -> string => "sql." + kind_code(kind);
+
+        /// @brief The kind, the action and the detail, such as
+        /// "ConstraintViolation: execute: UNIQUE constraint failed: parts.code".
+        #Pure
+        export let.override message = func -> string {
+            if (detail == "") {
+                return kind.to_string() + ": " + action;
+            }
+            return kind.to_string() + ": " + action + ": " + detail;
+        };
+
+        /// @brief Equal when kind, action and detail are.
+        #Pure
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SqlError)) {
+                return false;
+            }
+            last that = other as SqlError;
+            return kind == that.kind && action == that.action && detail == that.detail;
+        };
+
+        /// @brief Combines the hashes of the kind, action and detail.
+        #Pure
+        export let.override hash_code = func -> uint32 => hashing.combine(
+            hashing.combine(hashing.combine(17, (kind as uint32)), action.hash_code()), detail.hash_code());
+
+        /// @brief The message.
+        #Pure
+        export let.override to_string = func -> string => message();
+    );
+
+    /// @brief The ErrorKind of an SQL error, looking through Context errors; None for any other error.
+    #NoDiscard
+    export let kind_of = func(problem: errors.Error) -> Optional<ErrorKind> {
+        return match (errors.root_cause(problem)) {
+            errors.Error.Custom(detail) => detail is SqlError
+                ? Optional<ErrorKind>.Some((detail as SqlError).kind) : Optional<ErrorKind>.None,
+            _ => Optional<ErrorKind>.None,
+        };
+    };
+
+    /// @brief The lower-case code of a kind.
+    let kind_code = func(kind: ErrorKind) -> string => match (kind) {
+        ErrorKind.NotFound => "not_found",
+        ErrorKind.InvalidInput => "invalid_input",
+        ErrorKind.PermissionDenied => "permission_denied",
+        ErrorKind.ConnectionFailed => "connection_failed",
+        ErrorKind.ConnectionLost => "connection_lost",
+        ErrorKind.TimedOut => "timed_out",
+        ErrorKind.Unsupported => "unsupported",
+        ErrorKind.CapabilityDenied => "capability_denied",
+        ErrorKind.Cancelled => "cancelled",
+        ErrorKind.TooLarge => "too_large",
+        ErrorKind.Busy => "busy",
+        ErrorKind.OutcomeUnknown => "outcome_unknown",
+        ErrorKind.PoolExhausted => "pool_exhausted",
+        ErrorKind.ConstraintViolation => "constraint_violation",
+        ErrorKind.Serialization => "serialization",
+        ErrorKind.Other => "other",
+    };
+
+    /// @brief The kind of a host error code.
+    let kind_of_code = func(code: uint32) -> ErrorKind {
+        if (code == 1) { return ErrorKind.NotFound; }
+        if (code == 2) { return ErrorKind.PermissionDenied; }
+        if (code == 4) { return ErrorKind.InvalidInput; }
+        if (code == 10) { return ErrorKind.ConnectionFailed; }
+        if (code == 11) { return ErrorKind.ConnectionLost; }
+        if (code == 12) { return ErrorKind.TimedOut; }
+        if (code == 13) { return ErrorKind.Unsupported; }
+        if (code == 14) { return ErrorKind.CapabilityDenied; }
+        if (code == 15) { return ErrorKind.Cancelled; }
+        if (code == 16) { return ErrorKind.TooLarge; }
+        if (code == 17) { return ErrorKind.Busy; }
+        if (code == 18) { return ErrorKind.OutcomeUnknown; }
+        if (code == 19) { return ErrorKind.PoolExhausted; }
+        if (code == 21) { return ErrorKind.ConstraintViolation; }
+        if (code == 22) { return ErrorKind.Serialization; }
+        return ErrorKind.Other;
+    };
+
+    /// @brief An SQL error value.
+    let failure = func(kind: ErrorKind, action: string, detail: string) -> errors.Error =>
+        errors.Error.Custom(new SqlError(kind, action, detail));
+
+    /// @brief The error of a failed host call, with the host's detail.
+    let host_failure = func(code: uint32, action: string) -> errors.Error {
+        last detail = match (host_detail()) {
+            TextOutcome.Ok(text) => text,
+            TextOutcome.Error(_) => "",
+        };
+        return failure(kind_of_code(code), action, detail);
+    };
+
+    /// @brief The error of an operation on a closed connection, transaction or cursor.
+    let closed = func(what: string, action: string) -> errors.Error =>
+        failure(ErrorKind.InvalidInput, action, "the " + what + " is closed");
+
+    /// @brief Ok of Unit.
+    let done = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+
+    // ---------------------------------------------------------------------------------------------------
+    // Values
+
+    /// @brief The SQL types a value can have.
+    export let ValueKind = enum (Null, Bool, Int, Float, Text, Bytes);
+
+    /// @brief One SQL value: NULL, a Boolean, a 64-bit integer, a 64-bit float, UTF-8 text or bytes. Values
+    /// are immutable; build them with `null_value`, `bool_value`, `int_value`, `float_value`, `text_value`
+    /// and `bytes_value`.
+    #[Final, Since("0.3.0")]
+    export let Value = class (
+        /// @brief The type of the value.
+        export last kind: ValueKind;
+        /// @brief The Bool (0 or 1) or Int payload.
+        last integer: int64;
+        /// @brief The Float payload.
+        last real: float64;
+        /// @brief The Text payload.
+        last characters: string;
+        /// @brief The Bytes payload; a private copy.
+        last octets: uint8[list];
+
+        /// @brief Builds a value from its parts; use the constructor functions of Std.Data.Sql.
+        export let init = func(value_kind: ValueKind, integer_value: int64, real_value: float64,
+                               text: string, data: uint8[list]) {
+            kind = value_kind;
+            integer = integer_value;
+            real = real_value;
+            characters = text;
+            last copy: uint8[list] = new;
+            for (let b in data) {
+                copy.append(b);
+            }
+            octets = copy;
+        };
+
+        /// @brief Whether the value is NULL.
+        #Pure
+        export let is_null = func -> bool => kind == ValueKind.Null;
+
+        /// @brief The Bool payload, or None for another kind.
+        #NoDiscard
+        export let as_bool = func -> Optional<bool> =>
+            kind == ValueKind.Bool ? Optional<bool>.Some(integer == 1) : Optional<bool>.None;
+
+        /// @brief The Int payload, or None for another kind.
+        #NoDiscard
+        export let as_int64 = func -> Optional<int64> =>
+            kind == ValueKind.Int ? Optional<int64>.Some(integer) : Optional<int64>.None;
+
+        /// @brief The Float payload, or None for another kind.
+        #NoDiscard
+        export let as_float64 = func -> Optional<float64> =>
+            kind == ValueKind.Float ? Optional<float64>.Some(real) : Optional<float64>.None;
+
+        /// @brief The Text payload, or None for another kind.
+        #NoDiscard
+        export let as_text = func -> Optional<string> =>
+            kind == ValueKind.Text ? Optional<string>.Some(characters) : Optional<string>.None;
+
+        /// @brief A copy of the Bytes payload, or None for another kind.
+        #NoDiscard
+        export let as_bytes = func -> Optional<uint8[list]> {
+            if (kind != ValueKind.Bytes) {
+                return Optional<uint8[list]>.None;
+            }
+            last copy: uint8[list] = new;
+            for (let b in octets) {
+                copy.append(b);
+            }
+            return Optional<uint8[list]>.Some(copy);
+        };
+
+        /// @brief The number of payload bytes of Bytes; 0 otherwise.
+        #Pure
+        export let byte_count = func -> int => octets.length;
+
+        /// @brief The raw integer payload: the Int, 1 or 0 for a Bool, 0 otherwise.
+        #Pure
+        export let wire_integer = func -> int64 => integer;
+        /// @brief The raw Float payload; 0.0 for other kinds.
+        #Pure
+        export let wire_real = func -> float64 => real;
+        /// @brief The raw Text payload; empty for other kinds.
+        #Pure
+        export let wire_text = func -> string => characters;
+        /// @brief The raw Bytes payload, not copied: the library passes it to the host. Use `as_bytes` for a
+        /// copy.
+        export let wire_bytes = func -> uint8[list] => octets;
+
+        /// @brief Equal kinds and payloads; Floats compare by their bits, so NaN equals NaN.
+        #Pure
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Value)) {
+                return false;
+            }
+            last that = other as Value;
+            if (kind != that.kind || integer != that.integer || characters != that.characters) {
+                return false;
+            }
+            if (real.to_bits() != that.real.to_bits() || octets.length != that.octets.length) {
+                return false;
+            }
+            for (let i = 0; i < octets.length; i += 1) {
+                if (octets[i] != that.octets[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the kind and the payload.
+        #Pure
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(hashing.combine(17, kind as uint32), hashing.of_int64(integer));
+            hash = hashing.combine(hash, hashing.of_uint64(real.to_bits()));
+            hash = hashing.combine(hash, characters.hash_code());
+            for (let b in octets) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief NULL, true or false, the number, the text in single quotes with quotes doubled, or the
+        /// bytes as X'..' hexadecimal.
+        #Pure
+        export let.override to_string = func -> string => match (kind) {
+            ValueKind.Null => "NULL",
+            ValueKind.Bool => integer == 1 ? "true" : "false",
+            ValueKind.Int => integer.to_string(),
+            ValueKind.Float => real.to_string(),
+            ValueKind.Text => "'" + doubled_quotes(characters) + "'",
+            ValueKind.Bytes => "X'" + hexadecimal(octets) + "'",
+        };
+    );
+
+    /// @brief NULL.
+    #NoDiscard
+    export let null_value = func -> Value => new Value(ValueKind.Null, 0, 0.0, "", new);
+
+    /// @brief A Boolean.
+    #NoDiscard
+    export let bool_value = func(value: bool) -> Value => new Value(ValueKind.Bool, value ? 1 : 0, 0.0, "", new);
+
+    /// @brief A 64-bit integer.
+    #NoDiscard
+    export let int_value = func(value: int64) -> Value => new Value(ValueKind.Int, value, 0.0, "", new);
+
+    /// @brief A 64-bit float.
+    #NoDiscard
+    export let float_value = func(value: float64) -> Value => new Value(ValueKind.Float, 0, value, "", new);
+
+    /// @brief UTF-8 text.
+    #NoDiscard
+    export let text_value = func(value: string) -> Value => new Value(ValueKind.Text, 0, 0.0, value, new);
+
+    /// @brief Bytes, copied.
+    #NoDiscard
+    export let bytes_value = func(value: uint8[list]) -> Value => new Value(ValueKind.Bytes, 0, 0.0, "", value);
+
+    /// @brief `text` with each single quote doubled.
+    let doubled_quotes = func(text: string) -> string {
+        let out = "";
+        let start = 0;
+        for (let i = 0; i < text.byte_length; i += 1) {
+            if (text.byte_at(i) == 39) {
+                out = out + text.slice(start, i + 1) + "'";
+                start = i + 1;
+            }
+        }
+        return out + text.slice(start, text.byte_length);
+    };
+
+    /// @brief The bytes as upper-case hexadecimal digits.
+    let hexadecimal = func(data: uint8[list]) -> string {
+        last digits = "0123456789ABCDEF";
+        let out = "";
+        for (let b in data) {
+            out = out + digits.slice((b >> 4) as int, ((b >> 4) as int) + 1) + digits.slice((b & 15) as int, ((b & 15) as int) + 1);
+        }
+        return out;
+    };
+
+    /// @brief The value a variadic argument stands for: Text, Int (signed, or unsigned within the int64
+    /// range), Float (each float width, widened exactly), Bool, or a Value object. Anything else is
+    /// InvalidInput naming the parameter.
+    let value_of = func(argument: variadic.Argument, position: int) -> Result<Value> => match (argument) {
+        variadic.Argument.Text(text) => Result<Value>.Ok(text_value(text)),
+        variadic.Argument.Signed(number) => Result<Value>.Ok(int_value(number)),
+        variadic.Argument.Unsigned(number) => number > 9223372036854775807
+            ? Result<Value>.Err(failure(ErrorKind.InvalidInput, "parameter",
+                                        "$" + position.to_string() + " is above the int64 range"))
+            : Result<Value>.Ok(int_value(number as int64)),
+        variadic.Argument.Floating16(number) => Result<Value>.Ok(float_value(number as float64)),
+        variadic.Argument.BFloating16(number) => Result<Value>.Ok(float_value(number as float64)),
+        variadic.Argument.Floating32(number) => Result<Value>.Ok(float_value(number as float64)),
+        variadic.Argument.Floating(number) => Result<Value>.Ok(float_value(number)),
+        variadic.Argument.Boolean(flag) => Result<Value>.Ok(bool_value(flag)),
+        variadic.Argument.Object(item) => item is Value
+            ? Result<Value>.Ok(item as Value)
+            : Result<Value>.Err(failure(ErrorKind.InvalidInput, "parameter",
+                                        "$" + position.to_string() + " is an object that is not an sql.Value")),
+    };
+
+    /// @brief The values of variadic arguments.
+    let values_of = func(arguments: variadic.Argument[]) -> Result<Value[list]> {
+        last values: Value[list] = new;
+        for (let i = 0; i < arguments.length; i += 1) {
+            match (value_of(arguments[i], i + 1)) {
+                Result.Ok(value) => {
+                    values.append(value);
+                },
+                Result.Err(problem) => {
+                    return Result<Value[list]>.Err(problem);
+                },
+            }
+        }
+        return Result<Value[list]>.Ok(values);
+    };
+
+    /// @brief The four wire lists of a parameter list.
+    #Final
+    let Wire = class (
+        /// @brief One kind per value.
+        export last kinds: uint8[list] = new;
+        /// @brief One word per value.
+        export last bits: uint64[list] = new;
+        /// @brief The Text values.
+        export last texts: string[list] = new;
+        /// @brief The Bytes values.
+        export last blobs: uint8[list][list] = new;
+
+        /// @brief Encodes `values`.
+        export let init = func(values: Value[list]) {
+            for (let value in values) {
+                add(value);
+            }
+        };
+
+        /// @brief Appends one value.
+        let add = func(value: Value) {
+            match (value.kind) {
+                ValueKind.Null => {
+                    kinds.append(0);
+                    bits.append(0);
+                },
+                ValueKind.Bool => {
+                    kinds.append(1);
+                    bits.append(signed.to_unsigned(value.wire_integer()));
+                },
+                ValueKind.Int => {
+                    kinds.append(2);
+                    bits.append(signed.to_unsigned(value.wire_integer()));
+                },
+                ValueKind.Float => {
+                    kinds.append(3);
+                    bits.append(value.wire_real().to_bits());
+                },
+                ValueKind.Text => {
+                    kinds.append(4);
+                    bits.append(texts.length as uint64);
+                    texts.append(value.wire_text());
+                },
+                ValueKind.Bytes => {
+                    kinds.append(5);
+                    bits.append(blobs.length as uint64);
+                    blobs.append(value.wire_bytes());
+                },
+            }
+        };
+
+        /// @brief A fixed description.
+        export let.override to_string = func -> string => "Wire(" + kinds.length.to_string() + " values)";
+    );
+
+    /// @brief The values the host sent, in order.
+    let decode = func(kinds: uint8[list], bits: uint64[list], texts: string[list], blobs: uint8[list][list])
+        -> Value[list] {
+        last values: Value[list] = new;
+        for (let i = 0; i < kinds.length; i += 1) {
+            last kind = kinds[i];
+            last word = bits[i];
+            if (kind == 1) {
+                values.append(bool_value(word == 1));
+            } else if (kind == 2) {
+                values.append(int_value(unsigned.to_signed(word)));
+            } else if (kind == 3) {
+                values.append(float_value(float64.from_bits(word)));
+            } else if (kind == 4) {
+                values.append(text_value(texts[word as int]));
+            } else if (kind == 5) {
+                values.append(bytes_value(blobs[word as int]));
+            } else {
+                values.append(null_value());
+            }
+        }
+        return values;
+    };
+
+    /// @brief Rows of `columns` from a flat value list.
+    let rows_of = func(names: Columns, values: Value[list]) -> Row[list] {
+        last rows: Row[list] = new;
+        last width = names.names.length;
+        if (width == 0) {
+            return rows;
+        }
+        for (let start = 0; start + width <= values.length; start += width) {
+            last cells: Value[list] = new;
+            for (let i = start; i < start + width; i += 1) {
+                cells.append(values[i]);
+            }
+            rows.append(new Row(names, cells));
+        }
+        return rows;
+    };
+
+    // ---------------------------------------------------------------------------------------------------
+    // Rows
+
+    /// @brief The column names of a result, shared by its rows.
+    #Final
+    export let Columns = class (
+        /// @brief The names in result order.
+        export last names: string[list];
+
+        /// @brief Wraps the host's list.
+        export let init = func(list: string[list]) {
+            names = list;
+        };
+
+        /// @brief The index of `name`: an exact match first, then one that differs only in ASCII case; -1
+        /// when there is none.
+        #Pure
+        export let index_of = func(name: string) -> int {
+            for (let i = 0; i < names.length; i += 1) {
+                if (names[i] == name) {
+                    return i;
+                }
+            }
+            last wanted = lower(name);
+            for (let i = 0; i < names.length; i += 1) {
+                if (lower(names[i]) == wanted) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        /// @brief The names separated by commas.
+        #Pure
+        export let.override to_string = func -> string {
+            let out = "";
+            for (let i = 0; i < names.length; i += 1) {
+                out = out + (i == 0 ? "" : ", ") + names[i];
+            }
+            return out;
+        };
+    );
+
+    /// @brief ASCII lower case.
+    let lower = func(text: string) -> string {
+        let out = "";
+        let start = 0;
+        for (let i = 0; i < text.byte_length; i += 1) {
+            last b = text.byte_at(i);
+            if (b >= 65 && b <= 90) {
+                out = out + text.slice(start, i) + "abcdefghijklmnopqrstuvwxyz".slice((b - 65) as int, (b - 64) as int);
+                start = i + 1;
+            }
+        }
+        return out + text.slice(start, text.byte_length);
+    };
+
+    /// @brief One immutable result row. The typed accessors return Err for a missing column, a NULL in a
+    /// required read, and a value that does not convert exactly; the `optional_` forms answer None for NULL.
+    /// No integer is narrowed and no float rounded silently.
+    #[Final, Since("0.3.0")]
+    export let Row = class (
+        /// @brief The column names.
+        last header: Columns;
+        /// @brief The values in column order.
+        last cells: Value[list];
+
+        /// @brief Builds a row; results make these.
+        export let init = func(names: Columns, values: Value[list]) {
+            header = names;
+            cells = values;
+        };
+
+        /// @brief The number of columns.
+        #Pure
+        export let column_count = func -> int => cells.length;
+
+        /// @brief The name of column `index`, from 0.
+        #Pure
+        export let column_name = func(index: int) -> string => header.names[index];
+
+        /// @brief The value of column `index`, from 0.
+        #Pure
+        export let at = func(index: int) -> Value => cells[index];
+
+        /// @brief The value of the named column.
+        #NoDiscard
+        export let value = func(name: string) -> Result<Value> {
+            last index = header.index_of(name);
+            if (index < 0) {
+                return Result<Value>.Err(failure(ErrorKind.NotFound, "row", "no column named " + name));
+            }
+            return Result<Value>.Ok(cells[index]);
+        };
+
+        /// @brief The named column as an int64: an Int.
+        #NoDiscard
+        export let int64 = func(name: string) -> Result<int64> => required<int64>(name, optional_int64(name));
+
+        /// @brief The named column as an int64, None for NULL.
+        #NoDiscard
+        export let optional_int64 = func(name: string) -> Result<Optional<int64>> {
+            return match (value(name)) {
+                Result.Err(problem) => Result<Optional<int64>>.Err(problem),
+                Result.Ok(cell) => match (cell.kind) {
+                    ValueKind.Null => Result<Optional<int64>>.Ok(Optional<int64>.None),
+                    ValueKind.Int => Result<Optional<int64>>.Ok(cell.as_int64()),
+                    _ => Result<Optional<int64>>.Err(mismatch(name, cell, "int64")),
+                },
+            };
+        };
+
+        /// @brief The named column as an int32: an Int within the int32 range.
+        #NoDiscard
+        export let int32 = func(name: string) -> Result<int32> => required<int32>(name, optional_int32(name));
+
+        /// @brief The named column as an int32, None for NULL.
+        #NoDiscard
+        export let optional_int32 = func(name: string) -> Result<Optional<int32>> {
+            return match (optional_int64(name)) {
+                Result.Err(problem) => Result<Optional<int32>>.Err(problem),
+                Result.Ok(found) => match (found) {
+                    Optional.None => Result<Optional<int32>>.Ok(Optional<int32>.None),
+                    Optional.Some(number) => number < -2147483648 || number > 2147483647
+                        ? Result<Optional<int32>>.Err(failure(ErrorKind.InvalidInput, "row",
+                            "column " + name + " holds " + number.to_string() + ", outside the int32 range"))
+                        : Result<Optional<int32>>.Ok(Optional<int32>.Some(number as int32)),
+                },
+            };
+        };
+
+        /// @brief The named column as a Boolean: a Bool, or an Int 0 or 1 (SQLite stores Booleans so).
+        #NoDiscard
+        export let bool = func(name: string) -> Result<bool> => required<bool>(name, optional_bool(name));
+
+        /// @brief The named column as a Boolean, None for NULL.
+        #NoDiscard
+        export let optional_bool = func(name: string) -> Result<Optional<bool>> {
+            return match (value(name)) {
+                Result.Err(problem) => Result<Optional<bool>>.Err(problem),
+                Result.Ok(cell) => match (cell.kind) {
+                    ValueKind.Null => Result<Optional<bool>>.Ok(Optional<bool>.None),
+                    ValueKind.Bool => Result<Optional<bool>>.Ok(cell.as_bool()),
+                    ValueKind.Int => cell.wire_integer() == 0 || cell.wire_integer() == 1
+                        ? Result<Optional<bool>>.Ok(Optional<bool>.Some(cell.wire_integer() == 1))
+                        : Result<Optional<bool>>.Err(mismatch(name, cell, "bool")),
+                    _ => Result<Optional<bool>>.Err(mismatch(name, cell, "bool")),
+                },
+            };
+        };
+
+        /// @brief The named column as a float64: a Float, or an Int that a float64 holds exactly.
+        #NoDiscard
+        export let float64 = func(name: string) -> Result<float64> =>
+            required<float64>(name, optional_float64(name));
+
+        /// @brief The named column as a float64, None for NULL.
+        #NoDiscard
+        export let optional_float64 = func(name: string) -> Result<Optional<float64>> {
+            return match (value(name)) {
+                Result.Err(problem) => Result<Optional<float64>>.Err(problem),
+                Result.Ok(cell) => match (cell.kind) {
+                    ValueKind.Null => Result<Optional<float64>>.Ok(Optional<float64>.None),
+                    ValueKind.Float => Result<Optional<float64>>.Ok(cell.as_float64()),
+                    ValueKind.Int => cell.wire_integer() >= -9007199254740992 && cell.wire_integer() <= 9007199254740992
+                        ? Result<Optional<float64>>.Ok(Optional<float64>.Some(cell.wire_integer() as float64))
+                        : Result<Optional<float64>>.Err(mismatch(name, cell, "float64")),
+                    _ => Result<Optional<float64>>.Err(mismatch(name, cell, "float64")),
+                },
+            };
+        };
+
+        /// @brief The named column as text: a Text.
+        #NoDiscard
+        export let text = func(name: string) -> Result<string> => required<string>(name, optional_text(name));
+
+        /// @brief The named column as text, None for NULL.
+        #NoDiscard
+        export let optional_text = func(name: string) -> Result<Optional<string>> {
+            return match (value(name)) {
+                Result.Err(problem) => Result<Optional<string>>.Err(problem),
+                Result.Ok(cell) => match (cell.kind) {
+                    ValueKind.Null => Result<Optional<string>>.Ok(Optional<string>.None),
+                    ValueKind.Text => Result<Optional<string>>.Ok(cell.as_text()),
+                    _ => Result<Optional<string>>.Err(mismatch(name, cell, "text")),
+                },
+            };
+        };
+
+        /// @brief The named column as bytes: a Bytes, copied.
+        #NoDiscard
+        export let bytes = func(name: string) -> Result<uint8[list]> =>
+            required<uint8[list]>(name, optional_bytes(name));
+
+        /// @brief The named column as bytes, None for NULL.
+        #NoDiscard
+        export let optional_bytes = func(name: string) -> Result<Optional<uint8[list]>> {
+            return match (value(name)) {
+                Result.Err(problem) => Result<Optional<uint8[list]>>.Err(problem),
+                Result.Ok(cell) => match (cell.kind) {
+                    ValueKind.Null => Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None),
+                    ValueKind.Bytes => Result<Optional<uint8[list]>>.Ok(cell.as_bytes()),
+                    _ => Result<Optional<uint8[list]>>.Err(mismatch(name, cell, "bytes")),
+                },
+            };
+        };
+
+        /// @brief Equal column names and values.
+        #Pure
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Row)) {
+                return false;
+            }
+            last that = other as Row;
+            if (cells.length != that.cells.length) {
+                return false;
+            }
+            for (let i = 0; i < cells.length; i += 1) {
+                if (header.names[i] != that.header.names[i] || !cells[i].equals(that.cells[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the names and values.
+        #Pure
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 19;
+            for (let i = 0; i < cells.length; i += 1) {
+                hash = hashing.combine(hashing.combine(hash, header.names[i].hash_code()), cells[i].hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief The columns and values, such as "Row(id=7, name='bolt')".
+        #Pure
+        export let.override to_string = func -> string {
+            let out = "Row(";
+            for (let i = 0; i < cells.length; i += 1) {
+                out = out + (i == 0 ? "" : ", ") + header.names[i] + "=" + cells[i].to_string();
+            }
+            return out + ")";
+        };
+    );
+
+    /// @brief The value of an optional read, or the error of a NULL.
+    let required = func<T>(name: string, outcome: Result<Optional<T>>) -> Result<T> => match (outcome) {
+        Result.Err(problem) => Result<T>.Err(problem),
+        Result.Ok(found) => match (found) {
+            Optional.Some(item) => Result<T>.Ok(item),
+            Optional.None => Result<T>.Err(failure(ErrorKind.InvalidInput, "row", "column " + name + " is NULL")),
+        },
+    };
+
+    /// @brief The error of a value that does not convert to `wanted`.
+    let mismatch = func(name: string, cell: Value, wanted: string) -> errors.Error =>
+        failure(ErrorKind.InvalidInput, "row",
+                "column " + name + " holds a " + cell.kind.to_string() + " value, not " + wanted);
+
+    // ---------------------------------------------------------------------------------------------------
+    // Statements, shared by connections and transactions
+
+    /// @brief Runs one statement on a leased connection: the affected row count.
+    let run_execute = func(handle: int64, text: string, parameters: Value[list]) -> Result<int64> {
+        last wire = new Wire(parameters);
+        return match (host_execute(handle, text, wire.kinds, wire.bits, wire.texts, wire.blobs)) {
+            NumberOutcome.Ok(count) => Result<int64>.Ok(count),
+            NumberOutcome.Error(code) => Result<int64>.Err(host_failure(code, "execute")),
+        };
+    };
+
+    /// @brief Runs one statement and reads at most `limit` rows.
+    let run_query = func(handle: int64, text: string, parameters: Value[list], limit: int, action: string)
+        -> Result<Row[list]> {
+        last wire = new Wire(parameters);
+        return match (host_query(handle, text, wire.kinds, wire.bits, wire.texts, wire.blobs, limit)) {
+            PageOutcome.Ok(page) => Result<Row[list]>.Ok(
+                rows_of(new Columns(page[0]), decode(page[1], page[2], page[3], page[4]))),
+            PageOutcome.Error(code) => Result<Row[list]>.Err(host_failure(code, action)),
+        };
+    };
+
+    /// @brief The first row, or NotFound.
+    let first_row = func(rows: Result<Row[list]>) -> Result<Row> => match (rows) {
+        Result.Err(problem) => Result<Row>.Err(problem),
+        Result.Ok(list) => list.length == 0
+            ? Result<Row>.Err(failure(ErrorKind.NotFound, "query_one", "the query returned no row"))
+            : Result<Row>.Ok(list[0]),
+    };
+
+    /// @brief The page as an immutable list.
+    let page_of = func(rows: Result<Row[list]>) -> Result<immutable.ImmutableList<Row>> => match (rows) {
+        Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
+        Result.Ok(list) => Result<immutable.ImmutableList<Row>>.Ok(new immutable.ImmutableList<Row>(list)),
+    };
+
+    /// @brief Opens a cursor on a leased connection.
+    let run_open_cursor = func(lease: int64, text: string, parameters: Value[list]) -> Result<Cursor> {
+        last wire = new Wire(parameters);
+        return match (host_open_cursor(lease, text, wire.kinds, wire.bits, wire.texts, wire.blobs)) {
+            CursorOutcome.Ok(opened) => Result<Cursor>.Ok(new Cursor(opened[0], new Columns(opened[1]))),
+            CursorOutcome.Error(code) => Result<Cursor>.Err(host_failure(code, "open_cursor")),
+        };
+    };
+
+    /// @brief The statement of `query_one`: at most one row is read.
+    let one = 1;
+
+    // ---------------------------------------------------------------------------------------------------
+    // Pools, connections, transactions and cursors
+
+    /// @brief A pool the host declares, by name. Pools come from `pool(name)` or `Std.App.Context.sql_pool`;
+    /// the connections stay in the host.
+    #[Final, Since("0.3.0")]
+    export let Pool = class (
+        /// @brief The pool's name in the host's configuration.
+        export last name: string;
+
+        /// @brief Names a pool; use `pool(name)`, which checks that the host has it.
+        export let init = func(pool_name: string) {
+            name = pool_name;
+        };
+
+        /// @brief Leases a connection, waiting at most the pool's S-10 timeout. PoolExhausted when too many
+        /// acquires already wait, TimedOut after the wait.
+        #NoDiscard
+        export let acquire = func -> Result<Connection> {
+            return match (host_acquire(name, 0)) {
+                NumberOutcome.Ok(handle) => Result<Connection>.Ok(new Connection(name, handle)),
+                NumberOutcome.Error(code) => Result<Connection>.Err(host_failure(code, "acquire")),
+            };
+        };
+
+        /// @brief Leases a connection and begins a transaction on it; closing the transaction also returns
+        /// the connection.
+        #NoDiscard
+        export let begin = func -> Result<Transaction> {
+            return match (acquire()) {
+                Result.Err(problem) => Result<Transaction>.Err(problem),
+                Result.Ok(connection) => start_transaction(connection.handle(), name, true),
+            };
+        };
+
+        /// @brief Runs one statement on a connection of its own and returns the affected row count.
+        #NoDiscard
+        export let execute = func(text: string, parameters: ...) -> Result<int64> {
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<int64>.Err(problem),
+                Result.Ok(values) => match (acquire()) {
+                    Result.Err(problem) => Result<int64>.Err(problem),
+                    Result.Ok(connection) => release_after<int64>(connection,
+                        run_execute(connection.handle(), text, values)),
+                },
+            };
+        };
+
+        /// @brief The first row of a query on a connection of its own, or NotFound.
+        #NoDiscard
+        export let query_one = func(text: string, parameters: ...) -> Result<Row> {
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<Row>.Err(problem),
+                Result.Ok(values) => match (acquire()) {
+                    Result.Err(problem) => Result<Row>.Err(problem),
+                    Result.Ok(connection) => release_after<Row>(connection,
+                        first_row(run_query(connection.handle(), text, values, one, "query_one"))),
+                },
+            };
+        };
+
+        /// @brief At most `limit` rows of a query on a connection of its own. A limit above the pool's page
+        /// (S-11) is TooLarge.
+        #NoDiscard
+        export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>> {
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
+                Result.Ok(values) => match (acquire()) {
+                    Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
+                    Result.Ok(connection) => release_after<immutable.ImmutableList<Row>>(connection,
+                        page_of(run_query(connection.handle(), text, values, limit, "query_page"))),
+                },
+            };
+        };
+
+        /// @brief The pool's name, such as "Pool(main)"; the host keeps its URL and password.
+        #Pure
+        export let.override to_string = func -> string => "Pool(" + name + ")";
+
+        /// @brief Equal names.
+        #Pure
+        export let.override equals = func(other: class) -> bool => other is Pool && name == (other as Pool).name;
+
+        /// @brief The name's hash.
+        #Pure
+        export let.override hash_code = func -> uint32 => name.hash_code();
+    );
+
+    /// @brief The pool named `name`, or NotFound when the host has none; CapabilityDenied without a host.
+    #NoDiscard
+    export let pool = func(name: string) -> Result<Pool> {
+        return match (host_pool(name)) {
+            DoneOutcome.Ok => Result<Pool>.Ok(new Pool(name)),
+            DoneOutcome.Error(code) => Result<Pool>.Err(host_failure(code, "pool " + name)),
+        };
+    };
+
+    /// @brief Begins a transaction on `connection`; when it fails and the transaction would own the
+    /// connection, the connection is returned.
+    let start_transaction = func(lease: int64, pool_name: string, owns: bool) -> Result<Transaction> {
+        match (host_begin(lease)) {
+            DoneOutcome.Ok => {
+                return Result<Transaction>.Ok(new Transaction(lease, pool_name, owns));
+            },
+            DoneOutcome.Error(code) => {
+                last problem = host_failure(code, "begin");
+                if (owns) {
+                    match (host_release(lease)) {
+                        DoneOutcome.Ok => {},
+                        DoneOutcome.Error(_) => {},
+                    }
+                }
+                return Result<Transaction>.Err(problem);
+            },
+        }
+    };
+
+    /// @brief Returns the connection after the work and keeps the work's outcome; a failed release after Ok
+    /// is the release's error.
+    let release_after = func<T>(connection: Connection, outcome: Result<T>) -> Result<T> {
+        return match (connection.close()) {
+            Result.Ok(_) => outcome,
+            Result.Err(problem) => match (outcome) {
+                Result.Ok(_) => Result<T>.Err(problem),
+                Result.Err(_) => outcome,
+            },
+        };
+    };
+
+    /// @brief A leased connection. `close` returns it to the pool, rolling back any transaction left open;
+    /// after close every operation fails with InvalidInput. Statements run one at a time; while a cursor is open
+    /// on the connection, other statements fail with InvalidInput.
+    #[Final, NoDiscard(reason: "a connection must be closed"), NotThreadSafe, Since("0.3.0")]
+    export let Connection = class implements Closeable (
+        /// @brief The pool's name.
+        export last pool_name: string;
+        /// @brief The host's handle.
+        last lease: int64;
+        /// @brief Whether the lease is still held.
+        let open_now: bool = true;
+
+        /// @brief Wraps a lease; use `Pool.acquire`.
+        export let init = func(pool_value: string, handle_value: int64) {
+            pool_name = pool_value;
+            lease = handle_value;
+        };
+
+        /// @brief The host's lease number, valid in this execution only; the host refuses any other number.
+        #Pure
+        export let handle = func -> int64 => lease;
+
+        /// @brief Whether `close` has not been called.
+        #Pure
+        export let is_open = func -> bool => open_now;
+
+        /// @brief Runs one statement and returns the affected row count (0 for a query).
+        #NoDiscard
+        export let execute = func(text: string, parameters: ...) -> Result<int64> {
+            if (!open_now) {
+                return Result<int64>.Err(closed("connection", "execute"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<int64>.Err(problem),
+                Result.Ok(values) => run_execute(lease, text, values),
+            };
+        };
+
+        /// @brief Runs one statement with a list of parameter values.
+        #NoDiscard
+        export let execute_values = func(text: string, values: Value[list]) -> Result<int64> {
+            if (!open_now) {
+                return Result<int64>.Err(closed("connection", "execute"));
+            }
+            return run_execute(lease, text, values);
+        };
+
+        /// @brief The first row of a query, or NotFound.
+        #NoDiscard
+        export let query_one = func(text: string, parameters: ...) -> Result<Row> {
+            if (!open_now) {
+                return Result<Row>.Err(closed("connection", "query_one"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<Row>.Err(problem),
+                Result.Ok(values) => first_row(run_query(lease, text, values, one, "query_one")),
+            };
+        };
+
+        /// @brief At most `limit` rows of a query. A limit of 0 runs it and returns no row; a limit above the
+        /// pool's page (S-11) is TooLarge.
+        #NoDiscard
+        export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>> {
+            if (!open_now) {
+                return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
+                Result.Ok(values) => page_of(run_query(lease, text, values, limit, "query_page")),
+            };
+        };
+
+        /// @brief At most `limit` rows of a query with a list of parameter values.
+        #NoDiscard
+        export let query_page_values = func(text: string, limit: int, values: Value[list])
+            -> Result<immutable.ImmutableList<Row>> {
+            if (!open_now) {
+                return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page"));
+            }
+            return page_of(run_query(lease, text, values, limit, "query_page"));
+        };
+
+        /// @brief Runs a query whose rows are fetched in pages through the cursor, which must be closed.
+        #NoDiscard
+        export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor> {
+            if (!open_now) {
+                return Result<Cursor>.Err(closed("connection", "open_cursor"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<Cursor>.Err(problem),
+                Result.Ok(values) => run_open_cursor(lease, text, values),
+            };
+        };
+
+        /// @brief Begins a transaction on this connection; closing the transaction leaves the connection
+        /// open. A second transaction while one is open is InvalidInput.
+        #NoDiscard
+        export let begin = func -> Result<Transaction> {
+            if (!open_now) {
+                return Result<Transaction>.Err(closed("connection", "begin"));
+            }
+            return start_transaction(lease, pool_name, false);
+        };
+
+        /// @brief Returns the connection to its pool. Closing again does nothing and returns Ok.
+        export let close = func -> Result<Unit> {
+            if (!open_now) {
+                return done();
+            }
+            open_now = false;
+            return match (host_release(lease)) {
+                DoneOutcome.Ok => done(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_failure(code, "close")),
+            };
+        };
+
+        /// @brief The pool and state, such as "Connection(main, open)"; never the URL or a password.
+        #Pure
+        export let.override to_string = func -> string =>
+            "Connection(" + pool_name + (open_now ? ", open)" : ", closed)");
+    );
+
+    /// @brief A transaction. It ends by `commit` or by `close`: `close` without a commit rolls back; after a
+    /// commit that returned Ok, `close` only releases. A failed commit has rolled back, except OutcomeUnknown:
+    /// the connection failed after COMMIT was sent, nothing is retried, and the connection is discarded.
+    /// After the end every statement fails with InvalidInput.
+    #[Final, NoDiscard(reason: "a transaction must be closed"), NotThreadSafe, Since("0.3.0")]
+    export let Transaction = class implements Closeable (
+        /// @brief The host's lease of the connection the transaction runs on.
+        last lease: int64;
+        /// @brief The pool's name.
+        export last pool_name: string;
+        /// @brief Whether closing the transaction also returns the connection.
+        last owns_connection: bool;
+        /// @brief Whether the transaction is still open.
+        let active: bool = true;
+        /// @brief Whether close has run.
+        let closed_now: bool = false;
+
+        /// @brief Wraps a begun transaction; use `Pool.begin` or `Connection.begin`.
+        export let init = func(lease_value: int64, pool_value: string, owns: bool) {
+            lease = lease_value;
+            pool_name = pool_value;
+            owns_connection = owns;
+        };
+
+        /// @brief Whether neither commit, rollback nor close has ended it.
+        #Pure
+        export let is_active = func -> bool => active;
+
+        /// @brief Runs one statement and returns the affected row count.
+        #NoDiscard
+        export let execute = func(text: string, parameters: ...) -> Result<int64> {
+            if (!active) {
+                return Result<int64>.Err(closed("transaction", "execute"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<int64>.Err(problem),
+                Result.Ok(values) => run_execute(lease, text, values),
+            };
+        };
+
+        /// @brief The first row of a query, or NotFound.
+        #NoDiscard
+        export let query_one = func(text: string, parameters: ...) -> Result<Row> {
+            if (!active) {
+                return Result<Row>.Err(closed("transaction", "query_one"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<Row>.Err(problem),
+                Result.Ok(values) => first_row(run_query(lease, text, values, one, "query_one")),
+            };
+        };
+
+        /// @brief At most `limit` rows of a query.
+        #NoDiscard
+        export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>> {
+            if (!active) {
+                return Result<immutable.ImmutableList<Row>>.Err(closed("transaction", "query_page"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
+                Result.Ok(values) => page_of(run_query(lease, text, values, limit, "query_page")),
+            };
+        };
+
+        /// @brief A cursor over a query's rows, within the transaction.
+        #NoDiscard
+        export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor> {
+            if (!active) {
+                return Result<Cursor>.Err(closed("transaction", "open_cursor"));
+            }
+            return match (values_of(parameters)) {
+                Result.Err(problem) => Result<Cursor>.Err(problem),
+                Result.Ok(values) => run_open_cursor(lease, text, values),
+            };
+        };
+
+        /// @brief Commits. Err means the transaction rolled back, or for OutcomeUnknown that its outcome is
+        /// unknown; either way it has ended.
+        #NoDiscard
+        export let commit = func -> Result<Unit> {
+            if (!active) {
+                return Result<Unit>.Err(closed("transaction", "commit"));
+            }
+            active = false;
+            return match (host_commit(lease)) {
+                DoneOutcome.Ok => done(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_failure(code, "commit")),
+            };
+        };
+
+        /// @brief Rolls back.
+        #NoDiscard
+        export let rollback = func -> Result<Unit> {
+            if (!active) {
+                return Result<Unit>.Err(closed("transaction", "rollback"));
+            }
+            active = false;
+            return match (host_rollback(lease)) {
+                DoneOutcome.Ok => done(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_failure(code, "rollback")),
+            };
+        };
+
+        /// @brief Rolls back unless it was committed or rolled back, and returns the connection when the
+        /// transaction came from `Pool.begin`. Closing again does nothing and returns Ok.
+        export let close = func -> Result<Unit> {
+            if (closed_now) {
+                return done();
+            }
+            closed_now = true;
+            let outcome = done();
+            if (active) {
+                outcome = rollback();
+            }
+            if (owns_connection) {
+                match (host_release(lease)) {
+                    DoneOutcome.Ok => {},
+                    DoneOutcome.Error(code) => {
+                        match (outcome) {
+                            Result.Ok(_) => {
+                                outcome = Result<Unit>.Err(host_failure(code, "close"));
+                            },
+                            Result.Err(_) => {},
+                        }
+                    },
+                }
+            }
+            return outcome;
+        };
+
+        /// @brief The pool and state, such as "Transaction(main, active)".
+        #Pure
+        export let.override to_string = func -> string =>
+            "Transaction(" + pool_name + (active ? ", active)" : ", ended)");
+    );
+
+    /// @brief Runs `body` in a transaction of its own connection: commits when it returns Ok, rolls back when
+    /// it returns Err, and returns the connection either way. The commit's error replaces an Ok.
+    #NoDiscard
+    export let in_transaction = func<T>(on: Pool, body: func(Transaction) -> Result<T>) -> Result<T> {
+        return match (on.begin()) {
+            Result.Err(problem) => Result<T>.Err(problem),
+            Result.Ok(transaction) => finish<T>(transaction, body(transaction)),
+        };
+    };
+
+    /// @brief Commits after Ok or rolls back after Err, then closes.
+    let finish = func<T>(transaction: Transaction, outcome: Result<T>) -> Result<T> {
+        let result = outcome;
+        match (outcome) {
+            Result.Ok(_) => {
+                if (transaction.is_active()) {
+                    match (transaction.commit()) {
+                        Result.Ok(_) => {},
+                        Result.Err(problem) => {
+                            result = Result<T>.Err(problem);
+                        },
+                    }
+                }
+            },
+            Result.Err(_) => {},
+        }
+        match (transaction.close()) {
+            Result.Ok(_) => {},
+            Result.Err(problem) => {
+                match (result) {
+                    Result.Ok(_) => {
+                        result = Result<T>.Err(problem);
+                    },
+                    Result.Err(_) => {},
+                }
+            },
+        }
+        return result;
+    };
+
+    /// @brief The rows of a query read in pages. `close` ends the statement; the connection takes other
+    /// statements only after it.
+    #[Final, NoDiscard(reason: "a cursor must be closed"), NotThreadSafe, Since("0.3.0")]
+    export let Cursor = class implements Closeable (
+        /// @brief The host's cursor handle.
+        last handle: int64;
+        /// @brief The column names.
+        export last columns: Columns;
+        /// @brief Whether the cursor is open.
+        let open_now: bool = true;
+        /// @brief Whether rows may remain.
+        let remaining: bool = true;
+
+        /// @brief Wraps an open cursor; use `open_cursor`.
+        export let init = func(cursor: int64, names: Columns) {
+            handle = cursor;
+            columns = names;
+        };
+
+        /// @brief Whether rows may remain to fetch.
+        #Pure
+        export let has_more = func -> bool => open_now && remaining;
+
+        /// @brief Up to `max` further rows; an empty list at the end. A `max` above the pool's page (S-11) is
+        /// TooLarge.
+        #NoDiscard
+        export let fetch = func(max: int) -> Result<immutable.ImmutableList<Row>> {
+            if (!open_now) {
+                return Result<immutable.ImmutableList<Row>>.Err(closed("cursor", "fetch"));
+            }
+            if (!remaining) {
+                last none: Row[list] = new;
+                return Result<immutable.ImmutableList<Row>>.Ok(new immutable.ImmutableList<Row>(none));
+            }
+            match (host_fetch(handle, max)) {
+                RowsOutcome.Ok(page) => {
+                    remaining = page[4];
+                    return Result<immutable.ImmutableList<Row>>.Ok(new immutable.ImmutableList<Row>(
+                        rows_of(columns, decode(page[0], page[1], page[2], page[3]))));
+                },
+                RowsOutcome.Error(code) => {
+                    return Result<immutable.ImmutableList<Row>>.Err(host_failure(code, "fetch"));
+                },
+            }
+        };
+
+        /// @brief Ends the statement. Closing again does nothing and returns Ok.
+        export let close = func -> Result<Unit> {
+            if (!open_now) {
+                return done();
+            }
+            open_now = false;
+            return match (host_close_cursor(handle)) {
+                DoneOutcome.Ok => done(),
+                DoneOutcome.Error(code) => Result<Unit>.Err(host_failure(code, "close")),
+            };
+        };
+
+        /// @brief The columns and state, such as "Cursor(id, name; open)".
+        #Pure
+        export let.override to_string = func -> string =>
+            "Cursor(" + columns.to_string() + (open_now ? "; open)" : "; closed)");
+    );
+);

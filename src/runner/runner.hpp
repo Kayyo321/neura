@@ -4,6 +4,7 @@
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
+#include "nvm/sql_services.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -20,10 +21,13 @@ struct Host {
     nvm::StandardServices services;
     // Bound in every image; only a server-host worker passes an exchange.
     nvm::ApplicationServices application;
+    // Bound in every image; answered only with an SQL exchange and the sql group.
+    nvm::SqlServices sql;
     nvm::HostRegistry registry;
 
     explicit Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange = nullptr,
-                  std::uint64_t response_bytes = nvm::default_response_bytes);
+                  std::uint64_t response_bytes = nvm::default_response_bytes,
+                  nvm::SqlExchange* sql_exchange = nullptr);
 };
 
 struct RunOptions {

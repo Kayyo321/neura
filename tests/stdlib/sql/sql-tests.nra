@@ -1,0 +1,242 @@
+// test-options: --sql-pool main=sqlite::memory:
+let error = import:Std.Core.Error;
+let immutable = import:Std.Collections.ImmutableList;
+let sql = import:Std.Data.Sql;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+// Std.Data.Sql against an in-memory SQLite pool of `neura test --sql-pool`. Every test makes its own table,
+// because the tests of one run share the database. tests/server/sql_host_test.py covers the server host and
+// PostgreSQL.
+let SqlTests = module (
+    /// @brief The pool of the test run.
+    let main = func -> sql.Pool => test.assert_ok<sql.Pool>(sql.pool("main"));
+
+    /// @brief The rows of a page that must succeed.
+    let page = func(outcome: Result<immutable.ImmutableList<sql.Row>>) -> immutable.ImmutableList<sql.Row> =>
+        test.assert_ok<immutable.ImmutableList<sql.Row>>(outcome);
+
+    /// @brief The error of a page that must fail.
+    let page_error = func(outcome: Result<immutable.ImmutableList<sql.Row>>) -> error.Error =>
+        test.assert_err<immutable.ImmutableList<sql.Row>>(outcome);
+
+    /// @brief The kind of an SQL error.
+    let kind = func(problem: error.Error) -> sql.ErrorKind => test.assert_some<sql.ErrorKind>(sql.kind_of(problem));
+
+    /// @brief The detail of an SQL error.
+    let detail = func(problem: error.Error) -> string => match (problem) {
+        error.Error.Custom(item) => (item as sql.SqlError).detail,
+        _ => "",
+    };
+
+    export let test_values_print_compare_and_hash = func() -> void {
+        test.assert_equal_string("NULL", sql.null_value().to_string());
+        test.assert_equal_string("true", sql.bool_value(true).to_string());
+        test.assert_equal_string("-9223372036854775808", sql.int_value(-9223372036854775808).to_string());
+        test.assert_equal_string("'it''s'", sql.text_value("it's").to_string());
+        last data: uint8[list] = new([0, 171, 255]);
+        test.assert_equal_string("X'00ABFF'", sql.bytes_value(data).to_string());
+        test.assert(sql.int_value(7).equals(sql.int_value(7)));
+        test.assert(!sql.int_value(7).equals(sql.text_value("7")));
+        test.assert_equal<uint32>(sql.text_value("a").hash_code(), sql.text_value("a").hash_code());
+        test.assert(sql.null_value().is_null());
+        test.assert_equal<int64>(5, test.assert_some<int64>(sql.int_value(5).as_int64()));
+        test.assert_none<string>(sql.int_value(5).as_text());
+    };
+
+    export let test_pool_names_and_redaction = func() -> void {
+        last pool = main();
+        test.assert_equal_string("Pool(main)", pool.to_string());
+        test.assert(pool.equals(new sql.Pool("main")));
+        last missing = test.assert_err<sql.Pool>(sql.pool("absent"));
+        test.assert(kind(missing) == sql.ErrorKind.NotFound);
+        test.assert_equal_string("sql.not_found", match (missing) {
+            error.Error.Custom(item) => item.code(),
+            _ => "",
+        });
+        last connection = test.assert_ok<sql.Connection>(pool.acquire());
+        test.assert_equal_string("Connection(main, open)", connection.to_string());
+        test.assert_ok<Unit>(connection.close());
+        test.assert_equal_string("Connection(main, closed)", connection.to_string());
+        test.assert_ok<Unit>(connection.close());
+    };
+
+    export let test_execute_query_and_typed_reads = func() -> void {
+        last pool = main();
+        test.assert_ok<int64>(pool.execute(
+            "CREATE TABLE parts (id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, weight REAL, "
+            + "active INTEGER, photo BLOB, note TEXT)"));
+        last photo: uint8[list] = new([1, 2, 3]);
+        test.assert_equal<int64>(1, test.assert_ok<int64>(pool.execute(
+            "INSERT INTO parts (code, weight, active, photo, note) VALUES ($1, $2, $3, $4, $5)",
+            "bolt", 1.5, true, sql.bytes_value(photo), sql.null_value())));
+        test.assert_equal<int64>(1, test.assert_ok<int64>(pool.execute(
+            "INSERT INTO parts (code, weight, active, note) VALUES ($1, $2, $3, $4)", "nut", 2, false, "small")));
+        last rows = page(pool.query_page("SELECT id, code, weight, active, photo, note FROM parts ORDER BY id", 10))
+            .to_list();
+        test.assert_equal<int>(2, rows.length);
+        last bolt = rows[0];
+        test.assert_equal<int64>(1, test.assert_ok<int64>(bolt.int64("id")));
+        test.assert_equal<int32>(1, test.assert_ok<int32>(bolt.int32("ID")));
+        test.assert_equal_string("bolt", test.assert_ok<string>(bolt.text("code")));
+        test.assert_float_near(1.5, test.assert_ok<float64>(bolt.float64("weight")), 0.0);
+        test.assert(test.assert_ok<bool>(bolt.bool("active")));
+        test.assert_equal<int>(3, test.assert_ok<uint8[list]>(bolt.bytes("photo")).length);
+        test.assert_none<string>(test.assert_ok<Optional<string>>(bolt.optional_text("note")));
+        last nut = rows[1];
+        test.assert_float_near(2.0, test.assert_ok<float64>(nut.float64("weight")), 0.0);
+        test.assert(!test.assert_ok<bool>(nut.bool("active")));
+        test.assert_equal_string("small", test.assert_some<string>(test.assert_ok<Optional<string>>(nut.optional_text("note"))));
+        test.assert_equal_string("Row(id=2, code='nut', weight=2.0, active=0, photo=NULL, note='small')", nut.to_string());
+        test.assert(kind(test.assert_err<int64>(nut.int64("missing"))) == sql.ErrorKind.NotFound);
+        test.assert(kind(test.assert_err<string>(nut.text("photo"))) == sql.ErrorKind.InvalidInput);
+        test.assert(kind(test.assert_err<int64>(nut.int64("code"))) == sql.ErrorKind.InvalidInput);
+        test.assert_ok<int64>(pool.execute("DROP TABLE parts"));
+    };
+
+    export let test_query_one_and_not_found = func() -> void {
+        last pool = main();
+        last row = test.assert_ok<sql.Row>(pool.query_one("SELECT $1 AS greeting, $2 + 1 AS next", "hi", 41));
+        test.assert_equal_string("hi", test.assert_ok<string>(row.text("greeting")));
+        test.assert_equal<int64>(42, test.assert_ok<int64>(row.int64("next")));
+        last none = test.assert_err<sql.Row>(pool.query_one("SELECT 1 WHERE 1 = 0"));
+        test.assert(kind(none) == sql.ErrorKind.NotFound);
+    };
+
+    export let test_extreme_integers_and_narrowing = func() -> void {
+        last pool = main();
+        last lowest: int64 = -9223372036854775808;
+        last row = test.assert_ok<sql.Row>(pool.query_one(
+            "SELECT -9223372036854775808 AS low, 3000000000 AS big, $1 AS back", lowest));
+        test.assert_equal<int64>(-9223372036854775808, test.assert_ok<int64>(row.int64("low")));
+        test.assert_equal<int64>(-9223372036854775808, test.assert_ok<int64>(row.int64("back")));
+        last narrowed = test.assert_err<int32>(row.int32("big"));
+        test.assert(kind(narrowed) == sql.ErrorKind.InvalidInput);
+        test.assert(strings.contains(detail(narrowed), "outside the int32 range"));
+        last too_big: uint64 = 18446744073709551615;
+        test.assert(kind(test.assert_err<sql.Row>(pool.query_one("SELECT $1 AS x", too_big))) == sql.ErrorKind.InvalidInput);
+        last exact = test.assert_ok<sql.Row>(pool.query_one("SELECT 9007199254740993 AS x"));
+        test.assert(kind(test.assert_err<float64>(exact.float64("x"))) == sql.ErrorKind.InvalidInput);
+    };
+
+    export let test_page_limits = func() -> void {
+        last pool = main();
+        test.assert_equal<int>(0, page(pool.query_page("SELECT 1", 0)).size());
+        last limited = page(pool.query_page("SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3", 2));
+        test.assert_equal<int>(2, limited.size());
+        last over = page_error(pool.query_page("SELECT 1", 1001));
+        test.assert(kind(over) == sql.ErrorKind.TooLarge);
+    };
+
+    export let test_placeholders = func() -> void {
+        last pool = main();
+        last row = test.assert_ok<sql.Row>(pool.query_one("SELECT $2 AS b, $1 AS a, $1 AS again, '$1' AS literal",
+                                                          "first", "second"));
+        test.assert_equal_string("second", test.assert_ok<string>(row.text("b")));
+        test.assert_equal_string("first", test.assert_ok<string>(row.text("a")));
+        test.assert_equal_string("first", test.assert_ok<string>(row.text("again")));
+        test.assert_equal_string("$1", test.assert_ok<string>(row.text("literal")));
+        last question = test.assert_err<sql.Row>(pool.query_one("SELECT ? AS x", 1));
+        test.assert(kind(question) == sql.ErrorKind.InvalidInput);
+        last missing = test.assert_err<sql.Row>(pool.query_one("SELECT $2 AS x", 1));
+        test.assert(kind(missing) == sql.ErrorKind.InvalidInput);
+        last unused = test.assert_err<sql.Row>(pool.query_one("SELECT 1 AS x", 1));
+        test.assert(strings.contains(detail(unused), "$1 is not used"));
+        last two = test.assert_err<int64>(pool.execute("SELECT 1; SELECT 2"));
+        test.assert(strings.contains(detail(two), "one statement per call"));
+    };
+
+    export let test_transactions = func() -> void {
+        last pool = main();
+        test.assert_ok<int64>(pool.execute("CREATE TABLE ledger (entry TEXT NOT NULL)"));
+        last committed = test.assert_ok<sql.Transaction>(pool.begin());
+        test.assert_ok<int64>(committed.execute("INSERT INTO ledger VALUES ($1)", "kept"));
+        test.assert_ok<Unit>(committed.commit());
+        test.assert_ok<Unit>(committed.close());
+        last abandoned = test.assert_ok<sql.Transaction>(pool.begin());
+        test.assert_ok<int64>(abandoned.execute("INSERT INTO ledger VALUES ($1)", "dropped"));
+        test.assert_equal_string("Transaction(main, active)", abandoned.to_string());
+        test.assert_ok<Unit>(abandoned.close());
+        last after = test.assert_err<int64>(abandoned.execute("INSERT INTO ledger VALUES ('late')"));
+        test.assert(kind(after) == sql.ErrorKind.InvalidInput);
+        last failed = sql.in_transaction<int64>(pool, new func(transaction: sql.Transaction) -> Result<int64> {
+            test.assert_ok<int64>(transaction.execute("INSERT INTO ledger VALUES ($1)", "undone"));
+            return Result<int64>.Err(error.custom("test.stop", "stop here"));
+        });
+        test.assert_err<int64>(failed);
+        last counted = sql.in_transaction<int64>(pool, new func(transaction: sql.Transaction) -> Result<int64> {
+            return match (transaction.query_one("SELECT count(*) AS n FROM ledger")) {
+                Result.Ok(row) => row.int64("n"),
+                Result.Err(problem) => Result<int64>.Err(problem),
+            };
+        });
+        test.assert_equal<int64>(1, test.assert_ok<int64>(counted));
+        last connection = test.assert_ok<sql.Connection>(pool.acquire());
+        last first = test.assert_ok<sql.Transaction>(connection.begin());
+        test.assert(kind(test.assert_err<sql.Transaction>(connection.begin())) == sql.ErrorKind.InvalidInput);
+        test.assert_ok<Unit>(first.rollback());
+        test.assert_ok<Unit>(first.close());
+        test.assert(connection.is_open());
+        test.assert_ok<Unit>(connection.close());
+        test.assert_ok<int64>(pool.execute("DROP TABLE ledger"));
+    };
+
+    export let test_constraint_violation_names_the_constraint = func() -> void {
+        last pool = main();
+        test.assert_ok<int64>(pool.execute("CREATE TABLE users (email TEXT NOT NULL UNIQUE)"));
+        test.assert_ok<int64>(pool.execute("INSERT INTO users VALUES ($1)", "a@example.com"));
+        last duplicate = test.assert_err<int64>(pool.execute("INSERT INTO users VALUES ($1)", "a@example.com"));
+        test.assert(kind(duplicate) == sql.ErrorKind.ConstraintViolation);
+        test.assert(strings.contains(detail(duplicate), "users.email"));
+        test.assert(!strings.contains(detail(duplicate), "a@example.com"));
+        test.assert_equal_string("sql.constraint_violation", match (duplicate) {
+            error.Error.Custom(item) => item.code(),
+            _ => "",
+        });
+        test.assert_ok<int64>(pool.execute("DROP TABLE users"));
+    };
+
+    export let test_cursor_pages = func() -> void {
+        last pool = main();
+        last connection = test.assert_ok<sql.Connection>(pool.acquire());
+        test.assert_ok<int64>(connection.execute("CREATE TABLE numbers (n INTEGER)"));
+        for (let i = 0; i < 5; i += 1) {
+            test.assert_ok<int64>(connection.execute("INSERT INTO numbers VALUES ($1)", i));
+        }
+        last cursor = test.assert_ok<sql.Cursor>(connection.open_cursor("SELECT n FROM numbers ORDER BY n"));
+        test.assert_equal_string("Cursor(n; open)", cursor.to_string());
+        last busy = test.assert_err<int64>(connection.execute("SELECT 1"));
+        test.assert(kind(busy) == sql.ErrorKind.InvalidInput);
+        last first = page(cursor.fetch(2));
+        test.assert_equal<int>(2, first.size());
+        test.assert(cursor.has_more());
+        last rest = page(cursor.fetch(10));
+        test.assert_equal<int>(3, rest.size());
+        test.assert_equal<int64>(4, test.assert_ok<int64>(rest.get(2).int64("n")));
+        test.assert(!cursor.has_more());
+        test.assert_equal<int>(0, page(cursor.fetch(10)).size());
+        test.assert_ok<Unit>(cursor.close());
+        test.assert_ok<int64>(connection.execute("DROP TABLE numbers"));
+        test.assert_ok<Unit>(connection.close());
+        test.assert(kind(test.assert_err<int64>(connection.execute("SELECT 1"))) == sql.ErrorKind.InvalidInput);
+    };
+
+    export let test_forged_handle_is_refused = func() -> void {
+        last forged = new sql.Connection("main", 987654321);
+        last problem = test.assert_err<int64>(forged.execute("SELECT 1"));
+        test.assert(kind(problem) == sql.ErrorKind.InvalidInput);
+        test.assert(strings.contains(detail(problem), "unknown connection handle"));
+        test.assert(kind(test.assert_err<Unit>(forged.close())) == sql.ErrorKind.InvalidInput);
+    };
+
+    export let test_unicode_text_and_empty_bytes = func() -> void {
+        last pool = main();
+        last empty: uint8[list] = new;
+        last row = test.assert_ok<sql.Row>(pool.query_one("SELECT $1 AS t, $2 AS b", "héllo ✓", sql.bytes_value(empty)));
+        test.assert_equal_string("héllo ✓", test.assert_ok<string>(row.text("t")));
+        test.assert_equal<int>(0, test.assert_ok<uint8[list]>(row.bytes("b")).length);
+    };
+);

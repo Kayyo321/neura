@@ -4,6 +4,7 @@
 #include "nvr/format.hpp"
 #include "runner/runner.hpp"
 #include "server/json_line.hpp"
+#include "server/sql_channel.hpp"
 #include "server/worker_messages.hpp"
 #include "util/sha256.hpp"
 
@@ -165,7 +166,9 @@ int run_request_worker(const WorkerOptions& options) {
     }
 
     ChannelExchange exchange(channel, *request, std::move(body), deadline);
-    runner::Host host(capabilities, &exchange, options.response_bytes);
+    // SQL calls go to the host's pools (granted with --allow-sql).
+    worker::ChannelSql sql(channel, deadline);
+    runner::Host host(capabilities, &exchange, options.response_bytes, &sql);
     runner::RunOptions run_options;
     if (options.record_directory) {
         run_options.record = *options.record_directory / (request->request_id + ".trace");

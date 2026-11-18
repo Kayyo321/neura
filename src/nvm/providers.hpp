@@ -89,6 +89,10 @@ struct Capabilities {
     // them, to its request workers; the command-line tools never do.
     bool http_server = false;
     bool app = false;
+    // The SQL pools of Std.Data.Sql (neura.sql.*): granted by
+    // neura-server-host to its workers when it has pools, and by
+    // `neura run` and `neura test` with --sql-pool.
+    bool sql = false;
 };
 
 // The target triple of this runner, such as x86_64-linux-gnu; an image's

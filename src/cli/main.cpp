@@ -40,6 +40,9 @@
 #include "tooling/formatter.hpp"
 #include "tooling/json.hpp"
 #include "tooling/inspect.hpp"
+#ifdef NEURA_HAS_SQL
+#include "sql/sql_engine.hpp"
+#endif
 
 #include <algorithm>
 #include <charconv>
@@ -142,6 +145,8 @@ void usage(std::ostream& out) {
            "  --allow-net, --allow-env, --allow-clock, --allow-entropy, --allow-native\n"
            "                           grant that group again after a --deny option (native code is unsafe)\n"
            "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
+           "  --sql-pool <name>=<url>  (run, test) an SQL pool for Std.Data.Sql: sqlite:<path>, sqlite::memory:,\n"
+           "                           or postgresql://...; <name>.migrations=<dir> applies a migration directory\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
            "  --tier=0|1|2             the highest execution tier: 0 evaluates every graph by reference, 1 also\n"
@@ -220,6 +225,8 @@ neura::nvm::Capabilities granted_capabilities() {
 
 struct Options {
     Command command = Command::Check;
+    // run and test: --sql-pool <name>=<url> (docs/runtime/Sql.md).
+    std::vector<std::string> sql_pools;
     bool optimize = true;
     bool source_map = true;
     // build: emit the optional LIFT section (--no-lift-hints omits it).
@@ -412,6 +419,9 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
     } else if (arg == "--deny-all") {
         options.capabilities = {};
         options.allow_native_requested = false;
+    } else if (arg == "--sql-pool") {
+        options.sql_pools.emplace_back(next());
+        options.capabilities.sql = true;
     } else {
         return false;
     }
@@ -1376,7 +1386,13 @@ int run(const Options& options) {
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
+#ifdef NEURA_HAS_SQL
+    neura::sql::LocalSql sql(options.sql_pools);
+    Host host(options.capabilities, nullptr, neura::nvm::default_response_bytes, sql.exchange());
+#else
+    if (!options.sql_pools.empty()) throw std::runtime_error("this build has no SQL providers");
     Host host(options.capabilities);
+#endif
     provide_native_library(image, host.services);
     if (options.each) {
         return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device(), started), options.stats);
@@ -1552,7 +1568,13 @@ int run_tests(const Options& options) {
                 reporter->event("output", neura::tooling::test_output_json(catalog[i].id, stream, text));
             });
     };
+#ifdef NEURA_HAS_SQL
+    neura::sql::LocalSql sql(options.sql_pools);
+    Host host(options.capabilities, nullptr, neura::nvm::default_response_bytes, sql.exchange());
+#else
+    if (!options.sql_pools.empty()) throw std::runtime_error("this build has no SQL providers");
     Host host(options.capabilities);
+#endif
     provide_native_library(image, host.services);
     const auto bindings = neura::nvm::bind(image, host.registry);
     std::size_t failed = 0;

@@ -124,7 +124,7 @@ std::optional<ResponseHead> decode_head(std::span<const std::uint8_t> body) {
 WorkerIdentity server_identity(const ImageDigest& image) {
     WorkerIdentity identity;
     identity.image = image;
-    identity.providers = {{"neura.app", 1}, {"neura.http.server", 1}};
+    identity.providers = {{"neura.app", 1}, {"neura.http.server", 1}, {"neura.sql", 1}};
     return identity;
 }
 

@@ -4,6 +4,7 @@ let errors = import:Std.Core.Error;
 let host_error = import:Std.Core.Internal.HostError;
 let program = import:Std.Program;
 let server = import:Std.Net.Internal.HttpServer;
+let sql = import:Std.Data.Sql;
 let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
@@ -216,6 +217,11 @@ export let App = module (
                 server.ConfigOutcome.Error(_) => Optional<string>.None,
             };
         };
+
+        /// @brief The SQL pool the host declares under `name` (docs/runtime/Sql.md). Err of kind NotFound
+        /// when the host has no such pool, and CapabilityDenied when it has none at all.
+        #NoDiscard
+        export let sql_pool = func(name: string) -> Result<sql.Pool> => sql.pool(name);
 
         /// @brief Writes a JSON log record through the host, with this request's identifier. Without a host
         /// the record is dropped.

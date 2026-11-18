@@ -93,6 +93,7 @@ neura_target_defaults(neura_nvr)
 set(neura_nvm_sources
     src/nvm/driver.cpp
     src/nvm/app_provider.cpp
+    src/nvm/sql_services.cpp
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -538,14 +539,97 @@ if(NEURA_ENABLE_SERVER_TLS)
     neura_configure_server_tls()
 endif()
 
+# The SQL providers of Std.Data.Sql (docs/runtime/Sql.md): pools, sessions and
+# migrations, used by neura-server-host and by `neura run`/`neura test`
+# --sql-pool. SQLite is compiled in from the amalgamation that
+# packaging/server-components.lock.toml pins: from NEURA_SQLITE_AMALGAMATION
+# when it names the archive, otherwise downloaded at configure time; either
+# way its SHA-256 must match the lock. PostgreSQL needs a static libpq 18.7
+# and the static OpenSSL 3.5 of the TLS build.
+option(NEURA_ENABLE_SQL "Build the SQL providers of Std.Data.Sql (SQLite)" ON)
+set(NEURA_SQLITE_AMALGAMATION "" CACHE FILEPATH
+    "sqlite-amalgamation-3540100.zip; when empty it is downloaded from the URL of the component lock")
+option(NEURA_ENABLE_POSTGRES "Build the PostgreSQL provider of Std.Data.Sql over a static libpq 18.7" OFF)
+set(NEURA_LIBPQ_SOURCE "" CACHE PATH "The postgresql-18.7 source tree, for the libpq headers")
+set(NEURA_LIBPQ_BUILD "" CACHE PATH "The postgresql-18.7 build tree holding libpq.a, libpgcommon_shlib.a and libpgport_shlib.a")
+if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
+    set(neura_sqlite_sha256 "0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9")
+    set(neura_sqlite_dir "${CMAKE_CURRENT_BINARY_DIR}/_deps/sqlite")
+    set(neura_sqlite_source "${neura_sqlite_dir}/sqlite-amalgamation-3540100/sqlite3.c")
+    if(NOT EXISTS "${neura_sqlite_source}")
+        set(neura_sqlite_zip "${NEURA_SQLITE_AMALGAMATION}")
+        if(neura_sqlite_zip STREQUAL "")
+            set(neura_sqlite_zip "${neura_sqlite_dir}/sqlite-amalgamation-3540100.zip")
+            message(STATUS "Downloading the SQLite 3.54.1 amalgamation")
+            file(DOWNLOAD "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip" "${neura_sqlite_zip}"
+                EXPECTED_HASH SHA256=${neura_sqlite_sha256} STATUS neura_sqlite_status TLS_VERIFY ON)
+            list(GET neura_sqlite_status 0 neura_sqlite_code)
+            if(NOT neura_sqlite_code EQUAL 0)
+                message(FATAL_ERROR "Cannot download the SQLite amalgamation (${neura_sqlite_status}). Pass "
+                    "-DNEURA_SQLITE_AMALGAMATION=<sqlite-amalgamation-3540100.zip> or -DNEURA_ENABLE_SQL=OFF.")
+            endif()
+        endif()
+        file(SHA256 "${neura_sqlite_zip}" neura_sqlite_actual)
+        if(NOT neura_sqlite_actual STREQUAL neura_sqlite_sha256)
+            message(FATAL_ERROR "${neura_sqlite_zip} has SHA-256 ${neura_sqlite_actual}; the lock pins ${neura_sqlite_sha256}")
+        endif()
+        file(ARCHIVE_EXTRACT INPUT "${neura_sqlite_zip}" DESTINATION "${neura_sqlite_dir}")
+    endif()
+    # Upstream C, compiled without the project's warnings.
+    add_library(neura_sqlite3 STATIC "${neura_sqlite_source}")
+    target_include_directories(neura_sqlite3 SYSTEM PUBLIC "${neura_sqlite_dir}/sqlite-amalgamation-3540100")
+    target_compile_definitions(neura_sqlite3 PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION SQLITE_DQS=0
+        SQLITE_DEFAULT_MEMSTATUS=0 SQLITE_LIKE_DOESNT_MATCH_BLOBS)
+    set_target_properties(neura_sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+    if(NOT MSVC)
+        target_compile_options(neura_sqlite3 PRIVATE -w)
+    endif()
+    find_package(Threads REQUIRED)
+    target_link_libraries(neura_sqlite3 PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+
+    add_library(neura_sql STATIC src/sql/sql_engine.cpp src/sql/sqlite_connection.cpp src/sql/postgres_connection.cpp
+        src/sql/migrations.cpp)
+    target_include_directories(neura_sql PUBLIC src)
+    target_link_libraries(neura_sql PUBLIC neura_nvm neura_lifecycle PRIVATE neura_sqlite3)
+    target_compile_definitions(neura_sql PUBLIC NEURA_HAS_SQL)
+    neura_target_defaults(neura_sql)
+    if(NEURA_ENABLE_POSTGRES)
+        if(WIN32)
+            message(FATAL_ERROR "The PostgreSQL provider needs POSIX sockets")
+        endif()
+        if(NOT NEURA_ENABLE_SERVER_TLS)
+            message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_ENABLE_SERVER_TLS for the static OpenSSL 3.5")
+        endif()
+        if(NOT EXISTS "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq/libpq-fe.h"
+           OR NOT EXISTS "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a")
+            message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_LIBPQ_SOURCE (postgresql-18.7) and "
+                "NEURA_LIBPQ_BUILD (its build tree with libpq.a)")
+        endif()
+        target_include_directories(neura_sql SYSTEM PRIVATE "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq"
+            "${NEURA_LIBPQ_SOURCE}/src/include")
+        target_compile_definitions(neura_sql PRIVATE NEURA_SQL_POSTGRES)
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        find_package(OpenSSL 3.5 REQUIRED)
+        target_link_libraries(neura_sql PRIVATE "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a"
+            "${NEURA_LIBPQ_BUILD}/src/common/libpgcommon_shlib.a" "${NEURA_LIBPQ_BUILD}/src/port/libpgport_shlib.a"
+            OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+    endif()
+    # neura run and neura test take --sql-pool.
+    target_link_libraries(neura PRIVATE neura_sql)
+endif()
+
 # The server host (docs/design/Backend030.md): listeners, TLS when
 # NEURA_ENABLE_SERVER_TLS is on, and one request-worker process per request.
 # The same executable is the worker, in its --worker mode.
 if(UNIX AND NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
-    add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp)
+    add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp
+        src/server/sql_channel.cpp src/server/sql_host.cpp)
     target_include_directories(neura_server_worker PUBLIC src)
     target_link_libraries(neura_server_worker PUBLIC neura_server_worker_wire neura_runner neura_lifecycle)
+    if(TARGET neura_sql)
+        target_link_libraries(neura_server_worker PUBLIC neura_sql)
+    endif()
     neura_target_defaults(neura_server_worker)
     add_executable(neura-server-host src/server/server_host.cpp)
     target_link_libraries(neura-server-host PRIVATE neura_server_worker neura_server_listeners neura_server_http
