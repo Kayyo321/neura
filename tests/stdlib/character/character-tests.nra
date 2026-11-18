@@ -1,0 +1,341 @@
+let character = import:Std.Core.Character;
+let hash_set = import:Std.Collections.HashSet;
+let.promote _ = import:Std.Core.Optional;
+let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Ordering;
+let string = import:Std.Core.String;
+let test = import:Std.Test;
+let unicode_block = import:Std.Core.UnicodeBlock;
+let unicode_script = import:Std.Core.UnicodeScript;
+
+// Targeted cases of Std.Core.Character (Stdlib.md section 8.5). The expected
+// values were printed from the Unicode 17.0.0 data by the per-code-point
+// functions of generators/exhaustive.py (Perl 5.44 Unicode::UCD), and those
+// for code points assigned by Unicode 15.1 agree with Python 3.13's
+// unicodedata; exhaustive-tests.nra covers every code point.
+let CharacterTests = module (
+    let C = character.Character;
+    let Category = character.GeneralCategory;
+    let Bidi = character.BidiClass;
+
+    export let test_constants = func() -> void {
+        test.assert(character.MinCodePoint == 0);
+        test.assert(character.MaxCodePoint == 1114111);
+        test.assert(character.MinSupplementaryCodePoint == 65536);
+        test.assert(character.MinHighSurrogate == 55296 && character.MaxHighSurrogate == 56319);
+        test.assert(character.MinLowSurrogate == 56320 && character.MaxLowSurrogate == 57343);
+        test.assert(character.MinSurrogate == 55296 && character.MaxSurrogate == 57343);
+        test.assert(character.MinRadix == 2 && character.MaxRadix == 36);
+        test.assert(character.UnicodeVersion == "17.0.0");
+    };
+
+    export let test_ascii = func() -> void {
+        test.assert(character.get_type(65) == Category.UppercaseLetter);
+        test.assert(character.get_type(122) == Category.LowercaseLetter);
+        test.assert(character.get_type(48) == Category.DecimalNumber);
+        test.assert(character.get_type(32) == Category.SpaceSeparator);
+        test.assert(character.get_type(9) == Category.Control);
+        test.assert(character.get_type(40) == Category.OpenPunctuation);
+        test.assert(character.get_type(41) == Category.ClosePunctuation);
+        test.assert(character.is_upper(65) && !character.is_lower(65));
+        test.assert(character.is_lower(122) && !character.is_upper(122));
+        test.assert(character.to_lower(65) == 97 && character.to_upper(122) == 90 && character.to_title(122) == 90);
+        test.assert(character.to_upper(48) == 48);
+        test.assert(character.is_digit(48) && !character.is_letter(48) && character.is_letter_or_digit(48));
+        test.assert(character.is_alpha(65) && character.is_alpha_numeric(48) && !character.is_alpha_numeric(35));
+        test.assert(character.is_mirrored(40) && character.is_mirrored(41) && !character.is_mirrored(65));
+        test.assert(character.get_directionality(48) == Bidi.EuropeanNumber);
+        test.assert(character.get_directionality(35) == Bidi.EuropeanTerminator);
+        test.assert(character.category_code(character.get_type(65)) == "Lu");
+        test.assert(character.bidi_code(character.get_directionality(9)) == "S");
+        test.assert(character.bidi_code(Bidi.Undefined) == "");
+    };
+
+    export let test_white_space_sets = func() -> void {
+        // is_whitespace is Java's set, is_space_char the separators, and is_space the White_Space property.
+        test.assert(character.is_whitespace(9) && !character.is_space_char(9) && character.is_space(9));
+        test.assert(character.is_whitespace(28) && !character.is_space(28));
+        test.assert(!character.is_whitespace(133) && character.is_space(133));
+        test.assert(!character.is_whitespace(160) && character.is_space_char(160) && character.is_space(160));
+        test.assert(!character.is_whitespace(8199) && !character.is_whitespace(8239));
+        test.assert(character.is_whitespace(8232) && character.is_whitespace(8233) && character.is_whitespace(12288));
+        test.assert(character.get_type(8232) == Category.LineSeparator);
+        test.assert(character.get_type(8233) == Category.ParagraphSeparator);
+        test.assert(!character.is_whitespace(8203) && !character.is_space(8203));
+    };
+
+    export let test_whitespace_matches_string_strip = func() -> void {
+        // The String companion strips Java's white space set; is_whitespace must be the same set.
+        for (let p: uint32 = 0; p < 12352; p += 1) {
+            if (p >= 55296 && p <= 57343) {
+                continue;
+            }
+            last text = character.to_string(p) + "x";
+            test.assert_with(string.strip_leading(text) == "x" == character.is_whitespace(p),
+                "U+" + p.to_string() + " strip and is_whitespace disagree");
+        }
+    };
+
+    export let test_latin1_and_sharp_s = func() -> void {
+        test.assert(character.to_upper(233) == 201 && character.to_upper(255) == 376);
+        test.assert(character.to_upper(223) == 223 && character.to_lower(7838) == 223);
+        test.assert(character.to_upper_string(223) == "SS");
+        test.assert(character.to_lower_string(7838) == character.to_string(223));
+        test.assert(character.to_upper_string(64256) == "FF" && character.to_upper(64256) == 64256);
+        test.assert(character.to_upper(329) == 329 && character.to_upper_string(329) == character.to_string(700) + "N");
+        test.assert(character.get_type(173) == Category.Format && character.is_identifier_ignorable(173));
+    };
+
+    export let test_turkish_i = func() -> void {
+        test.assert(character.to_lower(304) == 105 && character.to_upper(305) == 73);
+        test.assert(character.to_upper(105) == 73 && character.to_lower(73) == 105);
+        test.assert(character.to_lower_string(304) == "i" + character.to_string(775));
+        test.assert(character.to_upper_string(105, "tr") == character.to_string(304));
+        test.assert(character.to_lower_string(73, "az") == character.to_string(305));
+        test.assert(character.to_upper_string(105, "en") == "I");
+    };
+
+    export let test_greek_sigma = func() -> void {
+        test.assert(character.to_lower(931) == 963 && character.to_upper(962) == 931 && character.to_upper(963) == 931);
+        test.assert(character.to_lower(962) == 962);
+        // A lone capital sigma is not final: nothing cased precedes it.
+        test.assert(character.to_lower_string(931) == character.to_string(963));
+        test.assert(character.is_lower(962) && character.is_upper(931));
+    };
+
+    export let test_title_case_digraphs = func() -> void {
+        test.assert(character.is_title_case(453) && character.is_title_case(498));
+        test.assert(!character.is_upper(453) && !character.is_lower(453));
+        test.assert(character.to_title(452) == 453 && character.to_title(453) == 453 && character.to_title(454) == 453);
+        test.assert(character.to_upper(453) == 452 && character.to_lower(453) == 454);
+        test.assert(character.to_title(497) == 498 && character.to_upper(499) == 497 && character.to_lower(497) == 499);
+        test.assert(character.get_type(453) == Category.TitlecaseLetter);
+    };
+
+    export let test_unicode_17_letters = func() -> void {
+        // U+1C89 CYRILLIC CAPITAL LETTER TJE (Unicode 17.0) and U+A7DC (16.0), which also maps U+019B.
+        test.assert(character.get_type(7305) == Category.UppercaseLetter && character.to_lower(7305) == 7306);
+        test.assert(character.to_upper(7306) == 7305);
+        test.assert(character.to_lower(42972) == 411 && character.to_upper(411) == 42972);
+        test.assert(character.to_lower(66560) == 66600 && character.to_upper(66600) == 66560);
+    };
+
+    export let test_digits_and_numbers = func() -> void {
+        test.assert(character.digit(48, 10) == 0 && character.digit(57, 10) == 9 && character.digit(57, 9) == -1);
+        test.assert(character.digit(65, 16) == 10 && character.digit(102, 16) == 15 && character.digit(103, 16) == -1);
+        test.assert(character.digit(90, 36) == 35 && character.digit(90, 35) == -1);
+        test.assert(character.digit(65313, 11) == 10 && character.digit(65370, 36) == 35);
+        test.assert(character.digit(1632, 10) == 0 && character.digit(1781, 10) == 5 && character.digit(2406, 2) == 0);
+        test.assert(character.digit(120782, 10) == 0 && character.digit(65296, 10) == 0);
+        test.assert(character.digit(8556, 36) == -1 && character.digit(189, 36) == -1);
+        test.assert(character.for_digit(0, 10) == 48 && character.for_digit(9, 10) == 57);
+        test.assert(character.for_digit(10, 16) == 97 && character.for_digit(35, 36) == 122);
+        test.assert(character.numeric_value(65) == 10 && character.numeric_value(122) == 35);
+        test.assert(character.numeric_value(65313) == 10 && character.numeric_value(65370) == 35);
+        test.assert(character.numeric_value(8556) == 50 && character.numeric_value(8544) == 1);
+        test.assert(character.numeric_value(189) == -2 && character.numeric_value(3891) == -2);
+        test.assert(character.numeric_value(20116) == 5 && character.numeric_value(20806) == -2);
+        test.assert(character.numeric_value(32) == -1 && character.numeric_value(1114111) == -1);
+        test.assert(optional.equals(character.numeric_value_text(189), Optional<string>.Some("1/2")));
+        test.assert(optional.equals(character.numeric_value_text(3891), Optional<string>.Some("-1/2")));
+        test.assert(optional.equals(character.numeric_value_text(20806), Optional<string>.Some("1000000000000")));
+        test.assert(optional.equals(character.numeric_value_text(65), Optional<string>.None));
+        test.assert(character.is_numeric(189) && character.is_numeric(20116) && !character.is_numeric(65));
+    };
+
+    export let test_identifiers = func() -> void {
+        test.assert(character.is_identifier_start(65) && !character.is_identifier_start(48));
+        test.assert(character.is_identifier_part(48) && character.is_identifier_part(95));
+        test.assert(!character.is_identifier_start(95) && !character.is_identifier_start(36));
+        test.assert(character.is_identifier_start(11823) && character.is_identifier_part(11823));
+        test.assert(character.is_identifier_part(8203) && character.is_identifier_part(0));
+        test.assert(character.is_identifier_ignorable(0) && character.is_identifier_ignorable(27));
+        test.assert(!character.is_identifier_ignorable(9) && !character.is_identifier_ignorable(28));
+        test.assert(character.is_identifier_ignorable(917505) && character.is_identifier_part(917505));
+        test.assert(character.is_identifier_start(8544) && character.is_identifier_start(20116));
+    };
+
+    export let test_iso_control_and_defined = func() -> void {
+        test.assert(character.is_iso_control(0) && character.is_iso_control(31) && !character.is_iso_control(32));
+        test.assert(character.is_iso_control(127) && character.is_iso_control(159) && !character.is_iso_control(160));
+        test.assert(character.is_defined(65) && character.is_defined(55296) && character.is_defined(57344));
+        test.assert(!character.is_defined(888) && !character.is_defined(64976) && !character.is_defined(65534));
+        test.assert(!character.is_defined(1114111) && !character.is_defined(1114112));
+    };
+
+    export let test_surrogates_private_use_and_noncharacters = func() -> void {
+        test.assert(character.get_type(55296) == Category.Surrogate && character.get_type(57343) == Category.Surrogate);
+        test.assert(character.get_type(57344) == Category.PrivateUse);
+        test.assert(character.get_type(983040) == Category.PrivateUse);
+        test.assert(character.get_type(64976) == Category.Unassigned);
+        test.assert(character.get_type(65535) == Category.Unassigned);
+        test.assert(character.get_type(1114110) == Category.Unassigned);
+        test.assert(character.get_directionality(64976) == Bidi.Undefined);
+        test.assert(character.bidi_class(64976) == Bidi.BoundaryNeutral);
+        test.assert(character.bidi_class(888) == Bidi.LeftToRight);
+        test.assert(character.get_directionality(55296) == Bidi.LeftToRight);
+        test.assert(character.get_directionality(1488) == Bidi.RightToLeft);
+        test.assert(character.get_directionality(1575) == Bidi.ArabicLetter);
+        test.assert(character.get_directionality(1632) == Bidi.ArabicNumber);
+        test.assert(character.to_upper(55296) == 55296 && character.to_lower(57344) == 57344);
+    };
+
+    export let test_beyond_max_code_point = func() -> void {
+        test.assert(character.get_type(1114112) == Category.Unassigned);
+        test.assert(character.get_type(4294967295) == Category.Unassigned);
+        test.assert(character.get_directionality(4294967295) == Bidi.Undefined);
+        test.assert(character.bidi_class(1114112) == Bidi.Undefined);
+        test.assert(!character.is_letter(4294967295) && !character.is_space(1114112) && !character.is_emoji(1114112));
+        test.assert(character.to_upper(4294967295) == 4294967295 && character.digit(1114112, 36) == -1);
+        test.assert(!character.is_valid_code_point(1114112) && character.is_valid_code_point(1114111));
+        test.assert(!character.is_supplementary(1114112) && !character.is_bmp(1114112));
+        test.assert(unicode_script.of(4294967295) == unicode_script.UnicodeScript.Unknown);
+        test.assert(unicode_block.of(1114112) == unicode_block.UnicodeBlock.NoBlock);
+    };
+
+    export let test_emoji = func() -> void {
+        test.assert(character.is_emoji(128512) && character.is_emoji_presentation(128512));
+        test.assert(character.is_extended_pictographic(128512) && !character.is_emoji_component(128512));
+        test.assert(character.is_emoji_modifier(127995) && character.is_emoji_component(127995));
+        test.assert(character.is_emoji_modifier_base(128077) && !character.is_emoji_modifier_base(128512));
+        test.assert(character.is_emoji(35) && character.is_emoji(48) && !character.is_emoji_presentation(35));
+        test.assert(character.is_emoji_component(8205) && character.is_emoji_component(127462));
+        test.assert(!character.is_emoji(65));
+    };
+
+    export let test_ideographic_and_alphabetic = func() -> void {
+        test.assert(character.is_ideographic(20116));
+        test.assert(character.is_ideographic(131072));
+        test.assert(!character.is_ideographic(11904));
+        test.assert(character.is_alphabetic(8556) && !character.is_letter(8556) && character.is_upper(8556));
+        test.assert(character.is_alphabetic(11823) && character.is_letter(11823));
+        test.assert(!character.is_alphabetic(48));
+    };
+
+    export let test_code_points_and_utf16 = func() -> void {
+        test.assert(character.is_bmp(65535) && !character.is_bmp(65536) && character.is_supplementary(65536));
+        test.assert(character.is_surrogate(55296));
+        test.assert(character.is_high_surrogate(56319));
+        test.assert(!character.is_high_surrogate(56320));
+        test.assert(character.is_low_surrogate(56320));
+        test.assert(character.is_low_surrogate(57343));
+        test.assert(!character.is_low_surrogate(57344));
+        test.assert(character.is_surrogate_pair(55357, 56832) && !character.is_surrogate_pair(56832, 55357));
+        test.assert(character.high_surrogate(128512) == 55357 && character.low_surrogate(128512) == 56832);
+        test.assert(character.to_code_point(55357, 56832) == 128512);
+        test.assert(character.high_surrogate(65536) == 55296 && character.low_surrogate(65536) == 56320);
+        test.assert(character.high_surrogate(1114111) == 56319 && character.low_surrogate(1114111) == 57343);
+        test.assert(character.char_count(65535) == 1 && character.char_count(65536) == 2);
+        test.assert(character.utf16_length(65) == 1 && character.utf16_length(1114111) == 2);
+        test.assert(character.utf8_length(127) == 1);
+        test.assert(character.utf8_length(128) == 2);
+        test.assert(character.utf8_length(2047) == 2);
+        test.assert(character.utf8_length(2048) == 3);
+        test.assert(character.utf8_length(65535) == 3);
+        test.assert(character.utf8_length(65536) == 4);
+        test.assert(character.to_utf8(8364).equals(new uint8[list]([226, 130, 172])));
+        test.assert(character.to_utf8(128512).equals(new uint8[list]([240, 159, 152, 128])));
+        test.assert(character.to_chars(65).equals(new uint16[list]([65])));
+        test.assert(character.to_chars(55296).equals(new uint16[list]([55296])));
+        test.assert(character.to_chars(128512).equals(new uint16[list]([55357, 56832])));
+        last units: uint16[list] = new([65, 55357, 56832, 56832, 55357]);
+        test.assert(character.code_point_at(units, 1) == 128512 && character.code_point_at(units, 2) == 56832);
+        test.assert(character.code_point_at(units, 4) == 55357);
+        test.assert(character.code_point_before(units, 3) == 128512 && character.code_point_before(units, 1) == 65);
+        test.assert(character.code_point_before(units, 2) == 55357);
+        test.assert(character.code_point_count(units, 0, 5) == 4 && character.code_point_count(units, 0, 2) == 2);
+        test.assert(character.offset_by_code_points(units, 0, 2) == 3);
+        test.assert(character.offset_by_code_points(units, 3, -2) == 0);
+        test.assert(character.offset_by_code_points(units, 5, 0) == 5);
+        test.assert(character.reverse_bytes(4660) == 13330 && character.reverse_bytes(255) == 65280);
+    };
+
+    export let test_scripts_and_blocks = func() -> void {
+        test.assert(unicode_script.of(65) == unicode_script.UnicodeScript.Latin);
+        test.assert(unicode_script.of(48) == unicode_script.UnicodeScript.Common);
+        test.assert(unicode_script.of(8205) == unicode_script.UnicodeScript.Inherited);
+        test.assert(unicode_script.of(1488) == unicode_script.UnicodeScript.Hebrew);
+        test.assert(unicode_script.of(20116) == unicode_script.UnicodeScript.Han);
+        test.assert(unicode_script.of(66560) == unicode_script.UnicodeScript.Deseret);
+        test.assert(unicode_script.of(888) == unicode_script.UnicodeScript.Unknown);
+        test.assert(unicode_script.of(57344) == unicode_script.UnicodeScript.Unknown);
+        test.assert(unicode_script.name(unicode_script.UnicodeScript.OldItalic) == "Old_Italic");
+        test.assert(unicode_script.code(unicode_script.UnicodeScript.OldItalic) == "Ital");
+        test.assert(optional.equals(unicode_script.for_name("old italic"), Optional<unicode_script.UnicodeScript>.Some(
+            unicode_script.UnicodeScript.OldItalic)));
+        test.assert(optional.equals(unicode_script.for_name("LATN"), Optional<unicode_script.UnicodeScript>.Some(
+            unicode_script.UnicodeScript.Latin)));
+        test.assert(optional.equals(unicode_script.for_name("Klingon"), Optional<unicode_script.UnicodeScript>.None));
+        test.assert(unicode_block.of(65) == unicode_block.UnicodeBlock.BasicLatin);
+        test.assert(unicode_block.of(233) == unicode_block.UnicodeBlock.Latin1Supplement);
+        test.assert(unicode_block.of(7305) == unicode_block.UnicodeBlock.CyrillicExtendedC);
+        test.assert(unicode_block.of(55296) == unicode_block.UnicodeBlock.HighSurrogates);
+        test.assert(unicode_block.of(56319) == unicode_block.UnicodeBlock.HighPrivateUseSurrogates);
+        test.assert(unicode_block.of(1114111) == unicode_block.UnicodeBlock.SupplementaryPrivateUseAreaB);
+        test.assert(unicode_block.name(unicode_block.UnicodeBlock.Latin1Supplement) == "Latin-1 Supplement");
+        test.assert(unicode_block.name(unicode_block.UnicodeBlock.NoBlock) == "No_Block");
+        test.assert(unicode_block.first(unicode_block.UnicodeBlock.BasicLatin) == 0);
+        test.assert(unicode_block.last(unicode_block.UnicodeBlock.BasicLatin) == 127);
+        test.assert(unicode_block.first(unicode_block.UnicodeBlock.Latin1Supplement) == 128);
+        test.assert(optional.equals(unicode_block.for_name("latin_1"), Optional<unicode_block.UnicodeBlock>.Some(
+            unicode_block.UnicodeBlock.Latin1Supplement)));
+        test.assert(optional.equals(unicode_block.for_name("Basic Latin"), Optional<unicode_block.UnicodeBlock>.Some(
+            unicode_block.UnicodeBlock.BasicLatin)));
+        test.assert(optional.equals(unicode_block.for_name("ascii"), Optional<unicode_block.UnicodeBlock>.Some(
+            unicode_block.UnicodeBlock.BasicLatin)));
+        test.assert(optional.equals(unicode_block.for_name("No such block"),
+            Optional<unicode_block.UnicodeBlock>.None));
+        last scripts = unicode_script.all();
+        test.assert(scripts[0] == unicode_script.UnicodeScript.Adlam);
+        last blocks = unicode_block.all();
+        test.assert(blocks[0] == unicode_block.UnicodeBlock.NoBlock);
+        test.assert(blocks[1] == unicode_block.UnicodeBlock.BasicLatin);
+    };
+
+    export let test_value_class = func() -> void {
+        last a = character.of(65);
+        last also_a = new C(65);
+        last b = character.of(66);
+        test.assert(a.code_point == 65 && a.to_string() == "A");
+        test.assert(a.equals(also_a) && !a.equals(b) && !a.equals(nil) && !(a == also_a));
+        test.assert(a.hash_code() == 65 && a.hash_code() == also_a.hash_code());
+        test.assert(character.of(128512).hash_code() == 128512 && character.hash(128512) == 128512);
+        test.assert(a.compare_to(b) == Ordering.Less && b.compare_to(a) == Ordering.Greater);
+        test.assert(a.compare_to(also_a) == Ordering.Equal);
+        test.assert(character.compare(1, 2) == Ordering.Less && character.compare(2, 2) == Ordering.Equal);
+        test.assert(character.of(128512).to_string() == character.to_string(128512));
+        test.assert(character.to_string(233).byte_length == 2);
+        test.assert(a.to_lower().equals(character.of(97)) && a.to_lower().to_upper().equals(a));
+        test.assert(character.of(453).to_title().code_point == 453 && character.of(454).to_title().code_point == 453);
+        test.assert(character.of(223).to_upper_string() == "SS");
+        test.assert(character.of(304).to_lower_string().byte_length == 3);
+        test.assert(a.is_letter() && a.is_upper() && !a.is_lower() && a.is_alphabetic() && a.is_alpha());
+        test.assert(a.is_letter_or_digit() && a.is_alpha_numeric() && !a.is_digit() && !a.is_numeric());
+        test.assert(character.of(32).is_whitespace());
+        test.assert(character.of(32).is_space_char());
+        test.assert(character.of(32).is_space());
+        test.assert(character.of(127).is_iso_control() && a.is_defined() && !character.of(888).is_defined());
+        test.assert(character.of(40).is_mirrored() && character.of(20116).is_ideographic());
+        test.assert(a.is_bmp() && !a.is_supplementary() && character.of(65536).is_supplementary());
+        test.assert(a.get_type() == Category.UppercaseLetter && a.get_directionality() == Bidi.LeftToRight);
+        test.assert(character.of(453).is_title_case() && a.digit(16) == 10 && a.numeric_value() == 10);
+        test.assert(a.char_count() == 1);
+        test.assert(character.of(128512).char_count() == 2);
+        test.assert(character.of(233).utf8_length() == 2);
+        test.assert(optional.equals(character.try_of(65), Optional<C>.Some(a)));
+        test.assert(optional.equals(character.try_of(55296), Optional<C>.None));
+        test.assert(optional.equals(character.try_of(1114112), Optional<C>.None));
+        test.assert(optional.equals(character.from_text("A"), Optional<C>.Some(a)));
+        last emoji = character.of(128512);
+        test.assert(optional.equals(character.from_text(character.to_string(128512)), Optional<C>.Some(emoji)));
+        test.assert(optional.equals(character.from_text(""), Optional<C>.None));
+        test.assert(optional.equals(character.from_text("AB"), Optional<C>.None));
+        test.assert(optional.equals(character.from_text("e" + character.to_string(769)), Optional<C>.None));
+    };
+
+    export let test_hash_set_of_characters = func() -> void {
+        last set = hash_set.create<C>();
+        test.assert(set.add(character.of(65)) && !set.add(new C(65)) && set.add(character.of(66)));
+        test.assert(set.size() == 2 && set.contains(character.of(66)));
+    };
+);
