@@ -38,7 +38,7 @@ The following public declarations are taken from the module source; each links t
 - **Instant.Instant** · [`export let compare_to = func(other: Instant) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L99)
   Orders instants by epoch second and then by nanosecond adjustment. Tagged `#Pure`.
 - **Instant.Instant** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L117)
-  Tests equality of epoch seconds and nanosecond adjustments. Tagged `#Pure`.
+  Tests equality of epoch seconds and nanosecond adjustments. Reading the argument can run its class hook.
 - **Instant.Instant** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L127)
   Combines the hashes of the seconds and nanosecond adjustment. Tagged `#Pure`.
 - **Instant.Instant** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/instant.nra#L135)

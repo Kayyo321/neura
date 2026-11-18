@@ -48,7 +48,7 @@ The following public declarations are taken from the module source; each links t
 - **LocalDate.LocalDate** · [`export let compare_to = func(other: LocalDate) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L84)
   Orders dates by year, month, and then day. Tagged `#Pure`.
 - **LocalDate.LocalDate** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L99)
-  Tests whether the year, month, and day all agree. Tagged `#Pure`.
+  Tests whether the year, month, and day all agree. Reading the argument can run its class hook.
 - **LocalDate.LocalDate** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L109)
   Combines the hashes of the year, month, and day. Tagged `#Pure`.
 - **LocalDate.LocalDate** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date.nra#L117)

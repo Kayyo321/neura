@@ -48,7 +48,7 @@ The following public declarations are taken from the module source; each links t
 - **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L138)
   Removes all accumulated bytes.
 - **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L144)
-  The current UTF-8 bytes determine equality and hashing. Tagged `#Pure`.
+  The current UTF-8 bytes determine equality and hashing. Reading the argument can run its class hook.
 - **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L154)
   Hashes the current text contents. Tagged `#Pure`.
 - **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L158)

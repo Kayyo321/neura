@@ -44,7 +44,7 @@ The following public declarations are taken from the module source; each links t
 - **Path.Path** · [`export let compare_to = func(other: Path) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L173)
   Orders paths lexicographically by their normalized UTF-8 bytes. Tagged `#Pure`.
 - **Path.Path** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L177)
-  Tests equality of the normalized path text. Tagged `#Pure`.
+  Tests equality of the normalized path text. Reading the argument can run its class hook.
 - **Path.Path** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L186)
   Hashes the normalized path text. Tagged `#Pure`.
 - **Path.Path** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/path.nra#L190)

@@ -32,7 +32,7 @@ The following public declarations are taken from the module source; each links t
 - **LocalDateTime.LocalDateTime** · [`export let compare_to = func(other: LocalDateTime) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L55)
   Orders by local date first and time of day second. Tagged `#Pure`.
 - **LocalDateTime.LocalDateTime** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L65)
-  Tests whether both date and time components are equal. Tagged `#Pure`.
+  Tests whether both date and time components are equal. Reading the argument can run its class hook.
 - **LocalDateTime.LocalDateTime** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L75)
   Combines the hashes of the date and time components. Tagged `#Pure`.
 - **LocalDateTime.LocalDateTime** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/local-date-time.nra#L81)

@@ -28,7 +28,7 @@ The following public declarations are taken from the module source; each links t
 - **ByteBuffer.ByteBuffer** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L32)
   Discards all accumulated bytes.
 - **ByteBuffer.ByteBuffer** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L40)
-  Only the current byte sequence participates. Readers hold their own copies and do not affect the buffer's equality or hash. Tagged `#Pure`.
+  Only the current byte sequence participates. Readers hold their own copies and do not affect the buffer's equality or hash. Reading the argument can run its class hook.
 - **ByteBuffer.ByteBuffer** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L50)
   Hashes the current byte sequence. Tagged `#Pure`.
 - **ByteBuffer.ByteBuffer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/byte-buffer.nra#L54)

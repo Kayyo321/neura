@@ -26,7 +26,7 @@ The following public declarations are taken from the module source; each links t
 - **Regex.RegexFlags** · [`export let dot_all: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L39)
   Allows dot to match LF.
 - **Regex.RegexFlags** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L43)
-  Compares flags by their three Boolean values. Tagged `#Pure`.
+  Compares flags by their three Boolean values. Reading the argument can run its class hook.
 - **Regex.RegexFlags** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L54)
   Encodes the enabled flags as a bit mask. Tagged `#Pure`.
 - **Regex.RegexFlags** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L59)
@@ -42,7 +42,7 @@ The following public declarations are taken from the module source; each links t
 - **Regex.RegexMatch** · [`export let text = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L95)
   Returns the whole matched substring. Tagged `#NoDiscard`, `#Pure`.
 - **Regex.RegexMatch** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L99)
-  Tests equality of input, capture offsets, and group names. Tagged `#Pure`.
+  Tests equality of input, capture offsets, and group names. Reading the argument can run its class hook.
 - **Regex.RegexMatch** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L109)
   Combines the hashes of the input, capture offsets, and group names. Tagged `#Pure`.
 - **Regex.RegexMatch** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L114)
@@ -78,7 +78,7 @@ The following public declarations are taken from the module source; each links t
 - **Regex.Regex** · [`export let split = func(input: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L240)
   The pieces between the matches of find_all, with the rules of Strings.split: empty pieces are kept, and an input without a match gives one piece.
 - **Regex.Regex** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L253)
-  Tests equality of the original pattern and recorded compilation options. Tagged `#Pure`.
+  Tests equality of the original pattern and recorded compilation options. Reading the argument can run its class hook.
 - **Regex.Regex** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L263)
   Hashes the original pattern and recorded compilation options. Tagged `#Pure`.
 - **Regex.Regex** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/text/regex.nra#L268)

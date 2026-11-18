@@ -64,7 +64,7 @@ The following public declarations are taken from the module source; each links t
 - **BigInteger.BigInteger** · [`export let compare_to = func(other: BigInteger) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L269)
   Compares signed values by sign and then magnitude. Tagged `#Pure`.
 - **BigInteger.BigInteger** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L288)
-  Tests whether another BigInteger has the same sign and magnitude. Tagged `#Pure`.
+  Tests whether another BigInteger has the same sign and magnitude. Reading the argument can run its class hook.
 - **BigInteger.BigInteger** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L299)
   Starts at 0, combines each limb from most to least significant, then negates (wrapping) for a negative value. Tagged `#Pure`.
 - **BigInteger.BigInteger** · [`export let to_int64 = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L312)

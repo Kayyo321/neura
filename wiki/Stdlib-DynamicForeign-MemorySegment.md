@@ -96,7 +96,7 @@ The following public declarations are taken from the module source; each links t
 - **MemorySegment.MemorySegment** · [`export let fill = func(value: uint8)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L177)
   Sets every byte to `value`.
 - **MemorySegment.MemorySegment** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L187)
-  Segments are equal when their addresses and sizes are. Tagged `#Pure`.
+  Segments are equal when their addresses and sizes are. Reading the argument can run its class hook.
 - **MemorySegment.MemorySegment** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L197)
   Hashes the address and size. Tagged `#Pure`.
 - **MemorySegment.MemorySegment** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L201)

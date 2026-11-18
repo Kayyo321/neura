@@ -50,7 +50,7 @@ The following public declarations are taken from the module source; each links t
 - **MemoryLayout.MemoryLayout** · [`export let element_offset = func(index: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L154)
   The offset of element `index` of a sequence. Traps outside 0 through element_count() - 1. Tagged `#Pure`.
 - **MemoryLayout.MemoryLayout** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L179)
-  Layouts compare by shape, carrier, size, alignment, name, and members. Tagged `#Pure`.
+  Layouts compare by shape, carrier, size, alignment, name, and members. Reading the argument can run its class hook.
 - **MemoryLayout.MemoryLayout** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L189)
   Hashes the text form. Tagged `#Pure`.
 - **MemoryLayout.MemoryLayout** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-layout.nra#L193)
