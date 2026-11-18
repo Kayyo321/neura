@@ -180,7 +180,8 @@ private:
                 }
             }
         }
-        if ((value.kind == Expr::Kind::Conditional || value.kind == Expr::Kind::Range) && value.operands.size() == 3) {
+        if (value.kind == Expr::Kind::Range && value.step_colon) hints_.spaced_colons.insert(value.step_colon->offset);
+        if (value.kind == Expr::Kind::Conditional && value.operands.size() == 3) {
             const auto start = value.operands[1].span.offset + value.operands[1].span.length;
             const auto end = value.operands[2].span.offset;
             if (end > start) {

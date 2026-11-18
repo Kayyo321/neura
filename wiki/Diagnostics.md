@@ -62,6 +62,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0233](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0233.md) | malformed optional access |
 | [E0260](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0260.md) | character literal that is not one byte |
 | [E0261](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0261.md) | malformed character literal |
+| [E0262](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0262.md) | ..= statement whose destination is not a string |
+| [E0263](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0263.md) | range or chain of the wrong shape |
 | [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md) | narrowing binding outside the condition of an if |
 | [E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md) | is not narrowing inside an && chain |
 | [E0301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0301.md) | duplicate local binding |

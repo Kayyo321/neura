@@ -42,7 +42,30 @@ let descending = 5 .. 0 : -2;          // [5, 3, 1]
 
 An expected array or list type determines the result and the integer type of the bounds and step; a list is constructed with `new(start .. stop)`. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` limit and the applicable stack or heap limit and does not advance past the last element. A constructed list starts with version zero.
 
-Binary operators bind more tightly than `..` and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
+`start ..= stop` is the inclusive range ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#ranges-with-), implemented, proposed): it also contains `stop` when the step reaches it, and otherwise has the typing, step, braces, evaluation order and failures of `..`. `3 ..= 3` has one element and `3 ..= 2` none. A range that ends at its type's largest or smallest value, such as `250 ..= 255` as `uint8`, is constructed without computing a value past it, and a range over a whole 32-bit or 64-bit domain fails with the length failure of an over-long `..` range. A range takes exactly two bounds, and `..=` does not combine with `..` (`E0263`). A statement that is exactly `place ..= value;` is not a range: it appends text to a string (`E0262` for any other destination).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let digits = 0 ..= 9;                 // [0, 1, ..., 9]
+        let countdown = 6 ..= 0 : -3;         // [6, 3, 0]
+        let top: uint8[] = 250 ..= 255;       // ends at the uint8 maximum
+        console.print_line(digits.length.to_string() + " " + countdown[2].to_string() + " " +
+                           top[5].to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+10 0 255
+```
+
+Binary operators bind more tightly than `..` and `..=`, and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
 
 A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`, of type `int` (`int32`). `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
 

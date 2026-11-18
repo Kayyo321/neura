@@ -1,0 +1,16 @@
+// Edge cases 30 and 33 of docs/design/Expressions030.md: the accepted forms
+// of inclusive ranges, including `??` in the stop and `...` beside them.
+let Limit = class ( export let stop: int = 0; );
+let digits = func() -> int[] => 0 ..= 9;
+let braced = func() -> int[] => {0 ..= 5};
+let listed = func() -> int[list] => new(0 ..= 5);
+let stepped = func(n: int) -> int[] => n ..= 0 : -2;
+let coalesced = func(limit: Limit) -> int[] => 0 ..= limit?.stop ?? 3;
+let tight = func() -> int[] => 0..=3;
+let total = func(values: ...int) -> int {
+    let sum = 0;
+    for (let value: int in 1 ..= values.length) {
+        sum = sum + value;
+    }
+    return sum;
+};

@@ -225,7 +225,8 @@ private:
         if (peek() == '.' && peek(1) == '.') {
             advance();
             advance();
-            if (peek() == '.') advance();
+            // `...`, and `..=` (docs/design/Expressions030.md, Ranges with `..=`).
+            if (peek() == '.' || peek() == '=') advance();
             return TokenKind::Symbol;
         }
         const auto remaining = source_.substr(offset_);

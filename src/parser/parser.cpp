@@ -2064,6 +2064,48 @@ private:
         return result;
     }
 
+    // docs/design/Expressions030.md, `..=` as a statement: a statement whose
+    // whole expression is `place ..= right` stores `place .. right` into the
+    // place. An unparenthesized chain on the right, `s ..= a .. b;`, stays
+    // one chain whose operands follow the old value. The operator is kept in
+    // `keyword`; lowering checks the destination.
+    bool concatenation_statement(Statement& result) {
+        auto& top = result.expressions.front();
+        if (top.kind != Expr::Kind::Range || top.grouped || top.braced || top.range_inclusive.empty() ||
+            !top.range_inclusive.front())
+            return false;
+        const auto operator_span = top.range_operators.front();
+        if (top.step_colon)
+            throw Diagnostic(operator_span, "a '..=' statement takes no step").with_code("E0262")
+                .label("'..=' as a statement").label(*top.step_colon, "a step is written here")
+                .note("as a statement, 'place ..= text;' appends text to a string; "
+                      "in an expression, 'start ..= stop : step' is an inclusive range")
+                .help("to make a stepped range, use it as a value: 'let r = start ..= stop : step;'");
+        if (const auto* access = optional_access(top.operands.front()))
+            throw Diagnostic(*access->operator_span, "malformed optional access: '?.' is not an assignment target")
+                .with_code("E0233").label("an optional access gives a value, not a place")
+                .help("test the receiver for nil and assign through '.'");
+        auto place = std::move(top.operands.front());
+        Expr right = std::move(top.operands[1]);
+        if (top.operands.size() > 2) {
+            auto chain = make_expression(Expr::Kind::Range, right.span);
+            chain.range_operators.assign(top.range_operators.begin() + 1, top.range_operators.end());
+            chain.range_inclusive.assign(top.range_inclusive.begin() + 1, top.range_inclusive.end());
+            const auto& last = top.operands.back().span;
+            chain.span.length = last.offset + last.length - chain.span.offset;
+            chain.operands.push_back(std::move(right));
+            for (std::size_t i = 2; i < top.operands.size(); ++i) chain.operands.push_back(std::move(top.operands[i]));
+            right = std::move(chain);
+        }
+        result.kind = Statement::Kind::Assignment;
+        result.assignment_operator = "..=";
+        result.keyword = operator_span;
+        result.expressions.clear();
+        result.expressions.push_back(std::move(place));
+        result.expressions.push_back(std::move(right));
+        return true;
+    }
+
     Statement simple_statement() {
         Statement result{};
         if (match("return")) {
@@ -2081,6 +2123,7 @@ private:
         } else {
             result.kind = Statement::Kind::Expression;
             result.expressions.push_back(expression());
+            if (concatenation_statement(result)) return result;
             if (at("=") || at("+=") || at("-=") || at("*=") || at("/=") || at("%=") ||
                 at("&=") || at("^=") || at("|=") || at("<<=") || at(">>=")) {
                 if (const auto* access = optional_access(result.expressions.front()))
@@ -2152,11 +2195,20 @@ private:
         }
         if (binary_only) return left;
         if (minimum_precedence == 1 && at("??")) left = coalesce(start, std::move(left), branch_keyword);
-        if (minimum_precedence == 1 && match("..")) {
+        if (minimum_precedence == 1 && (at("..") || at("..="))) {
+            // One node for `a .. b`, `a ..= b` and the chain `a .. b .. c`
+            // (docs/design/Expressions030.md); lowering checks the shape.
             auto range = make_expression(Expr::Kind::Range, left.span);
             range.operands.push_back(std::move(left));
-            range.operands.push_back(range_bound(branch_keyword));
-            if (range_step && match(":")) range.operands.push_back(range_bound(branch_keyword));
+            while (at("..") || at("..=")) {
+                range.range_inclusive.push_back(current().text == "..=");
+                range.range_operators.push_back(advance().span);
+                range.operands.push_back(range_bound(branch_keyword));
+            }
+            if (range_step && at(":")) {
+                range.step_colon = advance().span;
+                range.operands.push_back(range_bound(branch_keyword));
+            }
             range.span = span_from(start);
             left = std::move(range);
         }
@@ -2546,6 +2598,7 @@ private:
             auto result = expression();
             expect(")");
             result.span = span_from(start);
+            result.grouped = true;
             return result;
         }
         if (match("[")) {
@@ -2560,6 +2613,7 @@ private:
                 throw Diagnostic(result.span, "braces in an expression must enclose a range").with_code("E0212");
             expect("}");
             result.span = span_from(start);
+            result.braced = true;
             return result;
         }
         if (match("new")) return new_expression(start, branch_keyword);

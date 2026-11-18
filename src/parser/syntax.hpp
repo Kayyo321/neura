@@ -152,6 +152,19 @@ struct Expr {
     // as a character literal, whose text is its value in decimal; its type
     // without an expected integer type is `byte`.
     bool character{};
+    // docs/design/Expressions030.md, Ranges with `..=` and String chains. A
+    // Range holds two or more bounds and then, when `step_colon` is set, the
+    // step written after that colon. `range_operators` are the `..` and `..=`
+    // tokens in written order, and `range_inclusive` says which of them is
+    // `..=`. Lowering decides from the type of the first bound whether the
+    // node is an integer range or a string chain.
+    std::vector<Span> range_operators{};
+    std::vector<bool> range_inclusive{};
+    std::optional<Span> step_colon{};
+    // An expression written in parentheses, which a chain keeps as one
+    // operand, and a range written in braces, `{a .. b}`.
+    bool grouped{};
+    bool braced{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the

@@ -1,0 +1,11 @@
+error[E0262]: a '..=' statement takes no step
+ --> $DIR/concatenation-step.nra:5:12
+  |
+5 |     result ..= "!" : 2;
+  |            ^^^ '..=' as a statement
+  |                    - a step is written here
+  |
+  = note: as a statement, 'place ..= text;' appends text to a string; in an expression, 'start ..= stop : step' is an inclusive range
+  = help: to make a stepped range, use it as a value: 'let r = start ..= stop : step;'
+
+For more information about this error, try `neura explain E0262`.

@@ -497,6 +497,7 @@ private:
     IrNode narrowing_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
                         Names* after = nullptr);
     IrNode do_loop(const Statement& stmt, Context& context);
+    IrNode concatenation_assignment(const Statement& stmt, Context& context);
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
     IrNode for_each_iterable(const Statement& stmt, Context& context, IrNode items);
@@ -3397,6 +3398,16 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     const auto element = start.type;
     const auto format = specified_integer_format(element);
     if (!format) throw Diagnostic(start.span, "a range requires integer bounds and step").with_code("E0429");
+    // docs/design/Expressions030.md, Ranges with `..=`: exactly two bounds.
+    if (expr.range_operators.size() > 1) {
+        const bool mixed = expr.range_inclusive[0] || expr.range_inclusive[1];
+        throw Diagnostic(expr.range_operators[1], mixed ? "'..=' and '..' do not combine in one range"
+                                                        : "a range has exactly two bounds")
+            .with_code("E0263").label(mixed ? "a second range operator" : "a third bound starts here")
+            .note("only text is joined by a chain 'a .. b .. c'; an integer range has a start, a stop and an optional step")
+            .help("write 'start .. stop', 'start ..= stop', or either with ': step'");
+    }
+    const bool inclusive = !expr.range_inclusive.empty() && expr.range_inclusive.front();
     auto result = node(IrOp::ScopedValue, span,
                        expected_element ? *expected : collection_type(TypeKind::Array, element));
     const auto integer = [&](const IrType& type, std::string digits) {
@@ -3434,8 +3445,8 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
 
     const auto current = save(std::move(start), "$range_current", false);
     const auto stop = save(value(expr.operands[1], context, &element), "$range_stop");
-    const auto step = save(expr.operands.size() == 3 ? value(expr.operands[2], context, &element)
-                                                   : integer(element, "1"), "$range_step");
+    const auto step = save(expr.step_colon ? value(expr.operands[2], context, &element)
+                                           : integer(element, "1"), "$range_step");
     const auto& distance_type = format->bits <= 32 ? uint32_type : uint64_type;
     const auto zero = integer(distance_type, "0");
     const auto one = integer(distance_type, "1");
@@ -3470,13 +3481,27 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
         if (format->bits == 64) magnitude = binary("+", distance_type, std::move(magnitude), one);
         stride = select(descending, std::move(magnitude), std::move(stride));
     }
-    const auto has_items = save(binary("<", bool_type, low, high), "$range_nonempty");
-    auto last_offset = select(has_items, binary("-", distance_type,
-                             binary("-", distance_type, high, low), one), zero);
-    // The division also checks a zero step for an empty range.
-    auto count = binary("+", distance_type,
-                        binary("/", distance_type, std::move(last_offset), std::move(stride)),
-                        select(has_items, one, zero));
+    const auto has_items = save(binary(inclusive ? "<=" : "<", bool_type, low, high), "$range_nonempty");
+    IrNode count = node(IrOp::Binary, span);
+    if (!inclusive) {
+        auto last_offset = select(has_items, binary("-", distance_type,
+                                 binary("-", distance_type, high, low), one), zero);
+        // The division also checks a zero step for an empty range.
+        count = binary("+", distance_type,
+                       binary("/", distance_type, std::move(last_offset), std::move(stride)),
+                       select(has_items, one, zero));
+    } else {
+        // The last offset of `..=` is `high - low`. Limiting the quotient
+        // to the int32 maximum before adding one keeps a whole-domain range
+        // from overflowing the distance type: its length then fails the
+        // conversion below, as an over-long `..` range does.
+        auto last_offset = select(has_items, binary("-", distance_type, high, low), zero);
+        const auto quotient = save(binary("/", distance_type, std::move(last_offset), std::move(stride)),
+                                   "$range_quotient");
+        const auto limit = integer(distance_type, "2147483647");
+        count = binary("+", distance_type, select(binary(">", bool_type, quotient, limit), limit, quotient),
+                       select(has_items, one, zero));
+    }
     const auto length = save(convert(int32_type, std::move(count)), "$range_length");
     auto allocation = node(IrOp::RepeatCollection, span, result.type);
     allocation.operands = {convert(uint64_type, length), current};
@@ -3497,6 +3522,23 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     result.body.push_back(std::move(loop));
     result.body.push_back(items);
     return result;
+}
+
+// docs/design/Expressions030.md, `..=` as a statement.
+IrNode Lowering::concatenation_assignment(const Statement& stmt, Context& context) {
+    auto result = node(IrOp::Block, stmt.span);
+    auto destination = capture_place(stmt.expressions[0], result.body, context);
+    if (destination.type.kind != TypeKind::String) {
+        throw Diagnostic(stmt.keyword, "a '..=' statement appends to a string, but the destination is " +
+                                           describe(destination.type))
+            .with_code("E0262").label("'..=' as a statement")
+            .label(stmt.expressions[0].span, "this has type " + describe(destination.type))
+            .note("as a statement, 'place ..= text;' appends text to a string; "
+                  "in an expression, 'start ..= stop' is an inclusive range")
+            .help("to make an inclusive range, use it as a value: 'let r = start ..= stop;'");
+    }
+    throw Diagnostic(stmt.keyword, "appending with '..=' is not implemented yet").with_code("E0262")
+        .label("'..=' as a statement");
 }
 
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
@@ -4482,6 +4524,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             result.operands = {std::move(destination), std::move(source)};
             return result;
         }
+        if (stmt.assignment_operator == "..=") return concatenation_assignment(stmt, context);
         if (stmt.assignment_operator != "=") {
             auto result = node(IrOp::Block, stmt.span);
             auto destination = capture_place(stmt.expressions[0], result.body, context);

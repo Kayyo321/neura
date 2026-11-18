@@ -1,0 +1,10 @@
+error[E0263]: '..=' and '..' do not combine in one range
+ --> $DIR/range-shape-inclusive-first.nra:3:40
+  |
+3 | let range = func() -> int[] => 0 ..= 2 .. 4;
+  |                                        ^^ a second range operator
+  |
+  = note: only text is joined by a chain 'a .. b .. c'; an integer range has a start, a stop and an optional step
+  = help: write 'start .. stop', 'start ..= stop', or either with ': step'
+
+For more information about this error, try `neura explain E0263`.

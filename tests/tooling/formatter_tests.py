@@ -122,6 +122,10 @@ let reference=func(value:&int)->&int=>value;'''
         source = """let f=func(a:int,b:int)->bool=>a!==b||!(a===b);"""
         formatted = self.formatted(source)
         self.assertIn('=> a !== b || !(a === b);', formatted)
+        # One space around `..=`, and around the colon of its step.
+        formatted = self.formatted("let r=0..=5:2;let t=0..5:2;")
+        self.assertIn('let r = 0 ..= 5 : 2;', formatted)
+        self.assertIn('let t = 0 .. 5 : 2;', formatted)
 
     def test_negation_words_keep_their_spelling(self):
         # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.
