@@ -1,7 +1,8 @@
 // B-W9 (Apps030): mount and unmount a component 100 or 10,000 times, with ten
 // clicks per cycle, each a turn that updates, renders and commits, on the
 // model host. retained.py builds it with 100 and with 10,000 cycles and compares
-// the runs.
+// the runs. The host records no commit lines (stop_logging), so the run measures the
+// library's turns rather than the host's log.
 let console = import:Std.Io.Console;
 let model = import:Std.Ui.ModelHost;
 let program = import:Std.Program;
@@ -16,6 +17,8 @@ let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         last cycles = 100;
         let host = new model.Host();
+        // The host's commit lines are not read here; building them was about half of each turn's steps.
+        host.stop_logging();
         let state = new ui.State<int32>(0);
         let add = new func(event: ui.ClickEvent) {
             state.set(state.get() + 1);

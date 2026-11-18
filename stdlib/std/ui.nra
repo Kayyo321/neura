@@ -516,6 +516,7 @@ export let Ui = module (
         export let invalidate = func {
             if (owner != nil) {
                 dirty = true;
+                owner.invalidated();
             }
         };
 
@@ -848,6 +849,10 @@ export let Ui = module (
         // Navigations the host reports, and the element to focus after the turn's commit.
         let navigation: Subscriber<string>[list] = new;
         let pending_focus: string = "";
+        // Set while the root renders, and when a component is invalidated meanwhile (a child's mount action that
+        // changes state, such as a router reading the host's location), so that the turn renders again.
+        let rendering: bool = false;
+        let invalidated_while_rendering: bool = false;
 
         #Internal
         export let init = func(host: Host, handle: uint64, top: Component) {
@@ -1116,6 +1121,36 @@ export let Ui = module (
             queue.append(new QueuedEvent(navigation_listener, nil, 0, true, deliver, 0));
         };
 
+        /// @brief Reports whether a listener added with `on_navigation` is still open, so that a host waits for
+        /// the document's navigations only for a root that uses them.
+        #Internal
+        export let listens_for_navigation = func -> bool {
+            for (let i = 0; i < navigation.length; i++) {
+                if (navigation[i].handle.is_open()) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// Called by `Component.invalidate`.
+        #Internal
+        export let invalidated = func {
+            if (rendering) {
+                invalidated_while_rendering = true;
+            }
+        };
+
+        /// @brief Renders every component again at the end of the turn, as after a reset. The router calls it
+        /// when it learns, as it mounts, that links rendered earlier in the turn used another routing form.
+        #Internal
+        export let render_all_again = func {
+            invalidate_all(top);
+            if (rendering) {
+                invalidated_while_rendering = true;
+            }
+        };
+
         /// @brief Asks the host to focus the element whose `id` is `element_id` once the current turn has
         /// committed. A later request in the same turn replaces it; a host that is not a `FocusHost` ignores it.
         export let request_focus = func(element_id: string) {
@@ -1266,6 +1301,14 @@ export let Ui = module (
                 return;
             }
             commit_renders();
+            // A component invalidated while the turn rendered, after it had rendered, renders in a further commit
+            // of the same turn; at most four, so that a render that keeps invalidating cannot hold the root.
+            let again = 0;
+            while (invalidated_while_rendering && again < 4 && !closed && !faulted) {
+                again += 1;
+                commit_renders();
+            }
+            invalidated_while_rendering = false;
             if (pending_focus != "" && !closed && !faulted) {
                 last element = pending_focus;
                 pending_focus = "";
@@ -1281,7 +1324,10 @@ export let Ui = module (
         let commit_renders = func {
             last journal = new Journal();
             last rendered: Rendered[list] = new;
+            invalidated_while_rendering = false;
+            rendering = true;
             render_tree(top, rendered, journal);
+            rendering = false;
             if (rendered.length == 0) {
                 return;
             }

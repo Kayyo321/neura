@@ -146,10 +146,12 @@ service('neura.ui.template/1', 'ui', ['int64', 'text'], 'int64', (host, [root, t
 service('neura.ui.commit/1', 'ui', ['int64', 'bytes'], 'void', (host, [root, bytes], c) => host.ui.commit(root, bytes, c));
 service('neura.ui.event.next/1', 'ui', ['int64', 'int32'], 'bytes', (host, [root, max], c) => host.ui.nextEvents(root, max, c));
 service('neura.ui.stats/1', 'ui', ['int64'], 'stats', (host, [root], c) => host.ui.stats(root, c));
+service('neura.ui.focus/1', 'ui', ['int64', 'text'], 'void', (host, [root, id], c) => host.ui.focus(root, id, c));
 service('neura.history.current/1', 'history', [], 'text', (host, _, c) => host.history.current(c));
 service('neura.history.push/1', 'history', ['text'], 'text', (host, [path], c) => host.history.push(path, c));
 service('neura.history.replace/1', 'history', ['text'], 'text', (host, [path], c) => host.history.replace(path, c));
 service('neura.history.next/1', 'history', [], 'text', (host, _, c) => host.history.next(c));
+service('neura.history.link/1', 'history', ['text'], 'text', (host, [path], c) => host.history.link(path, c));
 
 function completionFor(adapter, value) {
     if (value && typeof value === 'object' && 'error' in value && Object.keys(value).length === 1) {

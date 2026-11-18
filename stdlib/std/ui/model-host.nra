@@ -64,6 +64,8 @@ export let ModelHost = module (
         export let focused: string = "";
         /// @brief One line per host request, in order.
         export last log: string[list] = new;
+        // False after `stop_logging()`: opens, plain commits and closes write no line.
+        let logging: bool = true;
         /// @brief How many events `post` refused.
         export let refused: int = 0;
 
@@ -289,6 +291,13 @@ export let ModelHost = module (
             return ui.Wake.Events;
         };
 
+        /// @brief Stops recording the lines of opens, commits that the host neither refuses nor reconciles, and
+        /// closes, which a long measurement such as budget B-W9 does not read: building each line copies text
+        /// byte by byte and dominated the cost of a turn. Other requests are still recorded.
+        export let stop_logging = func {
+            logging = false;
+        };
+
         /// @brief Forgets the recorded lines.
         export let clear_log = func {
             while (log.length > 0) {
@@ -341,15 +350,17 @@ export let ModelHost = module (
                 reconcilers[index] = new reconcile.Reconciler();
             }
             last handle = (index + 1) as uint64;
-            log.append("open " + target + ": root " + handle.to_string());
+            if (logging) {
+                log.append("open " + target + ": root " + handle.to_string());
+            }
             return result.Result<uint64>.Ok(handle);
         };
 
         export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome> {
-            let line = "commit " + batch.sequence.to_string() + " on root " + root.to_string() + ": "
-                + batch.rendered.length.to_string() + " render";
-            if (batch.rendered.length != 1) {
-                line = line + "s";
+            let line = "";
+            if (logging) {
+                line = "commit " + batch.sequence.to_string() + " on root " + root.to_string() + ": "
+                    + batch.rendered.length.to_string() + (batch.rendered.length == 1 ? " render" : " renders");
             }
             if (fail_next) {
                 fail_next = false;
@@ -376,7 +387,9 @@ export let ModelHost = module (
                 reconciler.accept(plan);
                 return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
             }
-            log.append(line);
+            if (logging) {
+                log.append(line);
+            }
             return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
         };
 
@@ -432,7 +445,9 @@ export let ModelHost = module (
             if (reconciling && (root as int) <= reconcilers.length) {
                 reconcilers[(root as int) - 1] = new reconcile.Reconciler();
             }
-            log.append("close root " + root.to_string());
+            if (logging) {
+                log.append("close root " + root.to_string());
+            }
         };
 
         let post_all = func(root: ui.Root, batch: Batch) {

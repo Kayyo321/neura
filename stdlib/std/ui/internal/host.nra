@@ -3,7 +3,8 @@
 ///
 /// A web or desktop host grants the group; `neura run` denies it, so every call fails with error 14. Handles are
 /// numbers the host issued to this run and checks on every call. `next_events` and `next_path` overlap in a
-/// program with tasks and can be cancelled (error 15).
+/// program with tasks and can be cancelled (error 15). `focus` and `link_path` were added to the group in 0.3.0
+/// as `neura.ui.focus` and `neura.history.link`, version 1.
 #Internal
 #Since("0.3.0")
 export let Host = module (
@@ -31,6 +32,9 @@ export let Host = module (
     export let next_events = func(root: int64, max: int) -> BytesOutcome host("neura.ui.event.next", 1);
     /// @brief Reads the root's counters.
     export let stats = func(root: int64) -> StatsOutcome host("neura.ui.stats", 1);
+    /// @brief Moves the keyboard focus to the element of the root whose `id` is `element_id`; error 1 when the
+    /// root holds no such element.
+    export let focus = func(root: int64, element_id: string) -> DoneOutcome host("neura.ui.focus", 1);
 
     /// @brief The current path.
     export let current_path = func -> PathOutcome host("neura.history.current", 1);
@@ -40,4 +44,7 @@ export let Host = module (
     export let replace_path = func(path: string) -> PathOutcome host("neura.history.replace", 1);
     /// @brief Waits for a navigation the program did not make and returns the new path.
     export let next_path = func -> PathOutcome host("neura.history.next", 1);
+    /// @brief The `href` of a link to `path` in the page's routing mode: `#/parts/7` with hash routing, the path
+    /// below the bundle's base with history routing.
+    export let link_path = func(path: string) -> PathOutcome host("neura.history.link", 1);
 );

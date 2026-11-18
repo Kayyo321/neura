@@ -219,10 +219,12 @@ NEURA_TEST(host, ungranted_groups_return_capability_denied) {
     denied("neura.ui.commit", {i64(1), bytes("\x01")});
     denied("neura.ui.event.next", {i64(1), i32(16)});
     denied("neura.ui.stats", {i64(1)});
+    denied("neura.ui.focus", {i64(1), text("name")});
     denied("neura.history.current", {});
     denied("neura.history.push", {text("/")});
     denied("neura.history.replace", {text("/")});
     denied("neura.history.next", {});
+    denied("neura.history.link", {text("/")});
     // Denial comes first, whatever the arguments.
     denied("neura.entropy.fill", {i32(-1)});
     // Console output and process exit need no capability.

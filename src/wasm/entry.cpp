@@ -167,10 +167,12 @@ std::vector<BrowserService> browser_services() {
         {ui("neura.ui.commit", {int64(), byte_list()}, void_type())},
         {ui("neura.ui.event.next", {int64(), int32()}, byte_list()), true, true},
         {ui("neura.ui.stats", {int64()}, tuple({int64(), int64(), int64(), int64()}))},
+        {ui("neura.ui.focus", {int64(), text()}, void_type())},
         {ui("neura.history.current", {}, text())},
         {ui("neura.history.push", {text()}, text())},
         {ui("neura.history.replace", {text()}, text())},
         {ui("neura.history.next", {}, text()), true, true},
+        {ui("neura.history.link", {text()}, text())},
     };
 }
 

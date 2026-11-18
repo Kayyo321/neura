@@ -1,3 +1,4 @@
+let channels = import:Std.Concurrent.Channel;
 let error = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Error;
 let host = import:Std.Ui.Internal.Host;
@@ -92,6 +93,8 @@ export let Web = module (
         /// The handle the browser issued; it changes when a reset reopens the root.
         export let provider: int64;
         export let reconciler: reconcile.Reconciler = new reconcile.Reconciler();
+        /// Set when the browser's event wait failed with an error other than a cancellation: no event will come.
+        export let failed: bool = false;
         /// How many of the reconciler's template descriptors the browser has registered for this handle.
         export let registered: int = 0;
         export let open: bool = true;
@@ -125,12 +128,46 @@ export let Web = module (
         return error.custom("ui.web", service + ": " + reason + " (" + code.to_string() + ")");
     };
 
-    /// @brief The `ui.Host` of a browser page. Each instance serves the roots it opened; `mount` makes one per root.
-    /// It is also the page's `ui.HistoryHost` over `neura.history.*`, with hash routing (`#/parts/7`), the
-    /// routing of a bundle built without `--routing history`.
+    // The browser's next events for a root, as a function a race can spawn.
+    let next_events_of = func(provider: int64, max: int) -> host.BytesOutcome => host.next_events(provider, max);
+
+    // A navigation wait in a race: the page's next navigation when the root listens for one, and otherwise a wait
+    // that only the race's cancellation ends. Spawned, so it calls nothing but the host and the channel.
+    let next_path_or_nothing = func(listen: bool, gate: channels.Receiver<int>) -> host.PathOutcome {
+        if (listen) {
+            return host.next_path();
+        }
+        gate.receive();
+        return host.PathOutcome.Error(15);
+    };
+
+    // What one race saw. `posted` events or a navigation, a `completed` command ticket, a `failed` event wait or a
+    // closed root, or nothing (a navigation wait that ended without a navigation): the caller races again.
     #[Final, NotThreadSafe]
-    export let Host = class implements ui.Host, ui.HistoryHost (
+    let RaceResult = class (
+        export let posted: bool = false;
+        export let completed: bool = false;
+        export let ticket: uint64 = 0;
+        export let failed: bool = false;
+
+        /// @brief `RaceResult(` what the race saw `)`.
+        export let.override to_string = func -> string =>
+            "RaceResult(" + (posted ? "posted" : "") + (completed ? " completed " + ticket.to_string() : "")
+            + (failed ? " failed" : "") + ")";
+    );
+
+    /// @brief The `ui.Host` of a browser page. Each instance serves the roots it opened; `mount` makes one per root.
+    /// It is also the page's `ui.HistoryHost` over `neura.history.*`, in the routing mode the page chose (hash
+    /// routing, `#/parts/7`, or history routing, `/parts/7`), its `ui.FocusHost` over `neura.ui.focus`, and a
+    /// `ui.TaskHost`: a root waits for the browser's events, the page's navigations (back, forward, an edited
+    /// address) and command completions together, so neither a running command nor a pending navigation holds
+    /// the others.
+    #[Final, NotThreadSafe]
+    export let Host = class implements ui.Host, ui.HistoryHost, ui.FocusHost, ui.TaskHost (
         let roots: Mounted[list] = new;
+        // Set when the page refused a navigation wait (no history service, or another root of the page already
+        // waits): this host's roots stop listening for navigations.
+        let history_off: bool = false;
 
         let path_of = func(outcome: host.PathOutcome, fallback: string) -> string {
             match (outcome) {
@@ -152,8 +189,27 @@ export let Web = module (
         /// @brief Replaces the current history entry with `path`; returns the current path.
         export let replace_location = func(path: string) -> string => path_of(host.replace_path(path), path);
 
-        /// @brief The `href` of a link to `path` in hash routing.
-        export let link = func(path: string) -> string => "#" + path;
+        /// @brief The `href` of a link to `path` in the page's routing mode (`neura.history.link`): `#/parts/7`
+        /// with hash routing, `/parts/7` below the bundle's base with history routing; the hash form when the page
+        /// keeps no history.
+        export let link = func(path: string) -> string => path_of(host.link_path(path), "#" + path);
+
+        /// @brief Moves the keyboard focus to the element of the root whose `id` is `element_id`
+        /// (`neura.ui.focus`); false when the root is closed or holds no such element.
+        export let focus = func(root: uint64, element_id: string) -> bool {
+            last mounted = entry(root);
+            if (!mounted.open) {
+                return false;
+            }
+            match (host.focus(mounted.provider, element_id)) {
+                host.DoneOutcome.Ok => {
+                    return true;
+                },
+                host.DoneOutcome.Error(_) => {
+                    return false;
+                },
+            }
+        };
 
         let entry = func(root: uint64) -> Mounted {
             last index = (root as int) - 1;
@@ -211,18 +267,137 @@ export let Web = module (
         };
 
         /// @brief Waits for the browser's next events, decodes them and posts each to its listener's component.
-        /// False when the root was closed or the wait failed.
+        /// A root whose router listens for navigations waits for the page's next navigation at the same time and
+        /// posts it with `post_navigation`. False when the root was closed or the wait failed.
         export let wait = func(root: ui.Root) -> bool {
             last mounted = entry(root.host_handle());
-            if (!mounted.open) {
+            if (!mounted.open || mounted.failed) {
                 return false;
             }
-            match (host.next_events(mounted.provider, BatchLimit)) {
-                host.BytesOutcome.Ok(bytes) => {
-                    return post_batch(root, mounted, bytes) > 0;
-                },
-                host.BytesOutcome.Error(_) => {
+            if (history_off || !root.listens_for_navigation()) {
+                match (host.next_events(mounted.provider, BatchLimit)) {
+                    host.BytesOutcome.Ok(bytes) => {
+                        return post_batch(root, mounted, bytes) > 0;
+                    },
+                    host.BytesOutcome.Error(_) => {
+                        mounted.failed = true;
+                        return false;
+                    },
+                }
+            }
+            // No command completes here: a channel that nothing sends on stands in for the completions.
+            const [_, nothing, _] = channels.open<uint64>(1);
+            while (true) {
+                last seen = race(root, mounted, nothing);
+                if (seen.posted) {
+                    return true;
+                }
+                if (seen.failed || seen.completed) {
                     return false;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Waits for the browser's events, the page's navigations (when the root listens for them) and
+        /// the next completion on `completions`, whichever comes first: `Events` after posting events or a
+        /// navigation, `Completed(ticket)`, or `Idle` when the event wait failed and only completions remain.
+        /// Each wait is a cancellable host request in a scope of its own; the losers are cancelled, and an answer
+        /// that arrived meanwhile is posted too, so no event is lost.
+        export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake {
+            last mounted = entry(root.host_handle());
+            if (!mounted.open || mounted.failed) {
+                return ui.Wake.Idle;
+            }
+            while (true) {
+                last seen = race(root, mounted, completions);
+                if (seen.completed) {
+                    return ui.Wake.Completed(seen.ticket);
+                }
+                if (seen.posted) {
+                    return ui.Wake.Events;
+                }
+                if (seen.failed) {
+                    return ui.Wake.Idle;
+                }
+            }
+            return ui.Wake.Idle;
+        };
+
+        // One race between the root's event wait, a navigation wait and `completions`.
+        let race = func(root: ui.Root, mounted: Mounted, completions: channels.Receiver<uint64>) -> RaceResult {
+            last seen = new RaceResult();
+            last listen = !history_off && root.listens_for_navigation();
+            last provider = mounted.provider;
+            // Nothing is sent on the gate: the race's cancellation ends a navigation wait that does not listen.
+            const [_, gate, _] = channels.open<int>(0);
+            let events_taken = false;
+            let path_taken = false;
+            scope (waits) {
+                let events = spawn next_events_of(provider, BatchLimit);
+                let paths = spawn next_path_or_nothing(listen, gate);
+                select {
+                    let got = events.join() => {
+                        events_taken = true;
+                        take_events(root, mounted, got, seen);
+                    },
+                    let moved = paths.join() => {
+                        path_taken = true;
+                        take_path(root, moved, seen);
+                    },
+                    let received = completions.receive() => {
+                        match (received) {
+                            channels.Received.Value(ticket) => {
+                                seen.completed = true;
+                                seen.ticket = ticket;
+                            },
+                            _ => {
+                                seen.failed = true;
+                            },
+                        }
+                    },
+                }
+                waits.cancel();
+                // A wait that the browser answered before its cancellation keeps its answer.
+                if (!events_taken) {
+                    take_events(root, mounted, events.join(), seen);
+                }
+                if (!path_taken) {
+                    take_path(root, paths.join(), seen);
+                }
+            }
+            return seen;
+        };
+
+        let take_events = func(root: ui.Root, mounted: Mounted, got: host.BytesOutcome, seen: RaceResult) {
+            match (got) {
+                host.BytesOutcome.Ok(bytes) => {
+                    if (post_batch(root, mounted, bytes) > 0) {
+                        seen.posted = true;
+                    } else {
+                        // An empty batch: the root was closed.
+                        seen.failed = true;
+                    }
+                },
+                host.BytesOutcome.Error(code) => {
+                    if (code != 15) {
+                        mounted.failed = true;
+                        seen.failed = true;
+                    }
+                },
+            }
+        };
+
+        let take_path = func(root: ui.Root, moved: host.PathOutcome, seen: RaceResult) {
+            match (moved) {
+                host.PathOutcome.Ok(path) => {
+                    root.post_navigation(path);
+                    seen.posted = true;
+                },
+                host.PathOutcome.Error(code) => {
+                    if (code != 15) {
+                        history_off = true;
+                    }
                 },
             }
         };
@@ -366,8 +541,9 @@ export let Web = module (
     /// @brief Mounts `component` on the first element that `selector` matches and commits its first render.
     /// `Err` when no element matches, the element is inside or contains another root, U-9 roots are open, the
     /// component is mounted, or the page did not grant the `ui` services (a native `neura run`). Call `run` on the
-    /// root for its event loop; it returns when the root is closed. `tasks` is the enclosing scope's handle:
-    /// the root starts no task of its own in 0.3.0, and commands will start theirs in it.
+    /// root for its event loop, or `Std.Ui.Commands.run(root)` when its components run commands; either returns
+    /// when the root is closed. `tasks` is the enclosing scope's handle. The root starts no long-lived task in
+    /// 0.3.0: each wait for events, navigations and completions runs in a scope of its own.
     export let mount = func(selector: string, component: ui.Component, tasks: scope.Scope) -> result.Result<ui.Root> =>
         ui.mount(new Host(), selector, component);
 );

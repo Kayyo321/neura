@@ -27,14 +27,16 @@ host_check = import_module('check-host')
 SKIP = 77
 
 
-def page(work, image, module):
-    """index.html links the image's stylesheets in the order of its .styles.json, as a bundle's page does."""
+def page(work, image, module, routing='hash'):
+    """index.html links the image's stylesheets in the order of its .styles.json, as a bundle's page does, and names
+    the routing mode for the journey. References are absolute, so the page also loads at a deep path."""
     links = ''
     listing = Path(f'{image}.styles.json')
     if listing.exists():
         for path in json.loads(listing.read_text())['stylesheets']:
-            links += f'<link rel="stylesheet" href="{html.escape(path)}">'
+            links += f'<link rel="stylesheet" href="/{html.escape(path)}">'
     (work / 'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Neura web app check</title>'
+                                     f'<meta name="neura-routing" content="{routing}">'
                                      f'{links}<div id="app"></div><script type="module" src="/{module}"></script>')
     return links.count('<link')
 
@@ -44,6 +46,8 @@ def main():
     parser.add_argument('--neura', required=True, type=Path)
     parser.add_argument('--wasm', default=ROOT / 'build/wasm-runtime', type=Path)
     parser.add_argument('--browser', action='append', default=[], help='chromium or firefox executable')
+    parser.add_argument('--only', action='append', default=[],
+                        help='run only this journey (app, portfolio, tasks, ...) or "bundle"; repeatable')
     args = parser.parse_args()
     browsers = [browser for browser in args.browser if shutil.which(browser)]
     if not (args.wasm / 'nvm.wasm').exists() or not browsers or not shutil.which('node'):
@@ -51,9 +55,13 @@ def main():
         return SKIP
     with TemporaryDirectory(prefix='neura-web-app-') as path:
         work = Path(path)
-        journeys = (('app', HERE / 'app/app.nra', 'app-test.mjs', 1),
-                    ('portfolio', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0))
-        for name, source, module, linked in journeys:
+        # Name, source, journey module, linked stylesheets, routing mode, and the path the browser opens.
+        journeys = (('app', HERE / 'app/app.nra', 'app-test.mjs', 1, 'hash', '/'),
+                    ('portfolio', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0, 'hash', '/'),
+                    ('tasks', HERE / 'tasks/tasks.nra', 'tasks-test.mjs', 0, 'hash', '/'))
+        for name, source, module, linked, routing, start in journeys:
+            if args.only and name not in args.only:
+                continue
             directory = work / name
             directory.mkdir()
             image = directory / 'app.nvr'
@@ -66,7 +74,7 @@ def main():
             for copied in (args.wasm / 'nvm.wasm', args.wasm / 'nvm.mjs', HERE / module,
                            *(ROOT / 'hosts/web' / file for file in ('nvm.js', 'dom.mjs', 'ui.mjs', 'ui-wire.mjs'))):
                 shutil.copy(copied, directory / copied.name)
-            sheets = page(directory, image, module)
+            sheets = page(directory, image, module, routing)
             if sheets != linked:
                 raise SystemExit(f'{name}: expected {linked} linked stylesheets, found {sheets}')
             for browser in browsers:
@@ -74,9 +82,10 @@ def main():
                 report = host_check.run_browser(browser, directory)
                 if 'error' in report:
                     raise SystemExit(f'{name}: {version}: {report["error"]}')
-                steps = '; '.join(f'{step["name"]}' for step in report['steps'])
+                steps = '; '.join(step['name'] + (f' {step["ms"]} ms' if 'ms' in step else '') for step in report['steps'])
                 print(f'{name}: {version}: {len(report["steps"])} steps passed ({steps})')
-        walkthrough(args, work, browsers)
+        if not args.only or 'bundle' in args.only:
+            walkthrough(args, work, browsers)
     return 0
 
 
@@ -122,7 +131,8 @@ def walkthrough(args, work, browsers):
         if report != {'state': 'running', 'sheets': 1, 'color': 'rgb(42, 93, 176)', 'clicked': '1'}:
             raise SystemExit(f'bundle: unexpected walkthrough report {report}')
         report = probe(parts, work, browser)
-        if report.get('state') != 'running' or report.get('image') not in {entry['path'] for entry in assets}:
+        if report.get('state') != 'running' or not any(report.get('image', '').endswith(entry['path'])
+                                                       for entry in assets):
             raise SystemExit(f'bundle: unexpected test application report {report}')
         print(f'bundle: {version}: the walkthrough mounted with {sheets[0]} applied and counted a click; the test '
               f'application showed its bundled image {report["image"]}')

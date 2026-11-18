@@ -65,9 +65,14 @@ export class UiHost {
     #next = 1n;
     #committed = false;
 
-    constructor({ document = globalThis.document, limits = {} } = {}) {
+    #assetBase;
+
+    // `assetBase`, the URL of the bundle's directory, makes bundled media resolve against the bundle rather than
+    // the page (dom.mjs); a bundle under history routing needs it.
+    constructor({ document = globalThis.document, limits = {}, assetBase } = {}) {
         this.#document = document;
         this.#limits = { ...UI_LIMITS, ...limits };
+        this.#assetBase = assetBase;
     }
 
     // Events queued across every root, for the adapter's hasPendingEvents.
@@ -94,7 +99,8 @@ export class UiHost {
         const entry = { handle, element, queue: [], dropped: 0, droppedInputs: new Map(), waiter: null,
                         templates: new Set(), dom: null };
         try {
-            entry.dom = new DomRoot(element, record => this.#arrive(entry, record));
+            const options = this.#assetBase === undefined ? {} : { assetBase: this.#assetBase };
+            entry.dom = new DomRoot(element, record => this.#arrive(entry, record), options);
         } catch (error) {
             if (error instanceof RootFault) return { error: ERROR.alreadyExists };
             throw error;
@@ -112,7 +118,7 @@ export class UiHost {
         entry.element.removeAttribute('data-neura-overloaded');
         entry.queue.length = 0;
         // A pending event.next answers an empty batch: the root has closed.
-        entry.waiter?.resolve(encodeEvents([]));
+        entry.waiter?.resolve([]);
         entry.waiter = null;
         return undefined;
     }
@@ -158,18 +164,41 @@ export class UiHost {
         if (entry.queue.length || entry.dropped) return encodeEvents(this.#take(entry, max));
         if (signal?.aborted) return { error: ERROR.cancelled };
         return new Promise(resolve => {
+            // The records handed to this wait. A cancellation that reaches the adapter before their answer was
+            // delivered discards the answer (nvm.js, cancelRequest), so the records go back to the queue's front.
+            let given = null;
             const aborted = () => {
+                if (given) {
+                    if (this.#roots.get(entry.handle) === entry) {
+                        entry.queue.unshift(...given);
+                        this.#deliver(entry);
+                    }
+                    given = null;
+                    return;
+                }
                 if (entry.waiter?.resolve !== finish) return;
                 entry.waiter = null;
                 resolve({ error: ERROR.cancelled });
             };
-            const finish = value => {
-                signal?.removeEventListener('abort', aborted);
-                resolve(value);
+            const finish = records => {
+                given = records.length ? records : null;
+                if (!given) signal?.removeEventListener('abort', aborted);
+                resolve(encodeEvents(records));
             };
             entry.waiter = { max, resolve: finish };
             signal?.addEventListener('abort', aborted, { once: true });
         });
+    }
+
+    // Moves the keyboard focus to the element of the root whose id is `id` (neura.ui.focus, version 1). Error 1
+    // when the root holds no such element.
+    focus(handle, id) {
+        const entry = this.#root(handle);
+        if (!entry || typeof id !== 'string' || id === '') return { error: ERROR.invalidInput };
+        const element = entry.element.ownerDocument.getElementById(id);
+        if (!element || element === entry.element || !entry.element.contains(element)) return { error: ERROR.notFound };
+        element.focus();
+        return undefined;
     }
 
     stats(handle) {
@@ -227,7 +256,7 @@ export class UiHost {
         const waiter = entry.waiter;
         if (!waiter || !entry.queue.length) return;
         entry.waiter = null;
-        waiter.resolve(encodeEvents(this.#take(entry, waiter.max)));
+        waiter.resolve(this.#take(entry, waiter.max));
     }
 }
 
@@ -236,19 +265,33 @@ function validPath(path) {
     return typeof path === 'string' && path.startsWith('/') && path.length <= 8192 && !/[\u0000-\u001f\u007f]/u.test(path);
 }
 
+// Decodes a URL's path text; a malformed escape leaves the text as it is.
+function decoded(text) {
+    try {
+        return decodeURI(text);
+    } catch {
+        return text;
+    }
+}
+
 // Hash routing (the default) keeps the path in the fragment, so any static
-// host serves it. History routing needs the host to serve index.html for
-// unknown paths.
+// host serves it. History routing keeps it in the URL's path below `base`
+// (default `/`), and needs the host to serve index.html for unknown paths.
 export class HistoryHost {
     #window;
     #mode;
+    #base;
     #changed = false;
     #waiter = null;
 
-    constructor({ window = globalThis, mode = 'hash' } = {}) {
+    constructor({ window = globalThis, mode = 'hash', base = '/' } = {}) {
         if (mode !== 'hash' && mode !== 'history') throw new RangeError('routing is "hash" or "history"');
+        if (typeof base !== 'string' || !base.startsWith('/') || !base.endsWith('/')) {
+            throw new RangeError('a base path starts and ends with "/"');
+        }
         this.#window = window;
         this.#mode = mode;
+        this.#base = base;
         const changed = () => {
             this.#changed = true;
             this.#deliver();
@@ -262,17 +305,24 @@ export class HistoryHost {
         };
     }
 
+    get mode() {
+        return this.#mode;
+    }
+
     current() {
         const location = this.#window.location;
         if (this.#mode === 'hash') {
-            const path = decodeURI(location.hash.slice(1));
+            const path = decoded(location.hash.slice(1));
             return validPath(path) ? path : '/';
         }
-        return location.pathname + location.search;
+        const full = decoded(location.pathname) + decoded(location.search);
+        const inside = full.startsWith(this.#base) ? `/${full.slice(this.#base.length)}`
+            : `${full}/` === this.#base ? '/' : full;
+        return validPath(inside) ? inside : '/';
     }
 
     #url(path) {
-        return this.#mode === 'hash' ? `#${encodeURI(path)}` : encodeURI(path);
+        return this.#mode === 'hash' ? `#${encodeURI(path)}` : this.#base + encodeURI(path.slice(1));
     }
 
     push(path) {
@@ -287,6 +337,13 @@ export class HistoryHost {
         return this.current();
     }
 
+    // The href of a link to `path` in this page's routing mode (neura.history.link, version 1): `#/parts/7`
+    // with hash routing, `/parts/7` below the base with history routing.
+    link(path) {
+        if (!validPath(path)) return { error: ERROR.invalidInput };
+        return this.#url(path);
+    }
+
     // The next navigation the program did not make itself (back, forward, an
     // edited fragment). Navigations while nobody waits coalesce to the latest.
     next({ signal } = {}) {
@@ -297,12 +354,19 @@ export class HistoryHost {
         }
         if (signal?.aborted) return { error: ERROR.cancelled };
         return new Promise(resolve => {
+            let answered = false;
+            // A cancellation that reaches the adapter before the answer was delivered discards it (nvm.js,
+            // cancelRequest), so the navigation is kept for the next wait.
             const aborted = () => {
+                if (answered) {
+                    this.#changed = true;
+                    return;
+                }
                 this.#waiter = null;
                 resolve({ error: ERROR.cancelled });
             };
             this.#waiter = path => {
-                signal?.removeEventListener('abort', aborted);
+                answered = true;
                 this.#waiter = null;
                 resolve(path);
             };
