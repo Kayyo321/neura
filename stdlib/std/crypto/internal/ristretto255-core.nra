@@ -162,6 +162,8 @@ export let Ristretto255Core = module (
         };
 
         export let scalar_bytes = func(scalar: uint32[list]) -> uint8[list] => curve.scalar_bytes(scalar);
+        export let scalar_order = func -> mp.Modulus => curve.order;
+
         export let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] => curve.order.add(a, b);
         export let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list] => curve.order.sub(a, b);
         export let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list] =>

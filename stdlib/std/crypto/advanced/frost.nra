@@ -2,10 +2,9 @@ let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Crypto.Algorithm;
 let.promote _ = import:Std.Crypto.Verifier;
-let core = import:Std.Crypto.Internal.Ristretto255Core;
+let core = import:Std.Crypto.Internal.FrostGroup;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
-let edwards = import:Std.Crypto.Internal.Edwards25519;
 let entropy = import:Std.Crypto.Random.Entropy;
 let error = import:Std.Core.Error;
 let hashing = import:Std.Core.Hash;
@@ -13,10 +12,9 @@ let hex = import:Std.Encoding.Hex;
 let mp = import:Std.Crypto.Internal.Mp;
 let secret = import:Std.Crypto.Core.SecretBytes;
 let sets = import:Std.Collections.HashSet;
-let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief RFC 9591 FROST(ristretto255, SHA-512) two-round threshold signatures (Stdlib.md section 21.12).
+/// @brief RFC 9591 FROST two-round threshold signatures (Stdlib.md section 21.13).
 ///
 /// Import an authenticated group configuration and signing share, or use the trusted-dealer helpers.
 /// Collect commitments in ascending identifier order and construct the signing transcript for the exact
@@ -28,7 +26,10 @@ let words = import:Std.Crypto.Internal.Words;
 /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
 #Since("0.3.0")
 export let Frost = module (
-    const Context = "FROST-RISTRETTO255-SHA512-v1";
+    /// @brief RFC 9591 ciphersuites. The overloads without a suite use ristretto255 and SHA-512.
+    /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
+    #Since("0.3.0")
+    export let Suite = core.Suite;
     const MaxParticipants = 255;
 
     #Final
@@ -40,13 +41,19 @@ export let Frost = module (
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[Final, Since("0.3.0")]
     export let Member = class (
+        /// @brief The ciphersuite that gives this value its wire format.
+        /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
+        #Since("0.3.0")
+        export last suite: Suite;
+
         last encoding: uint8[list];
         last tag: uint8[list];
-        last point: edwards.Point;
+        last point: core.Point;
 
-        #Internal
-        export let init = func(identifier_bytes: uint8[list], public_encoding: uint8[list],
-            verification_point: edwards.Point) {
+        #[Internal, Hidden]
+        export let init = func(selected: Suite, identifier_bytes: uint8[list], public_encoding: uint8[list],
+            verification_point: core.Point) {
+            suite = selected;
             tag = identifier_bytes;
             encoding = public_encoding;
             point = verification_point;
@@ -62,24 +69,24 @@ export let Frost = module (
         #[NoDiscard, Since("0.3.0")]
         export let public_key = func -> uint8[list] => words.copy(encoding);
 
-        /// @brief The identifier followed by the public verification key, 64 bytes.
+        /// @brief The suite-encoded identifier followed by the public verification key.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.concat(tag, encoding);
 
-        #Internal
-        export let element = func -> edwards.Point => point;
+        #[Internal, Hidden]
+        export let element = func -> core.Point => point;
 
         /// @brief Whether the identifier and public key both match.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool =>
-            other is Member && same(to_bytes(), (other as Member).to_bytes());
+            other is Member && suite == (other as Member).suite && same(to_bytes(), (other as Member).to_bytes());
 
         /// @brief A hash of the identifier and public key.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
-        export let.override hash_code = func -> uint32 => hash_bytes(to_bytes());
+        export let.override hash_code = func -> uint32 => hashing.combine(suite.to_string().hash_code(), hash_bytes(to_bytes()));
 
         /// @brief The public member type.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -91,13 +98,19 @@ export let Frost = module (
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[Final, Since("0.3.0")]
     export let Commitment = class (
+        /// @brief The ciphersuite that gives this value its wire format.
+        /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
+        #Since("0.3.0")
+        export last suite: Suite;
+
         last wire: uint8[list];
         last tag: uint8[list];
-        last hiding: edwards.Point;
-        last binding: edwards.Point;
+        last hiding: core.Point;
+        last binding: core.Point;
 
-        #Internal
-        export let init = func(encoding: uint8[list], id: uint8[list], d: edwards.Point, e: edwards.Point) {
+        #[Internal, Hidden]
+        export let init = func(selected: Suite, encoding: uint8[list], id: uint8[list], d: core.Point, e: core.Point) {
+            suite = selected;
             wire = encoding;
             tag = id;
             hiding = d;
@@ -114,20 +127,20 @@ export let Frost = module (
         #[NoDiscard, Since("0.3.0")]
         export let to_bytes = func -> uint8[list] => words.copy(wire);
 
-        #Internal
-        export let point_for = func(g: core.Group, rho: uint32[list]) -> edwards.Point =>
+        #[Internal, Hidden]
+        export let point_for = func(g: core.Group, rho: uint32[list]) -> core.Point =>
             g.add(hiding, g.multiply(rho, binding));
 
         /// @brief Whether the three canonical encodings match.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool =>
-            other is Commitment && same(wire, (other as Commitment).wire);
+            other is Commitment && suite == (other as Commitment).suite && same(wire, (other as Commitment).wire);
 
         /// @brief A hash of the encoded commitment.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
-        export let.override hash_code = func -> uint32 => hash_bytes(wire);
+        export let.override hash_code = func -> uint32 => hashing.combine(suite.to_string().hash_code(), hash_bytes(wire));
 
         /// @brief The public commitment type.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -139,11 +152,17 @@ export let Frost = module (
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[Final, Since("0.3.0")]
     export let SignatureShare = class (
+        /// @brief The ciphersuite that gives this value its wire format.
+        /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
+        #Since("0.3.0")
+        export last suite: Suite;
+
         last tag: uint8[list];
         last encoding: uint8[list];
 
-        #Internal
-        export let init = func(id: uint8[list], bytes: uint8[list]) {
+        #[Internal, Hidden]
+        export let init = func(selected: Suite, id: uint8[list], bytes: uint8[list]) {
+            suite = selected;
             tag = id;
             encoding = bytes;
         };
@@ -153,13 +172,10 @@ export let Frost = module (
         #[NoDiscard, Since("0.3.0")]
         export let identifier = func -> uint8[list] => words.copy(tag);
 
-        /// @brief A copy of the 32-byte little-endian signature scalar.
+        /// @brief A copy of the suite-encoded signature scalar.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #[NoDiscard, Since("0.3.0")]
         export let scalar = func -> uint8[list] => words.copy(encoding);
-
-        #Internal
-        export let limbs = func -> uint32[list] => mp.from_bytes_le(encoding, 8);
 
         /// @brief Whether the identifier and signature scalar both match.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -169,13 +185,14 @@ export let Frost = module (
                 return false;
             }
             last that = other as SignatureShare;
-            return same(tag, that.tag) && same(encoding, that.encoding);
+            return suite == that.suite && same(tag, that.tag) && same(encoding, that.encoding);
         };
 
         /// @brief A hash of the identifier and signature scalar.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
-        export let.override hash_code = func -> uint32 => hashing.combine(hash_bytes(tag), hash_bytes(encoding));
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(suite.to_string().hash_code(), hashing.combine(hash_bytes(tag), hash_bytes(encoding)));
 
         /// @brief The public share type.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -187,8 +204,13 @@ export let Frost = module (
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[Final, Since("0.3.0")]
     export let SigningGroup = class implements Verifier<uint8[list], uint8[list]> (
+        /// @brief The ciphersuite that gives this value its wire format.
+        /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
+        #Since("0.3.0")
+        export last suite: Suite;
+
         last key_bytes: uint8[list];
-        last key_point: edwards.Point;
+        last key_point: core.Point;
         last roster: Member[list];
 
         /// @brief The minimum number of signing members.
@@ -196,8 +218,10 @@ export let Frost = module (
         #Since("0.3.0")
         export last threshold: int;
 
-        #Internal
-        export let init = func(public_encoding: uint8[list], point: edwards.Point, minimum: int, members: Member[list]) {
+        #[Internal, Hidden]
+        export let init = func(selected: Suite, public_encoding: uint8[list], point: core.Point, minimum: int,
+            members: Member[list]) {
+            suite = selected;
             key_bytes = words.copy(public_encoding);
             key_point = point;
             threshold = minimum;
@@ -232,7 +256,7 @@ export let Frost = module (
             return roster[index];
         };
 
-        #Internal
+        #[Internal, Hidden]
         export let member_index = func(id: uint8[list]) -> int {
             for (let i = 0; i < roster.length; i++) {
                 if (same(id, roster[i].identifier())) {
@@ -242,14 +266,14 @@ export let Frost = module (
             return -1;
         };
 
-        #Internal
-        export let point = func -> edwards.Point => key_point;
+        #[Internal, Hidden]
+        export let point = func -> core.Point => key_point;
 
-        /// @brief Verifies the canonical 64-byte Schnorr signature for the exact message.
+        /// @brief Verifies the canonical Schnorr signature for this suite and the exact message.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #[NoDiscard, Since("0.3.0")]
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
-            verify_signature(key_bytes, message, signature);
+            verify_signature(suite, key_bytes, message, signature);
 
         /// @brief Whether public key, threshold and ordered roster match.
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -259,7 +283,8 @@ export let Frost = module (
                 return false;
             }
             last that = other as SigningGroup;
-            if (threshold != that.threshold || roster.length != that.roster.length || !same(key_bytes, that.key_bytes)) {
+            if (suite != that.suite || threshold != that.threshold || roster.length != that.roster.length
+                || !same(key_bytes, that.key_bytes)) {
                 return false;
             }
             for (let i = 0; i < roster.length; i++) {
@@ -274,7 +299,7 @@ export let Frost = module (
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
-            let hash = hashing.combine(hash_bytes(key_bytes), threshold as uint32);
+            let hash = hashing.combine(suite.to_string().hash_code(), hashing.combine(hash_bytes(key_bytes), threshold as uint32));
             for (let participant in roster) {
                 hash = hashing.combine(hash, participant.hash_code());
             }
@@ -295,7 +320,7 @@ export let Frost = module (
         last public_commitment: Commitment;
         last source: Owner;
 
-        #Internal
+        #[Internal, Hidden]
         export let init = func(bytes: uint8[list], value: Commitment, owner: Owner) {
             nonces = new(bytes);
             public_commitment = value;
@@ -317,10 +342,10 @@ export let Frost = module (
         #Since("0.3.0")
         export let wipe = func => nonces.wipe();
 
-        #Internal
+        #[Internal, Hidden]
         export let owned_by = func(owner: Owner) -> bool => source.equals(owner);
 
-        #Internal
+        #[Internal, Hidden]
         export let consume = func -> Result<uint8[list]> {
             if (nonces.is_wiped()) {
                 return fail<uint8[list]>("crypto.frost_nonce", "signing nonce already used or wiped");
@@ -346,7 +371,7 @@ export let Frost = module (
         last owner: Owner = new;
         last seen: sets.HashSet<string> = sets.create<string>();
 
-        #Internal
+        #[Internal, Hidden]
         export let init = func(secret_key: uint8[list], parameters: SigningGroup, participant: Member) {
             material = new(secret_key);
             group = parameters;
@@ -410,7 +435,7 @@ export let Frost = module (
             if (randomness.length != 64) {
                 trap_with_message("invalid argument: FROST nonce randomness must be 64 bytes");
             }
-            last g = engine();
+            last g = engine(group.suite);
             last secret_key = material.expose();
             last d = nonce_scalar(g, randomness, 0, secret_key);
             last e = nonce_scalar(g, randomness, 32, secret_key);
@@ -437,7 +462,7 @@ export let Frost = module (
             let _ = seen.add(binding_tag);
             last id = member.identifier();
             last encoding = words.concat(words.concat(id, hiding_encoding), binding_encoding);
-            last public_nonce = new Commitment(encoding, id, hiding, binding);
+            last public_nonce = new Commitment(group.suite, encoding, id, hiding, binding);
             last d_bytes = g.scalar_bytes(d);
             last e_bytes = g.scalar_bytes(e);
             last storage = words.concat(d_bytes, e_bytes);
@@ -477,12 +502,12 @@ export let Frost = module (
             if (index < 0 || !nonce.commitment().equals(round.party_at(index).commitment)) {
                 return fail<SignatureShare>("crypto.frost_commitment", "signer's commitment does not match the transcript");
             }
-            last g = engine();
-            last secret_limbs = mp.from_bytes_le(material.expose(), 8);
-            last d_bytes = words.slice(scalars, 0, 32);
-            last e_bytes = words.slice(scalars, 32, 64);
-            last d = mp.from_bytes_le(d_bytes, 8);
-            last e = mp.from_bytes_le(e_bytes, 8);
+            last g = engine(group.suite);
+            last secret_limbs = g.scalar_unchecked(material.expose());
+            last d_bytes = words.slice(scalars, 0, g.scalar_length);
+            last e_bytes = words.slice(scalars, g.scalar_length, scalars.length);
+            last d = g.scalar_unchecked(d_bytes);
+            last e = g.scalar_unchecked(e_bytes);
             words.wipe(d_bytes);
             words.wipe(e_bytes);
             last party = round.party_at(index);
@@ -490,7 +515,7 @@ export let Frost = module (
             last weighted_share = g.scalar_multiply(secret_limbs, party.challenge_weight);
             last nonce_sum = g.scalar_add(d, bound_nonce);
             last output = g.scalar_add(nonce_sum, weighted_share);
-            last share = new SignatureShare(id, g.scalar_bytes(output));
+            last share = new SignatureShare(group.suite, id, g.scalar_bytes(output));
             wipe_scalar(secret_limbs);
             wipe_scalar(d);
             wipe_scalar(e);
@@ -510,12 +535,12 @@ export let Frost = module (
     #Final
     let Party = class (
         export last commitment: Commitment;
-        export last verification_key: edwards.Point;
-        export last point: edwards.Point;
+        export last verification_key: core.Point;
+        export last point: core.Point;
         export last rho: uint32[list];
         export last challenge_weight: uint32[list];
 
-        export let init = func(value: Commitment, key: edwards.Point, nonce_point: edwards.Point, binding: uint32[list],
+        export let init = func(value: Commitment, key: core.Point, nonce_point: core.Point, binding: uint32[list],
             weight: uint32[list]) {
             commitment = value;
             verification_key = key;
@@ -533,13 +558,13 @@ export let Frost = module (
     export let SigningRound = class (
         last group: SigningGroup;
         last parties: Party[list];
-        last commitment: edwards.Point;
+        last commitment: core.Point;
         last commitment_bytes: uint8[list];
         last message_bytes: uint8[list];
         last challenge: uint32[list];
 
-        #Internal
-        export let init = func(parameters: SigningGroup, signer_list: Party[list], point: edwards.Point,
+        #[Internal, Hidden]
+        export let init = func(parameters: SigningGroup, signer_list: Party[list], point: core.Point,
             encoded: uint8[list], message: uint8[list], challenge_scalar: uint32[list]) {
             group = parameters;
             parties = signer_list;
@@ -549,16 +574,16 @@ export let Frost = module (
             challenge = challenge_scalar;
         };
 
-        #Internal
+        #[Internal, Hidden]
         export let matches_group = func(parameters: SigningGroup) -> bool => group.equals(parameters);
 
-        #Internal
+        #[Internal, Hidden]
         export let matches_message = func(message: uint8[list]) -> bool => same(message, message_bytes);
 
-        #Internal
+        #[Internal, Hidden]
         export let party_at = func(index: int) -> Party => parties[index];
 
-        #Internal
+        #[Internal, Hidden]
         export let index_of = func(id: uint8[list]) -> int {
             for (let i = 0; i < parties.length; i++) {
                 if (same(id, parties[i].commitment.identifier())) {
@@ -583,7 +608,11 @@ export let Frost = module (
         #[NoDiscard, Since("0.3.0")]
         export let verify_share = func(share: SignatureShare) -> bool {
             last index = index_of(share.identifier());
-            return index >= 0 && check_share(engine(), share.limbs(), parties[index]);
+            if (share.suite != group.suite || index < 0) {
+                return false;
+            }
+            last g = engine(group.suite);
+            return check_share(g, g.scalar_unchecked(share.scalar()), parties[index]);
         };
 
         /// @brief Verifies every selected signer exactly once, sums their shares and verifies the final
@@ -598,21 +627,21 @@ export let Frost = module (
             for (let i = 0; i < parties.length; i++) {
                 visited.append(false);
             }
-            last g = engine();
-            let sum = mp.zeros(8);
+            last g = engine(group.suite);
+            let sum = mp.zeros(g.limbs);
             for (let share in shares) {
                 last index = index_of(share.identifier());
-                if (index < 0 || visited[index]) {
+                if (share.suite != group.suite || index < 0 || visited[index]) {
                     return fail<uint8[list]>("crypto.frost_share", "unknown or duplicate signing share");
                 }
-                last scalar = share.limbs();
+                last scalar = g.scalar_unchecked(share.scalar());
                 if (!check_share(g, scalar, parties[index])) {
                     return fail<uint8[list]>("crypto.frost_share", $"invalid signature share at roster index {index}");
                 }
                 visited[index] = true;
                 sum = g.scalar_add(sum, scalar);
             }
-            if (!equation(g, sum, commitment, challenge, group.point())) {
+            if (!g.signature_equation(sum, commitment, challenge, group.point())) {
                 return fail<uint8[list]>("crypto.frost_share", "aggregate failed the final signature check");
             }
             return Result<uint8[list]>.Ok(words.concat(commitment_bytes, g.scalar_bytes(sum)));
@@ -666,7 +695,7 @@ export let Frost = module (
         last group: SigningGroup;
         last keys: SigningShare[list];
 
-        #Internal
+        #[Internal, Hidden]
         export let init = func(parameters: SigningGroup, shares: SigningShare[list]) {
             group = parameters;
             keys = shares;
@@ -702,52 +731,65 @@ export let Frost = module (
         export let.override to_string = func -> string => "Frost.DealerPackage(<redacted>)";
     );
 
-    /// @brief The canonical 32-byte identifier for a nonzero integer. Zero traps.
+    /// @brief The canonical identifier for a nonzero integer. With no suite argument, it uses ristretto255. Zero traps.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
-    export let identifier = func(index: uint32) -> uint8[list] {
-        if (index == 0) {
-            trap_with_message("invalid argument: FROST identifier must be nonzero");
-        }
-        let encoded: uint8[list] = new;
-        words.append32_le(encoded, index);
-        words.append_all(encoded, words.zeros(28));
-        return encoded;
-    };
+    export let identifier = func(index: uint32) -> uint8[list] =>
+        identifier(Suite.Ristretto255Sha512, index)
+        or func(suite: Suite, index: uint32) -> uint8[list] {
+            if (index == 0) {
+                trap_with_message("invalid argument: FROST identifier must be nonzero");
+            }
+            last scalar = mp.small(index, 1);
+            return match (suite) {
+                Suite.P256Sha256 => mp.to_bytes_be(scalar, 32),
+                Suite.Secp256k1Sha256 => mp.to_bytes_be(scalar, 32),
+                Suite.Ed448Shake256 => mp.to_bytes_le(scalar, 57),
+                _ => mp.to_bytes_le(scalar, 32),
+            };
+        };
 
     /// @brief Parses identifier || verification key from authenticated enrollment data.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
-    export let parse_member = func(bytes: uint8[list]) -> Result<Member> {
-        if (bytes.length != 64) {
-            return fail<Member>("crypto.frost_group", "FROST member must be 64 bytes");
-        }
-        last g = engine();
-        last id = words.slice(bytes, 0, 32);
-        let _ = id_scalar(g, id, "crypto.frost_group")?;
-        last key = words.slice(bytes, 32, 64);
-        last point = decode_point(g, key, "crypto.frost_group")?;
-        return Result<Member>.Ok(new Member(id, key, point));
-    };
+    export let parse_member = func(bytes: uint8[list]) -> Result<Member> =>
+        parse_member(Suite.Ristretto255Sha512, bytes)
+        or func(suite: Suite, bytes: uint8[list]) -> Result<Member> {
+            last g = engine(suite);
+            if (bytes.length != g.scalar_length + g.element_length) {
+                return fail<Member>("crypto.frost_group", "FROST member has the wrong length for the suite");
+            }
+            last id = words.slice(bytes, 0, g.scalar_length);
+            let _ = id_scalar(g, id, "crypto.frost_group")?;
+            last key = words.slice(bytes, g.scalar_length, bytes.length);
+            last point = decode_point(g, key, "crypto.frost_group")?;
+            return Result<Member>.Ok(new Member(suite, id, key, point));
+        };
 
     /// @brief Imports the public group configuration from a trusted source. Members must be sorted by ascending
     /// scalar identifier. The threshold must be at least 2 and the roster at most 255.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
     export let signing_group = func(public_key: uint8[list], threshold: int, members: Member[list])
+        -> Result<SigningGroup> =>
+            signing_group(Suite.Ristretto255Sha512, public_key, threshold, members)
+        or func(suite: Suite, public_key: uint8[list], threshold: int, members: Member[list])
         -> Result<SigningGroup> {
-        if (!valid_sizes(threshold, members.length)) {
-            return fail<SigningGroup>("crypto.frost_group", "invalid FROST threshold or roster size");
-        }
-        last g = engine();
-        last point = decode_point(g, public_key, "crypto.frost_group")?;
-        for (let i = 1; i < members.length; i++) {
-            if (!in_order(members[i - 1].identifier(), members[i].identifier())) {
-                return fail<SigningGroup>("crypto.frost_group", "FROST roster identifiers must be strictly increasing");
+            if (!valid_sizes(threshold, members.length)) {
+                return fail<SigningGroup>("crypto.frost_group", "invalid FROST threshold or roster size");
             }
-        }
-        return Result<SigningGroup>.Ok(new SigningGroup(public_key, point, threshold, members));
-    };
+            last g = engine(suite);
+            last point = decode_point(g, public_key, "crypto.frost_group")?;
+            for (let i = 0; i < members.length; i++) {
+                if (members[i].suite != suite) {
+                    return fail<SigningGroup>("crypto.frost_group", "FROST roster member belongs to a different suite");
+                }
+                if (i > 0 && !in_order(g, members[i - 1].identifier(), members[i].identifier())) {
+                    return fail<SigningGroup>("crypto.frost_group", "FROST roster identifiers must be strictly increasing");
+                }
+            }
+            return Result<SigningGroup>.Ok(new SigningGroup(suite, public_key, point, threshold, members));
+        };
 
     /// @brief Imports a canonical nonzero signing scalar and checks it against the authenticated roster.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -758,7 +800,7 @@ export let Frost = module (
         if (index < 0) {
             return fail<SigningShare>("crypto.frost_group", "signer is absent from the group roster");
         }
-        last g = engine();
+        last g = engine(group.suite);
         last value = scalar_of(g, scalar, "crypto.frost_share")?;
         last participant = group.member_at(index);
         last fits = mp.is_zero(value) != 1 && g.equal(g.multiply_base(value), participant.element());
@@ -769,30 +811,35 @@ export let Frost = module (
         return Result<SigningShare>.Ok(new SigningShare(scalar, group, participant));
     };
 
-    /// @brief Parses a canonical 96-byte commitment entry. Rejects identity points and invalid identifiers.
+    /// @brief Parses a canonical commitment entry. Rejects identity points and invalid identifiers.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
-    export let parse_commitment = func(bytes: uint8[list]) -> Result<Commitment> {
-        if (bytes.length != 96) {
-            return fail<Commitment>("crypto.frost_commitment", "FROST commitment needs 96 bytes");
-        }
-        last g = engine();
-        last id = words.slice(bytes, 0, 32);
-        let _ = id_scalar(g, id, "crypto.frost_commitment")?;
-        last hiding = decode_point(g, words.slice(bytes, 32, 64), "crypto.frost_commitment")?;
-        last binding = decode_point(g, words.slice(bytes, 64, 96), "crypto.frost_commitment")?;
-        return Result<Commitment>.Ok(new Commitment(words.copy(bytes), id, hiding, binding));
-    };
+    export let parse_commitment = func(bytes: uint8[list]) -> Result<Commitment> =>
+        parse_commitment(Suite.Ristretto255Sha512, bytes)
+        or func(suite: Suite, bytes: uint8[list]) -> Result<Commitment> {
+            last g = engine(suite);
+            last binding_start = g.scalar_length + g.element_length;
+            if (bytes.length != binding_start + g.element_length) {
+                return fail<Commitment>("crypto.frost_commitment", "FROST commitment has the wrong length for the suite");
+            }
+            last id = words.slice(bytes, 0, g.scalar_length);
+            let _ = id_scalar(g, id, "crypto.frost_commitment")?;
+            last hiding = decode_point(g, words.slice(bytes, g.scalar_length, binding_start), "crypto.frost_commitment")?;
+            last binding = decode_point(g, words.slice(bytes, binding_start, bytes.length), "crypto.frost_commitment")?;
+            return Result<Commitment>.Ok(new Commitment(suite, words.copy(bytes), id, hiding, binding));
+        };
 
-    /// @brief Parses the authenticated participant identifier and canonical 32-byte signature share.
+    /// @brief Parses the authenticated participant identifier and canonical signature share.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
-    export let parse_signature_share = func(id: uint8[list], scalar: uint8[list]) -> Result<SignatureShare> {
-        last g = engine();
-        let _ = id_scalar(g, id, "crypto.frost_share")?;
-        let _ = scalar_of(g, scalar, "crypto.frost_share")?;
-        return Result<SignatureShare>.Ok(new SignatureShare(words.copy(id), words.copy(scalar)));
-    };
+    export let parse_signature_share = func(id: uint8[list], scalar: uint8[list]) -> Result<SignatureShare> =>
+        parse_signature_share(Suite.Ristretto255Sha512, id, scalar)
+        or func(suite: Suite, id: uint8[list], scalar: uint8[list]) -> Result<SignatureShare> {
+            last g = engine(suite);
+            let _ = id_scalar(g, id, "crypto.frost_share")?;
+            let _ = scalar_of(g, scalar, "crypto.frost_share")?;
+            return Result<SignatureShare>.Ok(new SignatureShare(suite, words.copy(id), words.copy(scalar)));
+        };
 
     /// @brief Builds the transcript for a quorum of enrolled commitments sorted by ascending identifier.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
@@ -802,13 +849,16 @@ export let Frost = module (
         if (commitments.length < group.threshold || commitments.length > group.member_count()) {
             return fail<SigningRound>("crypto.frost_quorum", "FROST round does not contain a valid quorum");
         }
-        last g = engine();
+        last g = engine(group.suite);
         let ids: uint8[list][list] = new;
         let enrolled: Member[list] = new;
         let concatenated: uint8[list] = new;
         for (let entry in commitments) {
+            if (entry.suite != group.suite) {
+                return fail<SigningRound>("crypto.frost_commitment", "FROST commitment belongs to a different suite");
+            }
             last id = entry.identifier();
-            if (ids.length != 0 && !in_order(ids[ids.length - 1], id)) {
+            if (ids.length != 0 && !in_order(g, ids[ids.length - 1], id)) {
                 return fail<SigningRound>("crypto.frost_commitment", "FROST commitments must be strictly increasing");
             }
             last index = group.member_index(id);
@@ -820,13 +870,13 @@ export let Frost = module (
             words.append_all(concatenated, entry.to_bytes());
         }
         let binding_prefix = group.public_key();
-        words.append_all(binding_prefix, domain_hash("msg", message));
-        words.append_all(binding_prefix, domain_hash("com", concatenated));
+        words.append_all(binding_prefix, g.domain_hash("msg", message));
+        words.append_all(binding_prefix, g.domain_hash("com", concatenated));
         let factors: uint32[list][list] = new;
-        let points: edwards.Point[list] = new;
+        let points: core.Point[list] = new;
         let aggregate_commitment = g.identity();
         for (let i = 0; i < commitments.length; i++) {
-            last rho = hash_scalar(g, "rho", words.concat(binding_prefix, ids[i]));
+            last rho = g.hash_scalar("rho", words.concat(binding_prefix, ids[i]));
             last point = commitments[i].point_for(g, rho);
             factors.append(rho);
             points.append(point);
@@ -845,33 +895,35 @@ export let Frost = module (
         return Result<SigningRound>.Ok(new SigningRound(group, parties, aggregate_commitment, encoded, message, challenge));
     };
 
-    /// @brief Verifies a canonical 64-byte ristretto255 FROST signature under a 32-byte public key.
+    /// @brief Verifies a FROST signature in the selected suite’s canonical encoding.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
-    export let verify_signature = func(public_key: uint8[list], message: uint8[list], signature: uint8[list]) -> bool {
-        if (public_key.length != 32 || signature.length != 64) {
-            return false;
-        }
-        last g = engine();
-        last encoded = words.slice(signature, 0, 32);
-        match (decode_point(g, public_key, "crypto.frost_group")) {
-            Result.Ok(pk) => {
-                return verify_signature_for(g, pk, public_key, message, encoded, words.slice(signature, 32, 64));
-            },
-            Result.Err(_) => {
+    export let verify_signature = func(public_key: uint8[list], message: uint8[list], signature: uint8[list]) -> bool =>
+        verify_signature(Suite.Ristretto255Sha512, public_key, message, signature)
+        or func(suite: Suite, public_key: uint8[list], message: uint8[list], signature: uint8[list]) -> bool {
+            last g = engine(suite);
+            if (public_key.length != g.element_length || signature.length != g.element_length + g.scalar_length) {
                 return false;
-            },
-        }
-        return false;
-    };
+            }
+            last encoded = words.slice(signature, 0, g.element_length);
+            match (decode_point(g, public_key, "crypto.frost_group")) {
+                Result.Ok(pk) => {
+                    return verify_signature_for(g, pk, public_key, message, encoded, words.slice(signature, g.element_length, signature.length));
+                },
+                Result.Err(_) => {
+                    return false;
+                },
+            }
+            return false;
+        };
 
-    let verify_signature_for = func(g: core.Group, pk: edwards.Point, public_key: uint8[list], message: uint8[list],
+    let verify_signature_for = func(g: core.Group, pk: core.Point, public_key: uint8[list], message: uint8[list],
         commitment: uint8[list], signature: uint8[list]) -> bool {
         match (decode_point(g, commitment, "crypto.frost_commitment")) {
             Result.Ok(point) => {
                 match (g.scalar_canonical(signature)) {
                     Optional.Some(z) => {
-                        return equation(g, z, point, signing_challenge(g, commitment, public_key, message), pk);
+                        return g.signature_equation(z, point, signing_challenge(g, commitment, public_key, message), pk);
                     },
                     Optional.None => {
                         return false;
@@ -889,37 +941,46 @@ export let Frost = module (
     /// secret and must distribute shares securely. Valid sizes are 2 <= threshold <= participants <= 255.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
-    export let deal = func(threshold: int, participants: int) -> Result<DealerPackage> {
-        if (!valid_sizes(threshold, participants)) {
-            return fail<DealerPackage>("crypto.frost_group", "invalid FROST dealer threshold or member count");
-        }
-        crypto_policy.require(Algorithm.Frost);
-        last randomness = entropy.os_bytes(threshold * 64)?;
-        return deal_generated(threshold, participants, randomness);
-    };
+    export let deal = func(threshold: int, participants: int) -> Result<DealerPackage> =>
+        deal(Suite.Ristretto255Sha512, threshold, participants)
+        or func(suite: Suite, threshold: int, participants: int) -> Result<DealerPackage> {
+            if (!valid_sizes(threshold, participants)) {
+                return fail<DealerPackage>("crypto.frost_group", "invalid FROST dealer threshold or member count");
+            }
+            last g = engine(suite);
+            last width = dealer_random_width(g);
+            last randomness = entropy.os_bytes(threshold * width)?;
+            return deal_generated(suite, g, threshold, participants, randomness, width);
+        };
 
     /// @brief Trusted-dealer provisioning using a caller's generator.
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
     export let deal_with_drbg = func(threshold: int, participants: int, generator: drbg.ChaCha20Drbg)
+        -> Result<DealerPackage> =>
+            deal_with_drbg(Suite.Ristretto255Sha512, threshold, participants, generator)
+        or func(suite: Suite, threshold: int, participants: int, generator: drbg.ChaCha20Drbg)
         -> Result<DealerPackage> {
-        if (!valid_sizes(threshold, participants)) {
-            return fail<DealerPackage>("crypto.frost_group", "invalid FROST dealer threshold or member count");
-        }
-        crypto_policy.require(Algorithm.Frost);
-        return deal_generated(threshold, participants, generator.fill(threshold * 64));
-    };
+            if (!valid_sizes(threshold, participants)) {
+                return fail<DealerPackage>("crypto.frost_group", "invalid FROST dealer threshold or member count");
+            }
+            last g = engine(suite);
+            last width = dealer_random_width(g);
+            return deal_generated(suite, g, threshold, participants, generator.fill(threshold * width), width);
+        };
 
-    let deal_generated = func(threshold: int, participants: int, randomness: uint8[list]) -> Result<DealerPackage> {
-        last g = engine();
+    let dealer_random_width = func(g: core.Group) -> int => g.scalar_length == 57 ? 114 : 64;
+
+    let deal_generated = func(suite: Suite, g: core.Group, threshold: int, participants: int,
+        randomness: uint8[list], width: int) -> Result<DealerPackage> {
         let coefficients: uint32[list][list] = new;
         for (let i = 0; i < threshold; i++) {
-            last chunk = words.slice(randomness, 64 * i, 64 * (i + 1));
+            last chunk = words.slice(randomness, width * i, width * (i + 1));
             coefficients.append(g.scalar_reduce(chunk));
             words.wipe(chunk);
         }
         words.wipe(randomness);
-        last result = deal_polynomial(g, coefficients, participants);
+        last result = deal_polynomial(suite, g, coefficients, participants);
         wipe_rows(coefficients);
         return result;
     };
@@ -929,29 +990,33 @@ export let Frost = module (
     /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
     #[NoDiscard, Since("0.3.0")]
     export let deal_with_coefficients = func(coefficients: uint8[list][list], participants: int)
+        -> Result<DealerPackage> =>
+            deal_with_coefficients(Suite.Ristretto255Sha512, coefficients, participants)
+        or func(suite: Suite, coefficients: uint8[list][list], participants: int)
         -> Result<DealerPackage> {
-        if (!valid_sizes(coefficients.length, participants)) {
-            return fail<DealerPackage>("crypto.frost_group", "invalid FROST coefficient or member count");
-        }
-        last g = engine();
-        let scalars: uint32[list][list] = new;
-        for (let coefficient_bytes in coefficients) {
-            match (g.scalar_canonical(coefficient_bytes)) {
-                Optional.Some(value) => {
-                    scalars.append(value);
-                },
-                Optional.None => {
-                    wipe_rows(scalars);
-                    return fail<DealerPackage>("crypto.frost_group", "FROST polynomial coefficient is not canonical");
-                },
+            if (!valid_sizes(coefficients.length, participants)) {
+                return fail<DealerPackage>("crypto.frost_group", "invalid FROST coefficient or member count");
             }
-        }
-        last result = deal_polynomial(g, scalars, participants);
-        wipe_rows(scalars);
-        return result;
-    };
+            last g = engine(suite);
+            let scalars: uint32[list][list] = new;
+            for (let coefficient_bytes in coefficients) {
+                match (g.scalar_canonical(coefficient_bytes)) {
+                    Optional.Some(value) => {
+                        scalars.append(value);
+                    },
+                    Optional.None => {
+                        wipe_rows(scalars);
+                        return fail<DealerPackage>("crypto.frost_group", "FROST polynomial coefficient is not canonical");
+                    },
+                }
+            }
+            last result = deal_polynomial(suite, g, scalars, participants);
+            wipe_rows(scalars);
+            return result;
+        };
 
-    let deal_polynomial = func(g: core.Group, coefficients: uint32[list][list], count: int) -> Result<DealerPackage> {
+    let deal_polynomial = func(suite: Suite, g: core.Group, coefficients: uint32[list][list], count: int)
+        -> Result<DealerPackage> {
         last degree = coefficients.length - 1;
         if (mp.is_zero(coefficients[0]) == 1 || mp.is_zero(coefficients[degree]) == 1) {
             return fail<DealerPackage>("crypto.frost_group", "FROST polynomial needs nonzero constant and highest coefficient");
@@ -959,7 +1024,7 @@ export let Frost = module (
         let shares: uint32[list][list] = new;
         let members: Member[list] = new;
         for (let i = 1; i <= count; i++) {
-            last x = mp.small(i as uint32, 8);
+            last x = mp.small(i as uint32, g.limbs);
             let value = mp.copy(coefficients[degree]);
             for (let term = degree - 1; term >= 0; term--) {
                 last product = g.scalar_multiply(value, x);
@@ -973,11 +1038,11 @@ export let Frost = module (
                 return fail<DealerPackage>("crypto.frost_share", "FROST polynomial produced a zero signing share");
             }
             last public_share = g.multiply_base(value);
-            members.append(new Member(identifier(i as uint32), g.encode(public_share), public_share));
+            members.append(new Member(suite, identifier_for(g, i as uint32), g.encode(public_share), public_share));
             shares.append(value);
         }
         last point = g.multiply_base(coefficients[0]);
-        last group = new SigningGroup(g.encode(point), point, coefficients.length, members);
+        last group = new SigningGroup(suite, g.encode(point), point, coefficients.length, members);
         let keys: SigningShare[list] = new;
         for (let i = 0; i < count; i++) {
             last bytes = g.scalar_bytes(shares[i]);
@@ -989,14 +1054,14 @@ export let Frost = module (
     };
 
     let coefficient = func(g: core.Group, identifiers: uint8[list][list], index: int) -> uint32[list] {
-        last x = mp.from_bytes_le(identifiers[index], 8);
-        let numerator = mp.small(1, 8);
-        let denominator = mp.small(1, 8);
+        last x = g.scalar_unchecked(identifiers[index]);
+        let numerator = mp.small(1, g.limbs);
+        let denominator = mp.small(1, g.limbs);
         for (let i = 0; i < identifiers.length; i++) {
             if (i == index) {
                 continue;
             }
-            last other = mp.from_bytes_le(identifiers[i], 8);
+            last other = g.scalar_unchecked(identifiers[i]);
             numerator = g.scalar_multiply(numerator, other);
             denominator = g.scalar_multiply(denominator, g.scalar_subtract(other, x));
         }
@@ -1004,16 +1069,16 @@ export let Frost = module (
         return g.scalar_multiply(numerator, g.scalar_invert(denominator));
     };
 
-    let equation = func(g: core.Group, z: uint32[list], r: edwards.Point, c: uint32[list], pk: edwards.Point) -> bool =>
+    let equation = func(g: core.Group, z: uint32[list], r: core.Point, c: uint32[list], pk: core.Point) -> bool =>
         g.equal(g.multiply_base(z), g.add(r, g.multiply(c, pk)));
 
     let check_share = func(g: core.Group, z: uint32[list], party: Party) -> bool =>
         equation(g, z, party.point, party.challenge_weight, party.verification_key);
 
-    let engine = func -> core.Group {
-        crypto_policy.require(Algorithm.Frost);
-        return new;
-    };
+    let engine = func(suite: Suite) -> core.Group => new(suite);
+
+    let identifier_for = func(g: core.Group, index: uint32) -> uint8[list] =>
+        g.scalar_bytes(mp.small(index, g.limbs));
 
     let fail = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
 
@@ -1040,8 +1105,8 @@ export let Frost = module (
     let valid_sizes = func(threshold: int, participants: int) -> bool =>
         threshold >= 2 && threshold <= participants && participants <= MaxParticipants;
 
-    let in_order = func(left: uint8[list], right: uint8[list]) -> bool =>
-        mp.less(mp.from_bytes_le(left, 8), mp.from_bytes_le(right, 8)) == 1;
+    let in_order = func(g: core.Group, left: uint8[list], right: uint8[list]) -> bool =>
+        mp.less(g.scalar_unchecked(left), g.scalar_unchecked(right)) == 1;
 
     let scalar_of = func(g: core.Group, input: uint8[list], code: string) -> Result<uint32[list]> {
         match (g.scalar_canonical(input)) {
@@ -1063,40 +1128,24 @@ export let Frost = module (
         return Result<uint32[list]>.Ok(scalar);
     };
 
-    let decode_point = func(g: core.Group, bytes: uint8[list], code: string) -> Result<edwards.Point> {
+    let decode_point = func(g: core.Group, bytes: uint8[list], code: string) -> Result<core.Point> {
         match (g.decode(bytes)) {
             Optional.Some(point) => {
-                if (!g.is_identity(point)) {
-                    return Result<edwards.Point>.Ok(point);
-                }
+                return Result<core.Point>.Ok(point);
             },
             Optional.None => {},
         }
-        return fail<edwards.Point>(code, "noncanonical or identity FROST group element");
-    };
-
-    let domain_hash = func(label: string, bytes: uint8[list]) -> uint8[list] {
-        last h = new sha2.Sha512();
-        h.update(words.utf8(Context + label));
-        h.update(bytes);
-        return h.finish();
-    };
-
-    let hash_scalar = func(g: core.Group, domain: string, bytes: uint8[list]) -> uint32[list] {
-        last digest = domain_hash(domain, bytes);
-        last scalar = g.scalar_reduce(digest);
-        words.wipe(digest);
-        return scalar;
+        return fail<core.Point>(code, "noncanonical, identity or non-subgroup FROST element");
     };
 
     let signing_challenge = func(g: core.Group, commitment: uint8[list], key: uint8[list], message: uint8[list])
         -> uint32[list] =>
-            hash_scalar(g, "chal", words.concat(words.concat(commitment, key), message));
+            g.hash_scalar("chal", words.concat(words.concat(commitment, key), message));
 
     let nonce_scalar = func(g: core.Group, randomness: uint8[list], start: int, key: uint8[list]) -> uint32[list] {
         let input = words.slice(randomness, start, start + 32);
         words.append_all(input, key);
-        last scalar = hash_scalar(g, "nonce", input);
+        last scalar = g.hash_scalar("nonce", input);
         words.wipe(input);
         return scalar;
     };
