@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -1028,6 +1029,29 @@ NEURA_TEST(host, entropy_comes_from_the_system_generator) {
     check_equal(host.call("neura.entropy.fill", {i32(0)}).value.bytes.size(), std::size_t{0}, "empty draw");
     expect_error(host.call("neura.entropy.fill", {i32(-1)}), host_error::invalid_input, "negative count");
     expect_error(host.call("neura.entropy.fill", {i32((1 << 20) + 1)}), host_error::invalid_input, "over 1 MiB");
+
+    const auto hardware = host.call("neura.entropy.hardware", {i32(20)});
+    if (hardware.success) {
+        check_equal(hardware.value.bytes.size(), std::size_t{20}, "hardware entropy length");
+        check(hardware.value.bytes != host.call("neura.entropy.hardware", {i32(20)}).value.bytes, "two hardware draws");
+    } else {
+        check_equal(static_cast<std::uint32_t>(hardware.value.bits), host_error::unsupported, "no hardware source");
+    }
+    expect_error(host.call("neura.entropy.hardware", {i32(-1)}), host_error::invalid_input, "negative hardware count");
+    const auto generation = host.call("neura.process.generation", {});
+    expect_ok(generation, "generation");
+    check_equal(host.call("neura.process.generation", {}).value.bits, generation.value.bits, "stable without a fork");
+    const pid_t child = ::fork();
+    if (child == 0) {
+        const auto forked = host.call("neura.process.generation", {});
+        std::_Exit(forked.value.bits == generation.value.bits + 1 ? 0 : 1);
+    }
+    int status = 0;
+    ::waitpid(child, &status, 0);
+    check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "a forked child sees the next generation");
+    Host nothing({});
+    expect_error(nothing.call("neura.entropy.hardware", {i32(1)}), host_error::capability_denied, "hardware denied");
+    expect_error(nothing.call("neura.process.generation", {}), host_error::capability_denied, "generation denied");
 }
 
 

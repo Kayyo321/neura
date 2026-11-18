@@ -78,8 +78,8 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | MPTCP | stub: not reached; it would be a protocol flag of `connect` and `listen` on Linux 5.6 and later | |
 | `io_uring`, `epoll` and `kqueue` driver backends | stub: the driver waits with `poll(2)` or `WaitForMultipleObjects`; another backend changes the scheduling evidence and needs its own qualification | |
 | kTLS | stub: not reached; needs the kernel `tls` module and qualification of OpenSSL's offload | |
-| Fork and VM-generation detection | stub: not reached. The entropy service keeps no user-space pool, so each request draws fresh operating-system bytes | |
-| `RDSEED` and `RNDR` | stub: not offered separately; the operating-system generator already mixes them where the hardware has them | |
+| Fork and VM-generation detection, `neura.process.generation` | implemented for `fork` (a change of process ID); a VM snapshot restore is not detected | `backend-host` |
+| `RDSEED` and `RNDR`, `neura.entropy.hardware` | implemented on x86-64 and AArch64 Linux; 13 elsewhere or without the instruction | `backend-host` |
 | `mlock`, core-dump exclusion and zeroization (`neura.memory.lock`, which the `Std.Crypto` design note asks for) | not provided by this runtime: the collector moves and copies heap storage, so the NVM cannot pin, lock or promise to zero it | |
 
 ### Handler interface for `Std.Net.Http`

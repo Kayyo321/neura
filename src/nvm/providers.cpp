@@ -3,6 +3,7 @@
 #include "nvr/format.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -10,12 +11,16 @@
 #include <deque>
 #include <thread>
 
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#include <cpuid.h>
+#endif
 #ifndef _WIN32
 #include <poll.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
 #ifdef __linux__
+#include <sys/auxv.h>
 #include <sys/random.h>
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #include <sys/random.h>
@@ -285,6 +290,62 @@ bool fill_entropy(char* data, std::size_t size) {
 #endif
 }
 
+
+// Hardware random words for neura.entropy.hardware: RDSEED on x86-64 and
+// RNDR on AArch64 Linux. False when the processor has no such source or it
+// keeps failing.
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((target("rdseed"))) bool hardware_word(std::uint64_t& word) {
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        unsigned long long value = 0;
+        if (__builtin_ia32_rdseed_di_step(&value)) {
+            word = value;
+            return true;
+        }
+        __builtin_ia32_pause();
+    }
+    return false;
+}
+bool hardware_available() {
+    unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+    return __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) && (ebx & (1u << 18)) != 0;
+}
+#elif defined(__aarch64__) && defined(__linux__)
+bool hardware_word(std::uint64_t& word) {
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        std::uint64_t value = 0;
+        int ok = 0;
+        // RNDR sets NZCV to 0b0100 on failure; cset on ne reads success.
+        asm volatile("mrs %0, s3_3_c2_c4_0\n\tcset %w1, ne" : "=r"(value), "=r"(ok) : : "cc");
+        if (ok) {
+            word = value;
+            return true;
+        }
+    }
+    return false;
+}
+bool hardware_available() { return (::getauxval(AT_HWCAP2) & HWCAP2_RNG) != 0; }
+#else
+bool hardware_word(std::uint64_t&) { return false; }
+bool hardware_available() { return false; }
+#endif
+
+// The process generation for neura.process.generation: it changes in a
+// child created by fork (detected by a change of process ID). A restore of
+// a virtual machine snapshot is not detected.
+std::uint64_t process_generation() {
+#ifndef _WIN32
+    static std::atomic<std::uint64_t> generation{0};
+    static std::atomic<long> owner{static_cast<long>(::getpid())};
+    const long now = static_cast<long>(::getpid());
+    long seen = owner.load();
+    if (seen != now && owner.compare_exchange_strong(seen, now)) generation.fetch_add(1);
+    return generation.load();
+#else
+    return 0;
+#endif
+}
+
 } // namespace
 
 StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, ConsoleSource& input,
@@ -409,6 +470,29 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         };
         operation.expire = [] { return HostCompletion::ok(); };
         return operation;
+    });
+
+    // RDSEED or RNDR words; Unsupported (13) without a hardware source,
+    // Other (100) when the source keeps failing.
+    add(signature("neura.entropy.hardware", {int32()}, byte_list()), [this](const HostRequest& request) {
+        if (!capabilities_.entropy) return denied();
+        const auto count = as_int32(request.arguments.at(0));
+        if (count < 0 || count > max_entropy_bytes) return fail(host_error::invalid_input);
+        if (count > 0 && !hardware_available()) return fail(host_error::unsupported);
+        std::string bytes;
+        bytes.reserve(static_cast<std::size_t>(count) + 8);
+        while (bytes.size() < static_cast<std::size_t>(count)) {
+            std::uint64_t word = 0;
+            if (!hardware_word(word)) return fail(host_error::other);
+            for (int i = 0; i < 8; ++i) bytes += static_cast<char>(word >> (8 * i));
+        }
+        bytes.resize(static_cast<std::size_t>(count));
+        return HostCompletion::ok(bytes_value(std::move(bytes)));
+    });
+
+    add(signature("neura.process.generation", {}, HostType(Kind::Unsigned, 64)), [this](const HostRequest&) {
+        if (!capabilities_.entropy) return denied();
+        return HostCompletion::ok(scalar(process_generation()));
     });
 
     add(signature("neura.entropy.fill", {int32()}, byte_list()), [this](const HostRequest& request) {
