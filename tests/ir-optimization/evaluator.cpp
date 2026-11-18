@@ -769,7 +769,22 @@ private:
         return flow;
     }
 
+    // A `return`, `break` or `continue` inside a scoped value, as the
+    // lowering of `?` writes one, leaves the statement that evaluates the
+    // value: the scoped value throws it and that statement returns it.
+    struct ScopedExit {
+        Flow flow;
+    };
+
     Flow run_statement(const IrNode& node, Frame& frame) {
+        try {
+            return run_statement_once(node, frame);
+        } catch (const ScopedExit& exit) {
+            return exit.flow;
+        }
+    }
+
+    Flow run_statement_once(const IrNode& node, Frame& frame) {
         switch (node.op) {
         case IrOp::Initialize: {
             // NeuraIR 1.10: a deferred `last` local has no value until its
@@ -1185,7 +1200,7 @@ private:
         }
         case IrOp::ScopedValue: {
             for (std::size_t i = 0; i + 1 < node.body.size(); ++i) {
-                run_statement(node.body[i], frame);
+                if (const auto flow = run_statement(node.body[i], frame); flow != Flow::Next) throw ScopedExit{flow};
             }
             return evaluate(node.body.back(), frame);
         }
