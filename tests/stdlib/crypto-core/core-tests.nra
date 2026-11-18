@@ -1,0 +1,120 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let.promote _ = import:Std.Crypto.Core.Secret;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.Core.SecretKey;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let test = import:Std.Test;
+
+// A primitive class used only as a key's algorithm type.
+let Marker = class (
+    export let.override to_string = func -> string => "Marker";
+);
+
+let CoreTests = module (
+    export let test_ct_eq_uint32 = func {
+        test.assert_equal_int64(1, constant_time.ct_eq_uint32(0, 0) as int64);
+        test.assert_equal_int64(1, constant_time.ct_eq_uint32(4294967295, 4294967295) as int64);
+        test.assert_equal_int64(0, constant_time.ct_eq_uint32(0, 4294967295) as int64);
+        test.assert_equal_int64(0, constant_time.ct_eq_uint32(2147483648, 0) as int64);
+        test.assert_equal_int64(0, constant_time.ct_eq_uint32(1, 0) as int64);
+    };
+
+    export let test_ct_less = func {
+        test.assert_equal_int64(1, constant_time.ct_less(0, 1) as int64);
+        test.assert_equal_int64(0, constant_time.ct_less(1, 1) as int64);
+        test.assert_equal_int64(0, constant_time.ct_less(2, 1) as int64);
+        test.assert_equal_int64(1, constant_time.ct_less(0, 4294967295) as int64);
+        test.assert_equal_int64(0, constant_time.ct_less(4294967295, 0) as int64);
+        test.assert_equal_int64(1, constant_time.ct_less(4294967294, 4294967295) as int64);
+    };
+
+    export let test_ct_select = func {
+        test.assert_equal_int64(7, constant_time.ct_select(1, 7, 9) as int64);
+        test.assert_equal_int64(9, constant_time.ct_select(0, 7, 9) as int64);
+        test.assert_equal_int64(4294967295, constant_time.ct_select(1, 4294967295, 0) as int64);
+        last picked = constant_time.ct_select_bytes(0, new([1, 2]), new([3, 4]));
+        test.assert_equal_int32(4, picked[1] as int);
+        test.assert_equal_int32(2, constant_time.ct_select_bytes(1, new([1, 2]), new([3, 4]))[1] as int);
+    };
+
+    export let test_ct_eq_bytes = func {
+        test.assert(constant_time.ct_eq(new, new));
+        test.assert(constant_time.ct_eq(new([1, 2, 255]), new([1, 2, 255])));
+        test.assert(!constant_time.ct_eq(new([1, 2, 255]), new([1, 2, 254])));
+        test.assert(!constant_time.ct_eq(new([0, 2, 255]), new([1, 2, 255])));
+        test.assert(!constant_time.ct_eq(new([1, 2]), new([1, 2, 3])));
+    };
+
+    export let test_secret_bytes_redacts_copies_and_wipes = func {
+        let source: uint8[list] = new([9, 8, 7]);
+        let secret = new SecretBytes(source);
+        source[0] = 0;
+        test.assert_equal_int32(9, secret.expose()[0] as int);
+        test.assert_equal_string("SecretBytes(3 bytes, <redacted>)", secret.to_string());
+        test.assert(secret.ct_equals(new SecretBytes(new([9, 8, 7]))));
+        test.assert(!secret.ct_equals(new SecretBytes(new([9, 8, 6]))));
+        // Equality is identity: two objects with the same bytes are not equal.
+        test.assert(!secret.equals(new SecretBytes(new([9, 8, 7]))));
+        test.assert(secret.equals(secret));
+        let held = secret.expose();
+        secret.wipe();
+        test.assert(secret.is_wiped());
+        test.assert_equal_int32(0, held[0] as int);
+        test.assert_equal_int32(0, held[2] as int);
+        test.assert_equal_int32(3, secret.length());
+    };
+
+    export let test_generic_secret = func {
+        let bytes: uint8[list] = new([5, 6]);
+        let secret = new Secret<uint8[list]>(bytes, zero_bytes);
+        test.assert_equal_string("Secret(<redacted>)", secret.to_string());
+        test.assert_equal_int32(6, secret.expose()[1] as int);
+        secret.wipe();
+        test.assert_equal_int32(0, bytes[1] as int);
+        test.assert(secret.is_wiped());
+    };
+
+    export let test_secret_key = func {
+        let key: SymmetricKey<Marker> = new SecretKey<Marker>(new([1, 2, 3, 4]));
+        test.assert_equal_int32(4, key.key_length());
+        test.assert_equal_string("SecretKey(4 bytes, <redacted>)", key.to_string());
+        let same = new SecretKey<Marker>(new([1, 2, 3, 4]));
+        test.assert(same.ct_equals(new SecretKey<Marker>(new([1, 2, 3, 4]))));
+        key.wipe();
+        test.assert(key.is_wiped());
+    };
+
+    export let test_policy_default_is_modern = func {
+        test.assert(crypto_policy.policy() == crypto_policy.Policy.Modern);
+        test.assert(crypto_policy.allows(Algorithm.ChaCha20Poly1305));
+        test.assert(!crypto_policy.allows(Algorithm.Sha1));
+        test.assert(!crypto_policy.allows(Algorithm.Rsa1024));
+        crypto_policy.require(Algorithm.Blake3);
+    };
+
+    export let test_policy_tables = func {
+        last fips = crypto_policy.Policy.Fips140_3;
+        test.assert(crypto_policy.allowed_by(fips, Algorithm.Aes256Gcm));
+        test.assert(crypto_policy.allowed_by(fips, Algorithm.Sha3_256));
+        test.assert(!crypto_policy.allowed_by(fips, Algorithm.ChaCha20Poly1305));
+        test.assert(!crypto_policy.allowed_by(fips, Algorithm.Argon2id));
+        test.assert(!crypto_policy.allowed_by(fips, Algorithm.Sha1));
+        last cnsa = crypto_policy.Policy.Cnsa2_0;
+        test.assert(crypto_policy.allowed_by(cnsa, Algorithm.Aes256Gcm));
+        test.assert(crypto_policy.allowed_by(cnsa, Algorithm.Sha384));
+        test.assert(!crypto_policy.allowed_by(cnsa, Algorithm.Aes128Gcm));
+        test.assert(!crypto_policy.allowed_by(cnsa, Algorithm.Sha256));
+        test.assert(crypto_policy.allowed_by(cnsa, Algorithm.MlKem1024));
+        test.assert(!crypto_policy.allowed_by(cnsa, Algorithm.MlKem768));
+    };
+
+    export let test_set_policy = func {
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        test.assert(!crypto_policy.allows(Algorithm.Blake3));
+        crypto_policy.require(Algorithm.Sha256);
+        crypto_policy.set_policy(crypto_policy.Policy.Modern);
+        test.assert(crypto_policy.allows(Algorithm.Blake3));
+    };
+);

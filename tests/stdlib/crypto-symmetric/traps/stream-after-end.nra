@@ -1,0 +1,20 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: stream already ended
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let chacha20_poly1305 = import:Std.Crypto.Symmetric.ChaCha20Poly1305;
+let online = import:Std.Crypto.Symmetric.OnlineCipher;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let key: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            key.append(i as uint8);
+        }
+        let stream = new online.StreamEncryptor<SymmetricKey<chacha20_poly1305.ChaCha20Poly1305>>(
+            new chacha20_poly1305.ChaCha20Poly1305(key), new([1, 2, 3, 4, 5, 6, 7]), new);
+        let _ = stream.seal_segment(new([1]), true);
+        let _ = stream.seal_segment(new([2]), false);
+        return program.ExitCode.Ok;
+    };
+);

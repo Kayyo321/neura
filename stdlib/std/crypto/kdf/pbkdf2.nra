@@ -1,0 +1,44 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief PBKDF2 of RFC 8018, section 5.2 (NIST SP 800-132), with HMAC over any digest (Stdlib.md section
+/// 20.6).
+/// @see [Std.Crypto.Kdf.Pbkdf2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pbkdf2)
+#Since("0.3.0")
+export let Pbkdf2 = module (
+    /// @brief `length` bytes derived from the password and salt with `iterations` rounds of HMAC-H. Fewer than
+    /// one iteration or a negative length traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let derive = func<H: StreamingDigest<H>>(password: uint8[list], salt: uint8[list], iterations: int,
+            length: int) -> uint8[list] {
+        crypto_policy.require(Algorithm.Pbkdf2);
+        if (iterations < 1) {
+            trap_with_message("invalid argument: PBKDF2 needs at least one iteration");
+        }
+        if (length < 0) {
+            trap_with_message("invalid argument: negative length");
+        }
+        let out: uint8[list] = new;
+        let block: uint32 = 1;
+        while (out.length < length) {
+            let first = words.copy(salt);
+            words.append32_be(first, block);
+            let u = hmac.mac<H>(password, first);
+            let t = words.copy(u);
+            for (let i = 1; i < iterations; i++) {
+                u = hmac.mac<H>(password, u);
+                for (let k = 0; k < t.length; k++) {
+                    t[k] = t[k] ^ u[k];
+                }
+            }
+            for (let k = 0; k < t.length && out.length < length; k++) {
+                out.append(t[k]);
+            }
+            block += 1;
+        }
+        return out;
+    };
+);

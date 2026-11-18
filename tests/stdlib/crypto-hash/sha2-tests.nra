@@ -1,0 +1,91 @@
+let digest_sha256 = import:Std.Digest.Sha256;
+let hex = import:Std.Encoding.Hex;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let test = import:Std.Test;
+let vectors = import:HashVectors;
+
+// SHA-2 against hashlib (support/hash-vectors.nra, scripts/crypto-vectors/gen-hash.py).
+let Sha2Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let digest_of = func(name: string, message: uint8[list]) -> uint8[list] {
+        if (name == "sha224") {
+            return sha2.sha224(message);
+        }
+        if (name == "sha256") {
+            return sha2.sha256(message);
+        }
+        if (name == "sha384") {
+            return sha2.sha384(message);
+        }
+        if (name == "sha512") {
+            return sha2.sha512(message);
+        }
+        return sha2.sha512_256(message);
+    };
+
+    // The same digest through a generic function, fed in pieces of `piece` bytes.
+    let pieces = func<D: StreamingDigest<D>>(message: uint8[list], piece: int) -> uint8[list] {
+        let digest = D.create();
+        for (let start = 0; start < message.length; start += piece) {
+            let part: uint8[list] = new;
+            for (let i = start; i < start + piece && i < message.length; i++) {
+                part.append(message[i]);
+            }
+            digest.update(part);
+        }
+        last out = digest.finish();
+        test.assert_equal_int32(D.output_length(), out.length);
+        return out;
+    };
+
+    export let test_known_answers = func {
+        last rows = vectors.digests;
+        let checked = 0;
+        for (let i = 0; i < rows.length; i += 3) {
+            last name = rows[i];
+            if (name.byte_length > 5 && name.slice(0, 5) == "sha3_") {
+                continue;
+            }
+            test.assert_equal_string(rows[i + 2], hex.encode(digest_of(name, decode(rows[i + 1]))));
+            checked++;
+        }
+        test.assert_equal_int32(130, checked);
+    };
+
+    export let test_streaming_in_pieces = func {
+        last rows = vectors.digests;
+        for (let i = 0; i < rows.length; i += 3) {
+            last message = decode(rows[i + 1]);
+            if (message.length != 300) {
+                continue;
+            }
+            last name = rows[i];
+            last expected = rows[i + 2];
+            if (name == "sha224") {
+                test.assert_equal_string(expected, hex.encode(pieces<sha2.Sha224>(message, 7)));
+            } else if (name == "sha256") {
+                test.assert_equal_string(expected, hex.encode(pieces<sha2.Sha256>(message, 63)));
+            } else if (name == "sha384") {
+                test.assert_equal_string(expected, hex.encode(pieces<sha2.Sha384>(message, 1)));
+            } else if (name == "sha512") {
+                test.assert_equal_string(expected, hex.encode(pieces<sha2.Sha512>(message, 129)));
+            } else if (name == "sha512_256") {
+                test.assert_equal_string(expected, hex.encode(pieces<sha2.Sha512_256>(message, 13)));
+            }
+        }
+    };
+
+    export let test_sha256_shares_std_digest = func {
+        last message: uint8[list] = new([97, 98, 99]);
+        test.assert_equal_string(hex.encode(digest_sha256.of(message)), hex.encode(sha2.sha256(message)));
+    };
+
+    export let test_lengths_and_names = func {
+        test.assert_equal_int32(28, sha2.Sha224.output_length());
+        test.assert_equal_int32(64, sha2.Sha224.block_length());
+        test.assert_equal_int32(128, sha2.Sha512_256.block_length());
+        test.assert_equal_string("SHA-512/256", sha2.Sha512_256.create().to_string());
+    };
+);

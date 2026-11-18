@@ -1,0 +1,24 @@
+// test-options: --allow-entropy
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let test = import:Std.Test;
+
+// With the entropy capability, the operating system's bytes seed a working generator. The values are not
+// reproducible, so only lengths and a difference are checked.
+let EntropyAllowedTests = module (
+    export let test_os_bytes = func {
+        last a = test.assert_ok(entropy.os_bytes(32));
+        last b = test.assert_ok(entropy.os_bytes(32));
+        test.assert_equal_int32(32, a.length);
+        test.assert(!constant_time.ct_eq(a, b));
+        test.assert_equal_int32(0, test.assert_ok(entropy.os_bytes(0)).length);
+    };
+
+    export let test_drbg_from_entropy = func {
+        let generator = test.assert_ok(drbg.from_entropy());
+        test.assert_equal_int32(40, generator.fill(40).length);
+        let _ = test.assert_ok(generator.reseed_from_entropy());
+        test.assert_equal_int32(3, generator.fill(3).length);
+    };
+);

@@ -1,0 +1,48 @@
+let blake3 = import:Std.Crypto.Hash.Blake3;
+let hex = import:Std.Encoding.Hex;
+let int32s = import:Std.Core.Int32;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:Blake3Vectors;
+
+// BLAKE3 against the official test vectors (support/blake3-vectors.nra, scripts/crypto-vectors/gen-blake3.py):
+// all 131 output bytes of the hash, keyed_hash and derive_key modes for every input up to 4097 bytes.
+let Blake3Tests = module (
+    let input = func(length: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < length; i++) {
+            out.append((i % 251) as uint8);
+        }
+        return out;
+    };
+
+    export let test_official_vectors = func {
+        last key = utf8.encode(vectors.parameters[0]);
+        last context = vectors.parameters[1];
+        last rows = vectors.cases;
+        for (let i = 0; i < rows.length; i += 4) {
+            last message = input(test.assert_ok(int32s.parse(rows[i])));
+            test.assert_equal_string(rows[i + 1], hex.encode(blake3.hash(message, 131)));
+            test.assert_equal_string(rows[i + 2], hex.encode(blake3.keyed_hash(key, message, 131)));
+            test.assert_equal_string(rows[i + 3], hex.encode(blake3.derive_key(context, message, 131)));
+        }
+    };
+
+    // Feeding the input in odd pieces and reading the output in pieces gives the same bytes.
+    export let test_streaming = func {
+        last rows = vectors.cases;
+        last last_row = rows.length - 4;
+        last message = input(test.assert_ok(int32s.parse(rows[last_row])));
+        let hasher = new blake3.Blake3();
+        for (let start = 0; start < message.length; start += 37) {
+            let part: uint8[list] = new;
+            for (let i = start; i < start + 37 && i < message.length; i++) {
+                part.append(message[i]);
+            }
+            hasher.update(part);
+        }
+        let out = hex.encode(hasher.finish());
+        out += hex.encode(hasher.squeeze(1)) + hex.encode(hasher.squeeze(98));
+        test.assert_equal_string(rows[last_row + 1], out);
+    };
+);

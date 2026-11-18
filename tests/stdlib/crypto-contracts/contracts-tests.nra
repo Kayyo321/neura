@@ -1,0 +1,257 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.ExtendableOutput;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let.promote _ = import:Std.Crypto.KeyStoreProvider;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let.promote _ = import:Std.Crypto.Verifier;
+let error = import:Std.Core.Error;
+let test = import:Std.Test;
+
+// Toy implementations that show each contract of Std.Crypto can be implemented and used through its
+// interface. None of them is cryptography.
+
+// A sum of the bytes modulo 256, as a one-byte digest and as an endless output stream.
+let ToySum = class implements ExtendableOutput<ToySum> (
+    let total: int = 0;
+    let done: bool = false;
+
+    export static let create = func() -> ToySum => new ToySum();
+    export static let output_length = func() -> int => 1;
+    export static let block_length = func() -> int => 1;
+    export let algorithm = func -> Algorithm => Algorithm.Blake3;
+
+    export let update = func(bytes: uint8[list]) {
+        for (let b in bytes) {
+            total = (total + (b as int)) % 256;
+        }
+    };
+
+    export let finish = func -> uint8[list] => squeeze(1);
+
+    export let squeeze = func(count: int) -> uint8[list] {
+        done = true;
+        let out: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(((total + i) % 256) as uint8);
+        }
+        return out;
+    };
+
+    export let.override to_string = func -> string => "ToySum";
+);
+
+// A key: bytes that can be wiped.
+let ToyKey = class implements SymmetricKey<ToyCipher>, PrivateKey<ToySigner> (
+    let bytes: uint8[list];
+    let wiped: bool = false;
+
+    export let init = func(material: uint8[list]) {
+        bytes = material;
+    };
+
+    export let expose = func -> uint8[list] {
+        if (wiped) {
+            trap_with_message("invalid state: secret wiped");
+        }
+        return bytes;
+    };
+
+    export let wipe = func {
+        for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = 0;
+        }
+        wiped = true;
+    };
+
+    export let is_wiped = func -> bool => wiped;
+    export let lock = func {
+    };
+    export let key_length = func -> int => bytes.length;
+    export let public_key_bytes = func -> uint8[list] => new([bytes[0]]);
+    export let.override to_string = func -> string => "ToyKey(<redacted>)";
+);
+
+// An exclusive or with the key's first byte, tagged with the toy sum.
+let ToyCipher = class implements AeadCipher<ToyKey, uint8[list], uint8[list]> (
+    last key: ToyKey;
+
+    export let init = func(value: ToyKey) {
+        key = value;
+    };
+
+    export let algorithm = func -> Algorithm => Algorithm.ChaCha20Poly1305;
+    export let nonce_length = func -> int => 1;
+    export let tag_length = func -> int => 1;
+
+    let tag = func(nonce: uint8[list], body: uint8[list], data: uint8[list]) -> uint8 {
+        let sum = new ToySum();
+        sum.update(nonce);
+        sum.update(body);
+        sum.update(data);
+        return sum.finish()[0];
+    };
+
+    export let seal = func(nonce: uint8[list], plaintext: uint8[list], associated_data: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let b in plaintext) {
+            out.append(b ^ key.expose()[0]);
+        }
+        out.append(tag(nonce, out, associated_data));
+        return out;
+    };
+
+    export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
+            -> Result<uint8[list]> {
+        let body: uint8[list] = new;
+        for (let i = 0; i + 1 < sealed.length; i++) {
+            body.append(sealed[i]);
+        }
+        if (sealed.length < 1 || tag(nonce, body, associated_data) != sealed[sealed.length - 1]) {
+            return Result<uint8[list]>.Err(error.custom("crypto.authentication", "authentication failed"));
+        }
+        let out: uint8[list] = new;
+        for (let b in body) {
+            out.append(b ^ key.expose()[0]);
+        }
+        return Result<uint8[list]>.Ok(out);
+    };
+
+    export let.override to_string = func -> string => "ToyCipher";
+);
+
+let ToySigner = class implements Signer<ToyKey, uint8>, Verifier<uint8, uint8> (
+    last key: ToyKey;
+
+    export let init = func(value: ToyKey) {
+        key = value;
+    };
+
+    export let algorithm = func -> Algorithm => Algorithm.Ed25519;
+    export let public_key = func -> uint8 => key.public_key_bytes()[0];
+
+    export let sign = func(message: uint8[list]) -> uint8 {
+        let sum = new ToySum();
+        sum.update(message);
+        return sum.finish()[0] ^ key.expose()[0];
+    };
+
+    export let verify = func(message: uint8[list], signature: uint8) -> bool {
+        let sum = new ToySum();
+        sum.update(message);
+        return (sum.finish()[0] ^ public_key()) == signature;
+    };
+
+    export let.override to_string = func -> string => "ToySigner";
+);
+
+let ToyKem = class implements KeyEncapsulation<uint8, ToyKey, uint8, uint8> (
+    export let algorithm = func -> Algorithm => Algorithm.MlKem768;
+
+    export let encapsulate = func(public_key: uint8) -> Encapsulation<uint8, uint8> => new(7, 7 ^ public_key);
+
+    export let decapsulate = func(private_key: ToyKey, ciphertext: uint8) -> Result<uint8> =>
+        Result<uint8>.Ok(ciphertext ^ private_key.public_key_bytes()[0]);
+
+    export let.override to_string = func -> string => "ToyKem";
+);
+
+let ToyStore = class implements KeyStoreProvider<int> (
+    let keys: ToyKey[list] = new;
+
+    export let provider_name = func -> string => "toy";
+
+    export let generate_key = func(algorithm: Algorithm, label: string) -> Result<int> {
+        keys.append(new ToyKey(new([(keys.length + 1) as uint8])));
+        return Result<int>.Ok(keys.length - 1);
+    };
+
+    export let sign = func(key: int, message: uint8[list]) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Ok(new([new ToySigner(keys[key]).sign(message)]));
+
+    export let wrap_key = func(key: int, data_key: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]> =>
+        Result<uint8[list]>.Ok(new ToyCipher(keys[key]).seal(new([0]), data_key, associated_data));
+
+    export let unwrap_key = func(key: int, wrapped: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]> =>
+        new ToyCipher(keys[key]).open(new([0]), wrapped, associated_data);
+
+    export let delete_key = func(key: int) -> Result<Unit> {
+        keys[key].wipe();
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    export let.override to_string = func -> string => "ToyStore";
+);
+
+let digest_of = func<D: StreamingDigest<D>>(bytes: uint8[list]) -> uint8[list] {
+    let digest = D.create();
+    digest.update(bytes);
+    return digest.finish();
+};
+
+let ContractsTests = module (
+    export let test_streaming_digest_through_static_requirements = func {
+        test.assert_equal_int32(6, digest_of<ToySum>(new([1, 2, 3]))[0] as int);
+    };
+
+    export let test_extendable_output_reader = func {
+        let xof: ExtendableOutput<ToySum> = new ToySum();
+        xof.update(new([10]));
+        let read = xof.reader();
+        last bytes = test.assert_ok(read(3));
+        test.assert_equal_int32(3, bytes.length);
+        test.assert_equal_int32(12, bytes[2] as int);
+    };
+
+    export let test_aead_round_trip_and_rejection = func {
+        let cipher: AeadCipher<ToyKey, uint8[list], uint8[list]> = new ToyCipher(new ToyKey(new([90])));
+        last sealed = cipher.seal(new([1]), new([5, 6]), new([9]));
+        last opened = test.assert_ok(cipher.open(new([1]), sealed, new([9])));
+        test.assert_equal_int32(6, opened[1] as int);
+        let _ = test.assert_err(cipher.open(new([1]), sealed, new([8])));
+        test.assert(cipher.algorithm() == Algorithm.ChaCha20Poly1305);
+    };
+
+    export let test_signer_and_verifier = func {
+        let pair = new ToySigner(new ToyKey(new([3])));
+        let signer: Signer<ToyKey, uint8> = pair;
+        let verifier: Verifier<uint8, uint8> = pair;
+        test.assert(verifier.verify(new([1, 2]), signer.sign(new([1, 2]))));
+        test.assert(!verifier.verify(new([1, 3]), signer.sign(new([1, 2]))));
+    };
+
+    export let test_key_encapsulation = func {
+        let kem: KeyEncapsulation<uint8, ToyKey, uint8, uint8> = new ToyKem();
+        let key = new ToyKey(new([44]));
+        last sent = kem.encapsulate(key.public_key_bytes()[0]);
+        test.assert_equal_int32(sent.shared_secret as int, test.assert_ok(kem.decapsulate(key, sent.ciphertext)) as int);
+        test.assert_equal_string("Encapsulation(<redacted>)", sent.to_string());
+    };
+
+    export let test_key_store_provider = func {
+        let store: KeyStoreProvider<int> = new ToyStore();
+        last handle = test.assert_ok(store.generate_key(Algorithm.Aes256Gcm, "kek"));
+        last wrapped = test.assert_ok(store.wrap_key(handle, new([1, 2, 3]), new));
+        test.assert_equal_int32(2, test.assert_ok(store.unwrap_key(handle, wrapped, new))[1] as int);
+        test.assert_equal_int32(1, test.assert_ok(store.sign(handle, new([0]))).length);
+        let _ = test.assert_ok(store.delete_key(handle));
+        test.assert_equal_string("toy", store.provider_name());
+    };
+
+    export let test_secret_memory_wipe = func {
+        let key = new ToyKey(new([1, 2]));
+        key.wipe();
+        test.assert(key.is_wiped());
+        test.assert_equal_string("ToyKey(<redacted>)", key.to_string());
+    };
+
+    export let test_algorithm_names = func {
+        test.assert_equal_string("Sha3_256", Algorithm.Sha3_256.to_string());
+    };
+);

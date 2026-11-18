@@ -130,6 +130,7 @@ The language has no hexadecimal integer literals, no inference of type arguments
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop.md) |
 | `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](Concurrency.md#9-stdconcurrent) |
 | `Std.Events` | `Event`, `EventView`, `Subscription` | [20](#20-stdevents) |
+| `Std.Crypto` | The contracts, and the packages `Core`, `Random`, `Hash`, `Mac`, `Kdf` and `Symmetric` | [21](#21-stdcrypto) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retired-built-ins)).
 
@@ -155,6 +156,7 @@ A module may import only modules above it. Cycles are forbidden.
 6. `Std.Io`, `Std.Program`, `Std.Concurrent`
 7. `Std.Fs`, `Std.Net`, `Std.DynamicForeign`
 8. `Std.Log`, `Std.Test`
+9. `Std.Crypto`: its contracts, then `Core`, `Hash`, `Mac`, `Kdf`, `Symmetric` and `Random`, each above the next. It imports `Std.Core`, `Std.Concurrent.AtomicInt64`, `Std.Digest.Sha256`, `Std.Encoding`, `Std.Math.BigInteger` and `Std.Time`.
 
 `StringBuilder` is in `Std.Core` because number formatting needs it. `IntRange` imports the `Iterable` and `Iterator` interfaces from `Std.Collections` so that for-each can visit a range; those two modules import nothing, so no cycle forms. `Std.Core` never names a collection class: where a core function returns several values it returns a tuple or a built-in list. The `String` companion is an exception to the order above. It depends on `Std.Text` and the pure formatting module in `Std.Io.Internal`. `Std.Test` is last in the import order but early in the schedule: its assertions for built-in types import only `Std.Core`. `Character` is a second exception: its full case mappings use the casing routines of `Std.Text.Internal.UnicodeCase`, which import nothing above `Std.Text`.
 
@@ -178,7 +180,7 @@ Every interaction with the outside world is a host service with a name, a versio
 | `neura.fs.stat`, `list`, `make_directory`, `remove`, `rename` | 1 | path text (two for rename); `stat` also takes a follow-links flag and `remove` a directory flag | kind, size, and modified time; list of names; none | `Fs` |
 | `neura.clock.wall`, `monotonic` | 1 | none | seconds and nanoseconds; nanoseconds | `SystemClock` |
 | `neura.clock.sleep` | 1, 2 | nanoseconds | none | `SystemClock` (version 2); overlaps in an image with tasks |
-| `neura.entropy.fill` | 1 | count | bytes | `Random.from_entropy` |
+| `neura.entropy.fill` | 1 | count | bytes | `Random.from_entropy`, `Std.Crypto.Random.Entropy.os_bytes` |
 | `neura.env.get` | 1 | name text | found flag and value text | `Environment` |
 | `neura.process.exit` | 1 | status | does not return | `Process.exit` |
 | `neura.net.listen`, `local_port`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID or port | `Std.Net` |
@@ -1254,7 +1256,7 @@ There is no time zone database, no named zones, and no daylight-saving rules. Co
 | `shuffle<T>(items: T[list])` | Fisher–Yates: for `i` from the last index down to 1, swap `i` with `next_int_below(i + 1)`. Generic, with no callback. |
 | `choose<T>(items: T[list]) → T` | Traps with `no such element` for an empty list. |
 
-The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets, and the library offers no cryptographic generator.
+The same seed gives the same sequence of results from every member, on every runtime, in every library version with the same major number. `Random` is not suitable for secrets; use `Std.Crypto.Random` ([section 21.3](#213-stdcryptorandom)).
 
 **`Uuid`** is an `#Immutable` value of 16 bytes. The module function `random(random: Random)` makes a version 4 identifier from `fill_bytes`, then sets the version and variant bits. `to_string` writes the 36-character hyphenated form in lowercase. `parse(text) → Result<Uuid>` accepts either case and needs T1. It has `compare_to`, `equals`, and `hash_code` over its bytes.
 
@@ -1364,7 +1366,7 @@ Contracts deliberately kept: insertion-ordered hash collections, separate read-o
 | Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
 | Time zones, locales, localized formatting, collation | Not provided | They need large versioned data tables. |
 | Unicode normalization | Not provided | Same reason. [`Character`](#85-character) classifies, maps, and names every code point. |
-| Ciphers, signatures, TLS, secure random, HTTP | Not provided | They need security review. |
+| Signatures, key exchange, TLS, HTTP | Not provided | They need security review. Hashes, MACs, key derivation, authenticated encryption and a cryptographic generator are in [`Std.Crypto`](#21-stdcrypto); public-key cryptography is planned there. |
 | `BigInteger` bitwise operations, UDP | Not provided | |
 | Facade modules such as `Std.Collections` that re-export every collection type | Not provided | They need re-export of generic classes, which the language does not have. The type modules are the import paths. |
 
@@ -1549,3 +1551,90 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency.md) s
 - `emit` is not called under a monitor guard ([E0550](../diagnostics/E0550.md)): in a `#Synchronized` method, in a lambda passed directly to `Guarded.with`, or in a function either of them reaches through calls the compiler resolves. A call through a function value is not followed, so the check is a check of the known call graph and not a proof.
 - Tests: `stdlib-events`, and `lifetime-programs` for delivery in every execution mode.
 
+## 21. `Std.Crypto`
+
+`Std.Crypto` holds the cryptography of the library: contracts, memory hygiene and constant-time helpers, a policy object, digests, MACs, key derivation, authenticated encryption, and random generation. It is Neura source running on the interpreter. Only `Sha256` reaches a C kernel, through `Std.Digest.Sha256`. Every primitive is checked against known answers from an independent implementation or from a standard's text (`tests/stdlib/crypto-*`, generated by `scripts/crypto-vectors/`). [The design note](../design/Crypto030.md) records the API shape, the implementation tier of each item, and every stub.
+
+**What the runtime does not provide.** Interpreted code does not run in constant time. The constant-time helpers are branch-free in source, and the runtime does not guarantee constant time. The runtime cannot lock memory (`mlock`) or keep it out of swap, and it cannot erase copies of a secret that the collector made. A member that would need a missing host service has the doc line `@stub` and traps with `unsupported: <Module>.<member> is not implemented in Neura 0.3.0 (<reason>)`.
+
+### 21.1 Contracts
+
+| Module | Contract |
+| --- | --- |
+| `Algorithm` | The enum `Algorithm` names every algorithm that a primitive or a policy can mention, including ones that are only denied (`Sha1`, `Md5`, `Rsa1024`) and the public-key and post-quantum schemes of later packages. |
+| `SecretMemory` | `SecretMemory<T>`: `expose()` returns the secret and traps with `invalid state: secret wiped` after `wipe()`; `wipe()` overwrites the held storage; `is_wiped()`; `lock()` asks for page locking (a stub). |
+| `SymmetricKey`, `PrivateKey` | `SymmetricKey<Alg>` and `PrivateKey<Alg>` extend `SecretMemory<uint8[list]>` with `key_length()` and `public_key_bytes()`. `Alg` is the class of the primitive that uses the key. |
+| `CryptographicPrimitive` | `CryptographicPrimitive<Alg>` with `algorithm() -> Algorithm`. |
+| `StreamingDigest` | `StreamingDigest<D>`, where `D` is the implementing class: the static requirements `create()`, `output_length()` and `block_length()`, and `update(bytes)` and `finish()`. `finish` returns `output_length` bytes, and an `update` or `finish` after it traps with `invalid state: digest finished`. |
+| `ExtendableOutput` | `ExtendableOutput<D>: StreamingDigest<D>` adds `squeeze(count)`, which continues the output stream, and `read(max)` and `reader()`, a source in the shape `func(int) -> Result<uint8[list]>` that `Std.Io.BufferedReader` accepts. |
+| `AeadCipher` | `AeadCipher<Key, Nonce, Tag>`: `seal(nonce, plaintext, associated_data)` returns the ciphertext followed by the tag; `open(nonce, sealed, associated_data) -> Result<uint8[list]>` fails with a `Custom` error of code `crypto.authentication` and releases no plaintext. A nonce of the wrong length traps; `AesSiv` reports a nonce length of 0 and takes a nonce of any length, including none. |
+| `Signer`, `Verifier` | `Signer<PrivKey, Sig>` has `sign(message) -> Sig`. `Verifier<PubKey, Sig>` has `public_key()` and `verify(message, signature) -> bool`. |
+| `KeyEncapsulation` | `encapsulate(public_key) -> Encapsulation<SharedSecret, Ciphertext>` and `decapsulate(private_key, ciphertext) -> Result<SharedSecret>`. |
+| `KeyStoreProvider` | `KeyStoreProvider<KeyHandle>`: `provider_name`, `generate_key(algorithm, label)`, `sign`, `wrap_key`, `unwrap_key` and `delete_key`, each returning a `Result`. |
+
+### 21.2 `Std.Crypto.Core`
+
+| Module | Contract |
+| --- | --- |
+| `SecretBytes` | Holds a private copy of the bytes it is given. `expose()` returns the held list, `wipe()` overwrites it with zeros, and `length()` stays readable. `ct_equals(other)` compares contents without a data-dependent branch. `equals` and `hash_code` keep the identity defaults, so contents are never compared or hashed by accident. `to_string` is `SecretBytes(<n> bytes, <redacted>)`. `lock()` is a stub. |
+| `Secret` | `Secret<T>` wraps any value with an `eraser` function that `wipe()` calls once, because generic code cannot overwrite a value of unknown type. `zero_bytes` is the eraser for byte lists. `to_string` is `Secret(<redacted>)`, and `lock()` is a stub. |
+| `SecretKey` | `SecretKey<Alg>` implements `SymmetricKey<Alg>` over a `SecretBytes`. A cipher constructor that takes a `SymmetricKey<AesGcm>` rejects a key typed for another algorithm at compile time. |
+| `ConstantTime` | `ct_eq(a, b)` on byte lists (a length difference returns false at once, because lengths are public), `ct_eq_uint32`, `ct_less` and `ct_select` on `uint32` (results 0 or 1), and `ct_select_bytes`. Branch-free in source; the runtime does not guarantee constant time. |
+| `CryptoPolicy` | One process-wide `Policy`, which is `Modern` (the default), `Fips140_3` or `Cnsa2_0`. `set_policy`, `policy`, `allows(algorithm)`, `allowed_by(policy, algorithm)`, and `require(algorithm)`, which traps with `denied: <Algorithm> is not allowed under the <Policy> policy`. Each primitive calls `require` when it is created. `Modern` denies `Md5`, `Sha1` and `Rsa1024`. `Fips140_3` allows the FIPS-approved algorithms: SHA-2, SHA-3 and SP 800-185, HMAC, KMAC, CMAC, AES, GCM, FF1, HKDF, PBKDF2, and the approved public-key and post-quantum schemes. `Cnsa2_0` allows AES-256, SHA-384 and SHA-512, ML-KEM-1024 and ML-DSA-87, and HMAC, HKDF, PBKDF2 and Merkle trees over those hashes. The policy is checked at run time only. It is held in a `Std.Concurrent.AtomicInt64`, so primitives can be created in spawned tasks; set it at startup, because a change reaches each task at its next creation of a primitive. |
+
+### 21.3 `Std.Crypto.Random`
+
+| Module | Contract |
+| --- | --- |
+| `Entropy` | `os_bytes(count) -> Result<uint8[list]>` reads the operating system's generator through the existing host service `neura.entropy.fill` (requests of at most 1 MiB each) and needs the entropy capability. A denied capability is an `Io` error of kind `CapabilityDenied` with the message `entropy request failed`. `hardware_bytes(count)` (RDSEED or RNDR) and `fork_generation()` (fork and VM-clone detection) are stubs. `fused_seed()` is SHA-512 over a label, 64 OS bytes and 64 hardware bytes, so it traps while `hardware_bytes` is a stub. |
+| `ChaCha20Drbg` | A generator with fast key erasure. The key starts as SHA-256("Neura ChaCha20-DRBG seed" ‖ seed), for a seed of at least 32 bytes; `reseed(material)` sets it to SHA-256("Neura ChaCha20-DRBG reseed" ‖ key ‖ material). `fill(count)` takes the ChaCha20 keystream under the key with a zero nonce, uses its first 32 bytes as the next key, and returns the next `count` bytes. Also `next_uint32`, `next_uint64`, `next_below(bound)` (rejection sampling), `reseed_from_entropy() -> Result<Unit>`, and `wipe`. `from_entropy()` seeds from 32 OS bytes. `fork_safe()` also checks `fork_generation` before every output and reseeds after a change, so it traps until that stub is implemented. A seeded generator is reproducible, which makes it suitable for tests and for deterministic derivation; seed it from `os_bytes` for secrets. |
+
+### 21.4 `Std.Crypto.Hash`
+
+| Module | Contract |
+| --- | --- |
+| `Sha2` | `Sha224`, `Sha256`, `Sha384`, `Sha512` and `Sha512_256` (FIPS 180-4) implement `StreamingDigest`, with the functions `sha224(bytes)` through `sha512_256(bytes)`. `Sha256` runs the kernel of `Std.Digest.Sha256`, so the two modules share one implementation. The others are Neura code over the `uint32` and `uint64` recipes of [section 7.2](#72-arithmetic-without-wrapping-intrinsics). |
+| `Sha3` | `Sha3_224`, `Sha3_256`, `Sha3_384` and `Sha3_512` (FIPS 202) implement `StreamingDigest`. `Shake128` and `Shake256` implement `ExtendableOutput`, and `finish` returns 32 or 64 bytes. `CShake128` and `CShake256` (SP 800-185) take a function name and a customization string; with both empty they equal SHAKE. `TurboShake128` and `TurboShake256` (RFC 9861) run 12 rounds with a domain byte from 0x01 to 0x7F, 0x1F by default, and trap on any other. The functions are `sha3_224` through `sha3_512`, `shake128(bytes, length)`, `shake256`, `cshake128(bytes, length, function_name, customization)` and `cshake256`. |
+| `TupleHash` | `TupleHash128` and `TupleHash256` (SP 800-185, section 5) take the customization string, then `add(item)` for each item. `finish(length)` ends the hash, and `finish_xof(length)` with `squeeze` gives the XOF form. The functions are `tuple_hash128(items, length, customization)` and `tuple_hash128_xof`, and the same for 256. Item boundaries are part of the hash. |
+| `Blake3` | `Blake3` implements `ExtendableOutput`, and a 32-byte key gives the keyed mode. `hash(bytes, length)`, `keyed_hash(key, bytes, length)` and `derive_key(context, material, length)`. It is the serial reference algorithm, so the result equals the specification's but no SIMD or multithreading is used. |
+| `MerkleTree` | `MerkleTree<H: StreamingDigest<H>>` is append-only and hashes as RFC 6962 and RFC 9162, section 2.1 do: a leaf is H(0x00 ‖ data), a node is H(0x01 ‖ left ‖ right), and the empty tree is H(""). It has `append(data) -> index`, `size`, `leaf`, `root`, `root_at(size)`, `inclusion_proof(index, size)` and `consistency_proof(old_size, new_size)`. The module functions `leaf_hash<H>`, `node_hash<H>`, `verify_inclusion<H>` and `verify_consistency<H>` follow the algorithms of RFC 9162, sections 2.1.3.2 and 2.1.4.2. A root or proof costs time in proportion to the tree size. |
+
+Every digest checks the policy when it is created. An `update` after the output was read, or a second `finish` of a fixed-length digest, traps with `invalid state: digest finished`. No hardware acceleration (SHA-NI, AVX-512) is used.
+
+### 21.5 `Std.Crypto.Mac`
+
+| Module | Contract |
+| --- | --- |
+| `Authenticator` | The interface of every MAC here: `algorithm`, `tag_length`, `update(bytes)`, `finish() -> tag` and `verify(tag) -> bool`. `verify` compares in constant time and accepts only a tag of the full length, never a truncated one. An `update` after `finish` or `verify`, or a second `finish`, traps with `invalid state: mac finished`. |
+| `Hmac` | `Hmac<H: StreamingDigest<H>>(key)` (FIPS 198-1) over any digest, with `mac<H>(key, message)` and `verify<H>(key, message, tag)`. A key longer than the block is hashed first. The policy is checked for `Hmac` and for `H`. |
+| `Kmac` | `Kmac128` and `Kmac256` (SP 800-185, section 4). `new Kmac128(key)` gives a 32-byte tag (64 for `Kmac256`); `new Kmac128(key, customization, length)` takes any length of at least 4 bytes. `finish_xof(count)` and `squeeze` give KMACXOF. The functions are `kmac128(key, data, length, customization)`, `kmac128_xof` and the same for 256. |
+| `Poly1305` | The one-time authenticator of RFC 8439 under a 32-byte key, with `mac(key, message)`. The key must not be reused. The final reduction selects with a mask. |
+| `AesCmac` | AES-CMAC (SP 800-38B, RFC 4493) with 16-, 24- or 32-byte keys, and `mac(key, message)`. |
+
+### 21.6 `Std.Crypto.Kdf`
+
+| Module | Contract |
+| --- | --- |
+| `Hkdf` | RFC 5869 over any digest: `extract<H>(salt, input_key)` (an empty salt is HashLen zero bytes), `expand<H>(prk, info, length)` (traps above 255 × HashLen), `derive<H>(salt, input_key, info, length)`, and `expand_label<H>(prk, label, length)`, which puts a domain-separation label in `info`. |
+| `Pbkdf2` | `derive<H>(password, salt, iterations, length)` (SP 800-132, RFC 8018). Fewer than one iteration traps. |
+| `Scrypt` | `derive(password, salt, n, r, p, length)` (RFC 7914). It traps when N is not a power of two above 1, when r·p ≥ 2^30, or when 128·r·N exceeds 1 GiB. |
+| `Argon2` | Argon2id version 0x13 (RFC 9106). `Argon2Params(memory_kib, iterations, parallelism, tag_length)` is an immutable value that traps on out-of-range values. `argon2id(password, salt, params)` and `argon2id_with(password, salt, secret, associated_data, params)`. A salt under 8 bytes traps. Lanes are filled one after another, which gives the result of parallel filling. Argon2d and Argon2i are not offered. |
+| `Balloon` | `derive<H>(password, salt, space_cost, time_cost)`, single-buffer Balloon hashing with delta = 3 over any digest. The paper leaves the encodings open. This library uses 8-byte little-endian counters and indices, concatenated hash inputs, and `to_int` as the first 8 digest bytes little-endian modulo `space_cost`. No standard test vectors exist. |
+| `Phc` | `PhcString(id, version, names, values, salt, hash)` and `parse(text) -> Result<PhcString>` for the PHC string format (`$id$v=19$m=65536,t=3,p=4$salt$hash`, B64 without padding). Malformed text is a `Parse` error at the offending offset. `to_string` is the canonical encoding, which `equals` and `hash_code` use. |
+| `PasswordHash` | `hash_password(password, salt, params)` gives an argon2id PHC string; `hash_password_scrypt(password, salt, log2_n, r, p, length)` gives a scrypt one. `verify_password(password, encoded) -> Result<bool>` handles argon2id v=19 and scrypt and compares in constant time; an unknown function or bad parameters is `Custom` code `crypto.unsupported`. `needs_rehash(encoded, wanted)` is true unless the string is argon2id v=19 with exactly `wanted`'s parameters. |
+| `Calibration` | `calibrate_argon2id(clock, target, parallelism, max_memory_kib) -> Result<Argon2Params>` measures on the given `Std.Time` clock. It starts at 8 KiB per lane and one pass, doubles memory while a run is faster than the target and within the cap, then adds passes up to 10. Its result depends on the host and is not deterministic. |
+
+### 21.7 `Std.Crypto.Symmetric`
+
+Raw ECB and CBC modes are not exposed. Every AEAD implements `AeadCipher<SymmetricKey<C>, uint8[list], uint8[list]>`, where `C` is its own class. A constructor takes a `SymmetricKey<C>` (such as `SecretKey<AesGcm>`) or raw key bytes, and a key of the wrong length traps. `seal` returns the ciphertext and then the tag, except for `AesSiv`, which puts its synthetic IV first. `open` compares tags in constant time. A failed `open` is `Custom` code `crypto.authentication` and releases no plaintext. Each cipher checks the policy for its variant, such as `Aes128Gcm` or `Aes256Gcm`, when it is created.
+
+| Module | Contract |
+| --- | --- |
+| `AesBlock` | `AesBlock(key)`: the AES-128, AES-192 or AES-256 block cipher (FIPS 197), with `encrypt_block` and `decrypt_block` on 16-byte blocks. It is a building block, not an encryption mode. |
+| `AesGcm` | AES-GCM (SP 800-38D) with 16-, 24- or 32-byte keys, 12-byte nonces only, and 16-byte tags. A nonce must never repeat under one key. |
+| `AesGcmSiv` | AES-GCM-SIV (RFC 8452) with 16- or 32-byte keys, 12-byte nonces and 16-byte tags. A repeated nonce reveals only whether two messages were equal. |
+| `AesSiv` | Deterministic AEAD (RFC 5297) with 32-, 48- or 64-byte keys. Through `AeadCipher`, the associated-data items are `[data]`, or `[data, nonce]` when the nonce is not empty. `seal_items(items, plaintext)` and `open_items` take RFC 5297's vector of up to 126 items. The output is the 16-byte synthetic IV followed by the ciphertext. Equal inputs give equal outputs, which suits exact-match lookups on encrypted columns. |
+| `ChaCha20` | Hazmat functions without authentication: `xor(key, nonce12, counter, bytes)` (RFC 8439), `xchacha20_xor(key, nonce24, counter, bytes)`, and `hchacha20(key, nonce16)`. A block counter that would pass 2^32 - 1 traps. |
+| `ChaCha20Poly1305`, `XChaCha20Poly1305` | RFC 8439 with 12-byte nonces, and the 24-byte-nonce variant of draft-irtf-cfrg-xchacha-03, which derives a subkey with HChaCha20. Random 24-byte nonces do not collide in practice. |
+| `OnlineCipher` | STREAM over any AEAD whose nonce is at least 12 bytes. Segment *i* uses the nonce prefix ‖ *i* as a big-endian `uint32` ‖ a last-segment byte (1 on the last segment, otherwise 0). The prefix is 5 bytes shorter than the AEAD's nonce. `StreamEncryptor<K>(aead, prefix, data)` has `seal_segment(plaintext, last_segment)` and `is_ended`. `StreamDecryptor<K>` has `open_segment(sealed, last_segment) -> Result` and `finish() -> Result<Unit>`, which fails when the last segment was never seen. Truncated, reordered, altered or appended segments fail. `seal_segments` and `open_segments` work on a whole message. Each segment is processed in memory proportional to its own length. |
+| `Ff1` | FF1 format-preserving encryption (SP 800-38G) over AES. `Ff1(key, radix)` takes a radix from 2 to 65536 and has the fields `radix` and `min_length`, the shortest length with radix^length ≥ 10^6. `encrypt(numerals, tweak)` and `decrypt` take numerals as `int[list]`. `encrypt_text` and `decrypt_text` take text in the digits and lowercase letters 0-9a-z cut to the radix (radix 36 at most) and return `Result<string>`; a bad character or a short input is an `Encoding` error. |

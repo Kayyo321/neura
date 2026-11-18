@@ -100,6 +100,59 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.Variadic`](Stdlib-Core-Variadic) | [Contracts](Stdlib-Core-Variadic#detailed-contracts) | [Declarations](Stdlib-Core-Variadic#exported-declarations) |
 | [`Std.Core.Version`](Stdlib-Core-Version) | [Contracts](Stdlib-Core-Version#detailed-contracts) | [Declarations](Stdlib-Core-Version#exported-declarations) |
 
+### `Std.Crypto`
+
+Hashes, MACs, key derivation, authenticated encryption, and secure random generation; see [section 21](Stdlib-Design#21-stdcrypto).
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Crypto.AeadCipher`](Stdlib-Crypto-AeadCipher) | [Contracts](Stdlib-Crypto-AeadCipher#detailed-contracts) | [Declarations](Stdlib-Crypto-AeadCipher#exported-declarations) |
+| [`Std.Crypto.Algorithm`](Stdlib-Crypto-Algorithm) | [Contracts](Stdlib-Crypto-Algorithm#detailed-contracts) | [Declarations](Stdlib-Crypto-Algorithm#exported-declarations) |
+| [`Std.Crypto.Core.ConstantTime`](Stdlib-Crypto-ConstantTime) | [Contracts](Stdlib-Crypto-ConstantTime#detailed-contracts) | [Declarations](Stdlib-Crypto-ConstantTime#exported-declarations) |
+| [`Std.Crypto.Core.CryptoPolicy`](Stdlib-Crypto-CryptoPolicy) | [Contracts](Stdlib-Crypto-CryptoPolicy#detailed-contracts) | [Declarations](Stdlib-Crypto-CryptoPolicy#exported-declarations) |
+| [`Std.Crypto.Core.SecretBytes`](Stdlib-Crypto-SecretBytes) | [Contracts](Stdlib-Crypto-SecretBytes#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretBytes#exported-declarations) |
+| [`Std.Crypto.Core.SecretKey`](Stdlib-Crypto-SecretKey) | [Contracts](Stdlib-Crypto-SecretKey#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretKey#exported-declarations) |
+| [`Std.Crypto.Core.Secret`](Stdlib-Crypto-Secret) | [Contracts](Stdlib-Crypto-Secret#detailed-contracts) | [Declarations](Stdlib-Crypto-Secret#exported-declarations) |
+| [`Std.Crypto.CryptographicPrimitive`](Stdlib-Crypto-CryptographicPrimitive) | [Contracts](Stdlib-Crypto-CryptographicPrimitive#detailed-contracts) | [Declarations](Stdlib-Crypto-CryptographicPrimitive#exported-declarations) |
+| [`Std.Crypto.ExtendableOutput`](Stdlib-Crypto-ExtendableOutput) | [Contracts](Stdlib-Crypto-ExtendableOutput#detailed-contracts) | [Declarations](Stdlib-Crypto-ExtendableOutput#exported-declarations) |
+| [`Std.Crypto.Hash.Blake3`](Stdlib-Crypto-Blake3) | [Contracts](Stdlib-Crypto-Blake3#detailed-contracts) | [Declarations](Stdlib-Crypto-Blake3#exported-declarations) |
+| [`Std.Crypto.Hash.MerkleTree`](Stdlib-Crypto-MerkleTree) | [Contracts](Stdlib-Crypto-MerkleTree#detailed-contracts) | [Declarations](Stdlib-Crypto-MerkleTree#exported-declarations) |
+| [`Std.Crypto.Hash.Sha2`](Stdlib-Crypto-Sha2) | [Contracts](Stdlib-Crypto-Sha2#detailed-contracts) | [Declarations](Stdlib-Crypto-Sha2#exported-declarations) |
+| [`Std.Crypto.Hash.Sha3`](Stdlib-Crypto-Sha3) | [Contracts](Stdlib-Crypto-Sha3#detailed-contracts) | [Declarations](Stdlib-Crypto-Sha3#exported-declarations) |
+| [`Std.Crypto.Hash.TupleHash`](Stdlib-Crypto-TupleHash) | [Contracts](Stdlib-Crypto-TupleHash#detailed-contracts) | [Declarations](Stdlib-Crypto-TupleHash#exported-declarations) |
+| [`Std.Crypto.Kdf.Argon2`](Stdlib-Crypto-Argon2) | [Contracts](Stdlib-Crypto-Argon2#detailed-contracts) | [Declarations](Stdlib-Crypto-Argon2#exported-declarations) |
+| [`Std.Crypto.Kdf.Balloon`](Stdlib-Crypto-Balloon) | [Contracts](Stdlib-Crypto-Balloon#detailed-contracts) | [Declarations](Stdlib-Crypto-Balloon#exported-declarations) |
+| [`Std.Crypto.Kdf.Calibration`](Stdlib-Crypto-Calibration) | [Contracts](Stdlib-Crypto-Calibration#detailed-contracts) | [Declarations](Stdlib-Crypto-Calibration#exported-declarations) |
+| [`Std.Crypto.Kdf.Hkdf`](Stdlib-Crypto-Hkdf) | [Contracts](Stdlib-Crypto-Hkdf#detailed-contracts) | [Declarations](Stdlib-Crypto-Hkdf#exported-declarations) |
+| [`Std.Crypto.Kdf.PasswordHash`](Stdlib-Crypto-PasswordHash) | [Contracts](Stdlib-Crypto-PasswordHash#detailed-contracts) | [Declarations](Stdlib-Crypto-PasswordHash#exported-declarations) |
+| [`Std.Crypto.Kdf.Pbkdf2`](Stdlib-Crypto-Pbkdf2) | [Contracts](Stdlib-Crypto-Pbkdf2#detailed-contracts) | [Declarations](Stdlib-Crypto-Pbkdf2#exported-declarations) |
+| [`Std.Crypto.Kdf.Phc`](Stdlib-Crypto-Phc) | [Contracts](Stdlib-Crypto-Phc#detailed-contracts) | [Declarations](Stdlib-Crypto-Phc#exported-declarations) |
+| [`Std.Crypto.Kdf.Scrypt`](Stdlib-Crypto-Scrypt) | [Contracts](Stdlib-Crypto-Scrypt#detailed-contracts) | [Declarations](Stdlib-Crypto-Scrypt#exported-declarations) |
+| [`Std.Crypto.KeyEncapsulation`](Stdlib-Crypto-KeyEncapsulation) | [Contracts](Stdlib-Crypto-KeyEncapsulation#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyEncapsulation#exported-declarations) |
+| [`Std.Crypto.KeyStoreProvider`](Stdlib-Crypto-KeyStoreProvider) | [Contracts](Stdlib-Crypto-KeyStoreProvider#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyStoreProvider#exported-declarations) |
+| [`Std.Crypto.Mac.AesCmac`](Stdlib-Crypto-AesCmac) | [Contracts](Stdlib-Crypto-AesCmac#detailed-contracts) | [Declarations](Stdlib-Crypto-AesCmac#exported-declarations) |
+| [`Std.Crypto.Mac.Authenticator`](Stdlib-Crypto-Authenticator) | [Contracts](Stdlib-Crypto-Authenticator#detailed-contracts) | [Declarations](Stdlib-Crypto-Authenticator#exported-declarations) |
+| [`Std.Crypto.Mac.Hmac`](Stdlib-Crypto-Hmac) | [Contracts](Stdlib-Crypto-Hmac#detailed-contracts) | [Declarations](Stdlib-Crypto-Hmac#exported-declarations) |
+| [`Std.Crypto.Mac.Kmac`](Stdlib-Crypto-Kmac) | [Contracts](Stdlib-Crypto-Kmac#detailed-contracts) | [Declarations](Stdlib-Crypto-Kmac#exported-declarations) |
+| [`Std.Crypto.Mac.Poly1305`](Stdlib-Crypto-Poly1305) | [Contracts](Stdlib-Crypto-Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-Poly1305#exported-declarations) |
+| [`Std.Crypto.PrivateKey`](Stdlib-Crypto-PrivateKey) | [Contracts](Stdlib-Crypto-PrivateKey#detailed-contracts) | [Declarations](Stdlib-Crypto-PrivateKey#exported-declarations) |
+| [`Std.Crypto.Random.ChaCha20Drbg`](Stdlib-Crypto-ChaCha20Drbg) | [Contracts](Stdlib-Crypto-ChaCha20Drbg#detailed-contracts) | [Declarations](Stdlib-Crypto-ChaCha20Drbg#exported-declarations) |
+| [`Std.Crypto.Random.Entropy`](Stdlib-Crypto-Entropy) | [Contracts](Stdlib-Crypto-Entropy#detailed-contracts) | [Declarations](Stdlib-Crypto-Entropy#exported-declarations) |
+| [`Std.Crypto.SecretMemory`](Stdlib-Crypto-SecretMemory) | [Contracts](Stdlib-Crypto-SecretMemory#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretMemory#exported-declarations) |
+| [`Std.Crypto.Signer`](Stdlib-Crypto-Signer) | [Contracts](Stdlib-Crypto-Signer#detailed-contracts) | [Declarations](Stdlib-Crypto-Signer#exported-declarations) |
+| [`Std.Crypto.StreamingDigest`](Stdlib-Crypto-StreamingDigest) | [Contracts](Stdlib-Crypto-StreamingDigest#detailed-contracts) | [Declarations](Stdlib-Crypto-StreamingDigest#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesBlock`](Stdlib-Crypto-AesBlock) | [Contracts](Stdlib-Crypto-AesBlock#detailed-contracts) | [Declarations](Stdlib-Crypto-AesBlock#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesGcmSiv`](Stdlib-Crypto-AesGcmSiv) | [Contracts](Stdlib-Crypto-AesGcmSiv#detailed-contracts) | [Declarations](Stdlib-Crypto-AesGcmSiv#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesGcm`](Stdlib-Crypto-AesGcm) | [Contracts](Stdlib-Crypto-AesGcm#detailed-contracts) | [Declarations](Stdlib-Crypto-AesGcm#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesSiv`](Stdlib-Crypto-AesSiv) | [Contracts](Stdlib-Crypto-AesSiv#detailed-contracts) | [Declarations](Stdlib-Crypto-AesSiv#exported-declarations) |
+| [`Std.Crypto.Symmetric.ChaCha20Poly1305`](Stdlib-Crypto-ChaCha20Poly1305) | [Contracts](Stdlib-Crypto-ChaCha20Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-ChaCha20Poly1305#exported-declarations) |
+| [`Std.Crypto.Symmetric.ChaCha20`](Stdlib-Crypto-ChaCha20) | [Contracts](Stdlib-Crypto-ChaCha20#detailed-contracts) | [Declarations](Stdlib-Crypto-ChaCha20#exported-declarations) |
+| [`Std.Crypto.Symmetric.Ff1`](Stdlib-Crypto-Ff1) | [Contracts](Stdlib-Crypto-Ff1#detailed-contracts) | [Declarations](Stdlib-Crypto-Ff1#exported-declarations) |
+| [`Std.Crypto.Symmetric.OnlineCipher`](Stdlib-Crypto-OnlineCipher) | [Contracts](Stdlib-Crypto-OnlineCipher#detailed-contracts) | [Declarations](Stdlib-Crypto-OnlineCipher#exported-declarations) |
+| [`Std.Crypto.Symmetric.XChaCha20Poly1305`](Stdlib-Crypto-XChaCha20Poly1305) | [Contracts](Stdlib-Crypto-XChaCha20Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-XChaCha20Poly1305#exported-declarations) |
+| [`Std.Crypto.SymmetricKey`](Stdlib-Crypto-SymmetricKey) | [Contracts](Stdlib-Crypto-SymmetricKey#detailed-contracts) | [Declarations](Stdlib-Crypto-SymmetricKey#exported-declarations) |
+| [`Std.Crypto.Verifier`](Stdlib-Crypto-Verifier) | [Contracts](Stdlib-Crypto-Verifier#detailed-contracts) | [Declarations](Stdlib-Crypto-Verifier#exported-declarations) |
+
 ### `Std.Digest`
 
 | Module | Detailed contracts | Exported declarations |
@@ -329,3 +382,11 @@ The [complete specification](Stdlib-Design) has these sections.
   - [18.12 Concurrency](Stdlib-Design#1812-concurrency)
 - [19. `Std.Concurrent`](Stdlib-Design#19-stdconcurrent)
 - [20. `Std.Events`](Stdlib-Design#20-stdevents)
+- [21. `Std.Crypto`](Stdlib-Design#21-stdcrypto)
+  - [21.1 Contracts](Stdlib-Design#211-contracts)
+  - [21.2 `Std.Crypto.Core`](Stdlib-Design#212-stdcryptocore)
+  - [21.3 `Std.Crypto.Random`](Stdlib-Design#213-stdcryptorandom)
+  - [21.4 `Std.Crypto.Hash`](Stdlib-Design#214-stdcryptohash)
+  - [21.5 `Std.Crypto.Mac`](Stdlib-Design#215-stdcryptomac)
+  - [21.6 `Std.Crypto.Kdf`](Stdlib-Design#216-stdcryptokdf)
+  - [21.7 `Std.Crypto.Symmetric`](Stdlib-Design#217-stdcryptosymmetric)

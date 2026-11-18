@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: Poly1305 key must be 32 bytes
+let poly1305 = import:Std.Crypto.Mac.Poly1305;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = poly1305.mac(new([1, 2, 3]), new);
+        return program.ExitCode.Ok;
+    };
+);

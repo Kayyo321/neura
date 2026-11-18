@@ -1,0 +1,54 @@
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The Salsa20/8 core of RFC 7914, section 3, applied in place to 16 words. Internal: scrypt uses it.
+#Since("0.3.0")
+export let Salsa20 = module (
+    let step = func(x: uint32[list], target: int, a: int, b: int, shift: int) {
+        last sum = words.add32(x[a], x[b]);
+        x[target] = x[target] ^ ((sum << shift) | (sum >> (32 - shift)));
+    };
+
+    /// @brief Replaces the 16 words at `offset` of `block` with Salsa20/8 of them; `x` is 16 words of scratch.
+    export let core8 = func(block: uint32[list], offset: int, x: uint32[list]) {
+        for (let i = 0; i < 16; i++) {
+            x[i] = block[offset + i];
+        }
+        for (let round = 0; round < 8; round += 2) {
+            step(x, 4, 0, 12, 7);
+            step(x, 8, 4, 0, 9);
+            step(x, 12, 8, 4, 13);
+            step(x, 0, 12, 8, 18);
+            step(x, 9, 5, 1, 7);
+            step(x, 13, 9, 5, 9);
+            step(x, 1, 13, 9, 13);
+            step(x, 5, 1, 13, 18);
+            step(x, 14, 10, 6, 7);
+            step(x, 2, 14, 10, 9);
+            step(x, 6, 2, 14, 13);
+            step(x, 10, 6, 2, 18);
+            step(x, 3, 15, 11, 7);
+            step(x, 7, 3, 15, 9);
+            step(x, 11, 7, 3, 13);
+            step(x, 15, 11, 7, 18);
+            step(x, 1, 0, 3, 7);
+            step(x, 2, 1, 0, 9);
+            step(x, 3, 2, 1, 13);
+            step(x, 0, 3, 2, 18);
+            step(x, 6, 5, 4, 7);
+            step(x, 7, 6, 5, 9);
+            step(x, 4, 7, 6, 13);
+            step(x, 5, 4, 7, 18);
+            step(x, 11, 10, 9, 7);
+            step(x, 8, 11, 10, 9);
+            step(x, 9, 8, 11, 13);
+            step(x, 10, 9, 8, 18);
+            step(x, 12, 15, 14, 7);
+            step(x, 13, 12, 15, 9);
+            step(x, 14, 13, 12, 13);
+            step(x, 15, 14, 13, 18);
+        }
+        for (let i = 0; i < 16; i++) {
+            block[offset + i] = words.add32(block[offset + i], x[i]);
+        }
+    };
+);

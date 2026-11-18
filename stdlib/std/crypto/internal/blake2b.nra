@@ -1,0 +1,167 @@
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief BLAKE2b of RFC 7693 with an output of 1 to 64 bytes and an optional key of up to 64 bytes, and the
+/// variable-length hash H' of Argon2 (RFC 9106, section 3.3). Internal. The initial value is SHA-512's
+/// (scripts/crypto-vectors/constants.py); the message schedule SIGMA is RFC 7693's, checked by the Argon2
+/// known answers (and, when this table was written, by a Python BLAKE2b compared with hashlib.blake2b).
+#Since("0.3.0")
+export let Blake2b = module (
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let iv_table = func -> uint64[list] => new([
+        7640891576956012808, 13503953896175478587, 4354685564936845355, 11912009170470909681,
+        5840696475078001361, 11170449401992604703, 2270897969802886507, 6620516959819538809
+    ]);
+
+    /// @brief A new list of the table (a function, so that tasks can use it: arrays are not transferable).
+    let sigma_table = func -> int[list] => new([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
+        11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
+        7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
+        9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
+        2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
+        12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
+        13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
+        6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
+        10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0
+    ]);
+
+    let mix = func(v: uint64[list], a: int, b: int, c: int, d: int, x: uint64, y: uint64) {
+        v[a] = words.add64(words.add64(v[a], v[b]), x);
+        let t = v[d] ^ v[a];
+        v[d] = (t >> 32) | (t << 32);
+        v[c] = words.add64(v[c], v[d]);
+        t = v[b] ^ v[c];
+        v[b] = (t >> 24) | (t << 40);
+        v[a] = words.add64(words.add64(v[a], v[b]), y);
+        t = v[d] ^ v[a];
+        v[d] = (t >> 16) | (t << 48);
+        v[c] = words.add64(v[c], v[d]);
+        t = v[b] ^ v[c];
+        v[b] = (t >> 63) | (t << 1);
+    };
+
+    /// @brief A running BLAKE2b hash.
+    export let Hasher = class (
+        let iv: uint64[list] = iv_table();
+        let sigma: int[list] = sigma_table();
+        let h: uint64[list] = new;
+        let v: uint64[list] = new;
+        let m: uint64[list] = new;
+        let pending: uint8[list] = new;
+        let total: uint64 = 0;
+        let out_length: int = 0;
+
+        /// @brief An unkeyed hash with `output_length` bytes (1 to 64).
+        export let init = func(output_length: int) {
+            setup(output_length, new);
+        } or func(output_length: int, key: uint8[list]) {
+            setup(output_length, key);
+        };
+
+        let setup = func(output_length: int, key: uint8[list]) {
+            if (output_length < 1 || output_length > 64 || key.length > 64) {
+                trap_with_message("invalid argument: BLAKE2b output must be 1 to 64 bytes and key at most 64");
+            }
+            out_length = output_length;
+            for (let w in iv) {
+                h.append(w);
+            }
+            h[0] = h[0] ^ 16842752 ^ ((key.length as uint64) << 8) ^ (output_length as uint64);
+            for (let i = 0; i < 16; i++) {
+                v.append(0);
+                m.append(0);
+            }
+            if (key.length > 0) {
+                let block = words.copy(key);
+                while (block.length < 128) {
+                    block.append(0);
+                }
+                update(block);
+            }
+        };
+
+        /// @brief Adds the bytes. The last block is held back until `finish`.
+        export let update = func(bytes: uint8[list]) {
+            for (let b in bytes) {
+                if (pending.length == 128) {
+                    total += 128;
+                    compress(pending, false);
+                    pending = new;
+                }
+                pending.append(b);
+            }
+        };
+
+        /// @brief The hash.
+        export let finish = func -> uint8[list] {
+            total += pending.length as uint64;
+            let block = pending;
+            while (block.length < 128) {
+                block.append(0);
+            }
+            compress(block, true);
+            let out: uint8[list] = new;
+            for (let w in h) {
+                words.append64_le(out, w);
+            }
+            return words.slice(out, 0, out_length);
+        };
+
+        let compress = func(block: uint8[list], final_block: bool) {
+            for (let i = 0; i < 16; i++) {
+                m[i] = words.load64_le(block, 8 * i);
+            }
+            for (let i = 0; i < 8; i++) {
+                v[i] = h[i];
+                v[i + 8] = iv[i];
+            }
+            v[12] = v[12] ^ total;
+            if (final_block) {
+                v[14] = ~v[14];
+            }
+            for (let round = 0; round < 12; round++) {
+                last s = 16 * (round % 10);
+                mix(v, 0, 4, 8, 12, m[sigma[s]], m[sigma[s + 1]]);
+                mix(v, 1, 5, 9, 13, m[sigma[s + 2]], m[sigma[s + 3]]);
+                mix(v, 2, 6, 10, 14, m[sigma[s + 4]], m[sigma[s + 5]]);
+                mix(v, 3, 7, 11, 15, m[sigma[s + 6]], m[sigma[s + 7]]);
+                mix(v, 0, 5, 10, 15, m[sigma[s + 8]], m[sigma[s + 9]]);
+                mix(v, 1, 6, 11, 12, m[sigma[s + 10]], m[sigma[s + 11]]);
+                mix(v, 2, 7, 8, 13, m[sigma[s + 12]], m[sigma[s + 13]]);
+                mix(v, 3, 4, 9, 14, m[sigma[s + 14]], m[sigma[s + 15]]);
+            }
+            for (let i = 0; i < 8; i++) {
+                h[i] = h[i] ^ v[i] ^ v[i + 8];
+            }
+        };
+
+        export let.override to_string = func -> string => "Blake2b.Hasher";
+    );
+
+    /// @brief BLAKE2b with `length` bytes of output (1 to 64) of the bytes.
+    export let hash = func(bytes: uint8[list], length: int) -> uint8[list] {
+        let hasher = new Hasher(length);
+        hasher.update(bytes);
+        return hasher.finish();
+    };
+
+    /// @brief H'^T(X) of RFC 9106, section 3.3: `length` bytes (at least 1) of variable-length output.
+    export let long_hash = func(bytes: uint8[list], length: int) -> uint8[list] {
+        let input: uint8[list] = new;
+        words.append32_le(input, length as uint32);
+        words.append_all(input, bytes);
+        if (length <= 64) {
+            return hash(input, length);
+        }
+        last r = (length + 31) / 32 - 2;
+        let v = hash(input, 64);
+        let out = words.slice(v, 0, 32);
+        for (let i = 2; i <= r; i++) {
+            v = hash(v, 64);
+            words.append_all(out, words.slice(v, 0, 32));
+        }
+        words.append_all(out, hash(v, length - 32 * r));
+        return out;
+    };
+);

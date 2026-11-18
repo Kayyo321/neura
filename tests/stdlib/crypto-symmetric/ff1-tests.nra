@@ -1,0 +1,47 @@
+let ff1 = import:Std.Crypto.Symmetric.Ff1;
+let hex = import:Std.Encoding.Hex;
+let int32s = import:Std.Core.Int32;
+let test = import:Std.Test;
+let vectors = import:SymmetricVectors;
+
+// FF1 against every sample of NIST's FF1samples.pdf (support/symmetric-vectors.nra).
+let Ff1Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_nist_samples = func {
+        last rows = vectors.ff1;
+        for (let i = 0; i < rows.length; i += 5) {
+            let cipher = new ff1.Ff1(decode(rows[i]), test.assert_ok(int32s.parse(rows[i + 1])));
+            last tweak = decode(rows[i + 2]);
+            test.assert_equal_string(rows[i + 4], test.assert_ok(cipher.encrypt_text(rows[i + 3], tweak)));
+            test.assert_equal_string(rows[i + 3], test.assert_ok(cipher.decrypt_text(rows[i + 4], tweak)));
+        }
+        test.assert_equal_int32(45, rows.length);
+    };
+
+    // A large radix through the numeral form round-trips and keeps every numeral below the radix.
+    export let test_large_radix_round_trip = func {
+        let cipher = new ff1.Ff1(decode("2b7e151628aed2a6abf7158809cf4f3c"), 65536);
+        test.assert_equal_int32(2, cipher.min_length);
+        let message: int[list] = new([0, 65535, 12345, 7, 40000]);
+        last sealed = cipher.encrypt(message, new([1, 2, 3]));
+        test.assert_equal_int32(5, sealed.length);
+        for (let x in sealed) {
+            test.assert(x >= 0 && x < 65536);
+        }
+        last opened = cipher.decrypt(sealed, new([1, 2, 3]));
+        for (let k = 0; k < 5; k++) {
+            test.assert_equal_int32(message[k], opened[k]);
+        }
+        let binary = new ff1.Ff1(decode("2b7e151628aed2a6abf7158809cf4f3c"), 2);
+        test.assert_equal_int32(20, binary.min_length);
+    };
+
+    export let test_text_errors = func {
+        let cipher = new ff1.Ff1(decode("2b7e151628aed2a6abf7158809cf4f3c"), 10);
+        let _ = test.assert_err(cipher.encrypt_text("0123-45678", new));
+        let _ = test.assert_err(cipher.encrypt_text("12345", new));
+        test.assert_equal_int32(6, cipher.min_length);
+        test.assert_equal_string("Ff1(radix 10, <redacted>)", cipher.to_string());
+    };
+);

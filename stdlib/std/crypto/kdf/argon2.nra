@@ -1,0 +1,312 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let blake2b = import:Std.Crypto.Internal.Blake2b;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let hashing = import:Std.Core.Hash;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Argon2id, version 0x13, of RFC 9106 (Stdlib.md section 21.6).
+///
+/// Memory is one list of 64-bit words, 128 per 1 KiB block; lanes are filled one after another within each
+/// slice, which gives the same result as filling them in parallel. Argon2d and Argon2i are not offered.
+/// @see [Std.Crypto.Kdf.Argon2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Argon2)
+#Since("0.3.0")
+export let Argon2 = module (
+    /// @brief The cost parameters of an Argon2id hash.
+    #[Final, Immutable, Since("0.3.0")]
+    export let Argon2Params = class (
+        /// @brief Memory in KiB (m), at least 8 per lane.
+        export last memory_kib: int;
+        /// @brief Passes over memory (t), at least 1.
+        export last iterations: int;
+        /// @brief Lanes (p), 1 to 2^24 - 1.
+        export last parallelism: int;
+        /// @brief Tag length in bytes (T), at least 4.
+        export last tag_length: int;
+
+        /// @brief Stores the parameters; a value out of range traps with "invalid argument: Argon2 <name>".
+        export let init = func(memory: int, passes: int, lanes: int, length: int) {
+            if (lanes < 1 || lanes > 16777215) {
+                trap_with_message("invalid argument: Argon2 parallelism");
+            }
+            if (memory < 8 * lanes) {
+                trap_with_message("invalid argument: Argon2 memory");
+            }
+            if (passes < 1) {
+                trap_with_message("invalid argument: Argon2 iterations");
+            }
+            if (length < 4) {
+                trap_with_message("invalid argument: Argon2 tag length");
+            }
+            memory_kib = memory;
+            iterations = passes;
+            parallelism = lanes;
+            tag_length = length;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Argon2Params)) {
+                return false;
+            }
+            last params = other as Argon2Params;
+            return memory_kib == params.memory_kib && iterations == params.iterations
+                && parallelism == params.parallelism && tag_length == params.tag_length;
+        };
+
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(hashing.combine(
+            hashing.combine(17, memory_kib.hash_code()), iterations.hash_code()), parallelism.hash_code()),
+            tag_length.hash_code());
+
+        export let.override to_string = func -> string =>
+            $"Argon2Params(m={memory_kib}, t={iterations}, p={parallelism}, length={tag_length})";
+    );
+
+    /// @brief The Argon2id tag of the password with the salt (at least 8 bytes) and parameters.
+    #[NoDiscard, Since("0.3.0")]
+    export let argon2id = func(password: uint8[list], salt: uint8[list], params: Argon2Params) -> uint8[list] =>
+        argon2id_with(password, salt, new, new, params);
+
+    /// @brief Argon2id with the optional secret value K and associated data X of RFC 9106, section 3.1.
+    #[NoDiscard, Since("0.3.0")]
+    export let argon2id_with = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
+            associated_data: uint8[list], params: Argon2Params) -> uint8[list] {
+        crypto_policy.require(Algorithm.Argon2id);
+        if (salt.length < 8) {
+            trap_with_message("invalid argument: Argon2 salt must be at least 8 bytes");
+        }
+        let filler = new Filler(params);
+        return filler.run(password, salt, secret, associated_data);
+    };
+
+    /// @brief The working state of one Argon2id computation.
+    let Filler = class (
+        last lanes: int;
+        last passes: int;
+        last tag_length: int;
+        last memory_kib: int;
+        /// @brief m' = 4p floor(m / 4p), the number of blocks.
+        last blocks: int;
+        /// @brief q = m' / p, the blocks per lane.
+        last lane_length: int;
+        /// @brief q / 4.
+        last segment: int;
+        let memory: uint64[list] = new;
+        let r: uint64[list] = new;
+        let z: uint64[list] = new;
+        let input: uint64[list] = new;
+        let address: uint64[list] = new;
+        let zero: uint64[list] = new;
+        /// @brief The word positions of the eight row and eight column applications of P, 16 each.
+        let order: int[list] = new;
+
+        export let init = func(params: Argon2Params) {
+            lanes = params.parallelism;
+            passes = params.iterations;
+            tag_length = params.tag_length;
+            memory_kib = params.memory_kib;
+            blocks = 4 * lanes * (params.memory_kib / (4 * lanes));
+            lane_length = blocks / lanes;
+            segment = lane_length / 4;
+            for (let i = 0; i < 128; i++) {
+                r.append(0);
+                z.append(0);
+                input.append(0);
+                address.append(0);
+                zero.append(0);
+            }
+            for (let row = 0; row < 8; row++) {
+                for (let k = 0; k < 16; k++) {
+                    order.append(16 * row + k);
+                }
+            }
+            for (let column = 0; column < 8; column++) {
+                for (let k = 0; k < 8; k++) {
+                    order.append(2 * column + 16 * k);
+                    order.append(2 * column + 16 * k + 1);
+                }
+            }
+        };
+
+        export let run = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
+                associated_data: uint8[list]) -> uint8[list] {
+            let h0_input: uint8[list] = new;
+            words.append32_le(h0_input, lanes as uint32);
+            words.append32_le(h0_input, tag_length as uint32);
+            words.append32_le(h0_input, memory_kib as uint32);
+            words.append32_le(h0_input, passes as uint32);
+            words.append32_le(h0_input, 19);
+            words.append32_le(h0_input, 2);
+            for (let part in [password, salt, secret, associated_data]) {
+                words.append32_le(h0_input, part.length as uint32);
+                words.append_all(h0_input, part);
+            }
+            last h0 = blake2b.hash(h0_input, 64);
+            words.wipe(h0_input);
+            for (let i = 0; i < blocks * 128; i++) {
+                memory.append(0);
+            }
+            for (let lane = 0; lane < lanes; lane++) {
+                for (let j = 0; j < 2; j++) {
+                    let seed = words.copy(h0);
+                    words.append32_le(seed, j as uint32);
+                    words.append32_le(seed, lane as uint32);
+                    last block = blake2b.long_hash(seed, 1024);
+                    last base = (lane * lane_length + j) * 128;
+                    for (let k = 0; k < 128; k++) {
+                        memory[base + k] = words.load64_le(block, 8 * k);
+                    }
+                }
+            }
+            for (let pass = 0; pass < passes; pass++) {
+                for (let slice = 0; slice < 4; slice++) {
+                    for (let lane = 0; lane < lanes; lane++) {
+                        fill_segment(pass, slice, lane);
+                    }
+                }
+            }
+            let final_bytes: uint8[list] = new;
+            for (let k = 0; k < 128; k++) {
+                let word: uint64 = 0;
+                for (let lane = 0; lane < lanes; lane++) {
+                    word = word ^ memory[(lane * lane_length + lane_length - 1) * 128 + k];
+                }
+                words.append64_le(final_bytes, word);
+            }
+            last tag = blake2b.long_hash(final_bytes, tag_length);
+            for (let i = 0; i < memory.length; i++) {
+                memory[i] = 0;
+            }
+            return tag;
+        };
+
+        let fill_segment = func(pass: int, slice: int, lane: int) {
+            last independent = pass == 0 && slice < 2;
+            if (independent) {
+                for (let k = 0; k < 128; k++) {
+                    input[k] = 0;
+                }
+                input[0] = pass as uint64;
+                input[1] = lane as uint64;
+                input[2] = slice as uint64;
+                input[3] = blocks as uint64;
+                input[4] = passes as uint64;
+                input[5] = 2;
+            }
+            last start = pass == 0 && slice == 0 ? 2 : 0;
+            if (independent && start == 2) {
+                next_addresses();
+            }
+            let current = lane * lane_length + slice * segment + start;
+            for (let index = start; index < segment; index++) {
+                last previous = current % lane_length == 0 ? current + lane_length - 1 : current - 1;
+                last pseudo: uint64 = independent ? next_pseudo(index) : memory[previous * 128];
+                let ref_lane = ((pseudo >> 32) % (lanes as uint64)) as int;
+                if (pass == 0 && slice == 0) {
+                    ref_lane = lane;
+                }
+                last ref_index = reference(pass, slice, index, pseudo & 4294967295, ref_lane == lane);
+                compress(memory, previous * 128, memory, (ref_lane * lane_length + ref_index) * 128);
+                last base = current * 128;
+                if (pass == 0) {
+                    for (let k = 0; k < 128; k++) {
+                        memory[base + k] = z[k];
+                    }
+                } else {
+                    for (let k = 0; k < 128; k++) {
+                        memory[base + k] = memory[base + k] ^ z[k];
+                    }
+                }
+                current++;
+            }
+        };
+
+        let next_pseudo = func(index: int) -> uint64 {
+            if (index % 128 == 0) {
+                next_addresses();
+            }
+            return address[index % 128];
+        };
+
+        let next_addresses = func {
+            input[6] = input[6] + 1;
+            compress(zero, 0, input, 0);
+            for (let k = 0; k < 128; k++) {
+                address[k] = z[k];
+            }
+            compress(zero, 0, address, 0);
+            for (let k = 0; k < 128; k++) {
+                address[k] = z[k];
+            }
+        };
+
+        /// @brief The column of the reference block (RFC 9106, section 3.4.2).
+        let reference = func(pass: int, slice: int, index: int, j1: uint64, same_lane: bool) -> int {
+            let area: int = 0;
+            if (pass == 0) {
+                if (slice == 0) {
+                    area = index - 1;
+                } else if (same_lane) {
+                    area = slice * segment + index - 1;
+                } else {
+                    area = slice * segment + (index == 0 ? -1 : 0);
+                }
+            } else {
+                if (same_lane) {
+                    area = lane_length - segment + index - 1;
+                } else {
+                    area = lane_length - segment + (index == 0 ? -1 : 0);
+                }
+            }
+            last size = area as uint64;
+            last x = (j1 * j1) >> 32;
+            last relative = size - 1 - ((size * x) >> 32);
+            last start = pass == 0 || slice == 3 ? 0 : (slice + 1) * segment;
+            return (((start as uint64) + relative) % (lane_length as uint64)) as int;
+        };
+
+        /// @brief z = G(X, Y): P applied to the rows, then the columns, of R = X xor Y, xor R.
+        let compress = func(x: uint64[list], xo: int, y: uint64[list], yo: int) {
+            for (let k = 0; k < 128; k++) {
+                last value = x[xo + k] ^ y[yo + k];
+                r[k] = value;
+                z[k] = value;
+            }
+            for (let base = 0; base < 256; base += 16) {
+                permute(base);
+            }
+            for (let k = 0; k < 128; k++) {
+                z[k] = z[k] ^ r[k];
+            }
+        };
+
+        let permute = func(base: int) {
+            let o = order;
+            mix(o[base], o[base + 4], o[base + 8], o[base + 12]);
+            mix(o[base + 1], o[base + 5], o[base + 9], o[base + 13]);
+            mix(o[base + 2], o[base + 6], o[base + 10], o[base + 14]);
+            mix(o[base + 3], o[base + 7], o[base + 11], o[base + 15]);
+            mix(o[base], o[base + 5], o[base + 10], o[base + 15]);
+            mix(o[base + 1], o[base + 6], o[base + 11], o[base + 12]);
+            mix(o[base + 2], o[base + 7], o[base + 8], o[base + 13]);
+            mix(o[base + 3], o[base + 4], o[base + 9], o[base + 14]);
+        };
+
+        /// @brief GB with the multiplication of BlaMka: a + b + 2 lo(a) lo(b), all modulo 2^64.
+        let mix = func(a: int, b: int, c: int, d: int) {
+            let v = z;
+            v[a] = words.add64(words.add64(v[a], v[b]), ((v[a] & 4294967295) * (v[b] & 4294967295)) << 1);
+            let t = v[d] ^ v[a];
+            v[d] = (t >> 32) | (t << 32);
+            v[c] = words.add64(words.add64(v[c], v[d]), ((v[c] & 4294967295) * (v[d] & 4294967295)) << 1);
+            t = v[b] ^ v[c];
+            v[b] = (t >> 24) | (t << 40);
+            v[a] = words.add64(words.add64(v[a], v[b]), ((v[a] & 4294967295) * (v[b] & 4294967295)) << 1);
+            t = v[d] ^ v[a];
+            v[d] = (t >> 16) | (t << 48);
+            v[c] = words.add64(words.add64(v[c], v[d]), ((v[c] & 4294967295) * (v[d] & 4294967295)) << 1);
+            t = v[b] ^ v[c];
+            v[b] = (t >> 63) | (t << 1);
+        };
+
+        export let.override to_string = func -> string => "Argon2.Filler(<redacted>)";
+    );
+);

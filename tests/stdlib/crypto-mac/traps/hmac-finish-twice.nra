@@ -1,0 +1,14 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: mac finished
+let hmac = import:Std.Crypto.Mac.Hmac;
+let program = import:Std.Program;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mac = new hmac.Hmac<sha2.Sha256>(new([1, 2, 3]));
+        let _ = mac.finish();
+        let _ = mac.verify(new([0]));
+        return program.ExitCode.Ok;
+    };
+);

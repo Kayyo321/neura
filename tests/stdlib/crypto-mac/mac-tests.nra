@@ -1,0 +1,127 @@
+let aes_cmac = import:Std.Crypto.Mac.AesCmac;
+let hex = import:Std.Encoding.Hex;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let int32s = import:Std.Core.Int32;
+let kmac = import:Std.Crypto.Mac.Kmac;
+let kmac_vectors = import:KmacVectors;
+let poly1305 = import:Std.Crypto.Mac.Poly1305;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:MacVectors;
+let.promote _ = import:Std.Crypto.Mac.Authenticator;
+
+// HMAC against Python hmac; Poly1305 and AES-CMAC against cryptography; KMAC against the NIST SP 800-185
+// samples and `openssl mac` (support/, scripts/crypto-vectors/gen-mac.py and gen-sp800-185.py).
+let MacTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let hmac_of = func(name: string, key: uint8[list], message: uint8[list]) -> uint8[list] {
+        if (name == "sha224") {
+            return hmac.mac<sha2.Sha224>(key, message);
+        }
+        if (name == "sha256") {
+            return hmac.mac<sha2.Sha256>(key, message);
+        }
+        if (name == "sha384") {
+            return hmac.mac<sha2.Sha384>(key, message);
+        }
+        if (name == "sha512") {
+            return hmac.mac<sha2.Sha512>(key, message);
+        }
+        if (name == "sha512_256") {
+            return hmac.mac<sha2.Sha512_256>(key, message);
+        }
+        if (name == "sha3_224") {
+            return hmac.mac<sha3.Sha3_224>(key, message);
+        }
+        if (name == "sha3_256") {
+            return hmac.mac<sha3.Sha3_256>(key, message);
+        }
+        if (name == "sha3_384") {
+            return hmac.mac<sha3.Sha3_384>(key, message);
+        }
+        return hmac.mac<sha3.Sha3_512>(key, message);
+    };
+
+    export let test_hmac_every_hash = func {
+        last rows = vectors.hmac;
+        for (let i = 0; i < rows.length; i += 4) {
+            test.assert_equal_string(rows[i + 3], hex.encode(hmac_of(rows[i], decode(rows[i + 1]), decode(rows[i + 2]))));
+        }
+        test.assert_equal_int32(180, rows.length);
+    };
+
+    export let test_hmac_verify_refuses_truncation = func {
+        last key: uint8[list] = new([1, 2, 3]);
+        last message: uint8[list] = new([4, 5]);
+        last tag = hmac.mac<sha2.Sha256>(key, message);
+        test.assert(hmac.verify<sha2.Sha256>(key, message, tag));
+        let truncated: uint8[list] = new;
+        for (let i = 0; i < 16; i++) {
+            truncated.append(tag[i]);
+        }
+        test.assert(!hmac.verify<sha2.Sha256>(key, message, truncated));
+        let wrong = test.assert_ok(hex.decode(hex.encode(tag)));
+        wrong[31] = wrong[31] ^ 128;
+        test.assert(!hmac.verify<sha2.Sha256>(key, message, wrong));
+    };
+
+    export let test_poly1305 = func {
+        last rows = vectors.poly1305;
+        for (let i = 0; i < rows.length; i += 3) {
+            test.assert_equal_string(rows[i + 2], hex.encode(poly1305.mac(decode(rows[i]), decode(rows[i + 1]))));
+        }
+        // Fed in pieces of 7 bytes.
+        last key = decode(rows[rows.length - 3]);
+        last message = decode(rows[rows.length - 2]);
+        let mac: Authenticator = new poly1305.Poly1305(key);
+        for (let start = 0; start < message.length; start += 7) {
+            let part: uint8[list] = new;
+            for (let k = start; k < start + 7 && k < message.length; k++) {
+                part.append(message[k]);
+            }
+            mac.update(part);
+        }
+        test.assert(mac.verify(decode(rows[rows.length - 1])));
+    };
+
+    export let test_aes_cmac = func {
+        last rows = vectors.aes_cmac;
+        for (let i = 0; i < rows.length; i += 3) {
+            test.assert_equal_string(rows[i + 2], hex.encode(aes_cmac.mac(decode(rows[i]), decode(rows[i + 1]))));
+        }
+        test.assert_equal_int32(72, rows.length);
+    };
+
+    export let test_kmac = func {
+        last rows = kmac_vectors.kmac;
+        for (let i = 0; i < rows.length; i += 8) {
+            last key = decode(rows[i + 2]);
+            last data = decode(rows[i + 3]);
+            last custom = utf8.encode(rows[i + 4]);
+            last length = test.assert_ok(int32s.parse(rows[i + 5]));
+            last xof = rows[i + 1] == "true";
+            let out: uint8[list] = new;
+            if (rows[i] == "128") {
+                out = xof ? kmac.kmac128_xof(key, data, length, custom) : kmac.kmac128(key, data, length, custom);
+            } else {
+                out = xof ? kmac.kmac256_xof(key, data, length, custom) : kmac.kmac256(key, data, length, custom);
+            }
+            test.assert_equal_string(rows[i + 6], hex.encode(out));
+        }
+    };
+
+    export let test_kmac_verify = func {
+        last key: uint8[list] = new([9, 9, 9, 9]);
+        let mac = new kmac.Kmac256(key);
+        mac.update(new([1]));
+        last tag = mac.finish();
+        test.assert_equal_int32(64, tag.length);
+        let check = new kmac.Kmac256(key);
+        check.update(new([1]));
+        test.assert(check.verify(tag));
+        test.assert_equal_string("Kmac256(<redacted>)", check.to_string());
+    };
+);
