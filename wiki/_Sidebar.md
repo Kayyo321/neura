@@ -43,6 +43,8 @@
 - [NVR format](NVR)
 - [Neura Virtual Machine](NVM)
 - [Kernels](Kernels)
+- [Desktop host services](Providers)
+- [Desktop applications](Apps-Desktop)
 - [Wall-clock benchmarks](Benchmarks)
 - [Decompiler](Decompiler)
 - [Release checklist](Release)
