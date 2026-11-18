@@ -1,0 +1,56 @@
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The encodings of NIST SP 800-185, section 2.3: left_encode, right_encode, encode_string and bytepad.
+/// Internal.
+#Since("0.3.0")
+export let Sp800185 = module (
+    /// @brief The big-endian bytes of the value with no leading zero byte (one zero byte for 0).
+    let minimal = func(value: uint64) -> uint8[list] {
+        let out: uint8[list] = new;
+        let v = value;
+        while (v > 0) {
+            out.append((v & 255) as uint8);
+            v = v >> 8;
+        }
+        if (out.length == 0) {
+            out.append(0);
+        }
+        let reversed: uint8[list] = new;
+        for (let i = out.length - 1; i >= 0; i--) {
+            reversed.append(out[i]);
+        }
+        return reversed;
+    };
+
+    /// @brief left_encode(x): the byte count, then the bytes.
+    export let left_encode = func(value: uint64) -> uint8[list] {
+        last body = minimal(value);
+        let out: uint8[list] = new([body.length as uint8]);
+        words.append_all(out, body);
+        return out;
+    };
+
+    /// @brief right_encode(x): the bytes, then the byte count.
+    export let right_encode = func(value: uint64) -> uint8[list] {
+        let out = minimal(value);
+        out.append(out.length as uint8);
+        return out;
+    };
+
+    /// @brief encode_string(S): left_encode of the bit length, then S.
+    export let encode_string = func(bytes: uint8[list]) -> uint8[list] {
+        let out = left_encode((bytes.length as uint64) * 8);
+        words.append_all(out, bytes);
+        return out;
+    };
+
+    /// @brief bytepad(X, w): left_encode(w), X, then zeros to a multiple of w.
+    export let bytepad = func(bytes: uint8[list], width: int) -> uint8[list] {
+        let out = left_encode(width as uint64);
+        words.append_all(out, bytes);
+        while (out.length % width != 0) {
+            out.append(0);
+        }
+        return out;
+    };
+);

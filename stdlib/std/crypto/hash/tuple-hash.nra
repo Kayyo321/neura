@@ -1,0 +1,136 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let keccak = import:Std.Crypto.Internal.Keccak;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let sp800_185 = import:Std.Crypto.Internal.Sp800185;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief TupleHash128 and TupleHash256 of NIST SP 800-185, section 5, and their XOF forms (Stdlib.md section
+/// 20.4).
+///
+/// A tuple hash covers a sequence of byte strings so that different sequences never collide by concatenation:
+/// ("ab", "c") and ("a", "bc") hash differently. Each item is absorbed as encode_string(item) into
+/// cSHAKE(N = "TupleHash", S = customization).
+/// @see [Std.Crypto.Hash.TupleHash](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-TupleHash)
+#Since("0.3.0")
+export let TupleHash = module (
+    /// @brief A running TupleHash128: `add` each item, then `finish(length)` for TupleHash128 or
+    /// `finish_xof(length)` and `squeeze` for TupleHashXOF128. A second finish, or an `add` after one, traps.
+    #[Final, Since("0.3.0")]
+    export let TupleHash128 = class (
+        /// @brief The cSHAKE128 sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief An empty tuple with the customization string S.
+        export let init = func(customization: uint8[list]) {
+            crypto_policy.require(Algorithm.TupleHash128);
+            sponge = sha3.start(168, words.utf8("TupleHash"), customization);
+        };
+
+        /// @brief `Algorithm.TupleHash128`.
+        export let algorithm = func -> Algorithm => Algorithm.TupleHash128;
+
+        /// @brief Appends one item to the tuple.
+        export let add = func(item: uint8[list]) {
+            sponge.absorb(sp800_185.encode_string(item));
+        };
+
+        /// @brief TupleHash128 with an output of `length` bytes.
+        export let finish = func(length: int) -> uint8[list] {
+            sponge.absorb(sp800_185.right_encode((length as uint64) * 8));
+            return sponge.squeeze(length);
+        };
+
+        /// @brief The first `length` bytes of TupleHashXOF128; `squeeze` continues.
+        export let finish_xof = func(length: int) -> uint8[list] {
+            sponge.absorb(sp800_185.right_encode(0));
+            return sponge.squeeze(length);
+        };
+
+        /// @brief The next `count` bytes after `finish_xof`.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "TupleHash128";
+    );
+
+    /// @brief TupleHash128(items, length, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let tuple_hash128 = func(items: uint8[list][list], length: int, customization: uint8[list]) -> uint8[list] {
+        let hash = new TupleHash128(customization);
+        for (let item in items) {
+            hash.add(item);
+        }
+        return hash.finish(length);
+    };
+
+    /// @brief The first `length` bytes of TupleHashXOF128(items, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let tuple_hash128_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
+            -> uint8[list] {
+        let hash = new TupleHash128(customization);
+        for (let item in items) {
+            hash.add(item);
+        }
+        return hash.finish_xof(length);
+    };
+
+    /// @brief A running TupleHash256: `add` each item, then `finish(length)` for TupleHash256 or
+    /// `finish_xof(length)` and `squeeze` for TupleHashXOF256. A second finish, or an `add` after one, traps.
+    #[Final, Since("0.3.0")]
+    export let TupleHash256 = class (
+        /// @brief The cSHAKE256 sponge.
+        let sponge: keccak.Sponge;
+
+        /// @brief An empty tuple with the customization string S.
+        export let init = func(customization: uint8[list]) {
+            crypto_policy.require(Algorithm.TupleHash256);
+            sponge = sha3.start(136, words.utf8("TupleHash"), customization);
+        };
+
+        /// @brief `Algorithm.TupleHash256`.
+        export let algorithm = func -> Algorithm => Algorithm.TupleHash256;
+
+        /// @brief Appends one item to the tuple.
+        export let add = func(item: uint8[list]) {
+            sponge.absorb(sp800_185.encode_string(item));
+        };
+
+        /// @brief TupleHash256 with an output of `length` bytes.
+        export let finish = func(length: int) -> uint8[list] {
+            sponge.absorb(sp800_185.right_encode((length as uint64) * 8));
+            return sponge.squeeze(length);
+        };
+
+        /// @brief The first `length` bytes of TupleHashXOF256; `squeeze` continues.
+        export let finish_xof = func(length: int) -> uint8[list] {
+            sponge.absorb(sp800_185.right_encode(0));
+            return sponge.squeeze(length);
+        };
+
+        /// @brief The next `count` bytes after `finish_xof`.
+        export let squeeze = func(count: int) -> uint8[list] => sponge.squeeze(count);
+
+        export let.override to_string = func -> string => "TupleHash256";
+    );
+
+    /// @brief TupleHash256(items, length, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let tuple_hash256 = func(items: uint8[list][list], length: int, customization: uint8[list]) -> uint8[list] {
+        let hash = new TupleHash256(customization);
+        for (let item in items) {
+            hash.add(item);
+        }
+        return hash.finish(length);
+    };
+
+    /// @brief The first `length` bytes of TupleHashXOF256(items, customization).
+    #[NoDiscard, Since("0.3.0")]
+    export let tuple_hash256_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
+            -> uint8[list] {
+        let hash = new TupleHash256(customization);
+        for (let item in items) {
+            hash.add(item);
+        }
+        return hash.finish_xof(length);
+    };
+);

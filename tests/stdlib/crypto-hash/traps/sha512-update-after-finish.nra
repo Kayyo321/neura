@@ -1,0 +1,13 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: digest finished
+let program = import:Std.Program;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let digest = new sha2.Sha512();
+        let _ = digest.finish();
+        digest.update(new([1]));
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,311 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let.promote _ = import:Std.Crypto.ExtendableOutput;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief BLAKE3: hashing, keyed hashing, key derivation and extendable output (Stdlib.md section 20.4).
+///
+/// This is the specification's serial reference algorithm (chunks of 1024 bytes, a stack of chaining values,
+/// 7-round compression) in Neura code. The SIMD and multi-threaded tree evaluation of the specification is not
+/// provided: the result is the same, computed one chunk at a time.
+/// @see [Std.Crypto.Hash.Blake3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Blake3)
+#Since("0.3.0")
+export let Blake3 = module (
+    /// @brief The initial value: the SHA-256 initial words.
+    let Iv: uint32[] = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225];
+    let Permutation: int[] = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
+    const ChunkStart = 1;
+    const ChunkEnd = 2;
+    const Parent = 4;
+    const Root = 8;
+    const KeyedHash = 16;
+    const DeriveKeyContext = 32;
+    const DeriveKeyMaterial = 64;
+
+    /// @brief The 16 output words of the compression function.
+    let compress = func(cv: uint32[list], block: uint32[list], counter: uint64, block_length: int, flags: int)
+            -> uint32[list] {
+        let s: uint32[list] = new;
+        for (let i = 0; i < 8; i++) {
+            s.append(cv[i]);
+        }
+        for (let i = 0; i < 4; i++) {
+            s.append(Iv[i]);
+        }
+        s.append((counter & 4294967295) as uint32);
+        s.append((counter >> 32) as uint32);
+        s.append(block_length as uint32);
+        s.append(flags as uint32);
+        let m: uint32[list] = new;
+        for (let w in block) {
+            m.append(w);
+        }
+        for (let round = 0; round < 7; round++) {
+            mix(s, 0, 4, 8, 12, m[0], m[1]);
+            mix(s, 1, 5, 9, 13, m[2], m[3]);
+            mix(s, 2, 6, 10, 14, m[4], m[5]);
+            mix(s, 3, 7, 11, 15, m[6], m[7]);
+            mix(s, 0, 5, 10, 15, m[8], m[9]);
+            mix(s, 1, 6, 11, 12, m[10], m[11]);
+            mix(s, 2, 7, 8, 13, m[12], m[13]);
+            mix(s, 3, 4, 9, 14, m[14], m[15]);
+            if (round < 6) {
+                let permuted: uint32[list] = new;
+                for (let i = 0; i < 16; i++) {
+                    permuted.append(m[Permutation[i]]);
+                }
+                m = permuted;
+            }
+        }
+        for (let i = 0; i < 8; i++) {
+            s[i] = s[i] ^ s[i + 8];
+            s[i + 8] = s[i + 8] ^ cv[i];
+        }
+        return s;
+    };
+
+    /// @brief The quarter-round G.
+    let mix = func(s: uint32[list], a: int, b: int, c: int, d: int, x: uint32, y: uint32) {
+        s[a] = ((((s[a] as uint64) + (s[b] as uint64) + (x as uint64)) & 4294967295) as uint32);
+        let t = s[d] ^ s[a];
+        s[d] = (t >> 16) | (t << 16);
+        s[c] = words.add32(s[c], s[d]);
+        t = s[b] ^ s[c];
+        s[b] = (t >> 12) | (t << 20);
+        s[a] = ((((s[a] as uint64) + (s[b] as uint64) + (y as uint64)) & 4294967295) as uint32);
+        t = s[d] ^ s[a];
+        s[d] = (t >> 8) | (t << 24);
+        s[c] = words.add32(s[c], s[d]);
+        t = s[b] ^ s[c];
+        s[b] = (t >> 7) | (t << 25);
+    };
+
+    /// @brief The 16 little-endian words of a block, zero padded to 64 bytes.
+    let block_words = func(block: uint8[list]) -> uint32[list] {
+        let padded = words.copy(block);
+        while (padded.length < 64) {
+            padded.append(0);
+        }
+        let out: uint32[list] = new;
+        for (let i = 0; i < 16; i++) {
+            out.append(words.load32_le(padded, 4 * i));
+        }
+        return out;
+    };
+
+    /// @brief A new list holding the initial value.
+    let iv_words = func -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let w in Iv) {
+            out.append(w);
+        }
+        return out;
+    };
+
+    let first8 = func(state: uint32[list]) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let i = 0; i < 8; i++) {
+            out.append(state[i]);
+        }
+        return out;
+    };
+
+    /// @brief The 8 words of a 32-byte key.
+    let key_words = func(key: uint8[list]) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let i = 0; i < 8; i++) {
+            out.append(words.load32_le(key, 4 * i));
+        }
+        return out;
+    };
+
+    /// @brief The inputs of one compression whose output is not yet needed: a chunk's last block or a parent.
+    let Node = class (
+        export last cv: uint32[list];
+        export last block: uint32[list];
+        export last counter: uint64;
+        export last length: int;
+        export last flags: int;
+
+        export let init = func(input_cv: uint32[list], block_words: uint32[list], block_counter: uint64,
+                block_length: int, node_flags: int) {
+            cv = input_cv;
+            block = block_words;
+            counter = block_counter;
+            length = block_length;
+            flags = node_flags;
+        };
+
+        export let chaining_value = func -> uint32[list] => first8(compress(cv, block, counter, length, flags));
+
+        /// @brief Root output block number `index`.
+        export let root_block = func(index: uint64) -> uint8[list] {
+            last state = compress(cv, block, index, length, flags | Root);
+            let out: uint8[list] = new;
+            for (let w in state) {
+                words.append32_le(out, w);
+            }
+            return out;
+        };
+
+        export let.override to_string = func -> string => "Blake3.Node";
+    );
+
+    /// @brief A running BLAKE3 hash in one of its three modes. `finish` returns 32 bytes; `squeeze` and `read`
+    /// continue the output stream.
+    #[Final, Since("0.3.0")]
+    export let Blake3 = class implements ExtendableOutput<Blake3> (
+        let key: uint32[list] = new;
+        let flags: int = 0;
+        let stack: uint32[list][list] = new;
+        let chunk_cv: uint32[list] = new;
+        let chunk_counter: uint64 = 0;
+        let chunk_block: uint8[list] = new;
+        let blocks_done: int = 0;
+        let output: Node;
+        let output_block: uint8[list] = new;
+        let output_index: uint64 = 0;
+        let output_at: int = 64;
+        let squeezing: bool = false;
+
+        /// @brief The plain hash; with a 32-byte key, the keyed hash (any other key length traps).
+        export let init = func {
+            start(iv_words(), 0);
+        } or func(key_bytes: uint8[list]) {
+            if (key_bytes.length != 32) {
+                trap_with_message("invalid argument: BLAKE3 key must be 32 bytes");
+            }
+            start(key_words(key_bytes), KeyedHash);
+        };
+
+        /// @brief A hasher with the key words and mode flags: the start of every mode.
+        #Internal
+        export let start = func(key_value: uint32[list], mode: int) {
+            crypto_policy.require(Algorithm.Blake3);
+            key = key_value;
+            flags = mode;
+            chunk_cv = key;
+        };
+
+        /// @brief A new plain hasher.
+        export static let create = func() -> Blake3 => new Blake3();
+        /// @brief 32.
+        export static let output_length = func() -> int => 32;
+        /// @brief 64.
+        export static let block_length = func() -> int => 64;
+        /// @brief `Algorithm.Blake3`.
+        export let algorithm = func -> Algorithm => Algorithm.Blake3;
+
+        /// @brief Adds the bytes. Traps with "invalid state: digest finished" once output was read.
+        export let update = func(bytes: uint8[list]) {
+            if (squeezing) {
+                trap_with_message("invalid state: digest finished");
+            }
+            for (let b in bytes) {
+                if (chunk_block.length == 64) {
+                    if (blocks_done == 15) {
+                        // A full chunk with more input after it: close it and start the next one.
+                        last cv = chunk_node().chaining_value();
+                        chunk_counter += 1;
+                        push_chunk(cv, chunk_counter);
+                        chunk_cv = key;
+                        blocks_done = 0;
+                    } else {
+                        chunk_cv = first8(compress(chunk_cv, block_words(chunk_block), chunk_counter, 64,
+                            flags | start_flag()));
+                        blocks_done++;
+                    }
+                    chunk_block = new;
+                }
+                chunk_block.append(b);
+            }
+        };
+
+        let start_flag = func -> int => blocks_done == 0 ? ChunkStart : 0;
+
+        let chunk_node = func -> Node =>
+            new Node(chunk_cv, block_words(chunk_block), chunk_counter, chunk_block.length, flags | start_flag() | ChunkEnd);
+
+        /// @brief Merges completed subtrees: one parent per trailing zero bit of the chunk count.
+        let push_chunk = func(cv: uint32[list], total: uint64) {
+            let node_cv = cv;
+            let count = total;
+            while ((count & 1) == 0) {
+                last left = stack[stack.length - 1];
+                stack.remove_at(stack.length - 1);
+                node_cv = parent(left, node_cv).chaining_value();
+                count = count >> 1;
+            }
+            stack.append(node_cv);
+        };
+
+        let parent = func(left: uint32[list], right: uint32[list]) -> Node {
+            let block: uint32[list] = new;
+            for (let w in left) {
+                block.append(w);
+            }
+            for (let w in right) {
+                block.append(w);
+            }
+            return new Node(key, block, 0, 64, flags | Parent);
+        };
+
+        /// @brief The first 32 bytes of output (or the next 32, if output was already read).
+        export let finish = func -> uint8[list] => squeeze(32);
+
+        /// @brief The next `count` bytes of output.
+        export let squeeze = func(count: int) -> uint8[list] {
+            if (!squeezing) {
+                squeezing = true;
+                let node = chunk_node();
+                for (let i = stack.length - 1; i >= 0; i--) {
+                    node = parent(stack[i], node.chaining_value());
+                }
+                output = node;
+            }
+            let out: uint8[list] = new;
+            while (out.length < count) {
+                if (output_at == 64) {
+                    output_block = output.root_block(output_index);
+                    output_index += 1;
+                    output_at = 0;
+                }
+                out.append(output_block[output_at]);
+                output_at++;
+            }
+            return out;
+        };
+
+        export let.override to_string = func -> string => "BLAKE3";
+    );
+
+    /// @brief The first `length` bytes of the BLAKE3 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let hash = func(bytes: uint8[list], length: int) -> uint8[list] {
+        let hasher = new Blake3();
+        hasher.update(bytes);
+        return hasher.squeeze(length);
+    };
+
+    /// @brief The first `length` bytes of the keyed hash under a 32-byte key.
+    #[NoDiscard, Since("0.3.0")]
+    export let keyed_hash = func(key: uint8[list], bytes: uint8[list], length: int) -> uint8[list] {
+        let hasher = new Blake3(key);
+        hasher.update(bytes);
+        return hasher.squeeze(length);
+    };
+
+    /// @brief `length` bytes of key material derived from `material` under the context string, which should be
+    /// a hardcoded, globally unique, application-specific text.
+    #[NoDiscard, Since("0.3.0")]
+    export let derive_key = func(context: string, material: uint8[list], length: int) -> uint8[list] {
+        let context_hasher = new Blake3();
+        context_hasher.start(iv_words(), DeriveKeyContext);
+        context_hasher.update(words.utf8(context));
+        last context_key = context_hasher.squeeze(32);
+        let hasher = new Blake3();
+        hasher.start(key_words(context_key), DeriveKeyMaterial);
+        hasher.update(material);
+        return hasher.squeeze(length);
+    };
+);

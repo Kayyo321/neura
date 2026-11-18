@@ -1,0 +1,230 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let digest_sha256 = import:Std.Digest.Sha256;
+let sha2_core = import:Std.Crypto.Internal.Sha2Core;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+
+/// @brief The SHA-2 family of FIPS 180-4: SHA-224, SHA-256, SHA-384, SHA-512 and SHA-512/256 (Stdlib.md section
+/// 20.4).
+///
+/// `Sha256` runs the kernel of `Std.Digest.Sha256`, so both modules share one implementation; the others are
+/// Neura code. No hardware acceleration (SHA-NI, AVX-512) is used. Each digest checks the current
+/// Std.Crypto.Core.CryptoPolicy when it is created.
+/// @see [Std.Crypto.Hash.Sha2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Sha2)
+#Since("0.3.0")
+export let Sha2 = module (
+    /// @brief A running SHA-224 digest. `finish` returns 28 bytes; an `update` or `finish` after it
+    /// traps with "invalid state: digest finished".
+    #[Final, Since("0.3.0")]
+    export let Sha224 = class implements StreamingDigest<Sha224> (
+        /// @brief The compression state.
+        last core: sha2_core.Core256 = new([3238371032, 914150663, 812702999, 4144912697, 4290775857, 1750603025, 1694076839, 3204075428], 7);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha224);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha224 => new Sha224();
+
+        /// @brief 28.
+        export static let output_length = func() -> int => 28;
+
+        /// @brief 64.
+        export static let block_length = func() -> int => 64;
+
+        /// @brief `Algorithm.Sha224`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha224;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            core.update(bytes);
+        };
+
+        /// @brief Pads the message, ends the digest, and returns the 28-byte hash.
+        export let finish = func -> uint8[list] => core.finish();
+
+        export let.override to_string = func -> string => "SHA-224";
+    );
+
+    /// @brief The SHA-224 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha224 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha224();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA-256 digest. `finish` returns 32 bytes; an `update` or `finish` after it
+    /// traps with "invalid state: digest finished".
+    #[Final, Since("0.3.0")]
+    export let Sha256 = class implements StreamingDigest<Sha256> (
+        /// @brief The running kernel digest of Std.Digest.Sha256.
+        last core: digest_sha256.Sha256 = new;
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha256);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha256 => new Sha256();
+
+        /// @brief 32.
+        export static let output_length = func() -> int => 32;
+
+        /// @brief 64.
+        export static let block_length = func() -> int => 64;
+
+        /// @brief `Algorithm.Sha256`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha256;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            core.update(bytes);
+        };
+
+        /// @brief Pads the message, ends the digest, and returns the 32-byte hash.
+        export let finish = func -> uint8[list] => core.finish();
+
+        export let.override to_string = func -> string => "SHA-256";
+    );
+
+    /// @brief The SHA-256 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha256 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha256();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA-384 digest. `finish` returns 48 bytes; an `update` or `finish` after it
+    /// traps with "invalid state: digest finished".
+    #[Final, Since("0.3.0")]
+    export let Sha384 = class implements StreamingDigest<Sha384> (
+        /// @brief The compression state.
+        last core: sha2_core.Core512 = new([14680500436340154072, 7105036623409894663, 10473403895298186519, 1526699215303891257, 7436329637833083697, 10282925794625328401, 15784041429090275239, 5167115440072839076], 48);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha384);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha384 => new Sha384();
+
+        /// @brief 48.
+        export static let output_length = func() -> int => 48;
+
+        /// @brief 128.
+        export static let block_length = func() -> int => 128;
+
+        /// @brief `Algorithm.Sha384`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha384;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            core.update(bytes);
+        };
+
+        /// @brief Pads the message, ends the digest, and returns the 48-byte hash.
+        export let finish = func -> uint8[list] => core.finish();
+
+        export let.override to_string = func -> string => "SHA-384";
+    );
+
+    /// @brief The SHA-384 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha384 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha384();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA-512 digest. `finish` returns 64 bytes; an `update` or `finish` after it
+    /// traps with "invalid state: digest finished".
+    #[Final, Since("0.3.0")]
+    export let Sha512 = class implements StreamingDigest<Sha512> (
+        /// @brief The compression state.
+        last core: sha2_core.Core512 = new([7640891576956012808, 13503953896175478587, 4354685564936845355, 11912009170470909681, 5840696475078001361, 11170449401992604703, 2270897969802886507, 6620516959819538809], 64);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha512);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha512 => new Sha512();
+
+        /// @brief 64.
+        export static let output_length = func() -> int => 64;
+
+        /// @brief 128.
+        export static let block_length = func() -> int => 128;
+
+        /// @brief `Algorithm.Sha512`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha512;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            core.update(bytes);
+        };
+
+        /// @brief Pads the message, ends the digest, and returns the 64-byte hash.
+        export let finish = func -> uint8[list] => core.finish();
+
+        export let.override to_string = func -> string => "SHA-512";
+    );
+
+    /// @brief The SHA-512 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha512 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha512();
+        digest.update(bytes);
+        return digest.finish();
+    };
+
+    /// @brief A running SHA-512/256 digest. `finish` returns 32 bytes; an `update` or `finish` after it
+    /// traps with "invalid state: digest finished".
+    #[Final, Since("0.3.0")]
+    export let Sha512_256 = class implements StreamingDigest<Sha512_256> (
+        /// @brief The compression state.
+        last core: sha2_core.Core512 = new([2463787394917988140, 11481187982095705282, 2563595384472711505, 10824532655140301501, 10819967247969091555, 13717434660681038226, 3098927326965381290, 1060366662362279074], 32);
+
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.Sha512_256);
+        };
+
+        /// @brief A new digest with no bytes added.
+        export static let create = func() -> Sha512_256 => new Sha512_256();
+
+        /// @brief 32.
+        export static let output_length = func() -> int => 32;
+
+        /// @brief 128.
+        export static let block_length = func() -> int => 128;
+
+        /// @brief `Algorithm.Sha512_256`.
+        export let algorithm = func -> Algorithm => Algorithm.Sha512_256;
+
+        /// @brief Adds the bytes to the message.
+        export let update = func(bytes: uint8[list]) {
+            core.update(bytes);
+        };
+
+        /// @brief Pads the message, ends the digest, and returns the 32-byte hash.
+        export let finish = func -> uint8[list] => core.finish();
+
+        export let.override to_string = func -> string => "SHA-512/256";
+    );
+
+    /// @brief The SHA-512/256 hash of the bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let sha512_256 = func(bytes: uint8[list]) -> uint8[list] {
+        let digest = new Sha512_256();
+        digest.update(bytes);
+        return digest.finish();
+    };
+);

@@ -112,6 +112,11 @@ Hashes, MACs, key derivation, authenticated encryption, and secure random genera
 | [`Std.Crypto.Core.Secret`](Stdlib-Crypto-Secret) | [Contracts](Stdlib-Crypto-Secret#detailed-contracts) | [Declarations](Stdlib-Crypto-Secret#exported-declarations) |
 | [`Std.Crypto.CryptographicPrimitive`](Stdlib-Crypto-CryptographicPrimitive) | [Contracts](Stdlib-Crypto-CryptographicPrimitive#detailed-contracts) | [Declarations](Stdlib-Crypto-CryptographicPrimitive#exported-declarations) |
 | [`Std.Crypto.ExtendableOutput`](Stdlib-Crypto-ExtendableOutput) | [Contracts](Stdlib-Crypto-ExtendableOutput#detailed-contracts) | [Declarations](Stdlib-Crypto-ExtendableOutput#exported-declarations) |
+| [`Std.Crypto.Hash.Blake3`](Stdlib-Crypto-Blake3) | [Contracts](Stdlib-Crypto-Blake3#detailed-contracts) | [Declarations](Stdlib-Crypto-Blake3#exported-declarations) |
+| [`Std.Crypto.Hash.MerkleTree`](Stdlib-Crypto-MerkleTree) | [Contracts](Stdlib-Crypto-MerkleTree#detailed-contracts) | [Declarations](Stdlib-Crypto-MerkleTree#exported-declarations) |
+| [`Std.Crypto.Hash.Sha2`](Stdlib-Crypto-Sha2) | [Contracts](Stdlib-Crypto-Sha2#detailed-contracts) | [Declarations](Stdlib-Crypto-Sha2#exported-declarations) |
+| [`Std.Crypto.Hash.Sha3`](Stdlib-Crypto-Sha3) | [Contracts](Stdlib-Crypto-Sha3#detailed-contracts) | [Declarations](Stdlib-Crypto-Sha3#exported-declarations) |
+| [`Std.Crypto.Hash.TupleHash`](Stdlib-Crypto-TupleHash) | [Contracts](Stdlib-Crypto-TupleHash#detailed-contracts) | [Declarations](Stdlib-Crypto-TupleHash#exported-declarations) |
 | [`Std.Crypto.KeyEncapsulation`](Stdlib-Crypto-KeyEncapsulation) | [Contracts](Stdlib-Crypto-KeyEncapsulation#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyEncapsulation#exported-declarations) |
 | [`Std.Crypto.KeyStoreProvider`](Stdlib-Crypto-KeyStoreProvider) | [Contracts](Stdlib-Crypto-KeyStoreProvider#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyStoreProvider#exported-declarations) |
 | [`Std.Crypto.PrivateKey`](Stdlib-Crypto-PrivateKey) | [Contracts](Stdlib-Crypto-PrivateKey#detailed-contracts) | [Declarations](Stdlib-Crypto-PrivateKey#exported-declarations) |
@@ -344,3 +349,4 @@ The [complete specification](Stdlib-Design) has these sections.
 - [20. `Std.Crypto`](Stdlib-Design#20-stdcrypto)
   - [20.1 Contracts](Stdlib-Design#201-contracts)
   - [20.2 `Std.Crypto.Core`](Stdlib-Design#202-stdcryptocore)
+  - [20.4 `Std.Crypto.Hash`](Stdlib-Design#204-stdcryptohash)

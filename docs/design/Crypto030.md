@@ -38,6 +38,14 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | Page locking, swap exclusion and zeroization on drop (2.1) | stub (`lock`) | not provided by this runtime | stub |
 | `ct_eq`, `ct_select`, `ct_less` (2.1) | logic | edge values (0, 2^32-1, neighbours) | implemented; branch-free in source; the runtime does not guarantee constant time |
 | `CryptoPolicy` `Modern`, `Fips140_3`, `Cnsa2_0` (2.1) | logic | table tests and a trap | implemented at run time; compile-time enforcement is outside 0.3.0 |
+| SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/256 (2.3) | KAT | Python `hashlib`: 26 messages per digest around every block and padding boundary; streaming in pieces | implemented; `Sha256` shares the kernel of `Std.Digest.Sha256` |
+| SHA3-224/256/384/512, SHAKE128/256 (2.3) | KAT | `hashlib`, including lengths rate - 1, rate and rate + 1 for every rate; multi-block squeeze | implemented |
+| XOFs as readers (2.3) | logic | `squeeze`, `read` and `reader()` give one stream | implemented |
+| cSHAKE128/256, TupleHash128/256 and their XOFs (2.3) | KAT | every sample of NIST's SP 800-185 example files (4 cSHAKE, 12 TupleHash) | implemented |
+| TurboSHAKE128/256 (2.3) | KAT | RFC 9861 section 5 (cases up to 17^3 bytes, all domain bytes given) | implemented |
+| BLAKE3 hash, keyed hash, derive_key, XOF (2.3) | KAT | official `test_vectors.json` at commit 657284b1, all 24 inputs up to 4097 bytes, 131 output bytes per mode | implemented; serial |
+| Multi-threaded SIMD BLAKE3, SHA-NI/AVX-512 acceleration (2.3) | not provided | the serial code gives the same results | not provided by this runtime |
+| `MerkleTree<H>` with inclusion and consistency proofs (2.3) | logic | independent Python reference of RFC 6962 section 2.1 (`gen-merkle.py`), sizes 0 to 13, SHA-256 and SHA3-256; verification against tampered proofs | implemented |
 
 ## Runtime needs
 
