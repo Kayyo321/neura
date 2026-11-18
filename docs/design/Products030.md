@@ -41,7 +41,7 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | `neura-explain` | sdk | `explain`, `--explain` | `neura-explain [explain] ...` | `libneura-sdk`, `libneura-core` |
 | `neura-tags` | sdk | `tags` | `neura-tags [tags] ...` | `libneura-sdk`, `libneura-core` |
 | `neura-debug` | sdk | `debug --stdio` | `neura-debug [debug] --stdio` | `libneura-sdk`, `libneura-core`; every debug session runs at tier 0 with the JIT off |
-| `neura-lsp` | sdk | `lsp --stdio` | `neura-lsp [lsp] --stdio` | `libneura-sdk`, `libneura-core` |
+| `neura-lsp` | sdk | `lsp --stdio`, `rename` | `neura-lsp [lsp] --stdio`, `neura-lsp rename ...` | `libneura-sdk`, `libneura-core` |
 | `neura-fmt` | sdk | `fmt ...` | `neura-fmt [fmt] ...` | `libneura-sdk`, `libneura-core` |
 | `neurad` | service | `runtime ...` is served by `neura-run` | `neurad --foreground --root ROOT`, and the private `neurad --worker` | `libneura-core`; built by the service milestone ([Service030.md](Service030.md)) and installed only with `--component service` |
 

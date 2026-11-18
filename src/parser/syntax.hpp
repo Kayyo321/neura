@@ -133,6 +133,9 @@ struct Expr {
     bool chain_conjunction{};
     std::shared_ptr<Declaration> lambda{};
     std::vector<std::string> field_names{};
+    // The span of each name in `field_names`, for a NamedVariant
+    // (`Enum.Variant { name: value }`); the editor renames them.
+    std::vector<Span> field_spans{};
     std::shared_ptr<Statement> match{};
     // Artifact imports carry a quoted path and an optional module name in text.
     std::optional<std::string> import_path{};

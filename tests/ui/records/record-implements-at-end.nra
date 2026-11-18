@@ -1,0 +1,4 @@
+// Edge case 146: `record implements` at the end of the buffer is one E0206;
+// the declaration before it is kept.
+let before = 1;
+let P = record implements

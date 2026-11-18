@@ -7,6 +7,9 @@
 #include "launcher/container.hpp"
 #include "lift/hints.hpp"
 #include "neura-ir/class_hooks.hpp"
+#include "neura-ir/event_guard.hpp"
+#include "neura-ir/lifetime.hpp"
+#include "neura-ir/scoped_resources.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
@@ -188,11 +191,22 @@ neura::IrProgram load_program(const Options& options) {
         throw std::runtime_error("-I applies only to source inputs");
     }
     const auto bytes = read_file(options.files.front());
+    neura::IrProgram program;
     try {
-        return neura::read_nir(bytes, options.files.front().string());
+        program = neura::read_nir(bytes, options.files.front().string());
     } catch (const neura::NirError& error) {
         throw std::runtime_error(error.what());
     }
+    // Lowering checks a `using` resource's escape (E0475) and emission under
+    // a monitor guard (E0550) on the program it links
+    // (docs/design/Lifetime030.md). A .nir input skipped lowering, so the
+    // same checks run on it here, over the whole program it holds. Invalid
+    // IR is left to the verifier, which reports it at its own stage.
+    if (neura::verify_ir(program).empty()) {
+        neura::check_scoped_resources(program, {});
+        neura::check_event_guards(program);
+    }
+    return program;
 }
 
 int emit_ir(const Options& options) {
@@ -209,6 +223,7 @@ int emit_ir(const Options& options) {
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
         neura::specialize(program);
+        neura::check_using_results(program);
         neura::check_storage(program, neura::StorageStage::Specialized);
         neura::materialize_reference_storage(program);
         neura::elaborate_class_hooks(program);
@@ -392,6 +407,7 @@ namespace {
 int task_safety_report(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
     neura::specialize(program);
+    neura::check_using_results(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
     neura::elaborate_class_hooks(program);
@@ -460,6 +476,7 @@ int task_safety_report(neura::IrProgram program) {
 int check_program(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
     neura::specialize(program);
+    neura::check_using_results(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
     neura::elaborate_class_hooks(program);

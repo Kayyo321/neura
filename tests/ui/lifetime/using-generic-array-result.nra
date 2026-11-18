@@ -1,0 +1,26 @@
+// A generic function whose `Result<T>` carries an array once it is
+// specialized: a return inside `using` passes its value to the close, so
+// `read<int[]>` is E0473 at the `using` (docs/design/Lifetime030.md), not the
+// storage check's E0451 inside the library.
+let closeable = import:Std.Io.Closeable;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+
+let read = func<T>(make: func() -> T) -> Result<T> {
+    using (source = new Resource()) {
+        return Result<T>.Ok(make());
+    }
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let names = read<string[list]>(func() -> string[list] => new);
+        let numbers = read<int[]>(func() -> int[] => [1, 2, 3]);
+        return program.ExitCode.Ok;
+    };
+);

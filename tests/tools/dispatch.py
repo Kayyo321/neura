@@ -194,6 +194,8 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["fmt"], None, []),
     (["lsp", "--stdio"], lsp_session(), []),
     (["lsp"], None, []),
+    (["rename"], None, []),
+    (["rename", "{HELLO}", "1:1"], None, []),
     (["debug", "--stdio"], dap_session(), []),
     (["debug"], None, []),
 ]

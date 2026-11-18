@@ -4923,6 +4923,10 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     // by the optimizer, or directly when optimization is off.
     require_valid_ir(program, "before specialization");
     specialize(program);
+    // A generic `using` whose Result carries an array once specialized
+    // (docs/design/Lifetime030.md): E0473 at the `using`, before the storage
+    // check would report the array inside the library.
+    check_using_results(program);
     check_storage(program, StorageStage::Specialized);
     materialize_reference_storage(program);
     // Tuples and payload enums are stored inline: a value type may not

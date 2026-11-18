@@ -1329,6 +1329,10 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
     set_tests_properties(lifetime-programs PROPERTIES TIMEOUT 900)
+    # E0475 and E0550 when a program is built from a .nir module whose call
+    # was retargeted after lowering checked it.
+    add_test(NAME lifetime-nir-checks COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/nir_checks.py" "$<TARGET_FILE:neura>")
     add_test(NAME matching-nir COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/nir_versions.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")

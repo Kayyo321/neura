@@ -1,0 +1,34 @@
+// Native tier 3 deoptimizes inside a generator's `$resume`, reached through
+// `has_next` from a consuming loop (docs/design/Lifetime030.md, "Optimization
+// and tiers", Checks). The last value divides by zero: the checked division
+// leaves native code in `$resume`, whose frame state rebuilds the frame from
+// that call's slots alone, and the slower tier reports the trap. The state
+// is an object whose fields are stored before `$resume` returns, so the
+// values printed before the trap are the same in every mode.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let GeneratorResumeDeopt = module:program.Entry (
+    let ratios = iterator(count: int) -> int {
+        let total = 0;
+        for (let index = 0; index < count; index++) {
+            total = total + index % 5;
+            yield total % 3 + 1000 / (count - 1 - index);
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let sum = 0;
+        let seen = 0;
+        let items = ratios(40000).iterator();
+        while (items.has_next()) {
+            sum = sum + items.next() % 11;
+            seen = seen + 1;
+            if (seen % 10000 == 0) {
+                console.print_line("seen " + seen.to_string() + " sum " + sum.to_string());
+            }
+        }
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

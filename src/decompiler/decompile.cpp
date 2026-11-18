@@ -530,6 +530,43 @@ const char* evidence_label(const LiftedBlock& lifted) {
     return "?";
 }
 
+// docs/design/Lifetime030.md, Lowering and artifacts: a generator is an
+// ordinary class whose fields hold its state, so nothing in the circuit
+// marks it. With names, a layout named `$generator<N>` that has the state's
+// fields is shown as inferred generator state; without them, or with other
+// fields, it stays an ordinary layout.
+std::string generator_state(const nvr::Names& names, std::uint32_t layout) {
+    const auto& name = names.layouts[layout];
+    const auto dot = name.rfind('.');
+    const auto last = std::string_view(name).substr(dot == std::string::npos ? 0 : dot + 1);
+    if (!last.starts_with("$generator") || last.size() == 10 ||
+        !std::ranges::all_of(last.substr(10), [](char c) { return c >= '0' && c <= '9'; }) ||
+        layout >= names.fields.size())
+        return {};
+    const auto& fields = names.fields[layout];
+    const auto field = [&](std::string_view wanted) -> std::string {
+        for (std::size_t j = 0; j < fields.size(); ++j)
+            if (fields[j] == wanted) return "field" + std::to_string(j);
+        return {};
+    };
+    const auto index = field("$index"), buffer = field("$buffer"), buffered = field("$buffered"),
+               finished = field("$finished"), running = field("$running");
+    if (index.empty() || buffer.empty() || buffered.empty() || finished.empty() || running.empty()) return {};
+    std::string locals;
+    std::size_t temporaries = 0, captures = 0;
+    for (std::size_t j = 0; j < fields.size(); ++j) {
+        const auto& item = fields[j];
+        if (item.starts_with("$local") && item.find(':') != std::string::npos)
+            locals += (locals.empty() ? "" : ", ") + item.substr(item.find(':') + 1) + " field" + std::to_string(j);
+        else if (item.starts_with("$temp")) ++temporaries;
+        else if (!item.empty() && !item.starts_with('$')) ++captures;
+    }
+    return "// inferred from provenance names, not from the circuit: generator state; resume index " + index +
+           ", buffered value " + buffer + ", flags buffered " + buffered + ", finished " + finished + ", running " +
+           running + "; locals live across a yield: " + (locals.empty() ? std::string("none") : locals) +
+           "; hidden temporaries: " + std::to_string(temporaries) + "; other fields: " + std::to_string(captures);
+}
+
 } // namespace
 
 Decompilation decompile(const nvr::Image& image, const DecompileOptions& options) {
@@ -605,6 +642,7 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
         out << " }";
         if (names && i < names->layouts.size() && !names->layouts[i].empty()) {
             out << "  // provenance: " << names->layouts[i];
+            if (const auto state = generator_state(*names, i); !state.empty()) out << "\n  " << state;
         }
         out << "\n";
     }

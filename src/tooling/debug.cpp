@@ -1,4 +1,5 @@
 #include "debug.hpp"
+#include "neura-ir/lifetime.hpp"
 
 #include "json.hpp"
 #include "protocol.hpp"
@@ -546,6 +547,7 @@ void Adapter::launch(const Json& arguments) {
             const auto symbol = test->symbol;
             require_valid_ir(program, "before debug specialization");
             specialize(program);
+            check_using_results(program);
             check_storage(program, StorageStage::Specialized);
             materialize_reference_storage(program);
             check_containment(program);
@@ -1043,6 +1045,49 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
             if (value.raw.text == "false") return false;
             throw std::runtime_error("Boolean operand required");
         }
+        // The stored field `field` of the object `value`, read without
+        // calling a getter.
+        InspectedValue stored_field(const InspectedValue& value, const std::string& field) const {
+            const auto& raw = value.raw;
+            if (raw.layout == nvr::absent || !adapter.names_ || raw.layout >= adapter.names_->fields.size())
+                throw std::runtime_error("only direct object storage can be inspected; getters are not evaluated");
+            const WordNames names = adapter.names_->fields[raw.layout];
+            auto found = std::ranges::find(names, field);
+            const bool marked = found == names.end();
+            if (marked) found = std::ranges::find(names, field + std::string(any_marker));
+            if (found == names.end()) throw std::runtime_error("unknown stored field: " + field);
+            const auto index = static_cast<std::size_t>(found - names.begin());
+            const auto values = adapter.execution_->debug_children(raw.type, raw.bits, index, marked ? any_words + 1 : 2);
+            const auto tail = names.subspan(index);
+            const auto width = marked ? adapter.any_width(tail, values.size(), [&](auto i) { return values[i].type; }) : 0;
+            if (marked && width == 0) throw std::runtime_error("unknown stored field: " + field);
+            if (values.empty()) throw std::runtime_error("field is not initialized");
+            auto result = adapter.inspect(values, tail, width);
+            if (!result.raw.initialized) throw std::runtime_error("field is not initialized");
+            return result;
+        }
+        // `identifier` as a moved local of the generator whose `$resume`
+        // runs in this frame, or nothing.
+        std::optional<InspectedValue> generator_local(const std::string& identifier) const {
+            if (!adapter.names_) return std::nullopt;
+            const auto& f = adapter.snapshot_.threads.at(frame.thread).frames.at(frame.frame);
+            if (f.function >= adapter.names_->slots.size()) return std::nullopt;
+            std::optional<InspectedValue> receiver;
+            const WordNames slot_names = adapter.names_->slots[f.function];
+            const DebugWords slots = f.slots;
+            adapter.bindings(slot_names, slots.size(), [&](auto i) { return slots[i].type; },
+                             [&](std::size_t i, std::string_view name, std::size_t width) {
+                if (name == "this" && !receiver) receiver = adapter.inspect(slots.subspan(i), slot_names.subspan(i), width);
+            });
+            if (!receiver || !receiver->raw.initialized || receiver->raw.layout == nvr::absent ||
+                receiver->raw.layout >= adapter.names_->fields.size()) return std::nullopt;
+            const auto suffix = ":" + identifier;
+            for (const auto& field : adapter.names_->fields[receiver->raw.layout])
+                if (field.starts_with("$local") && field.ends_with(suffix) &&
+                    field.find(':') == field.size() - suffix.size())
+                    return stored_field(*receiver, field);
+            return std::nullopt;
+        }
         InspectedValue lookup(const std::string& identifier) const {
             const auto& f = adapter.snapshot_.threads.at(frame.thread).frames.at(frame.frame);
             std::optional<InspectedValue> found;
@@ -1061,6 +1106,11 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
                 if (!found->raw.initialized) throw std::runtime_error(identifier + " is not initialized");
                 return *found;
             }
+            // A local of a generator body whose scope contains a `yield`
+            // lives in the generator's state as `$local<M>:<name>`
+            // (docs/design/Lifetime030.md, Lowering): in its `$resume`
+            // frame the name reads that field of `this`.
+            if (const auto moved = generator_local(identifier)) return *moved;
             if (adapter.names_) {
                 const auto suffix = "." + identifier;
                 const WordNames names = adapter.names_->globals;
@@ -1138,21 +1188,7 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
                         result = {{type(nvr::TypeKind::Unsigned, 64), raw.children, true, std::to_string(raw.children), 0}};
                         continue;
                     }
-                    if (raw.layout == nvr::absent || !adapter.names_ || raw.layout >= adapter.names_->fields.size())
-                        throw std::runtime_error("only direct object storage can be inspected; getters are not evaluated");
-                    const WordNames names = adapter.names_->fields[raw.layout];
-                    auto found = std::ranges::find(names, field);
-                    const bool marked = found == names.end();
-                    if (marked) found = std::ranges::find(names, field + std::string(any_marker));
-                    if (found == names.end()) throw std::runtime_error("unknown stored field: " + field);
-                    const auto index = static_cast<std::size_t>(found - names.begin());
-                    const auto values = adapter.execution_->debug_children(raw.type, raw.bits, index, marked ? any_words + 1 : 2);
-                    const auto tail = names.subspan(index);
-                    const auto width = marked ? adapter.any_width(tail, values.size(), [&](auto i) { return values[i].type; }) : 0;
-                    if (marked && width == 0) throw std::runtime_error("unknown stored field: " + field);
-                    if (values.empty()) throw std::runtime_error("field is not initialized");
-                    result = adapter.inspect(values, tail, width);
-                    if (!result.raw.initialized) throw std::runtime_error("field is not initialized");
+                    result = stored_field(result, field);
                 } else if (take("[")) {
                     const auto index_value = logical_or();
                     if (!take("]")) throw std::runtime_error("expected ']'");

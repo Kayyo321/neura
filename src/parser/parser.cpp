@@ -75,6 +75,9 @@ private:
     bool skipped_to_end_ = false;
     // Set when error_limit() errors have been recorded.
     bool stopped_ = false;
+    // Set when a declaration's value reached the end of the file and its
+    // error is recorded, so that the declaration is kept without its ';'.
+    bool unfinished_at_end_ = false;
     unsigned block_depth_ = 0;
     // Narrowing (docs/design/Expressions030.md): the cursor where the
     // condition of the `if` being parsed starts, and whether the next cast
@@ -1136,6 +1139,8 @@ private:
                 expect("(");
                 hook_clauses(result, result.kind == Declaration::Kind::Class ? nullptr
                                      : result.kind == Declaration::Kind::Interface ? "an interface" : "a module");
+                // Set when a member's error reached the end of the file.
+                bool member_failed_at_end = false;
                 while (!at_end() && !at(")")) {
                     const auto member_start = cursor_;
                     if (startup_member(result)) continue;
@@ -1145,6 +1150,7 @@ private:
                     } catch (const Diagnostic& error) {
                         recover(error, member_start);
                         skip_accessor_clauses();
+                        member_failed_at_end = at_end();
                         continue;
                     }
                     if (member.cast_target) {
@@ -1155,7 +1161,15 @@ private:
                         result.members.push_back(std::move(member));
                     }
                 }
-                expect(")");
+                // Edge case 143 (docs/design/Records030.md): a member whose
+                // error ran to the end of the file has reported it; the body
+                // keeps its other members, as a record does (edge case 141).
+                // A body around such a member, or around such a record,
+                // stops in the same way.
+                if ((member_failed_at_end || unfinished_at_end_) && at_end())
+                    unfinished_at_end_ = true;
+                else
+                    expect(")");
                 expand_constructor_shorthands(result);
             } else if (next_is_word(0, "derive") && cursor_ + 1 < tokens_.size() &&
                        tokens_[cursor_ + 1].kind == TokenKind::Identifier) {
@@ -1199,10 +1213,14 @@ private:
                                 result.kind == Declaration::Kind::Class ||
                                 result.kind == Declaration::Kind::Interface ||
                                 result.kind == Declaration::Kind::Module;
-        if (body_value && !at(";"))
-            missing_semicolon("every declaration ends with ';', including one whose value is a function, class or "
-                              "module body");
-        expect(";");
+        // A declaration whose value ran to the end of the file has recorded
+        // its error already (parser_records.inc, edge case 141).
+        if (!(unfinished_at_end_ && at_end())) {
+            if (body_value && !at(";"))
+                missing_semicolon("every declaration ends with ';', including one whose value is a function, "
+                                  "class or module body");
+            expect(";");
+        }
         if (result.overloads.empty()) result.span = span_from(start);
         if (owner) accessor_clauses(result, *owner);
         return result;
@@ -2714,7 +2732,9 @@ private:
                 auto construct = make_expression(Expr::Kind::NamedVariant, result.span);
                 construct.operands.push_back(std::move(result));
                 while (!at("}")) {
-                    construct.field_names.push_back(identifier().text);
+                    const auto& field = identifier();
+                    construct.field_names.push_back(field.text);
+                    construct.field_spans.push_back(field.span);
                     expect(":");
                     construct.operands.push_back(expression());
                     if (!match(",")) break;

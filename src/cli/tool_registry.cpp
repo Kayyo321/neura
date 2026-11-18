@@ -34,7 +34,7 @@ constexpr std::array<std::string_view, 1> disasm_words{"disassemble"};
 constexpr std::array<std::string_view, 2> explain_words{"explain", "--explain"};
 constexpr std::array<std::string_view, 1> tags_words{"tags"};
 constexpr std::array<std::string_view, 1> debug_words{"debug"};
-constexpr std::array<std::string_view, 1> lsp_words{"lsp"};
+constexpr std::array<std::string_view, 2> lsp_words{"lsp", "rename"};
 constexpr std::array<std::string_view, 1> fmt_words{"fmt"};
 constexpr std::array<std::string_view, 1> doctor_words{"doctor"};
 constexpr std::array<std::string_view, 1> update_words{"update"};
@@ -66,7 +66,7 @@ constexpr std::array<Tool, 18> tool_table{{
 
 // Every `neura` command that a tool serves. version, help and capabilities
 // are built into `neura` itself.
-constexpr std::array<Command, 23> command_table{{
+constexpr std::array<Command, 24> command_table{{
     {"check", "neurac", "check", Component::Sdk},
     {"docs", "neura-doc", "docs", Component::Sdk},
     {"emit-ir", "neurac", "emit-ir", Component::Sdk},
@@ -86,6 +86,7 @@ constexpr std::array<Command, 23> command_table{{
     {"--explain", "neura-explain", "--explain", Component::Sdk},
     {"tags", "neura-tags", "tags", Component::Sdk},
     {"lsp", "neura-lsp", "lsp", Component::Sdk},
+    {"rename", "neura-lsp", "rename", Component::Sdk},
     {"fmt", "neura-fmt", "fmt", Component::Sdk},
     {"debug", "neura-debug", "debug", Component::Sdk},
     {"inspect-image", "neura-inspect", "inspect-image", Component::Core},
@@ -209,6 +210,7 @@ const char* usage_text() {
            "       neura debug --stdio\n"
            "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
            "       neura capabilities --json\n"
+           "       neura rename [-I source-root] <file.nra> <line>:<column> <new-name>\n"
            "       neura check [-I source-root] [--task-safety | --fix | --show-derived[=Name]] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"

@@ -10,6 +10,7 @@
 #include "neura-ir/class_hooks.hpp"
 #include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
+#include "neura-ir/lifetime.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
@@ -144,6 +145,7 @@ int run_tests(const Options& options) {
                                  "test_* in a module of the listed files");
     }
     neura::specialize(program);
+    neura::check_using_results(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
     neura::check_containment(program);
