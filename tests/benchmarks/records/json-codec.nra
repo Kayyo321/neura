@@ -12,7 +12,9 @@ let.promote _ = import:Std.Core.Result;
 
 let Mode = enum (Fast, Slow);
 let User = record (id: int64, name: string, mode: Mode, note: Optional<string>);
-let UserJson = derive json.Codec<User> { field User.name: "display"; };
+let UserJson = derive json.Codec<User> {
+    field User.name: "display";
+};
 
 let JsonCodec = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
@@ -29,10 +31,14 @@ let JsonCodec = module:program.Entry (
                                 matched++;
                             }
                         },
-                        Result.Err(_) => { return program.ExitCode.Failure; },
+                        Result.Err(_) => {
+                            return program.ExitCode.Failure;
+                        },
                     }
                 },
-                Result.Err(_) => { return program.ExitCode.Failure; },
+                Result.Err(_) => {
+                    return program.ExitCode.Failure;
+                },
             }
         }
         if (matched != n) {

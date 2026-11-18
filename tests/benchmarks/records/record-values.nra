@@ -17,7 +17,7 @@ let RecordValues = module:program.Entry (
         let mixed: uint32 = 0;
         for (let i = 0; i < n; i++) {
             last point = new Point(i, i * 3, "p");
-            last same = new with(point) { };
+            last same = new with(point) {};
             last other = new with(point) { y: i * 3 + 1 };
             if (point.equals(same)) {
                 equal++;

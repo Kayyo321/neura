@@ -24,6 +24,7 @@ let Doubled = class implements Sized (
     let half: int = 0;
     export let size: int = 0;
         | get: half * 2;
+
     export let init = func(value: int) -> void {
         half = value;
     };
