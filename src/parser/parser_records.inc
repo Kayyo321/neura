@@ -205,7 +205,19 @@ void record_declaration(Declaration& result) {
         if (!match(",")) break;
     }
     syntax->close = current().span;
-    expect(")");
+    if (at_end() && !result.members.empty()) {
+        // Edge case 141: `let P = record (id: int64,` at the end of the
+        // buffer. The one error is the unclosed '('; the record keeps the
+        // components read so far, so that the editor knows `P`.
+        try {
+            expected("')'", ")");
+        } catch (const Diagnostic& error) {
+            record(error);
+        }
+        unfinished_at_end_ = true;
+    } else {
+        expect(")");
+    }
     if (result.members.empty()) syntax->problems.emplace_back(syntax->close, "a record needs at least one component");
     Statement set{};
     set.kind = Statement::Kind::Expression;

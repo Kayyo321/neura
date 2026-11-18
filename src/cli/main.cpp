@@ -95,6 +95,7 @@ void usage(std::ostream& out) {
            "       neura debug --stdio\n"
            "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
            "       neura capabilities --json\n"
+           "       neura rename [-I source-root] <file.nra> <line>:<column> <new-name>\n"
            "       neura check [-I source-root] [--task-safety | --fix | --show-derived[=Name]] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"
@@ -2069,11 +2070,13 @@ int main(int argc, char** argv) {
     // Protocol commands own stdout. Dispatch before ordinary option/diagnostic
     // handling so no terminal notices can corrupt their transport.
     const std::string_view tooling_command(argv[1]);
-    if (tooling_command == "lsp" || tooling_command == "fmt" || tooling_command == "debug" || tooling_command == "capabilities" || tooling_command == "inspect-image") {
+    if (tooling_command == "lsp" || tooling_command == "fmt" || tooling_command == "debug" || tooling_command == "capabilities" || tooling_command == "inspect-image" || tooling_command == "rename") {
         try {
             std::vector<std::string> arguments;
             for (int i = 2; i < argc; ++i) arguments.emplace_back(argv[i]);
             if (tooling_command == "lsp") return neura::tooling::run_lsp(arguments);
+            if (tooling_command == "rename")
+                return neura::tooling::run_rename(arguments, standard_library(executable_path(argv[0])));
             if (tooling_command == "fmt") return neura::tooling::run_formatter(arguments);
             if (tooling_command == "inspect-image") return neura::tooling::run_image_inspector(arguments);
             if (tooling_command == "debug") {

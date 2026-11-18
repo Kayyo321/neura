@@ -888,6 +888,12 @@ void AnalysisSession::index_compiler() {
             }
         }
         if (!best) {
+            // The generated members of a hidden class, such as a generator's
+            // `init`, `has_next` and `next` (docs/design/Lifetime030.md), have
+            // no declaration of their own in the source.
+            if (original.owner != no_symbol && original.owner < program->symbols.size() &&
+                program->symbols[original.owner].name.starts_with('$'))
+                continue;
             auto doc = documents.find(original.span.file);
             if (doc == documents.end())
                 continue;
@@ -932,6 +938,26 @@ void AnalysisSession::index_compiler() {
             s.detail = detail + ") -> " + type_text(original.type);
         } else if (s.detail.empty() || original.kind == SymbolKind::Local || original.kind == SymbolKind::Parameter)
             s.detail = s.name + ": " + type_text(original.type);
+    }
+    // `export let.override name: T;` declares no field: its clauses lower to
+    // the hidden accessors `$get_name` and `$set_name`, which override the
+    // base's virtual ones (docs/design/Records030.md, Virtual accessors).
+    // The declaration's name stands for its first clause, so that rename and
+    // references reach the property through it.
+    for (SymbolId id = 0; id < program->symbols.size(); ++id) {
+        const auto &original = program->symbols[id];
+        if (original.kind != SymbolKind::Function || original.overrides == no_symbol ||
+            !(original.name.starts_with("$get_") || original.name.starts_with("$set_")) ||
+            !find_attribute(original, AttributeId::AccessorOf))
+            continue;
+        const auto found = symbol_names_.find({original.span.file, original.name.substr(5)});
+        if (found == symbol_names_.end()) continue;
+        std::optional<std::size_t> declaration;
+        for (const auto i : found->second)
+            if (symbols[i].selection.offset <= original.span.offset) declaration = i;
+        if (!declaration || symbols[*declaration].compiler_id != no_symbol) continue;
+        symbols[*declaration].compiler_id = id;
+        ids.emplace(id, *declaration);
     }
     // Type references disappear during lowering unless the editor records
     // them alongside the resolved declaration types. Pair syntax with those
@@ -1791,7 +1817,15 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                     }) || std::any_of(candidate.tags.begin(), candidate.tags.end(), [](const TagSyntax &tag) {
                         return tag.name == "Final";
                     })) continue;
-                if (container.kind == Declaration::Kind::Class && candidate.kind != Declaration::Kind::Function) continue;
+                // In a class, a field is overridden only through a virtual
+                // accessor (docs/design/Records030.md, Virtual accessors).
+                if (container.kind == Declaration::Kind::Class && candidate.kind != Declaration::Kind::Function &&
+                    !(target.owner && target.owner->kind == Declaration::Kind::Class &&
+                      std::ranges::any_of(candidate.accessors, [](const AccessorClause &clause) {
+                          return std::ranges::any_of(clause.dispatch_words, [](const auto &word) {
+                              return word.first == "virtual" || word.first == "override";
+                          });
+                      }))) continue;
                 add_declaration(target);
             }
             if (container.kind == Declaration::Kind::Class)
@@ -2056,6 +2090,102 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             }
             return ValueType{std::move(type)};
         };
+        // The path of a mapping in a derivation's braces,
+        // `derive G<T> { field Q.| }` or `{ variant E.| }`: the fields of a
+        // record, the variants of an enum, or the named payload fields of a
+        // variant (docs/design/Records030.md, Derivation).
+        {
+            std::optional<std::size_t> head;
+            for (std::size_t i = doc.tokens.size(); i > 0;) {
+                const auto &t = doc.tokens[--i];
+                if (t.kind == TokenKind::End || t.span.offset >= begin) continue;
+                head = i;
+                break;
+            }
+            const auto word = head ? doc.tokens[*head].text : std::string_view{};
+            bool deriving = false;
+            if (word == "field" || word == "variant") {
+                int depth = 0;
+                for (std::size_t i = *head; i > 0;) {
+                    const auto &t = doc.tokens[--i];
+                    if (t.text == "}" || t.text == ")") ++depth;
+                    else if (t.text == "(") --depth;
+                    else if (t.text == "{") {
+                        if (depth-- > 0) continue;
+                        // The braces belong to `derive G<...>`.
+                        for (std::size_t j = i; j > 0;) {
+                            const auto &before_brace = doc.tokens[--j];
+                            if (before_brace.text == "derive") { deriving = true; break; }
+                            if (before_brace.text == ";" || before_brace.text == "{" || before_brace.text == "}" ||
+                                before_brace.text == "(" || before_brace.text == ")") break;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (deriving) {
+                const auto dot = receiver_name.rfind('.');
+                auto shape = resolve(doc, receiver_name, begin, 0);
+                const Declaration *variant = nullptr;
+                if (!shape.declaration && dot != std::string_view::npos) {
+                    // `Enum.Variant.`: the variant is a member of the enum.
+                    const auto owner = resolve(doc, receiver_name.substr(0, dot), begin, 0);
+                    if (owner.declaration && owner.declaration->kind == Declaration::Kind::Enum)
+                        for (const auto &item : owner.declaration->members)
+                            if (item.name == receiver_name.substr(dot + 1)) variant = &item;
+                } else if (shape.declaration && shape.owner && shape.owner->kind == Declaration::Kind::Enum) {
+                    variant = shape.declaration;
+                }
+                if (variant) {
+                    if (word == "field" && variant->named_payload)
+                        for (const auto &parameter : variant->parameters)
+                            add(parameter.name, 5, parameter.name + ": " + syntax_type(parameter.type));
+                } else if (shape.declaration && shape.declaration->kind == Declaration::Kind::Enum) {
+                    for (const auto &item : shape.declaration->members)
+                        if (word == "variant" || item.named_payload) add(item.name, 20, "variant " + item.name);
+                } else if (shape.declaration && shape.declaration->kind == Declaration::Kind::Class && word == "field") {
+                    for (const auto &item : shape.declaration->members)
+                        if (item.kind == Declaration::Kind::Binding && !item.static_member)
+                            add(item.name, 5, item.name + (item.type ? ": " + syntax_type(*item.type) : std::string()));
+                }
+                return Json{{"isIncomplete", false}, {"items", items}};
+            }
+        }
+        // `T.` for a type parameter `T` in scope: the static requirements of
+        // its bounds (docs/design/Records030.md, Static interface requirements).
+        if (!receiver_name.empty() && receiver_name.find('.') == std::string_view::npos) {
+            const GenericParameter *generic = nullptr;
+            const EditorDocument *generic_document = &doc;
+            std::size_t narrowest = std::numeric_limits<std::size_t>::max();
+            std::function<void(const std::vector<Statement> &)> walk;
+            std::function<void(const Declaration &)> visit = [&](const Declaration &candidate) {
+                if (!contains(candidate.span, begin)) return;
+                for (const auto &parameter : candidate.generics)
+                    if (parameter.name == receiver_name && candidate.span.length <= narrowest) {
+                        generic = &parameter;
+                        narrowest = candidate.span.length;
+                    }
+                for (const auto &item : candidate.members) visit(item);
+                walk(candidate.body);
+            };
+            walk = [&](const std::vector<Statement> &body) {
+                for (const auto &statement : body) {
+                    if (statement.declaration) visit(*statement.declaration);
+                    walk(statement.body);
+                    walk(statement.alternative);
+                }
+            };
+            walk(doc.syntax.statements);
+            if (generic) {
+                for (const auto &bound : generic->bounds) {
+                    const auto interface = resolve(*generic_document, bound.name, bound.span.offset, 0);
+                    if (!interface.declaration || interface.declaration->kind != Declaration::Kind::Interface) continue;
+                    for (const auto &candidate : members(interface, 0))
+                        if (candidate.declaration->static_member) add_declaration(candidate);
+                }
+                return Json{{"isIncomplete", false}, {"items", items}};
+            }
+        }
         auto type = declared_type(find_declaration(doc, receiver_name, begin), 0);
         if (!type && wrappers.contains(canonical(std::string(receiver_name)))) {
             TypeSyntax syntax;

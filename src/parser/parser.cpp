@@ -50,6 +50,9 @@ private:
     bool skipped_to_end_ = false;
     // Set when error_limit() errors have been recorded.
     bool stopped_ = false;
+    // Set when a declaration's value reached the end of the file and its
+    // error is recorded, so that the declaration is kept without its ';'.
+    bool unfinished_at_end_ = false;
     unsigned block_depth_ = 0;
     std::optional<Span> untyped_variadic_;
     // The function bodies being parsed, innermost last, and whether each is
@@ -1142,10 +1145,14 @@ private:
                                 result.kind == Declaration::Kind::Class ||
                                 result.kind == Declaration::Kind::Interface ||
                                 result.kind == Declaration::Kind::Module;
-        if (body_value && !at(";"))
-            missing_semicolon("every declaration ends with ';', including one whose value is a function, class or "
-                              "module body");
-        expect(";");
+        // A declaration whose value ran to the end of the file has recorded
+        // its error already (parser_records.inc, edge case 141).
+        if (!(unfinished_at_end_ && at_end())) {
+            if (body_value && !at(";"))
+                missing_semicolon("every declaration ends with ';', including one whose value is a function, "
+                                  "class or module body");
+            expect(";");
+        }
         if (result.overloads.empty()) result.span = span_from(start);
         if (owner) accessor_clauses(result, *owner);
         return result;

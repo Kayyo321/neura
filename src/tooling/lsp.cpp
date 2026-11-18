@@ -16,6 +16,9 @@
 #include <deque>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iterator>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -38,6 +41,17 @@ Json strings(const std::vector<std::string> &values) {
     for (const auto &value : values)
         result.emplace_back(value);
     return result;
+}
+
+std::string file_text(const fs::path &path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("cannot read " + path.string());
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+void write_file_text(const fs::path &path, const std::string &text) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output << text;
+    if (!output) throw std::runtime_error("cannot write " + path.string());
 }
 
 class Server {
@@ -339,6 +353,47 @@ class Server {
             return false;
         }
     }
+    // docs/design/Records030.md, Tooling: a property is one name across an
+    // interface requirement, every field that satisfies it and every
+    // `let.override` of those fields. The family of a field is every field of
+    // that name whose owner is a subtype or a supertype of the owner of a
+    // member of the family.
+    std::set<SymbolId> property_family(SymbolId field) const {
+        std::set<SymbolId> family;
+        if (!session_.program || field >= session_.program->symbols.size()) return family;
+        const auto &symbols = session_.program->symbols;
+        if (symbols[field].kind != SymbolKind::Field) return family;
+        const auto &name = symbols[field].name;
+        const std::function<bool(SymbolId, SymbolId, unsigned)> below = [&](SymbolId type, SymbolId super,
+                                                                            unsigned depth) {
+            if (type == super) return true;
+            if (type >= symbols.size() || depth > 64) return false;
+            if (symbols[type].base != no_symbol && below(symbols[type].base, super, depth + 1)) return true;
+            return std::ranges::any_of(symbols[type].interfaces, [&](const IrType &item) {
+                return item.symbol != no_symbol && below(item.symbol, super, depth + 1);
+            });
+        };
+        family.insert(field);
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (SymbolId id = 0; id < symbols.size(); ++id) {
+                if (family.contains(id) || symbols[id].kind != SymbolKind::Field || symbols[id].name != name)
+                    continue;
+                const auto owner = symbols[id].owner;
+                if (owner == no_symbol) continue;
+                const auto kind = symbols[owner].kind;
+                if (kind != SymbolKind::Class && kind != SymbolKind::Interface) continue;
+                if (std::ranges::any_of(family, [&](SymbolId member) {
+                        const auto other = symbols[member].owner;
+                        return below(owner, other, 0) || below(other, owner, 0);
+                    })) {
+                    family.insert(id);
+                    grew = true;
+                }
+            }
+        }
+        return family;
+    }
     std::vector<Span> all_references(const EditorSymbol &selected, bool declarations,
                                      std::vector<DiagnosticEdit>* schema_edits = nullptr,
                                      const std::string& new_name = {}) {
@@ -415,6 +470,43 @@ class Server {
                         }
                     }
                 }
+                // A property renames with its requirement, the fields that
+                // satisfy it and their `let.override` clauses, whose hidden
+                // accessors serve one of those fields.
+                if (session_.program->symbols[target].kind == SymbolKind::Field ||
+                    (session_.program->symbols[target].kind == SymbolKind::Function &&
+                     find_attribute(session_.program->symbols[target], AttributeId::AccessorOf) &&
+                     session_.symbols[*found].name != session_.program->symbols[target].name)) {
+                    auto field = target;
+                    if (const auto *of = find_attribute(session_.program->symbols[target], AttributeId::AccessorOf);
+                        of && !of->value.items.empty())
+                        field = of->value.items.front().symbol;
+                    const auto fields = property_family(field);
+                    // A property is renamed everywhere or not at all.
+                    if (schema_edits)
+                        for (const auto member : fields) {
+                            const auto &item = session_.program->symbols[member];
+                            const auto at = session_.documents.find(item.span.file);
+                            if (at == session_.documents.end() || at->second.library)
+                                throw RequestError(-32803, "Rename would change the property '" + item.name +
+                                                               "' of '" + session_.program->symbols[item.owner].name +
+                                                               "', which is declared outside the workspace");
+                        }
+                    for (std::size_t i = 0; i < session_.symbols.size(); ++i) {
+                        const auto id = session_.symbols[i].compiler_id;
+                        if (id == no_symbol || id >= session_.program->symbols.size() || i == *found) continue;
+                        const auto &candidate = session_.program->symbols[id];
+                        bool member = fields.contains(id);
+                        if (!member && candidate.kind == SymbolKind::Function &&
+                            session_.symbols[i].name == session_.symbols[*found].name)
+                            if (const auto *of = find_attribute(candidate, AttributeId::AccessorOf);
+                                of && !of->value.items.empty())
+                                member = fields.contains(of->value.items.front().symbol);
+                        if (!member) continue;
+                        family.insert(i);
+                        if (declarations) spans.push_back(session_.symbols[i].selection);
+                    }
+                }
                 if (session_.program->symbols[target].kind == SymbolKind::Function) {
                     const auto root = root_of(target);
                     for (std::size_t i = 0; i < session_.symbols.size(); ++i) {
@@ -439,8 +531,18 @@ class Server {
                     spans.end());
         return spans;
     }
-    Json rename(EditorDocument &doc, const Json &params) {
-        const auto offset = source_offset(doc.source, params["position"]);
+    // The edits of renaming the symbol at `offset` to `name`, checked: a
+    // missed reference or capture must never produce an apparently
+    // successful rename, so every affected input is lowered with the edits
+    // applied before they are returned.
+    struct RenamePlan {
+        std::vector<DiagnosticEdit> edits;
+        // The mappings and imports inserted to keep a derived wire name
+        // (docs/design/Records030.md, Tooling).
+        std::vector<DiagnosticEdit> schema_edits;
+        std::optional<std::pair<std::string, std::string>> moved;
+    };
+    RenamePlan plan_rename(EditorDocument &doc, std::size_t offset, const std::string &name) {
         const auto *found = session_.symbol_at(doc, offset);
         if (!found)
             throw RequestError(-32602, "No resolved symbol at this position");
@@ -448,23 +550,22 @@ class Server {
         if (doc.library || selected.file.empty() || selected.name == "main" || selected.name == "init" ||
             selected.name == "destroy")
             throw RequestError(-32602, "This language-defined or library symbol cannot be renamed");
-        const auto name = params["newName"].string();
         if (!valid_identifier(name))
             throw RequestError(-32602, "The new name must be a Neura identifier");
         if (!session_.program || selected.compiler_id == no_symbol)
             throw RequestError(-32803, "Resolve source errors before renaming this symbol");
-        std::vector<DiagnosticEdit> schema_edits;
-        auto references = all_references(selected, true, &schema_edits, name);
-        auto edits = schema_edits;
-        for (const auto& span : references) edits.push_back({span, name});
-        std::sort(edits.begin(), edits.end(), [](const auto& a, const auto& b) {
+        RenamePlan plan;
+        auto references = all_references(selected, true, &plan.schema_edits, name);
+        plan.edits = plan.schema_edits;
+        for (const auto& span : references) plan.edits.push_back({span, name});
+        std::sort(plan.edits.begin(), plan.edits.end(), [](const auto& a, const auto& b) {
             return std::tie(a.span.file, a.span.offset) > std::tie(b.span.file, b.span.offset);
         });
         std::map<std::string, std::string, std::less<>> overlays;
         for (const auto &[path, item] : session_.documents)
             if (item.open)
                 overlays[path] = item.source;
-        for (const auto& edit : edits) {
+        for (const auto& edit : plan.edits) {
             const auto at = session_.documents.find(edit.span.file);
             if (at == session_.documents.end() || at->second.library)
                 throw RequestError(-32803, "Rename would modify a library declaration");
@@ -472,9 +573,6 @@ class Server {
                 overlays[edit.span.file] = at->second.source;
             overlays[edit.span.file].replace(edit.span.offset, edit.span.length, edit.replacement);
         }
-        // A missed reference or capture must never produce an apparently
-        // successful rename. Validate every affected input before returning.
-        std::optional<std::pair<std::string, std::string>> moved;
         std::set<std::string> hidden;
         if (selected.kind == 2 && selected.parent == static_cast<std::size_t>(-1) &&
             fs::path(selected.file).filename() == module_path(selected.name).filename()) {
@@ -486,7 +584,7 @@ class Server {
                 overlays[destination] = overlays.at(selected.file);
                 overlays.erase(selected.file);
                 hidden.insert(selected.file);
-                moved = std::pair{selected.file, destination};
+                plan.moved = std::pair{selected.file, destination};
             }
         }
         const SourceOverlayScope overlay_scope(overlays, session_.trusted, &hidden);
@@ -495,32 +593,99 @@ class Server {
         DiagnosticSink warnings;
         const DiagnosticSinkScope warning_scope(warnings);
         std::set<std::string> inputs;
-        for (const auto &edit : edits)
+        for (const auto &edit : plan.edits)
             inputs.insert(edit.span.file);
         for (const auto &input : inputs) {
             try {
-                const auto source = moved && input == moved->first ? moved->second : input;
+                const auto source = plan.moved && input == plan.moved->first ? plan.moved->second : input;
                 (void)lower_sources({source}, session_.source_roots, session_.library);
             } catch (const Diagnostic &error) {
                 throw RequestError(-32803, "Rename would not preserve a valid program: " + std::string(error.what()));
             }
         }
-        auto result = session_.workspace_edit(edits);
-        if (change_annotations_ && !schema_edits.empty()) {
+        return plan;
+    }
+    Json rename(EditorDocument &doc, const Json &params) {
+        const auto name = params["newName"].string();
+        const auto plan = plan_rename(doc, source_offset(doc.source, params["position"]), name);
+        auto result = session_.workspace_edit(plan.edits);
+        if (change_annotations_ && !plan.schema_edits.empty()) {
             result["changeAnnotations"]["neura.preserveSchema"] =
                 Json{{"label", "Preserve JSON wire name"}, {"needsConfirmation", false}};
             for (auto& change : result["documentChanges"].items())
                 for (auto& edit : change["edits"].items())
                     if (edit["newText"].string() != name) edit["annotationId"] = "neura.preserveSchema";
         }
-        if (moved)
+        if (plan.moved)
             result["documentChanges"].push_back(
                 Json{{"kind", "rename"},
-                     {"oldUri", path_uri(moved->first)},
-                     {"newUri", path_uri(moved->second)},
+                     {"oldUri", path_uri(plan.moved->first)},
+                     {"newUri", path_uri(plan.moved->second)},
                      {"options", Json{{"overwrite", false}, {"ignoreIfExists", false}}}});
         return result;
     }
+
+  public:
+    // `neura rename` (docs/lang/Tooling.md): the language server's rename,
+    // applied to the files on disk. It inserts the mappings that keep a
+    // derived wire name and says so.
+    int rename_on_disk(const fs::path &file, std::size_t line, std::size_t column, const std::string &name,
+                       const std::vector<fs::path> &roots, const fs::path &library) {
+        initialized_ = true;
+        session_.root = fs::current_path();
+        for (const auto &root : roots) session_.source_roots.push_back(fs::weakly_canonical(root));
+        session_.source_roots.push_back(fs::weakly_canonical(fs::absolute(file).parent_path()));
+        session_.library = library;
+        const auto path = fs::weakly_canonical(fs::absolute(file));
+        if (!fs::is_regular_file(path)) throw std::runtime_error("cannot read " + file.string());
+        // The command reads the files it is given, as `neura check` does,
+        // C imports included.
+        session_.trusted = true;
+        auto &doc = session_.open(path_uri(path.generic_string()), file_text(path), 1);
+        session_.analyze(doc.uri);
+        // Lines and columns count from 1, and a column counts bytes, as a
+        // diagnostic's location does.
+        std::size_t offset = 0;
+        for (std::size_t current = 1; current < line; ++current) {
+            const auto next = doc.source.find('\n', offset);
+            if (next == std::string::npos) throw std::runtime_error("line " + std::to_string(line) + " is past the end of " + file.string());
+            offset = next + 1;
+        }
+        const auto line_end = std::min(doc.source.find('\n', offset), doc.source.size());
+        if (column == 0 || offset + column - 1 > line_end)
+            throw std::runtime_error("column " + std::to_string(column) + " is past the end of line " + std::to_string(line));
+        offset += column - 1;
+        RenamePlan plan;
+        try {
+            plan = plan_rename(doc, offset, name);
+        } catch (const RequestError &error) {
+            throw std::runtime_error(std::string("rename: ") + error.what());
+        }
+        std::map<std::string, std::string> contents;
+        for (const auto &edit : plan.edits) {
+            if (!contents.contains(edit.span.file)) contents[edit.span.file] = session_.documents.at(edit.span.file).source;
+            contents[edit.span.file].replace(edit.span.offset, edit.span.length, edit.replacement);
+        }
+        for (const auto &[target, text] : contents) {
+            const auto destination = plan.moved && plan.moved->first == target ? plan.moved->second : target;
+            write_file_text(destination, text);
+            if (destination != target) fs::remove(target);
+        }
+        if (plan.moved && !contents.contains(plan.moved->first)) fs::rename(plan.moved->first, plan.moved->second);
+        for (const auto &edit : plan.schema_edits) {
+            std::string text = edit.replacement;
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\n')) text.erase(text.begin());
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\n')) text.pop_back();
+            std::cerr << "neura: rename inserted '" << text << "' in " << edit.span.file
+                      << " so that the JSON wire name does not change\n";
+        }
+        if (plan.moved) std::cerr << "neura: rename moved " << plan.moved->first << " to " << plan.moved->second << '\n';
+        std::cerr << "neura: rename applied " << plan.edits.size() << (plan.edits.size() == 1 ? " edit" : " edits")
+                  << " to " << contents.size() << (contents.size() == 1 ? " file\n" : " files\n");
+        return 0;
+    }
+
+  private:
     Json dispatch(const std::string &method, const Json &params) {
         if (method == "initialize")
             return initialize(params);
@@ -780,6 +945,18 @@ class Server {
             if (const auto inherited = overridden_hook(*doc, offset))
                 return session_.location(*inherited);
             const auto *symbol = session_.symbol_at(*doc, offset);
+            // `let.override name` stands for the accessors it declares; its
+            // definition is the overridden field (docs/design/Records030.md,
+            // Language server).
+            if (symbol && session_.program && symbol->compiler_id < session_.program->symbols.size()) {
+                const auto &original = session_.program->symbols[symbol->compiler_id];
+                if (const auto *of = find_attribute(original, AttributeId::AccessorOf);
+                    of && original.kind == SymbolKind::Function && original.name.starts_with('$') &&
+                    !of->value.items.empty())
+                    for (const auto &candidate : session_.symbols)
+                        if (candidate.compiler_id == of->value.items.front().symbol)
+                            return session_.location(candidate.selection);
+            }
             return symbol ? session_.location(symbol->selection) : Json{};
         }
         if (method == "textDocument/typeDefinition") {
@@ -882,6 +1059,34 @@ class Server {
     }
 };
 } // namespace
+int run_rename(const std::vector<std::string> &arguments, const std::filesystem::path &library) {
+    std::vector<fs::path> roots;
+    std::vector<std::string> positional;
+    for (std::size_t i = 0; i < arguments.size(); ++i) {
+        if (arguments[i] == "-I" && i + 1 < arguments.size()) roots.emplace_back(arguments[++i]);
+        else if (arguments[i].starts_with("-I") && arguments[i].size() > 2) roots.emplace_back(arguments[i].substr(2));
+        else if (arguments[i].starts_with("-")) throw std::runtime_error("unknown rename option " + arguments[i]);
+        else positional.push_back(arguments[i]);
+    }
+    const auto usage = std::string("usage: neura rename [-I <dir>]... <file.nra> <line>:<column> <new-name>");
+    if (positional.size() != 3) throw std::runtime_error(usage);
+    const auto& place = positional[1];
+    const auto colon = place.find(':');
+    std::size_t line = 0, column = 0;
+    try {
+        if (colon == std::string::npos) throw std::invalid_argument(place);
+        std::size_t used = 0;
+        line = std::stoul(place.substr(0, colon), &used);
+        if (used != colon) throw std::invalid_argument(place);
+        column = std::stoul(place.substr(colon + 1), &used);
+        if (used != place.size() - colon - 1) throw std::invalid_argument(place);
+    } catch (const std::exception &) {
+        throw std::runtime_error(usage);
+    }
+    if (line == 0 || column == 0) throw std::runtime_error(usage);
+    return Server{}.rename_on_disk(positional[0], line, column, positional[2], roots, library);
+}
+
 int run_lsp(const std::vector<std::string> &arguments) {
     for (const auto &argument : arguments)
         if (argument != "--stdio")
