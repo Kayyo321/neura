@@ -386,6 +386,20 @@ IrProgram without_attributes(IrProgram program) {
     return program;
 }
 
+// The minor version the writer picks for a linked program: the lowest that
+// holds every node. Since the 0.3.0 modernization the standard library builds
+// its messages with string chains (Std.Core.Error.message, io_text and
+// others), which are ConcatText nodes of NeuraIR 1.15, so a program that
+// links them is 1.15 whatever else it uses; one that does not keeps the
+// minor of its own features.
+int expected_minor(const IrProgram& program, int otherwise) {
+    bool expressions = false;
+    for_each_node(program, [&](const IrNode& item) {
+        expressions = expressions || item.op == IrOp::ConcatText || item.op == IrOp::TypeOf;
+    });
+    return expressions ? static_cast<int>(nir_expressions_minor) : otherwise;
+}
+
 NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
     std::size_t polls = 0;
     std::size_t spawns = 0;
@@ -394,10 +408,10 @@ NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
         check(has_spawn(program), fixture.name + ": the fixture spawns");
         const auto bytes = write_nir(program);
         check_equal(static_cast<int>(bytes[4]) + 256 * static_cast<int>(bytes[5]), 1, fixture.name + " major version");
-        check_equal(static_cast<int>(bytes[6]), 9, fixture.name + " is NeuraIR 1.9");
+        check_equal(static_cast<int>(bytes[6]), expected_minor(program, 9), fixture.name + " is NeuraIR 1.9 or newer");
         std::uint16_t minor = 0;
         const auto read = read_nir(bytes, fixture.name, &minor);
-        check_equal(static_cast<int>(minor), 9, fixture.name + " minor version read");
+        check_equal(static_cast<int>(minor), expected_minor(program, 9), fixture.name + " minor version read");
         std::size_t before = 0;
         std::size_t after = 0;
         for_each_node(program, [&](const IrNode& item) {
@@ -424,7 +438,7 @@ NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
             for (auto& instruction : body.instructions) clear(instruction);
         }
         const auto without = write_nir(unpolled);
-        check_equal(static_cast<int>(without[6]), 9, fixture.name + " without polls is still 1.9");
+        check_equal(static_cast<int>(without[6]), expected_minor(unpolled, 9), fixture.name + " without polls keeps its minor");
         check(without != bytes, fixture.name + ": polls are not part of the bytes");
     }
     std::cout << "  " << polls << " polls and " << spawns << " spawns survived the round trip in 1.9 files\n";
@@ -433,7 +447,7 @@ NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
 NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     const auto program = without_attributes(lower_files({environment.fixtures() / "concurrency" / "discard.nra"}));
     const auto bytes = write_nir(program);
-    check_equal(static_cast<int>(bytes[6]), 9, "discard.nir is NeuraIR 1.9");
+    check_equal(static_cast<int>(bytes[6]), expected_minor(program, 9), "discard.nir is NeuraIR 1.9 or newer");
 
     // A poll bit on an operation that is neither a loop nor a call.
     IrProgram misplaced;
@@ -1049,10 +1063,10 @@ NEURA_TEST(nir, records_attributes_and_conformance_calls_round_trip) {
               std::string(attribute_info(id).name) + " is attached by lowering");
     }
     const auto bytes = write_nir(program);
-    check_equal(static_cast<int>(bytes[6]), static_cast<int>(nir_records_minor), "a conformance call sets the minor");
+    check_equal(static_cast<int>(bytes[6]), expected_minor(program, nir_records_minor), "a conformance call sets the minor");
     std::uint16_t minor = 0;
     const auto read = read_nir(bytes, "records.nir", &minor);
-    check_equal(static_cast<int>(minor), static_cast<int>(nir_records_minor), "minor version read");
+    check_equal(static_cast<int>(minor), expected_minor(program, nir_records_minor), "minor version read");
     mismatch.clear();
     check(same_program(program, read), mismatch);
     check(write_nir(read) == bytes, "rewriting the read program changes its bytes");
@@ -1063,7 +1077,7 @@ NEURA_TEST(nir, records_attributes_and_conformance_calls_round_trip) {
     for (auto& body : plain.bodies) {
         if (plain.symbols[body.owner].name == "twice") body.instructions.clear();
     }
-    check_equal(static_cast<int>(write_nir(plain)[6]), 10, "attributes alone are 1.10");
+    check_equal(static_cast<int>(write_nir(plain)[6]), expected_minor(plain, 10), "attributes alone are 1.10");
 }
 
 NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10) {
@@ -1080,10 +1094,10 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
               std::string(info.name) + " is not attached by the fixture");
     }
     const auto bytes = write_nir(program);
-    check_equal(static_cast<int>(bytes[6]), 10, "an attributed program is NeuraIR 1.10");
+    check_equal(static_cast<int>(bytes[6]), expected_minor(program, 10), "an attributed program is NeuraIR 1.10");
     std::uint16_t minor = 0;
     const auto read = read_nir(bytes, "attributes.nir", &minor);
-    check_equal(static_cast<int>(minor), 10, "minor version read");
+    check_equal(static_cast<int>(minor), expected_minor(program, 10), "minor version read");
     mismatch.clear();
     check(same_program(program, read), mismatch);
     check(write_nir(read) == bytes, "rewriting the read program changes its bytes");
@@ -1114,11 +1128,17 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
     }
 
     // Each half alone also needs 1.10.
-    check_equal(static_cast<int>(write_nir(attributed_fixture(environment, true, false).program)[6]), 10,
-                "attributes alone make a file 1.10");
-    check_equal(static_cast<int>(write_nir(attributed_fixture(environment, false, true).program)[6]), 10,
-                "deferred initialization alone makes a file 1.10");
-    check(static_cast<int>(write_nir(without_attributes(attributed_fixture(environment, false, false).program))[6]) < 10,
+    {
+        const auto attributes_only = attributed_fixture(environment, true, false).program;
+        check_equal(static_cast<int>(write_nir(attributes_only)[6]), expected_minor(attributes_only, 10),
+                    "attributes alone make a file 1.10");
+        const auto deferred_only = attributed_fixture(environment, false, true).program;
+        check_equal(static_cast<int>(write_nir(deferred_only)[6]), expected_minor(deferred_only, 10),
+                    "deferred initialization alone makes a file 1.10");
+    }
+    check(static_cast<int>(write_nir(without_attributes(attributed_fixture(environment, false, false).program))[6]) < 10 ||
+              expected_minor(without_attributes(attributed_fixture(environment, false, false).program), 0) ==
+                  static_cast<int>(nir_expressions_minor),
           "the fixture without either keeps an earlier version");
 }
 
@@ -1419,7 +1439,7 @@ NEURA_TEST(nir, any_round_trips_as_version_1_12_and_its_unpack_needs_a_tag_test)
     auto program = lower_files({backend_dir(environment) / "nir-versions" / "any.nra"});
     check(verify_ir(program).empty(), "the any fixture verifies");
     const auto bytes = write_nir(program);
-    check_equal(static_cast<int>(bytes[6] | (bytes[7] << 8)), static_cast<int>(nir_any_minor),
+    check_equal(static_cast<int>(bytes[6] | (bytes[7] << 8)), expected_minor(program, nir_any_minor),
                 "a program with any is written as NeuraIR 1.12");
     check(write_nir(read_nir(bytes, "any")) == bytes, "any round-trips through .nir");
     auto older = bytes;
@@ -1477,8 +1497,9 @@ NEURA_TEST(nir, class_hooks_are_written_with_their_minor_version) {
     auto newer = bytes;
     newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
     expect_nir_error(newer, "is not supported");
-    const auto plain = write_nir(lower_files({backend_dir(environment) / "nir-versions" / "attributes.nra"}));
-    check(static_cast<int>(plain[6]) < static_cast<int>(nir_hooks_minor), "a program without hooks keeps its version");
+    const auto unhooked = lower_files({backend_dir(environment) / "nir-versions" / "attributes.nra"});
+    const auto plain = write_nir(unhooked);
+    check_equal(static_cast<int>(plain[6]), expected_minor(unhooked, 10), "a program without hooks keeps its version");
 }
 
 } // namespace neura::testing

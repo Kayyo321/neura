@@ -49,6 +49,11 @@ import tempfile
 NEURA = pathlib.Path(sys.argv[1]).resolve()
 DIRECTORY = pathlib.Path(sys.argv[2]).resolve()
 LIFETIME_MINOR = 14
+# NeuraIR 1.15 (nir_expressions_minor) holds concat text, the string chains
+# that the standard library uses for its messages since the 0.3.0
+# modernization (Std.Core.Error.message and others): a program that links one
+# is written as 1.15 whatever else it uses.
+EXPRESSIONS_MINOR = 15
 GENERATOR_STATE = 'inferred from provenance names, not from the circuit: generator state; resume index'
 YIELD = re.compile(r'^\s*yield\b', re.MULTILINE)
 
@@ -180,12 +185,14 @@ def main():
                 failures.append(f'{source.name}: steps and peak cells differ between builds: {counts}')
             data = bytearray(module.read_bytes())
             minor = data[6] | (data[7] << 8)
+            chained = 'concat_text' in run(['emit-ir', str(module)]).stdout
             if expected_path.with_suffix('.plain').exists():
-                if minor >= LIFETIME_MINOR:
+                if minor >= LIFETIME_MINOR and not (chained and minor == EXPRESSIONS_MINOR):
                     failures.append(f'{source.name}: NeuraIR 1.{minor}, expected a minor below 1.{LIFETIME_MINOR}')
                 continue
-            if minor != LIFETIME_MINOR:
-                failures.append(f'{source.name}: NeuraIR 1.{minor}, expected 1.{LIFETIME_MINOR}')
+            expected_minor = EXPRESSIONS_MINOR if chained else LIFETIME_MINOR
+            if minor != expected_minor:
+                failures.append(f'{source.name}: NeuraIR 1.{minor}, expected 1.{expected_minor}')
             data[6], data[7] = LIFETIME_MINOR - 2, 0
             older = scratch / (source.name + '.older.nir')
             older.write_bytes(data)
