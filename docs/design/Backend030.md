@@ -57,6 +57,30 @@ Departures, each to be confirmed by the owner:
 6. **The handler interface** the `Std.Net.Http` router implements is `Std.App.Handler` (below), not `http.Router` itself, so that `Std.App` does not depend on `Std.Net.Http`.
 7. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host. Native code is always denied.
 
+### Host services for the standard library
+
+The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [NVM](../runtime/NVM.md#host-services), has a capability group (denied answers 14) and is recorded and replayed like every host request. `Std.Net.Internal.Sockets` binds them for the public library.
+
+| Service | Status | Tests |
+| --- | --- | --- |
+| OS entropy, `neura.entropy.fill` | implemented: `getrandom`, `getentropy`, `BCryptGenRandom`; fails with 100 instead of a weaker fallback | `backend-host` |
+| UDP, `neura.net.udp.*` | implemented; numeric addresses only, no overlap | `backend-host` |
+| Unix-domain streams and datagrams, `neura.net.unix.*`, with the Linux abstract namespace | implemented; not on Windows | `backend-host` |
+| Socket options, `neura.net.option.*`: `SO_REUSEADDR`, `SO_REUSEPORT`, `TCP_NODELAY`, `TCP_FASTOPEN`, `TCP_USER_TIMEOUT`, keepalive and its timers, buffers, broadcast | implemented; an option the platform lacks answers 13 | `backend-host` |
+| TLS client streams with verification, SNI and ALPN, and server streams outside the host, `neura.net.tls.*` | implemented in builds with `NEURA_ENABLE_SERVER_TLS`; 13 otherwise | `backend-host` (TLS builds) |
+| `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a copy elsewhere | `backend-host` |
+| `splice` | stub: the providers have no pipe handles to splice between; `send_file` covers file to socket | |
+| System name resolution, `neura.net.resolve` | implemented with `getaddrinfo`; blocks every task while it waits | `backend-host` |
+| HTTP/2 over TLS through ALPN | stub: ALPN is negotiated by the TLS streams, but the server host speaks HTTP/1.1 only (approved decision 9) | |
+| `MSG_ZEROCOPY` | stub: host values are copied at the boundary, so the kernel would gain nothing to share | |
+| UDP GSO and GRO | stub: not reached; needs a segment-size argument and batched results | |
+| MPTCP | stub: not reached; it would be a protocol flag of `connect` and `listen` on Linux 5.6 and later | |
+| `io_uring`, `epoll` and `kqueue` driver backends | stub: the driver waits with `poll(2)` or `WaitForMultipleObjects`; another backend changes the scheduling evidence and needs its own qualification | |
+| kTLS | stub: not reached; needs the kernel `tls` module and qualification of OpenSSL's offload | |
+| Fork and VM-generation detection | stub: not reached. The entropy service keeps no user-space pool, so each request draws fresh operating-system bytes | |
+| `RDSEED` and `RNDR` | stub: not offered separately; the operating-system generator already mixes them where the hardware has them | |
+| `mlock`, core-dump exclusion and zeroization (`neura.memory.lock`, which the `Std.Crypto` design note asks for) | not provided by this runtime: the collector moves and copies heap storage, so the NVM cannot pin, lock or promise to zero it | |
+
 ### Handler interface for `Std.Net.Http`
 
 `Context.serve(handler: app.Handler) -> Result<Unit>` receives the assigned request and calls the handler once.
