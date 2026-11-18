@@ -129,9 +129,9 @@ Native code pays off where most steps run in regions of integer loops: collatz (
 
 The geometric mean of the ratios is 3.87. Steps and peak heap cells are those of every tier, so these rows are also the reference for comparing a later version on this machine: a change that leaves the steps and cells of a program as they are and makes its time longer has made the runtime slower. The steps of `binary-trees` are the same as in the tables below, which were measured with the 0.2.1 sources before tier 3 and before the changes to the heap.
 
-### 0.2.0 and 0.2.1 in development
+### 0.2.0 and the 0.2.1 development line
 
-Full sizes on a 4-core Intel Xeon virtual machine at 2.10 GHz running Linux x86-64, with OpenJDK 21.0.12. *0.2.0* is the released version and *0.2.1* the version in development, with the same sources; both run every program in the same number of steps and print the same output. The 0.2.1 and Java columns are medians of 5 runs with nothing else running, and the 0.2.0 column medians of 3 runs while other work ran on the machine.
+Full sizes on a 4-core Intel Xeon virtual machine at 2.10 GHz running Linux x86-64, with OpenJDK 21.0.12. *0.2.0* is the released version and *0.2.1* the development line that preceded the 0.2.1 candidates, with the same sources; both run every program in the same number of steps and print the same output. The 0.2.1 and Java columns are medians of 5 runs with nothing else running, and the 0.2.0 column medians of 3 runs while other work ran on the machine.
 
 | Program | Size | Steps | 0.2.0 (s) | 0.2.1 (s) | Java (s) | 0.2.1 / Java |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |

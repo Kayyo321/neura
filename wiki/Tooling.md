@@ -341,9 +341,9 @@ Diagnostics should identify the source file, line and column, the offending span
 A formatter should produce stable, idempotent output consistent with [Coding style](CodingStyle). Editor integration should eventually expose diagnostics, navigation and completion; debugger support should include source locations, stepping and local variables. These are tooling goals, not promises of first-release support.
 
 
-## Editor tooling research candidate
+## Editor tooling
 
-The `0.2.1-rc.2` tooling candidate provides these interfaces for the VS Code extension. They are capability-negotiated: `neura capabilities --json` returns a versioned feature object.
+Neura 0.3.0 provides these interfaces for the VS Code extension, as the `0.2.1-rc.2` candidate first did. They are capability-negotiated: `neura capabilities --json` returns a versioned feature object.
 
 - `neura lsp --stdio` speaks LSP with UTF-16 positions. It analyzes unsaved sources and imports using per-session overlays, recovers partial syntax, and provides diagnostics, tokens, completion, hover, symbols, navigation, rename, hierarchy, refactoring, and formatting. Editor requests never link or run a program. C header analysis requires a trusted session.
 - `neura fmt [--check | --write] <file.nra>...` shares the editor formatter. `--stdin --stdin-filepath <file>` formats unsaved text. It preserves token spellings, comments and documentation attachment; malformed input is rejected before writes. `--check` reports files that need formatting without changing them.
