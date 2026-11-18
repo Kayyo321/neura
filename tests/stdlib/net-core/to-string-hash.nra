@@ -1,0 +1,87 @@
+let cidr = import:Std.Net.Core.CidrBlock;
+let ips = import:Std.Net.Core.IpAddr;
+let query = import:Std.Net.Core.Query;
+let sockets = import:Std.Net.Core.SocketAddr;
+let test = import:Std.Test;
+let unix = import:Std.Net.Core.UnixAddr;
+let uri = import:Std.Net.Core.Uri;
+let urn = import:Std.Net.Core.Urn;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Core value classes agree.
+// Each pair below is built from different text for the same value.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    export let test_ipv4 = func {
+        last a = v4.of(192, 0, 2, 1);
+        last b = test.assert_ok<v4.Ipv4Addr>(v4.parse("192.0.2.1"));
+        agree(a, b);
+        differ(a, v4.of(192, 0, 2, 2));
+        test.assert_equal_string("192.0.2.1", a.to_string());
+    };
+
+    export let test_ipv6 = func {
+        last a = test.assert_ok<v6.Ipv6Addr>(v6.parse("2001:DB8:0:0::1"));
+        last b = test.assert_ok<v6.Ipv6Addr>(v6.parse("2001:db8::1"));
+        agree(a, b);
+        differ(a, test.assert_ok<v6.Ipv6Addr>(v6.parse("2001:db8::2")));
+        test.assert_equal_string("2001:db8::1", a.to_string());
+    };
+
+    export let test_socket_addr = func {
+        last a = test.assert_ok<sockets.SocketAddr>(sockets.parse("192.0.2.1:80"));
+        last b = test.assert_ok<sockets.SocketAddr>(sockets.parse("192.0.2.1:80"));
+        agree(a, b);
+        differ(a, test.assert_ok<sockets.SocketAddr>(sockets.parse("192.0.2.1:81")));
+        test.assert_equal_string("192.0.2.1:80", a.to_string());
+    };
+
+    export let test_cidr_block = func {
+        last a = test.assert_ok<cidr.CidrBlock>(cidr.parse("10.0.0.0/8"));
+        last b = test.assert_ok<cidr.CidrBlock>(cidr.parse("10.0.0.0/8"));
+        agree(a, b);
+        differ(a, test.assert_ok<cidr.CidrBlock>(cidr.parse("10.0.0.0/9")));
+        test.assert_equal_string("10.0.0.0/8", a.to_string());
+    };
+
+    export let test_unix_addr = func {
+        agree(unix.of_path("/tmp/a.sock"), unix.of_path("/tmp/a.sock"));
+        differ(unix.of_path("/tmp/a.sock"), unix.abstract_name("/tmp/a.sock"));
+        test.assert_equal_string("/tmp/a.sock", unix.of_path("/tmp/a.sock").to_string());
+    };
+
+    export let test_query = func {
+        last a = test.assert_ok<query.QueryString>(query.parse("a=1&b=2", query.QueryMode.Rfc3986));
+        last b = test.assert_ok<query.QueryString>(query.parse("a=1&b=2", query.QueryMode.Rfc3986));
+        agree(a, b);
+        differ(a, test.assert_ok<query.QueryString>(query.parse("a=1&b=3", query.QueryMode.Rfc3986)));
+        test.assert_equal_string("a=1&b=2", a.to_string());
+        agree(a.pair_at(0), b.pair_at(0));
+        differ(a.pair_at(0), a.pair_at(1));
+        test.assert_equal_string("b=2", a.pair_at(1).to_string());
+    };
+
+    export let test_uri_and_urn = func {
+        last a = test.assert_ok<uri.Uri>(uri.parse("https://example.com/a?b=1#c"));
+        last b = test.assert_ok<uri.Uri>(uri.parse("https://example.com/a?b=1#c"));
+        agree(a, b);
+        differ(a, test.assert_ok<uri.Uri>(uri.parse("https://example.com/a?b=2#c")));
+        test.assert_equal_string("https://example.com/a?b=1#c", a.to_string());
+        last x = test.assert_ok<urn.Urn>(urn.parse("urn:ISBN:0451450523"));
+        last y = test.assert_ok<urn.Urn>(urn.parse("URN:isbn:0451450523?=q"));
+        agree(x, y);
+        differ(x, test.assert_ok<urn.Urn>(urn.parse("urn:isbn:0451450524")));
+        test.assert_equal_string("urn:ISBN:0451450523", x.to_string());
+    };
+);
