@@ -76,6 +76,16 @@ def main():
     return 0
 
 
+def load(browser, site, path, wasm_type):
+    """The bundled page's DOM once its boot module settled. bundle-check.dump tries a load three times, since a
+    loaded machine can exhaust the virtual-time budget while nvm.wasm compiles; this tries that three times more."""
+    for _ in range(3):
+        dom = bundle_check.dump(browser, site, path, wasm_type)
+        if 'data-neura-state=' in dom:
+            break
+    return dom
+
+
 def walkthrough(args, work, browsers):
     example = ROOT / 'examples/apps/web-counter/app.nra'
     document = (ROOT / 'docs/apps/WebApp.md').read_text()
@@ -93,7 +103,7 @@ def walkthrough(args, work, browsers):
     if chromium is None:
         print('bundle: no Chromium to load it')
         return
-    dom = bundle_check.dump(chromium, site, 'portfolio/', 'application/wasm')
+    dom = load(chromium, site, 'portfolio/', 'application/wasm')
     bundle_check.expect(dom, f'<link rel="stylesheet" href="./{re.escape(sheets[0])}">', 'stylesheet link')
     bundle_check.expect(dom, r'data-neura-state="running"', 'bundle state')
     bundle_check.expect(dom, r'<h1>My first Neura app</h1>', 'heading')
@@ -109,7 +119,7 @@ def walkthrough(args, work, browsers):
     if len(assets) != 2 or any(entry['initial'] or entry['media_type'] != 'image/svg+xml'
                                or not (parts / entry['path']).exists() for entry in assets):
         raise SystemExit(f'expected two bundled SVG assets, not initial: {assets}')
-    dom = bundle_check.dump(chromium, site, 'parts/', 'application/wasm')
+    dom = load(chromium, site, 'parts/', 'application/wasm')
     bundle_check.expect(dom, r'data-neura-state="running"', 'parts bundle state')
     badge = re.search(r'<img id="badge" src="(assets/[0-9a-f]{64}\.svg)"', dom)
     if not badge or badge.group(1) not in {entry['path'] for entry in assets}:
