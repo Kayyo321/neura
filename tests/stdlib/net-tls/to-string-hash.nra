@@ -1,0 +1,15 @@
+let spiffe = import:Std.Net.Tls.Spiffe;
+let test = import:Std.Test;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of Std.Net.Tls.SpiffeId agree.
+let ToStringHashTests = module (
+    let id = func(text: string) -> spiffe.SpiffeId => test.assert_ok<spiffe.SpiffeId>(spiffe.parse(text));
+
+    export let test_spiffe_id = func {
+        last a = id("spiffe://example.org/ns/prod/sa/web");
+        test.assert(a.equals(id("spiffe://example.org/ns/prod/sa/web")));
+        test.assert_equal_int64(a.hash_code() as int64, id("spiffe://example.org/ns/prod/sa/web").hash_code() as int64);
+        test.assert(not a.equals(id("spiffe://example.org/ns/prod/sa/api")));
+        test.assert_equal_string("spiffe://example.org/ns/prod/sa/web", a.to_string());
+    };
+);

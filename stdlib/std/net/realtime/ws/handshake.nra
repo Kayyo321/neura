@@ -2,6 +2,7 @@ let base64 = import:Std.Encoding.Base64;
 let errors = import:Std.Core.Error;
 let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Optional;
+let optionals = import:Std.Core.Optional;
 let.promote _ = import:Std.Random.Random;
 let.promote _ = import:Std.Core.Result;
 let sha1_digest = import:Std.Net.Realtime.Ws.Internal.Sha1;
@@ -172,6 +173,18 @@ export let Handshake = module (
             protocol = chosen;
             extensions = extension_response;
         };
+
+        /// @brief Equal when the chosen protocol and the extension response are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ServerAcceptance) {
+                return false;
+            }
+            return optionals.equals<string>(protocol, that.protocol) && extensions == that.extensions;
+        };
+
+        /// @brief Combines the protocol and the extension response, consistent with equals.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(optionals.hash<string>(protocol), strings.hash(extensions));
 
         /// @brief The chosen protocol and extensions.
         export let.override to_string = func -> string {

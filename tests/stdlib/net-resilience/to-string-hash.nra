@@ -1,0 +1,20 @@
+let durations = import:Std.Time.Duration;
+let limiters = import:Std.Net.Resilience.RateLimiter;
+let test = import:Std.Test;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of Std.Net.Resilience.RateDecision agree.
+let ToStringHashTests = module (
+    let decision = func(allowed: bool, remaining: int, retry_millis: int) -> limiters.RateDecision =>
+        new limiters.RateDecision(allowed, remaining, durations.of_millis(retry_millis as int64), durations.of_seconds(1));
+
+    export let test_rate_decision = func {
+        last a = decision(true, 4, 0);
+        test.assert(a.equals(decision(true, 4, 0)));
+        test.assert_equal_int64(a.hash_code() as int64, decision(true, 4, 0).hash_code() as int64);
+        test.assert(not a.equals(decision(false, 4, 0)));
+        test.assert(not a.equals(decision(true, 3, 0)));
+        test.assert(not a.equals(decision(true, 4, 5)));
+        test.assert(a.to_string().byte_length > 0);
+        test.assert_equal_string(a.to_string(), decision(true, 4, 0).to_string());
+    };
+);

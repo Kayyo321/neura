@@ -4,6 +4,7 @@ let.promote _ = import:Std.Time.Duration;
 let errors = import:Std.Core.Error;
 let.promote _ = import:Std.Net.FramedTransport;
 let frames = import:Std.Net.Realtime.Ws.Frame;
+let hashing = import:Std.Core.Hash;
 let handshake = import:Std.Net.Realtime.Ws.Handshake;
 let heartbeat = import:Std.Net.Realtime.Ws.Heartbeat;
 let.promote _ = import:Std.Net.Realtime.Ws.Message;
@@ -61,6 +62,19 @@ export let WebSocket = module (
             max_message_size = message_limit;
             max_fragment_size = fragment;
         };
+
+        /// @brief Equal when the three limits are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: WebSocketOptions) {
+                return false;
+            }
+            return max_frame_size == that.max_frame_size && max_message_size == that.max_message_size
+                && max_fragment_size == that.max_fragment_size;
+        };
+
+        /// @brief Combines the three limits, consistent with equals.
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(
+            max_frame_size as uint32, max_message_size as uint32), max_fragment_size as uint32);
 
         /// @brief The three limits.
         export let.override to_string = func -> string =>

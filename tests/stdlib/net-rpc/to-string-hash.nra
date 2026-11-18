@@ -1,0 +1,77 @@
+let calls = import:Std.Net.Rpc.Call;
+let deadlines = import:Std.Net.Rpc.Deadline;
+let durations = import:Std.Time.Duration;
+let framing = import:Std.Net.Rpc.Framing;
+let metadata = import:Std.Net.Rpc.Metadata;
+let proto = import:Std.Net.Rpc.ProtoWire;
+let reflection = import:Std.Net.Rpc.Reflection;
+let statuses = import:Std.Net.Rpc.Status;
+let test = import:Std.Test;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Rpc value classes agree.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    export let test_method_path = func {
+        last a = new calls.MethodPath("grpc.health.v1.Health", "Check");
+        agree(a, new calls.MethodPath("grpc.health.v1.Health", "Check"));
+        differ(a, new calls.MethodPath("grpc.health.v1.Health", "Watch"));
+        test.assert_equal_string("/grpc.health.v1.Health/Check", a.to_string());
+    };
+
+    export let test_status = func {
+        last a = statuses.of(statuses.Code.NotFound, "no such thing");
+        agree(a, statuses.of(statuses.Code.NotFound, "no such thing"));
+        differ(a, statuses.of(statuses.Code.NotFound, "another thing"));
+        test.assert(a.to_string().byte_length > 0);
+        last f = new statuses.RpcFailure(a);
+        agree(f, new statuses.RpcFailure(statuses.of(statuses.Code.NotFound, "no such thing")));
+        differ(f, new statuses.RpcFailure(statuses.of(statuses.Code.Internal, "no such thing")));
+        test.assert(f.to_string().byte_length > 0);
+    };
+
+    export let test_metadata = func {
+        last a = metadata.empty();
+        last b = metadata.empty();
+        a.add_raw("x-key", "value");
+        b.add_raw("x-key", "value");
+        agree(a, b);
+        b.add_raw("x-other", "1");
+        differ(a, b);
+        test.assert(a.to_string().byte_length > 0);
+    };
+
+    export let test_deadline = func {
+        last a = new deadlines.Deadline(durations.of_seconds(5));
+        agree(a, new deadlines.Deadline(durations.of_seconds(5)));
+        differ(a, new deadlines.Deadline(durations.of_seconds(6)));
+        test.assert(a.to_string().byte_length > 0);
+    };
+
+    export let test_frame_and_field_key = func {
+        last f = new framing.Frame(0, new([1, 2, 3]));
+        agree(f, new framing.Frame(0, new([1, 2, 3])));
+        differ(f, new framing.Frame(1, new([1, 2, 3])));
+        test.assert_equal_string("Frame(flags 0, 3 bytes)", f.to_string());
+        last k = new proto.FieldKey(1, 2);
+        agree(k, new proto.FieldKey(1, 2));
+        differ(k, new proto.FieldKey(1, 0));
+        test.assert_equal_string("field 1, wire type 2", k.to_string());
+    };
+
+    export let test_method_descriptor = func {
+        last a = new reflection.MethodDescriptor("Check", "Req", "Resp", false, true);
+        agree(a, new reflection.MethodDescriptor("Check", "Req", "Resp", false, true));
+        differ(a, new reflection.MethodDescriptor("Check", "Req", "Resp", true, true));
+        test.assert_equal_string("Check(Req) returns (stream Resp)", a.to_string());
+    };
+);

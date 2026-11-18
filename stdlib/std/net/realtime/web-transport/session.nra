@@ -84,6 +84,18 @@ export let Session = module (
             origin = origin_value;
         };
 
+        /// @brief Equal when the authority, path and origin are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: SessionRequest) {
+                return false;
+            }
+            return authority == that.authority && path == that.path && origin == that.origin;
+        };
+
+        /// @brief Combines the authority, path and origin, consistent with equals.
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(
+            strings.hash(authority), strings.hash(path)), strings.hash(origin));
+
         /// @brief The authority, path and origin.
         export let.override to_string = func -> string =>
             "SessionRequest(" .. authority .. path .. (origin.byte_length > 0 ? ", origin " .. origin : "") .. ")";

@@ -1,0 +1,26 @@
+// test-options: --allow-net
+let duration = import:Std.Time.Duration;
+let unit = import:Std.Core.Unit;
+let strings = import:Std.Text.Strings;
+let tcp_listener = import:Std.Net.TcpListener;
+let tcp_stream = import:Std.Net.TcpStream;
+let test = import:Std.Test;
+
+// Part 4 of the 0.3.0 stdlib pass: TcpListener and TcpStream describe themselves, on loopback sockets.
+let ToStringTests = module (
+    export let test_listener_and_stream_text = func {
+        last listener = test.assert_ok<tcp_listener.TcpListener>(tcp_listener.bind("127.0.0.1", 0));
+        last port = listener.local_port;
+        test.assert_equal_string("TcpListener(port " .. port.to_string() .. ", open)", listener.to_string());
+        last client = test.assert_ok<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", port, duration.of_seconds(5)));
+        test.assert_equal_string("TcpStream(127.0.0.1:" .. port.to_string() .. ", open)", client.to_string());
+        last server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
+        test.assert(strings.starts_with(server.to_string(), "TcpStream("));
+        test.assert(strings.ends_with(server.to_string(), ", open)"));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_equal_string("TcpStream(127.0.0.1:" .. port.to_string() .. ", closed)", client.to_string());
+        test.assert_ok<unit.Unit>(server.close());
+        test.assert_ok<unit.Unit>(listener.close());
+        test.assert_equal_string("TcpListener(port " .. port.to_string() .. ", closed)", listener.to_string());
+    };
+);

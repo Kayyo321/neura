@@ -121,6 +121,22 @@ export let PermessageDeflate = module (
             client_max_window_bits = client_bits;
         };
 
+        /// @brief Equal when the four settings are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ServerConfig) {
+                return false;
+            }
+            return accept_server_window_limit == that.accept_server_window_limit
+                && server_no_context_takeover == that.server_no_context_takeover
+                && client_no_context_takeover == that.client_no_context_takeover
+                && client_max_window_bits == that.client_max_window_bits;
+        };
+
+        /// @brief Combines the four settings, consistent with equals.
+        export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(hashing.combine(
+            hashing.of_bool(accept_server_window_limit), hashing.of_bool(server_no_context_takeover)),
+            hashing.of_bool(client_no_context_takeover)), client_max_window_bits as uint32);
+
         /// @brief The four settings.
         export let.override to_string = func -> string =>
             "ServerConfig(accept_server_window_limit " .. accept_server_window_limit.to_string()

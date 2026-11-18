@@ -1,0 +1,21 @@
+let instant = import:Std.Time.Instant;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let ticket = import:Std.Net.Quic.SessionTicket;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of Std.Net.Quic.SessionTicket agree, and the
+// text never shows the ticket bytes.
+let ToStringHashTests = module (
+    let held = func(opaque: string, server: string) -> ticket.SessionTicket => test.assert_ok<ticket.SessionTicket>(
+        ticket.create(strings.to_bytes(opaque), server, "h3", instant.of_epoch_seconds(1000, 0), 7200, 7, 4294967295));
+
+    export let test_session_ticket = func {
+        last a = held("secret-ticket", "example.com");
+        test.assert(a.equals(held("secret-ticket", "example.com")));
+        test.assert_equal_int64(a.hash_code() as int64, held("secret-ticket", "example.com").hash_code() as int64);
+        test.assert(not a.equals(held("secret-ticket", "example.org")));
+        test.assert(not a.equals(held("other-ticket", "example.com")));
+        test.assert_equal_string("SessionTicket(example.com, h3, 7200 s, 0-RTT, ticket redacted)", a.to_string());
+        test.assert(not strings.contains(a.to_string(), "secret-ticket"));
+    };
+);

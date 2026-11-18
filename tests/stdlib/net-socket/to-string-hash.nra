@@ -1,0 +1,40 @@
+let duration = import:Std.Time.Duration;
+let event_loop = import:Std.Net.Socket.EventLoop;
+let options = import:Std.Net.Socket.SocketOptions;
+let test = import:Std.Test;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Socket value classes agree.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    let with_timeout = func(seconds: int) -> options.SocketOptions {
+        last builder = options.builder();
+        builder.set_no_delay(true);
+        builder.set_keep_alive(true);
+        builder.set_keep_alive_idle(duration.of_seconds(seconds as int64));
+        return test.assert_ok<options.SocketOptions>(builder.build(options.SocketKind.TcpStream));
+    };
+
+    export let test_platform = func {
+        last a = new event_loop.Platform("Linux", 6, 1);
+        agree(a, new event_loop.Platform("Linux", 6, 1));
+        differ(a, new event_loop.Platform("Linux", 6, 2));
+        test.assert_equal_string("linux 6.1", a.to_string());
+    };
+
+    export let test_socket_options = func {
+        agree(with_timeout(60), with_timeout(60));
+        differ(with_timeout(60), with_timeout(61));
+        test.assert_equal_string(with_timeout(60).to_string(), with_timeout(60).to_string());
+        test.assert(with_timeout(60).to_string().byte_length > 0);
+    };
+);
