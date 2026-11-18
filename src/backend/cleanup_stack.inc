@@ -176,10 +176,29 @@ void FunctionCompiler::yield_statement(const IrNode& node) {
     save.operands.push_back(std::move(place));
     save.operands.push_back(std::move(number));
     store(save);
+    // The regions of the blocks around the yield are released before it
+    // returns and entered again, into the same token slots, where the next
+    // `$resume` continues: nothing in them is live across the yield (E0477),
+    // and the resume chain jumps past the blocks' own EnterRegion.
+    const auto nothing = c_.scalar(nvr::TypeKind::Void);
+    for (auto entry = exit_stack_.rbegin(); entry != exit_stack_.rend(); ++entry)
+        if (entry->kind == ExitWorkKind::Region && entry->token)
+            state(nvr::StateOp::ReleaseRegion, 0, {*entry->token}, nothing, node.span);
     ExitSpec exit;
     exit.kind = nvr::ExitKind::Return;
     exit.arguments.push_back(immediate(c_.scalar(nvr::TypeKind::Bool), 1));
     operation_at(node.span);
     close({exit});
     begin(resume_blocks_[index - 1], node.span);
+    for (const auto& entry : exit_stack_) {
+        if (entry.kind != ExitWorkKind::Region || !entry.token) continue;
+        if (entry.token->kind != Operand::Kind::Slot)
+            throw Diagnostic(node.span, "a region token outside a frame slot at a yield").with_code("E0801");
+        const auto token = state(nvr::StateOp::EnterRegion, 0, {}, c_.scalar(nvr::TypeKind::Unsigned, 64), node.span);
+        assign(entry.token->index, token);
+        // Commit the slot before an operation of the block reads it.
+        const auto next = new_block();
+        jump(next);
+        begin(next, node.span);
+    }
 }

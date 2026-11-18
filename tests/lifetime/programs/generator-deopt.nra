@@ -1,8 +1,11 @@
-// Tier 3 deoptimization inside a generator's `$resume`, reached through
-// `has_next` and `next` from a consuming loop (docs/design/Lifetime030.md,
-// "Optimization and tiers"). The state is an object whose fields are stored
-// before `$resume` returns, so a frame state inside it holds only that
-// call's slots. The shapes change class late in the run.
+// A generator's `$resume` in native tier 3, reached through `has_next` and
+// `next` from a consuming loop (docs/design/Lifetime030.md, "Optimization
+// and tiers"). The state is an object whose fields are stored before
+// `$resume` returns, so a frame state inside it holds only that call's
+// slots. The shapes change class late in the run. Since the resume chain
+// carries lift hints, native code stays in `$resume`: the deoptimizations
+// that `generator-deopt.deopt` asks for are at the host calls that print,
+// not in the generator.
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
 

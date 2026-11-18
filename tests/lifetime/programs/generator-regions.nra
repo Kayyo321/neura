@@ -1,0 +1,39 @@
+// A generator whose blocks allocate in regions (docs/design/Lifetime030.md,
+// Exit order): each `yield` releases the regions of the blocks around it and
+// the next resume enters them again, so a temporary array before and after
+// a `yield`, also in a loop, is read from a live region and the peak heap
+// stays bounded.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let make_array = func(n: int) -> int[] {
+    return [n, n + 1, n + 2];
+};
+let GeneratorRegions = module:program.Entry (
+    let top = iterator() -> int {
+        let n = make_array(1).length;
+        yield n;
+        let m = make_array(2)[1];
+        yield m;
+    };
+
+    let looped = iterator(count: int) -> int {
+        for (let i = 0; i < count; i++) {
+            let a = make_array(i)[0];
+            yield a;
+            let b = make_array(i)[2];
+            yield b;
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let total = 0;
+        for (let v in top()) {
+            total = total + v;
+        }
+        for (let v in looped(3000)) {
+            total = total + v;
+        }
+        console.print_line(total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

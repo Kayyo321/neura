@@ -152,10 +152,12 @@ Every NeuraIR operation is in exactly one row. An event exists only where the va
 | `ClassIs`, `ClassHash`, `ClassText`, `ValueEquals`, `ValueHash`, `ValueText`, `EnumTag`, `ComparisonChain`, `Binary`, `Unary`, `Length`, `CollectionVersion` | None; they consume values that were already read | proposed; implemented |
 | `Spawn`, `SchedulerCall`, `ExternalCall`, `TaskScope` | None; a value they carry is boxed or rejected by the representation rules, and the binding that receives a result has its own admission | proposed; implemented |
 | `Block`, `Branch`, `Loop`, `Break`, `Continue`, `Fail`, `TrapMessage`, `Integer`, `Float`, `String`, `Boolean`, `Reference`, `ReferencePlace`, and the text operations | None | proposed; implemented |
+| `Cleanup`, `Pending`, `Yield` ([lifetime](Lifetime030.md#lowering-and-artifacts)) | None of their own; a cleanup's lists keep their events, which happen when the lists run. A store to `Pending` is no admission. | proposed; implemented |
 
 | Exemption | Status |
 | --- | --- |
-| A symbol whose name begins with `$` is a compiler temporary: reading it and storing to it are not events. A capture field `$capture<N>` is the exception, since it is a binding of its lambda. | proposed; implemented |
+| A symbol whose name begins with `$` is a compiler temporary: reading it and storing to it are not events. A capture field `$capture<N>` is the exception, since it is a binding of its lambda, and so is a generator's moved local `$local<M>:<name>`, which has the events of the local it replaces. | proposed; implemented |
+| A generator's state class (lifetime): its constructor, `has_next` and `next`, the generated closures that return their calls, and its allocation at the generator's call have no events; the store to its `$buffer` before a `yield` is the result admission. The `Initialize` of a `using` token `$using<N>` reads the binding without a getter. | proposed; implemented |
 | The parameters and the result of a function that carries `accessor.of` or `hook.of` have no events. | proposed; implemented |
 | Anything the rules do not exempt is an event. A temporary that lowering creates without a `$` name therefore shows as an extra event in the trace tests and never as a missing one. | proposed; implemented |
 
@@ -171,7 +173,7 @@ Each feature below is specified by its own milestone's note, which adds its rows
 | `match.is`, guards and nested patterns | matching | The subject is evaluated once and tested as a snapshot with no event; a selected binding is admitted; a type match proves nothing about later reads. | proposed |
 | Inline `any` | matching | Reading or admitting an `any` that holds a class reference is that class's one event; packing and unpacking add none; the `any` carries the policy word. | proposed |
 | Records and `new with` | data | Generated field stores are admissions; generated equality, hashing and codecs read fields with events. | proposed |
-| `defer`, `using`, `yield` | lifetime | Stated in that milestone's note: reads at registration, admissions at the deferred call, no event for the resource token or the generator's state. | proposed |
+| `defer`, `using`, `yield` | lifetime | Stated in that milestone's note: reads at registration, admissions at the deferred call, no event for the resource token or the generator's state. | proposed; implemented |
 
 ### Optimization and tiers
 
