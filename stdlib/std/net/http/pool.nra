@@ -197,7 +197,7 @@ export let Pool = module (
         /// @brief Whether `request` may be repeated after it may have reached the server.
         export let is_repeatable = func(request: http.ClientRequest) -> bool =>
             methods.is_idempotent_name(request.method)
-                || (honor_idempotency_key && request.headers.contains("Idempotency-Key"));
+            || (honor_idempotency_key && request.headers.contains("Idempotency-Key"));
 
         /// @brief The computed wait after attempt `attempt` (1-based): base times 2^(attempt-1), at most the cap.
         export let backoff = func(attempt: int) -> durations.Duration {
@@ -250,7 +250,7 @@ export let Pool = module (
             last retryable = match (problem) {
                 errors.Error.Io { kind, message, path } => kind == errors.IoErrorKind.ConnectionRefused
                     || ((kind == errors.IoErrorKind.ConnectionReset || kind == errors.IoErrorKind.TimedOut)
-                        && is_repeatable(request)),
+                    && is_repeatable(request)),
                 _ => false,
             };
             return retryable ? RetryDecision.RetryAfter(backoff(attempt)) : RetryDecision.Stop;

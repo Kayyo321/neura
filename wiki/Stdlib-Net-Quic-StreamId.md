@@ -22,49 +22,49 @@ The following public declarations are taken from the module source; each links t
   The largest stream ID, 2^62 - 1.
 - **StreamId** · [`export const MaxStreamCount: int64 = 1152921504606846976`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L20)
   The largest number of streams of one type, 2^60 (section 4.6).
-- **StreamId** · [`export let StreamType = enum (ClientBidirectional, ServerBidirectional, ClientUnidirectional, ServerUnidirectional)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L23)
+- **StreamId** · [`export let StreamType = enum ( ClientBidirectional, ServerBidirectional, ClientUnidirectional, ServerUnidirectional )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L23)
   The four stream types of RFC 9000 Table 1, in the order of their low bits 0x00 through 0x03.
-- **StreamId** · [`export let type_of = func(id: int64) -> StreamType`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L28)
+- **StreamId** · [`export let type_of = func(id: int64) -> StreamType`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L30)
   The type of a stream ID. Tagged `#Pure`.
-- **StreamId** · [`export let type_bits = func(kind: StreamType) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L37)
+- **StreamId** · [`export let type_bits = func(kind: StreamType) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L39)
   The two low bits of a type (0 through 3). Tagged `#Pure`.
-- **StreamId** · [`export let type_for = func(client: bool, bidirectional: bool) -> StreamType`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L42)
+- **StreamId** · [`export let type_for = func(client: bool, bidirectional: bool) -> StreamType`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L44)
   The type of streams that `client` (true) or the server opens in the given direction. Tagged `#Pure`.
-- **StreamId** · [`export let is_client_initiated = func(id: int64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L48)
+- **StreamId** · [`export let is_client_initiated = func(id: int64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L50)
   True when the client opened the stream (bit 0x01 clear). Tagged `#Pure`.
-- **StreamId** · [`export let is_bidirectional = func(id: int64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L55)
+- **StreamId** · [`export let is_bidirectional = func(id: int64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L57)
   True for a bidirectional stream (bit 0x02 clear). Tagged `#Pure`.
-- **StreamId** · [`export let index_of = func(id: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L62)
+- **StreamId** · [`export let index_of = func(id: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L64)
   The position of the stream among the streams of its type, from 0. Tagged `#Pure`.
-- **StreamId** · [`export let nth = func(kind: StreamType, index: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L70)
+- **StreamId** · [`export let nth = func(kind: StreamType, index: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L72)
   The ID of the `index`-th stream of `kind` (from 0). An index from which no valid ID follows traps with "invalid argument: stream index". Tagged `#Pure`.
-- **StreamId** · [`export let may_send = func(id: int64, local_client: bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L80)
+- **StreamId** · [`export let may_send = func(id: int64, local_client: bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L82)
   True when the client (`local_client`) or the server may send on stream `id`: on every bidirectional stream and on its own unidirectional streams. Tagged `#Pure`.
-- **StreamId** · [`export let may_receive = func(id: int64, local_client: bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L86)
+- **StreamId** · [`export let may_receive = func(id: int64, local_client: bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L88)
   True when the client (`local_client`) or the server may receive on stream `id`: on every bidirectional stream and on the peer's unidirectional streams. Tagged `#Pure`.
-- **StreamId** · [`export let StreamIdAllocator = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L91)
+- **StreamId** · [`export let StreamIdAllocator = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L93)
   Allocates the IDs of the streams one endpoint opens, within the peer's stream limits. Tagged `#Final`, `#NotThreadSafe`.
-- **StreamId.StreamIdAllocator** · [`export last client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L93)
+- **StreamId.StreamIdAllocator** · [`export last client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L95)
   True for the client side.
-- **StreamId.StreamIdAllocator** · [`export let init = func(is_client: bool, max_bidirectional: int64, max_unidirectional: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L106)
+- **StreamId.StreamIdAllocator** · [`export let init = func(is_client: bool, max_bidirectional: int64, max_unidirectional: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L108)
   An allocator for the client or the server with the peer's initial limits (`initial_max_streams_bidi` and `initial_max_streams_uni`). A limit outside 0 through 2^60 traps with "invalid argument: stream limit".
-- **StreamId.StreamIdAllocator** · [`export let open = func(bidirectional: bool) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L117)
+- **StreamId.StreamIdAllocator** · [`export let open = func(bidirectional: bool) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L119)
   The next stream ID of the direction, or a `quic.stream_limit` error when the peer's limit is reached (the endpoint would then send STREAMS_BLOCKED). Tagged `#NoDiscard`.
-- **StreamId.StreamIdAllocator** · [`export let raise_limit = func(bidirectional: bool, max_streams: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L134)
+- **StreamId.StreamIdAllocator** · [`export let raise_limit = func(bidirectional: bool, max_streams: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L136)
   Applies a MAX_STREAMS frame from the peer; a smaller value than the current limit is ignored (section 19.11). A value above 2^60 traps with "invalid argument: stream limit".
-- **StreamId.StreamIdAllocator** · [`export let opened = func(bidirectional: bool) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L146)
+- **StreamId.StreamIdAllocator** · [`export let opened = func(bidirectional: bool) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L148)
   The number of streams opened in the direction. Tagged `#Pure`.
-- **StreamId.StreamIdAllocator** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L150)
+- **StreamId.StreamIdAllocator** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L152)
   Text such as "StreamIdAllocator(client, 3/100 bidirectional, 0/3 unidirectional)".
-- **StreamId** · [`export let PeerStreams = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L157)
+- **StreamId** · [`export let PeerStreams = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L159)
   Tracks the streams a peer opens, applying the implicit opening of lower-numbered streams. Tagged `#Final`, `#NotThreadSafe`.
-- **StreamId.PeerStreams** · [`export last local_client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L159)
+- **StreamId.PeerStreams** · [`export last local_client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L161)
   True when the local endpoint is the client (so the peer is the server).
-- **StreamId.PeerStreams** · [`export let init = func(is_client: bool, max_bidirectional: int64, max_unidirectional: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L170)
+- **StreamId.PeerStreams** · [`export let init = func(is_client: bool, max_bidirectional: int64, max_unidirectional: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L172)
   A tracker with the limits this endpoint advertised. A limit outside 0 through 2^60 traps.
-- **StreamId.PeerStreams** · [`export let receive = func(id: int64) -> Result<int64[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L182)
+- **StreamId.PeerStreams** · [`export let receive = func(id: int64) -> Result<int64[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L184)
   Records a frame on stream `id` from the peer and returns the IDs it newly opens, in increasing order (empty when the stream was already open). Err `quic.stream_state` when `id` is of a type the local endpoint opens, and `quic.stream_limit` when it exceeds the advertised limit. Tagged `#NoDiscard`.
-- **StreamId.PeerStreams** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L212)
+- **StreamId.PeerStreams** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/stream-id.nra#L214)
   Text such as "PeerStreams(2 bidirectional, 0 unidirectional)".
 <!-- END SOURCE API -->
 

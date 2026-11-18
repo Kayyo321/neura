@@ -34,7 +34,7 @@ export let Phc = module (
         /// name or value, lists of different lengths, or a hash without a salt traps with "invalid argument:
         /// PHC ...".
         export let init = func(id: string, version_number: int, parameter_names: string[list],
-                parameter_values: string[list], salt_bytes: uint8[list], hash_bytes: uint8[list]) {
+            parameter_values: string[list], salt_bytes: uint8[list], hash_bytes: uint8[list]) {
             if (!is_name(id)) {
                 trap_with_message("invalid argument: PHC identifier");
             }
@@ -145,7 +145,7 @@ export let Phc = module (
         for (let i = 0; i < text.byte_length; i++) {
             last c = text.byte_at(i);
             if (!((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 47 || c == 43
-                    || c == 46 || c == 45)) {
+                || c == 46 || c == 45)) {
                 return false;
             }
         }

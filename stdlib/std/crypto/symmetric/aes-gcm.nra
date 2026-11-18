@@ -59,7 +59,7 @@ export let AesGcm = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 12, "AES-GCM");
             if (sealed.length < 16) {
                 return aead.failure();

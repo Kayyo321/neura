@@ -41,7 +41,7 @@ export let Calibration = module (
     /// Memory is preferred to passes, as RFC 9106, section 4 recommends. A clock error is returned.
     #[NoDiscard, Since("0.3.0")]
     export let calibrate_argon2id = func(clock: Clock, target: Duration, parallelism: int, max_memory_kib: int)
-            -> Result<argon2.Argon2Params> {
+        -> Result<argon2.Argon2Params> {
         let memory = 8 * parallelism;
         if (max_memory_kib < memory) {
             trap_with_message("invalid argument: maximum memory below 8 KiB per lane");

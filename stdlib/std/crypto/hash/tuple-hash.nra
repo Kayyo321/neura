@@ -66,7 +66,7 @@ export let TupleHash = module (
     /// @brief The first `length` bytes of TupleHashXOF128(items, customization).
     #[NoDiscard, Since("0.3.0")]
     export let tuple_hash128_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let hash = new TupleHash128(customization);
         for (let item in items) {
             hash.add(item);
@@ -126,7 +126,7 @@ export let TupleHash = module (
     /// @brief The first `length` bytes of TupleHashXOF256(items, customization).
     #[NoDiscard, Since("0.3.0")]
     export let tuple_hash256_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let hash = new TupleHash256(customization);
         for (let item in items) {
             hash.add(item);

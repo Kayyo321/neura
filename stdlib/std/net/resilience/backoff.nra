@@ -36,7 +36,7 @@ export let Backoff = module (
         /// @brief Backoff from `initial` doubling up to `maximum`. Traps with "invalid argument: <name>" unless
         /// `initial` is positive and `maximum` is at least `initial`.
         export let init = func(initial: durations.Duration, maximum: durations.Duration, spread: Jitter,
-                source: randoms.Random) {
+            source: randoms.Random) {
             if (initial.to_nanos() <= 0) {
                 trap_with_message("invalid argument: initial");
             }
@@ -75,7 +75,7 @@ export let Backoff = module (
         /// @brief Text such as "Backoff(PT0.1S to PT10S, Full jitter)".
         export let.override to_string = func -> string =>
             "Backoff(" + durations.of_nanos(base).to_string() + " to " + durations.of_nanos(cap).to_string() + ", "
-                + jitter.to_string() + " jitter)";
+            + jitter.to_string() + " jitter)";
 
         /// @brief floor(span * u) for one draw u in [0, 1).
         let scaled = func(span: int64) -> int64 => ((span as float64) * random.next_float64()) as int64;

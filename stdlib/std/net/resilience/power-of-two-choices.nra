@@ -56,7 +56,7 @@ export let PowerOfTwoChoices = module (
 
         /// @brief Ends the pending request.
         export let report = func(selection: balancers.Selection<Endpoint>, latency: durations.Duration, success: bool)
-                -> Result<Unit> {
+            -> Result<Unit> {
             if (waiting[selection.index] > 0) {
                 waiting[selection.index] = waiting[selection.index] - 1;
             }

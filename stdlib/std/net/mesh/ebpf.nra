@@ -27,18 +27,18 @@ export let Ebpf = module (
     export let AttachPoint = enum (
         /// @brief `BPF_PROG_TYPE_SOCK_OPS` on a cgroup: sees TCP socket events, can add sockets to a redirect map.
         SockOps,
-        /// @brief `BPF_PROG_TYPE_SK_MSG` on a redirect map: sees each sendmsg and can redirect it to another socket.
-        SkMsg,
-        /// @brief `BPF_PROG_TYPE_SK_LOOKUP` on a network namespace: picks the listening socket for a new connection.
-        SkLookup
+            /// @brief `BPF_PROG_TYPE_SK_MSG` on a redirect map: sees each sendmsg and can redirect it to another socket.
+            SkMsg,
+            /// @brief `BPF_PROG_TYPE_SK_LOOKUP` on a network namespace: picks the listening socket for a new connection.
+            SkLookup
     );
 
     /// @brief The kind of socket redirect map.
     export let MapKind = enum (
         /// @brief `BPF_MAP_TYPE_SOCKMAP`: sockets indexed by a 4-byte key.
         SockMap,
-        /// @brief `BPF_MAP_TYPE_SOCKHASH`: sockets indexed by a key of any fixed size.
-        SockHash
+            /// @brief `BPF_MAP_TYPE_SOCKHASH`: sockets indexed by a key of any fixed size.
+            SockHash
     );
 
     /// @brief An eBPF socket program: a name, an attach point, its license, and its bytecode.

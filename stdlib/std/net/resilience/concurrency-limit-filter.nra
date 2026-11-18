@@ -87,5 +87,5 @@ export let ConcurrencyLimitFilter = module (
     #NoDiscard
     export let classified = func<Req, Resp>(limit: limits.AdaptiveLimit, is_drop: func(Result<Resp>) -> bool,
         clock: Clock) -> ConcurrencyLimitFilter<Req, Resp> =>
-        new ConcurrencyLimitFilter<Req, Resp>(limit, is_drop, clock);
+            new ConcurrencyLimitFilter<Req, Resp>(limit, is_drop, clock);
 );

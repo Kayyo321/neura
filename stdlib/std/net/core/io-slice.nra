@@ -212,7 +212,7 @@ export let IoSlice = module (
                 if (taken < 1 || taken > rest.length()) {
                     return Result<int>.Err(Error.Io { kind: IoErrorKind.Other,
                         message: "gather writer took " + taken.to_string() + " of " + rest.length().to_string()
-                            + " bytes", path: "" });
+                        + " bytes", path: "" });
                 }
                 done += taken;
                 total += taken;

@@ -83,5 +83,5 @@ export let TracePropagationFilter = module (
     export let of = func<Req, Resp>(get_header: func(Req, string) -> Optional<string>,
         with_header: func(Req, string, string) -> Req, random: Random, sample_new: bool)
         -> TracePropagationFilter<Req, Resp> =>
-        new TracePropagationFilter<Req, Resp>(get_header, with_header, random, sample_new);
+            new TracePropagationFilter<Req, Resp>(get_header, with_header, random, sample_new);
 );

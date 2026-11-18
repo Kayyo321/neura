@@ -162,7 +162,7 @@ export let MerkleTree = module (
     /// the root (RFC 9162, section 2.1.3.2).
     #[NoDiscard, Since("0.3.0")]
     export let verify_inclusion = func<H: StreamingDigest<H>>(leaf: uint8[list], index: int, tree_size: int,
-            proof: uint8[list][list], root: uint8[list]) -> bool {
+        proof: uint8[list][list], root: uint8[list]) -> bool {
         if (index < 0 || index >= tree_size) {
             return false;
         }
@@ -193,7 +193,7 @@ export let MerkleTree = module (
     /// equal roots; an old size of 0 needs an empty proof.
     #[NoDiscard, Since("0.3.0")]
     export let verify_consistency = func<H: StreamingDigest<H>>(old_size: int, new_size: int, old_root: uint8[list],
-            new_root: uint8[list], proof: uint8[list][list]) -> bool {
+        new_root: uint8[list], proof: uint8[list][list]) -> bool {
         if (old_size < 0 || old_size > new_size) {
             return false;
         }

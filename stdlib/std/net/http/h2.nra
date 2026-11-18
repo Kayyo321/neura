@@ -149,7 +149,7 @@ export let H2 = module (
         /// @brief The fields by name.
         export let.override to_string = func -> string =>
             "FrameHeader{length=" + length.to_string() + ", type=" + frame_type.to_string() + ", flags="
-                + flags.to_string() + ", stream=" + stream_id.to_string() + "}";
+            + flags.to_string() + ", stream=" + stream_id.to_string() + "}";
     );
 
     /// @brief The identifiers and values of a SETTINGS frame, in order.
@@ -224,8 +224,8 @@ export let H2 = module (
     #[NoDiscard]
     export let encode_frame_header = func(header: FrameHeader) -> uint8[list] {
         if (header.length < 0 || (header.length as int64) > MaxFrameLength || header.frame_type < 0
-                || header.frame_type > 255 || header.flags < 0 || header.flags > 255 || header.stream_id < 0
-                || header.stream_id > MaxWindowSize) {
+            || header.frame_type > 255 || header.flags < 0 || header.flags > 255 || header.stream_id < 0
+            || header.stream_id > MaxWindowSize) {
             trap_with_message("invalid argument: frame header");
         }
         last bytes: uint8[list] = new;

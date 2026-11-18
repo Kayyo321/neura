@@ -139,7 +139,7 @@ export let UdpSocket = module (
         last text = address.to_string();
         last at_bind = support.needs_bind_time(options);
         last outcome = at_bind ? host.udp_bind_with_options(address.host_text(), address.port,
-                support.numbers(options), support.values(options))
+            support.numbers(options), support.values(options))
             : host.udp_bind(address.host_text(), address.port);
         let id: int64 = 0;
         match (outcome) {

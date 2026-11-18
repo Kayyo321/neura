@@ -174,7 +174,7 @@ export let Masque = module (
     /// `proxy_authority`, with the default template (RFC 9298 section 3.4). Errors are those of `udp_path`.
     #NoDiscard
     export let udp_request = func(proxy_authority: string, target_host: string,
-            target_port: int) -> Result<ConnectRequest> {
+        target_port: int) -> Result<ConnectRequest> {
         last path = udp_path(target_host, target_port)?;
         return Result<ConnectRequest>.Ok(new ConnectRequest(ConnectUdp, "https", proxy_authority, path));
     };

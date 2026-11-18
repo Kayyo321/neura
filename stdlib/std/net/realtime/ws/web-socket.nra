@@ -461,7 +461,7 @@ export let WebSocket = module (
     #NoDiscard
     export let over_upgraded = func(bytes: Transport<uint8[list], uint8[list]>, role: frames.Role, random: Random,
         options: WebSocketOptions, protocol: Optional<string>) -> WebSocket =>
-        new WebSocket(bytes, role, random, options, protocol, new);
+            new WebSocket(bytes, role, random, options, protocol, new);
 
     /// @brief The client opening handshake: writes the request, reads and validates the response
     /// (`Handshake.validate_server_response`), and returns the open connection. A response that agrees to an

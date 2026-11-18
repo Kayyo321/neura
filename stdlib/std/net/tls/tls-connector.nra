@@ -50,10 +50,10 @@ export let TlsConnector = module (
             last nanos = support.timeout_nanos(config.handshake_timeout);
             last outcome = config.is_mutual() || !config.allows_both_versions()
                 ? host.tls_connect_extended(target.host_text(), target.port, nanos, config.server_name, config.alpn(),
-                    config.ca_file, version_code(config.min_version), version_code(config.max_version),
-                    config.certificate_file, config.key_file)
+                config.ca_file, version_code(config.min_version), version_code(config.max_version),
+                config.certificate_file, config.key_file)
                 : host.tls_connect(target.host_text(), target.port, nanos, config.server_name, config.alpn(),
-                    config.ca_file);
+                config.ca_file);
             return match (outcome) {
                 host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, target)),
                 host.TlsOutcome.Error(code) => Result<TlsStream>.Err(host_error.io(code, "TLS connect failed", text)),

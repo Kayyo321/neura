@@ -47,7 +47,7 @@ export let GcraLimiter = module (
         /// "invalid argument: <name>" unless `rate`, `burst`, and `max_attempts` are positive and `period / rate` is
         /// at least one nanosecond.
         export let init = func(rate: int, period: durations.Duration, burst_size: int, state: stores.RateStore,
-                source: Clock, max_attempts: int) {
+            source: Clock, max_attempts: int) {
             if (rate < 1) {
                 trap_with_message("invalid argument: rate");
             }

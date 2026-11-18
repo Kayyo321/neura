@@ -26,7 +26,7 @@ export let Blake3 = module (
 
     /// @brief The 16 output words of the compression function.
     let compress = func(cv: uint32[list], block: uint32[list], counter: uint64, block_length: int, flags: int)
-            -> uint32[list] {
+        -> uint32[list] {
         last iv = iv_table();
         last permutation = permutation_table();
         let s: uint32[list] = new;
@@ -132,7 +132,7 @@ export let Blake3 = module (
         export last flags: int;
 
         export let init = func(input_cv: uint32[list], block_words: uint32[list], block_counter: uint64,
-                block_length: int, node_flags: int) {
+            block_length: int, node_flags: int) {
             cv = input_cv;
             block = block_words;
             counter = block_counter;

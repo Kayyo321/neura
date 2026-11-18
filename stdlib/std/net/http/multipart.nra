@@ -25,12 +25,12 @@ export let Multipart = module (
     export let MultipartEvent = enum (
         /// @brief A part begins; its header fields.
         PartStart(http_headers.Headers),
-        /// @brief The next bytes of the current part's body.
-        Data(uint8[list]),
-        /// @brief The current part ended.
-        PartEnd,
-        /// @brief The close delimiter was read; the rest is the epilogue.
-        Done
+            /// @brief The next bytes of the current part's body.
+            Data(uint8[list]),
+            /// @brief The current part ended.
+            PartEnd,
+            /// @brief The close delimiter was read; the rest is the epilogue.
+            Done
     );
 
     /// @brief The limits of a multipart parser. The defaults are 1,000 parts, 16,384 bytes of each part's header
@@ -414,7 +414,7 @@ export let Multipart = module (
         last media = http_headers.trim_value(semicolon < 0 ? content_type : content_type.slice(0, semicolon));
         last slash = strings.index_of(media, "/");
         if (slash < 0 || !strings.equals_ignore_ascii_case(media.slice(0, slash), "multipart")
-                || !http_headers.is_token(media.slice(slash + 1, media.byte_length))) {
+            || !http_headers.is_token(media.slice(slash + 1, media.byte_length))) {
             return Result<string>.Err(wire.rejection(415, "not a multipart media type"));
         }
         last names: string[list] = new;
@@ -555,7 +555,7 @@ export let Multipart = module (
                 return false;
             }
         } else if (!http_headers.is_token(kind.slice(0, slash))
-                || !http_headers.is_token(kind.slice(slash + 1, kind.byte_length))) {
+            || !http_headers.is_token(kind.slice(slash + 1, kind.byte_length))) {
             return false;
         }
         while (true) {

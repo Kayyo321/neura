@@ -55,8 +55,8 @@ export let TlsAcceptor = module (
             last nanos = support.timeout_nanos(config.handshake_timeout);
             last outcome = config.is_mutual() || !config.allows_both_versions()
                 ? host.tls_accept_mutual(id, config.certificate_file, config.key_file, config.alpn(), nanos,
-                    tls_connector.version_code(config.min_version), tls_connector.version_code(config.max_version),
-                    config.client_ca_file)
+                tls_connector.version_code(config.min_version), tls_connector.version_code(config.max_version),
+                config.client_ca_file)
                 : host.tls_accept(id, config.certificate_file, config.key_file, config.alpn(), nanos);
             return match (outcome) {
                 host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, bound)),

@@ -48,7 +48,7 @@ export let Hkdf = module (
     /// @brief `expand(extract(salt, input_key), info, length)`.
     #[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(salt: uint8[list], input_key: uint8[list], info: uint8[list],
-            length: int) -> uint8[list] {
+        length: int) -> uint8[list] {
         let prk = extract<H>(salt, input_key);
         last out = expand<H>(prk, info, length);
         words.wipe(prk);

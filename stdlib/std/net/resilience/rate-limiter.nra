@@ -60,6 +60,6 @@ export let RateLimiter = module (
         /// @brief Text such as "RateDecision(allowed, remaining 2, retry after PT0S, reset after PT0.1S)".
         export let.override to_string = func -> string =>
             "RateDecision(" + (allowed ? "allowed" : "denied") + ", remaining " + remaining.to_string()
-                + ", retry after " + retry_after.to_string() + ", reset after " + reset_after.to_string() + ")";
+            + ", retry after " + retry_after.to_string() + ", reset after " + reset_after.to_string() + ")";
     );
 );

@@ -739,7 +739,7 @@ export let Http = module (
     #NoDiscard
     export let host_request = func(method: string, target: string, fields: Headers, limit: int64, peer: string,
         scheme: string, request_id: string) -> Request =>
-        new Request(method, target, fields, new HostBody(), limit, peer, scheme, request_id);
+            new Request(method, target, fields, new HostBody(), limit, peer, scheme, request_id);
 
     // ---------------------------------------------------------------- message conversions
 
@@ -923,25 +923,25 @@ export let Http = module (
     #NoDiscard
     export let from_filter = func(filter: filters.SimpleFilter<Request, Response>)
         -> func(Request, Next) -> Result<Response> =>
-        new func(request: Request, next: Next) -> Result<Response> => filter.apply(request, next);
+            new func(request: Request, next: Next) -> Result<Response> => filter.apply(request, next);
 
     /// @brief A middleware that logs one line per request ("ID METHOD PATH STATUS Nms", or "error" in place of
     /// the status) at Info through `logger`, timing with `clock`'s monotonic time.
     #NoDiscard
     export let request_log_to = func(logger: logging.Logger, clock: clocks.Clock)
         -> func(Request, Next) -> Result<Response> =>
-        new func(request: Request, next: Next) -> Result<Response> {
-            last started = elapsed_or_zero(clock);
-            last outcome = next.call(request);
-            last millis = (elapsed_or_zero(clock).to_nanos() - started.to_nanos()) / 1000000;
-            last outcome_text = match (outcome) {
-                Result.Ok(response) => response.status.to_string(),
-                Result.Err(_) => "error",
+            new func(request: Request, next: Next) -> Result<Response> {
+                last started = elapsed_or_zero(clock);
+                last outcome = next.call(request);
+                last millis = (elapsed_or_zero(clock).to_nanos() - started.to_nanos()) / 1000000;
+                last outcome_text = match (outcome) {
+                    Result.Ok(response) => response.status.to_string(),
+                    Result.Err(_) => "error",
+                };
+                logger.info(request.request_id + " " + request.method + " " + request.path + " " + outcome_text + " "
+                    + millis.to_string() + "ms");
+                return outcome;
             };
-            logger.info(request.request_id + " " + request.method + " " + request.path + " " + outcome_text + " "
-                + millis.to_string() + "ms");
-            return outcome;
-        };
 
     /// @brief `request_log_to` with a logger named "http" writing to standard error and the system clock.
     #NoDiscard

@@ -98,7 +98,7 @@ export let TcpServer = module (
         last at_bind = !options.multipath && support.needs_bind_time(options);
         last outcome = options.multipath ? host.mptcp_listen(address.host_text(), address.port)
             : at_bind ? host.listen_with_options(address.host_text(), address.port, support.numbers(options),
-                support.values(options))
+            support.values(options))
             : host.listen(address.host_text(), address.port);
         let id: int64 = 0;
         match (outcome) {

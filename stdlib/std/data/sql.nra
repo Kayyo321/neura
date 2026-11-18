@@ -52,6 +52,7 @@ export let Sql = module (
         Ok([string[list], uint8[list], uint64[list], string[list], uint8[list][list], bool]),
         Error(uint32)
     );
+
     /// @brief An open cursor's handle and column names.
     let CursorOutcome = enum (Ok([int64, string[list]]), Error(uint32));
     /// @brief Fetched rows as the four value lists, and whether more rows exist.
@@ -73,16 +74,19 @@ export let Sql = module (
     let host_rollback = func(connection: int64) -> DoneOutcome host("neura.sql.rollback", 1);
     /// @brief Runs one statement and answers the affected row count.
     let host_execute = func(connection: int64, text: string, kinds: uint8[list], bits: uint64[list],
-                            texts: string[list], blobs: uint8[list][list]) -> NumberOutcome
+        texts: string[list], blobs: uint8[list][list]) -> NumberOutcome
         host("neura.sql.execute", 1);
+
     /// @brief Runs one statement and answers at most `limit` rows.
     let host_query = func(connection: int64, text: string, kinds: uint8[list], bits: uint64[list],
-                          texts: string[list], blobs: uint8[list][list], limit: int) -> PageOutcome
+        texts: string[list], blobs: uint8[list][list], limit: int) -> PageOutcome
         host("neura.sql.query", 1);
+
     /// @brief Runs one statement whose rows are fetched in pages.
     let host_open_cursor = func(connection: int64, text: string, kinds: uint8[list], bits: uint64[list],
-                                texts: string[list], blobs: uint8[list][list]) -> CursorOutcome
+        texts: string[list], blobs: uint8[list][list]) -> CursorOutcome
         host("neura.sql.open_cursor", 1);
+
     /// @brief Up to `max` further rows of a cursor.
     let host_fetch = func(cursor: int64, max: int) -> RowsOutcome host("neura.sql.fetch", 1);
     /// @brief Closes a cursor.
@@ -188,21 +192,51 @@ export let Sql = module (
 
     /// @brief The kind of a host error code.
     let kind_of_code = func(code: uint32) -> ErrorKind {
-        if (code == 1) { return ErrorKind.NotFound; }
-        if (code == 2) { return ErrorKind.PermissionDenied; }
-        if (code == 4) { return ErrorKind.InvalidInput; }
-        if (code == 10) { return ErrorKind.ConnectionFailed; }
-        if (code == 11) { return ErrorKind.ConnectionLost; }
-        if (code == 12) { return ErrorKind.TimedOut; }
-        if (code == 13) { return ErrorKind.Unsupported; }
-        if (code == 14) { return ErrorKind.CapabilityDenied; }
-        if (code == 15) { return ErrorKind.Cancelled; }
-        if (code == 16) { return ErrorKind.TooLarge; }
-        if (code == 17) { return ErrorKind.Busy; }
-        if (code == 18) { return ErrorKind.OutcomeUnknown; }
-        if (code == 19) { return ErrorKind.PoolExhausted; }
-        if (code == 21) { return ErrorKind.ConstraintViolation; }
-        if (code == 22) { return ErrorKind.Serialization; }
+        if (code == 1) {
+            return ErrorKind.NotFound;
+        }
+        if (code == 2) {
+            return ErrorKind.PermissionDenied;
+        }
+        if (code == 4) {
+            return ErrorKind.InvalidInput;
+        }
+        if (code == 10) {
+            return ErrorKind.ConnectionFailed;
+        }
+        if (code == 11) {
+            return ErrorKind.ConnectionLost;
+        }
+        if (code == 12) {
+            return ErrorKind.TimedOut;
+        }
+        if (code == 13) {
+            return ErrorKind.Unsupported;
+        }
+        if (code == 14) {
+            return ErrorKind.CapabilityDenied;
+        }
+        if (code == 15) {
+            return ErrorKind.Cancelled;
+        }
+        if (code == 16) {
+            return ErrorKind.TooLarge;
+        }
+        if (code == 17) {
+            return ErrorKind.Busy;
+        }
+        if (code == 18) {
+            return ErrorKind.OutcomeUnknown;
+        }
+        if (code == 19) {
+            return ErrorKind.PoolExhausted;
+        }
+        if (code == 21) {
+            return ErrorKind.ConstraintViolation;
+        }
+        if (code == 22) {
+            return ErrorKind.Serialization;
+        }
         return ErrorKind.Other;
     };
 
@@ -251,7 +285,7 @@ export let Sql = module (
 
         /// @brief Builds a value from its parts; use the constructor functions of Std.Data.Sql.
         export let init = func(value_kind: ValueKind, integer_value: int64, real_value: float64,
-                               text: string, data: uint8[list]) {
+            text: string, data: uint8[list]) {
             kind = value_kind;
             integer = integer_value;
             real = real_value;
@@ -421,7 +455,7 @@ export let Sql = module (
         variadic.Argument.Signed(number) => Result<Value>.Ok(int_value(number)),
         variadic.Argument.Unsigned(number) => number > 9223372036854775807
             ? Result<Value>.Err(failure(ErrorKind.InvalidInput, "parameter",
-                                        "$" + position.to_string() + " is above the int64 range"))
+                "$" + position.to_string() + " is above the int64 range"))
             : Result<Value>.Ok(int_value(number as int64)),
         variadic.Argument.Floating16(number) => Result<Value>.Ok(float_value(number as float64)),
         variadic.Argument.BFloating16(number) => Result<Value>.Ok(float_value(number as float64)),
@@ -431,7 +465,7 @@ export let Sql = module (
         variadic.Argument.Object(item) => item is Value
             ? Result<Value>.Ok(item as Value)
             : Result<Value>.Err(failure(ErrorKind.InvalidInput, "parameter",
-                                        "$" + position.to_string() + " is an object that is not an sql.Value")),
+                "$" + position.to_string() + " is an object that is not an sql.Value")),
     };
 
     /// @brief The values of variadic arguments.
@@ -832,7 +866,7 @@ export let Sql = module (
     /// @brief The error of a value that does not convert to `wanted`.
     let mismatch = func(name: string, cell: Value, wanted: string) -> errors.Error =>
         failure(ErrorKind.InvalidInput, "row",
-                "column " + name + " holds a " + cell.kind.to_string() + " value, not " + wanted);
+            "column " + name + " holds a " + cell.kind.to_string() + " value, not " + wanted);
 
     // ---------------------------------------------------------------------------------------------------
     // Statements, shared by connections and transactions

@@ -67,8 +67,8 @@ export let App = module (
 
         /// @brief Builds a request; the server host's values arrive through `Context.serve`.
         export let init = func(method_value: string, target_value: string, header_list: [string, string][list],
-                               body_bytes: uint8[list], client_value: string, scheme_value: string,
-                               id: string) {
+            body_bytes: uint8[list], client_value: string, scheme_value: string,
+            id: string) {
             method = method_value;
             target = target_value;
             last mark = strings.index_of(target_value, "?");
@@ -429,7 +429,7 @@ export let App = module (
                     }
                     last none: uint8[list] = new;
                     last request = new Request(assigned[2], assigned[3], pairs_of(assigned[4]), none, assigned[6],
-                                               assigned[7], assigned[1]);
+                        assigned[7], assigned[1]);
                     return answer(handler.handle(request, new BodyReader()));
                 },
             }
@@ -457,8 +457,8 @@ export let App = module (
 
         /// @brief Answers a startup check or reads the body, calls the handler and responds.
         let dispatch = func(handler: Handler,
-                            assigned: [uint32, string, string, string, string[list], int64, string, string, int64])
-                            -> Result<Unit> {
+            assigned: [uint32, string, string, string, string[list], int64, string, string, int64])
+            -> Result<Unit> {
             if (assigned[0] == 2 as uint32) {
                 return send(empty(204));
             }
@@ -469,7 +469,7 @@ export let App = module (
                 },
                 Result.Ok(content) => {
                     last request = new Request(assigned[2], assigned[3], pairs_of(assigned[4]), content, assigned[6],
-                                               assigned[7], assigned[1]);
+                        assigned[7], assigned[1]);
                     return answer(handler.handle(request));
                 },
             }

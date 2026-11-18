@@ -18,7 +18,7 @@ export let Balloon = module (
     /// `time_cost` mixing rounds; a cost below 1 traps with "invalid argument: Balloon costs".
     #[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(password: uint8[list], salt: uint8[list], space_cost: int,
-            time_cost: int) -> uint8[list] {
+        time_cost: int) -> uint8[list] {
         crypto_policy.require(Algorithm.Balloon);
         if (space_cost < 1 || time_cost < 1) {
             trap_with_message("invalid argument: Balloon costs");

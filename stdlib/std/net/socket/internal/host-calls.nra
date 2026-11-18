@@ -74,9 +74,11 @@ export let HostCalls = module (
     /// @brief Sends one datagram; the count sent. As `udp_send_to`.
     export let udp_send_to = func(socket: int64, host: string, port: int, bytes: uint8[list]) -> CountOutcome
         host("neura.net.udp.send_to", 1);
+
     /// @brief Receives one datagram; TimedOut (12) when none arrives in time. As `udp_receive_from`.
     export let udp_receive_from = func(socket: int64, max: int, timeout_nanos: int64) -> DatagramOutcome
         host("neura.net.udp.receive_from", 1);
+
     /// @brief A Unix-domain stream (`@name` abstract). As `unix_connect`.
     export let unix_connect = func(path: string) -> IdOutcome host("neura.net.unix.connect", 1);
     /// @brief A Unix-domain stream listener. As `unix_listen`.
@@ -86,22 +88,28 @@ export let HostCalls = module (
     /// @brief Sends one Unix datagram. As `unix_send_to`.
     export let unix_send_to = func(socket: int64, path: string, bytes: uint8[list]) -> CountOutcome
         host("neura.net.unix.send_to", 1);
+
     /// @brief Receives one Unix datagram. As `unix_receive_from`.
     export let unix_receive_from = func(socket: int64, max: int, timeout_nanos: int64) -> DatagramOutcome
         host("neura.net.unix.receive_from", 1);
+
     /// @brief Sets a numbered socket option; Unsupported (13) when the platform lacks it. As `set_option`.
     export let set_option = func(socket: int64, option: int, value: int64) -> DoneOutcome
         host("neura.net.option.set", 1);
+
     /// @brief A verified TLS client stream; PermissionDenied (2) when verification fails, Unsupported (13) in a
     /// build without TLS. As `tls_connect`.
     export let tls_connect = func(host: string, port: int, timeout_nanos: int64, server_name: string,
         alpn: string[list], ca_file: string) -> TlsOutcome host("neura.net.tls.connect", 1);
+
     /// @brief Accepts one TLS server stream. As `tls_accept`.
     export let tls_accept = func(listener: int64, certificate_file: string, key_file: string, alpn: string[list],
         timeout_nanos: int64) -> TlsOutcome host("neura.net.tls.accept", 1);
+
     /// @brief Decrypted bytes; empty at the end. As `tls_read`.
     export let tls_read = func(stream: int64, max: int, timeout_nanos: int64) -> BytesOutcome
         host("neura.net.tls.read", 1);
+
     /// @brief Encrypts and sends a prefix; its length. As `tls_write`.
     export let tls_write = func(stream: int64, bytes: uint8[list]) -> CountOutcome host("neura.net.tls.write", 1);
     /// @brief Sends close_notify and releases the stream. As `tls_close`.

@@ -45,7 +45,7 @@ export let GradientLimit = module (
         /// @brief A limit starting at `initial`. Traps with "invalid argument: <name>" unless 1 <= min <= initial <=
         /// max, 0 < smoothing <= 1, tolerance >= 1, 0 < backoff <= 1, and queue_floor >= 1.
         export let init = func(initial: int, minimum: int, maximum: int, weight: float64, rtt_tolerance: float64,
-                backoff: float64, floor: int) {
+            backoff: float64, floor: int) {
             if (minimum < 1 || minimum > maximum) {
                 trap_with_message("invalid argument: min_limit");
             }

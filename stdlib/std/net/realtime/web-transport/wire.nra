@@ -36,8 +36,10 @@ export let Wire = module (
     export const LastApplicationError: uint64 = 91146396643682;
 
     /// @brief The four stream types of RFC 9000 section 2.1, by the two low bits of the ID.
-    export let StreamType = enum (ClientBidirectional, ServerBidirectional, ClientUnidirectional,
-        ServerUnidirectional);
+    export let StreamType = enum (
+        ClientBidirectional, ServerBidirectional, ClientUnidirectional,
+        ServerUnidirectional
+    );
 
     /// @brief The type of a stream ID. A negative ID or one above 2^62 - 1 traps with "invalid argument: stream
     /// id".

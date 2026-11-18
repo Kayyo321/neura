@@ -353,9 +353,9 @@ export let CacheControl = module (
     #[Pure, ThreadSafe]
     export let is_known = func(name: string) -> bool =>
         name == "max-age" || name == "max-stale" || name == "min-fresh" || name == "no-cache" || name == "no-store"
-            || name == "no-transform" || name == "only-if-cached" || name == "must-revalidate"
-            || name == "must-understand" || name == "private" || name == "proxy-revalidate" || name == "public"
-            || name == "s-maxage";
+        || name == "no-transform" || name == "only-if-cached" || name == "must-revalidate"
+        || name == "must-understand" || name == "private" || name == "proxy-revalidate" || name == "public"
+        || name == "s-maxage";
 
     /// @brief `text` as a quoted-string: in double quotes, with `"` and `\` escaped by a backslash.
     #[Pure, ThreadSafe]

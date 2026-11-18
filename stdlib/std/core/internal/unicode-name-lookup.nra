@@ -170,7 +170,7 @@ export let UnicodeNameLookup = module (
         let position = number(names.BlockOffsets, block << 2);
         let previous = "";
         for (let index = block << names.BlockShift; index < names.RecordCount && result.length < limit;
-                index += 1) {
+            index += 1) {
             previous = decode_record(position, previous);
             result.append(previous);
             while (names.Stream.byte_at(position) != 46) {

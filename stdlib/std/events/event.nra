@@ -39,6 +39,7 @@ export let Event = module (
             token = subscription;
             handler = run;
         };
+
         export let token_of = func -> Subscription => token;
         export let deliver = func(payload: T) {
             handler(payload);

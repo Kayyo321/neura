@@ -171,7 +171,7 @@ export let ShadowFilter = module (
         /// @brief Equal when both counts are.
         export let.override equals = func(other: class) -> bool =>
             other is WorkerReport && handled == (other as WorkerReport).handled
-                && failed == (other as WorkerReport).failed;
+            && failed == (other as WorkerReport).failed;
 
         /// @brief Combines the counts.
         export let.override hash_code = func -> uint32 =>

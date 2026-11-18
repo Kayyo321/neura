@@ -146,7 +146,7 @@ export let H3 = module (
         /// @brief The fields by name.
         export let.override to_string = func -> string =>
             "FrameHeader{type=" + frame_type.to_string() + ", length=" + length.to_string() + ", payload_offset="
-                + payload_offset.to_string() + "}";
+            + payload_offset.to_string() + "}";
     );
 
     /// @brief The identifiers and values of a SETTINGS frame, in order.

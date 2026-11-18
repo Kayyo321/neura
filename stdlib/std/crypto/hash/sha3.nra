@@ -320,7 +320,7 @@ export let Sha3 = module (
     /// @brief The first `length` bytes of cSHAKE128(bytes, length, function_name, customization).
     #[NoDiscard, Since("0.3.0")]
     export let cshake128 = func(bytes: uint8[list], length: int, function_name: uint8[list], customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let xof = new CShake128(function_name, customization);
         xof.update(bytes);
         return xof.squeeze(length);
@@ -367,7 +367,7 @@ export let Sha3 = module (
     /// @brief The first `length` bytes of cSHAKE256(bytes, length, function_name, customization).
     #[NoDiscard, Since("0.3.0")]
     export let cshake256 = func(bytes: uint8[list], length: int, function_name: uint8[list], customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let xof = new CShake256(function_name, customization);
         xof.update(bytes);
         return xof.squeeze(length);

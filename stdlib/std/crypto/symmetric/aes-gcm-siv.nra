@@ -60,7 +60,7 @@ export let AesGcmSiv = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 12, "AES-GCM-SIV");
             if (sealed.length < 16) {
                 return aead.failure();
@@ -99,7 +99,7 @@ export let AesGcmSiv = module (
         };
 
         let tag_of = func(auth: uint8[list], encryption: aes.Cipher, nonce: uint8[list], plaintext: uint8[list],
-                data: uint8[list]) -> uint8[list] {
+            data: uint8[list]) -> uint8[list] {
             let polyval = new gf128.Hasher(auth, true);
             polyval.update_padded(data);
             polyval.update_padded(plaintext);

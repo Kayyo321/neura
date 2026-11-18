@@ -53,7 +53,7 @@ let PartsSql = module:program.Entry (
 
         /// @brief Builds a part.
         export let init = func(id_value: int64, code_value: string, quantity_value: int64,
-                               note_value: Optional<string>) {
+            note_value: Optional<string>) {
             id = id_value;
             code = code_value;
             quantity = quantity_value;
@@ -134,7 +134,7 @@ let PartsSql = module:program.Entry (
         export let update = func(id: int64, quantity: int64, note: Optional<string>) -> Result<Part> {
             return sql.in_transaction<Part>(pool, new func(transaction: sql.Transaction) -> Result<Part> {
                 last changed = transaction.execute("UPDATE parts SET quantity = $2, note = $3 WHERE id = $1",
-                                                   id, quantity, note_value(note));
+                    id, quantity, note_value(note));
                 match (changed) {
                     Result.Err(problem) => {
                         return Result<Part>.Err(problem);
@@ -185,7 +185,7 @@ let PartsSql = module:program.Entry (
                     Result.Ok(quantity_value) => match (note) {
                         Result.Err(problem) => Result<Part>.Err(problem),
                         Result.Ok(note_value) => Result<Part>.Ok(new Part(id_value, code_value, quantity_value,
-                                                                          note_value)),
+                            note_value)),
                     },
                 },
             },
@@ -348,8 +348,8 @@ let PartsSql = module:program.Entry (
                 Optional.Some(kind) => kind == sql.ErrorKind.NotFound
                     ? Result<app.Response>.Ok(app.json(404, "{\"error\":\"not found\"}"))
                     : (kind == sql.ErrorKind.ConstraintViolation
-                        ? Result<app.Response>.Ok(app.json(409, "{\"error\":\"conflict\"}"))
-                        : Result<app.Response>.Err(problem)),
+                    ? Result<app.Response>.Ok(app.json(409, "{\"error\":\"conflict\"}"))
+                    : Result<app.Response>.Err(problem)),
                 Optional.None => match (problem) {
                     errors.Error.Custom(detail) => detail.code() == "parts.not_found"
                         ? Result<app.Response>.Ok(app.json(404, "{\"error\":\"not found\"}"))

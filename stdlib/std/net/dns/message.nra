@@ -184,9 +184,11 @@ export let Message = module (
         Txt(uint8[list][list]),
         Soa { mname: names.DnsName, rname: names.DnsName, serial: int64, refresh: int64, retry: int64, expire: int64,
             minimum: int64 },
+
         Srv { priority: int, weight: int, port: int, target: names.DnsName },
         Naptr { order: int, preference: int, flags: string, services: string, regexp: string,
             replacement: names.DnsName },
+
         Opt(EdnsOption[list]),
         Unknown(uint8[list])
     );

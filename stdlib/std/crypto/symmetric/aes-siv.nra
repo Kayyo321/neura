@@ -59,7 +59,7 @@ export let AesSiv = module (
             seal_items(items_of(nonce, associated_data), plaintext);
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> => open_items(items_of(nonce, associated_data), sealed);
+            -> Result<uint8[list]> => open_items(items_of(nonce, associated_data), sealed);
 
         let items_of = func(nonce: uint8[list], data: uint8[list]) -> uint8[list][list] {
             let items: uint8[list][list] = new([data]);

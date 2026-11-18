@@ -65,7 +65,7 @@ export let HedgingFilter = module (
         /// @brief A hedging filter. Traps with "invalid argument: <name>" unless 1 <= percentile <= 100 and
         /// min_samples >= 1.
         export let init = func(recent: windows.LatencyWindow, p: int, minimum: int, limit: budgets.RetryBudget,
-                source: Clock, backup: optional.Optional<func(Req) -> Result<Resp>>) {
+            source: Clock, backup: optional.Optional<func(Req) -> Result<Resp>>) {
             if (p < 1 || p > 100) {
                 trap_with_message("invalid argument: percentile");
             }
@@ -128,7 +128,7 @@ export let HedgingFilter = module (
 
         /// @brief The primary and, after `delay`, the backup as tasks; the first Ok wins.
         let race = func(request: Req, primary: func(Req) -> Result<Resp>, backup: func(Req) -> Result<Resp>,
-                delay: durations.Duration, start: durations.Duration) -> Result<Resp> {
+            delay: durations.Duration, start: durations.Duration) -> Result<Resp> {
             scope (tasks) {
                 let first = spawn primary(request);
                 last timer = timers.after(delay)?;
@@ -196,13 +196,13 @@ export let HedgingFilter = module (
     #NoDiscard
     export let of = func<Req, Resp>(window: int, percentile: int, min_samples: int, budget: budgets.RetryBudget,
         clock: Clock) -> HedgingFilter<Req, Resp> =>
-        new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
-            optional.Optional<func(Req) -> Result<Resp>>.None);
+            new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
+                optional.Optional<func(Req) -> Result<Resp>>.None);
 
     /// @brief As `of`, sending backups to `replica`.
     #NoDiscard
     export let with_replica = func<Req, Resp>(window: int, percentile: int, min_samples: int,
         budget: budgets.RetryBudget, clock: Clock, replica: func(Req) -> Result<Resp>) -> HedgingFilter<Req, Resp> =>
-        new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
-            optional.Optional<func(Req) -> Result<Resp>>.Some(replica));
+            new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
+                optional.Optional<func(Req) -> Result<Resp>>.Some(replica));
 );

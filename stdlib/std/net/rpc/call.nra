@@ -97,9 +97,9 @@ export let Call = module (
         /// @brief The path, message count and timeout.
         export let.override to_string = func -> string => "RpcRequest(" + path.to_string() + ", "
             + messages.length.to_string() + " messages, timeout " + match (timeout) {
-                Optional.Some(span) => timeouts.format(span),
-                Optional.None => "none",
-            } + ")";
+            Optional.Some(span) => timeouts.format(span),
+            Optional.None => "none",
+        } + ")";
     );
 
     /// @brief A unary request with one message.

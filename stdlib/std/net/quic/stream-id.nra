@@ -20,8 +20,10 @@ export let StreamId = module (
     export const MaxStreamCount: int64 = 1152921504606846976;
 
     /// @brief The four stream types of RFC 9000 Table 1, in the order of their low bits 0x00 through 0x03.
-    export let StreamType = enum (ClientBidirectional, ServerBidirectional, ClientUnidirectional,
-        ServerUnidirectional);
+    export let StreamType = enum (
+        ClientBidirectional, ServerBidirectional, ClientUnidirectional,
+        ServerUnidirectional
+    );
 
     /// @brief The type of a stream ID.
     #Pure

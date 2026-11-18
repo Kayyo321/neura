@@ -30,12 +30,12 @@ export let Wire = module (
     export let BodyFraming = enum (
         /// @brief No body follows the head.
         None,
-        /// @brief Exactly this many bytes follow (Content-Length).
-        Length(int64),
-        /// @brief The body is in the chunked transfer coding (RFC 9112 section 7.1).
-        Chunked,
-        /// @brief A response body that ends when the server closes the connection.
-        UntilClose
+            /// @brief Exactly this many bytes follow (Content-Length).
+            Length(int64),
+            /// @brief The body is in the chunked transfer coding (RFC 9112 section 7.1).
+            Chunked,
+            /// @brief A response body that ends when the server closes the connection.
+            UntilClose
     );
 
     /// @brief The limits a recipient applies to a message. Read-only once built.
@@ -87,7 +87,7 @@ export let Wire = module (
         /// @brief Every limit given. The numbers must be positive and each method a token; otherwise traps with
         /// "invalid argument: <name>".
         or func(head_bytes: int, header_fields: int, body_bytes: int64, chunk_line_bytes: int, trailer_bytes: int,
-                bare_lf: bool, known_methods: string[]) {
+            bare_lf: bool, known_methods: string[]) {
             check_positive(head_bytes as int64, "head_bytes");
             check_positive(header_fields as int64, "header_fields");
             check_positive(body_bytes, "body_bytes");
@@ -160,7 +160,7 @@ export let Wire = module (
         /// @brief A head of the given parts. Traps with "invalid argument: <name>" when the method is not a token,
         /// the target is empty or holds a byte outside visible ASCII, or the version is not "HTTP/" DIGIT "." DIGIT.
         export let init = func(method_text: string, target_text: string, version_text: string,
-                fields: http_headers.Headers) {
+            fields: http_headers.Headers) {
             if (!http_headers.is_token(method_text)) {
                 trap_with_message("invalid argument: method");
             }
@@ -219,7 +219,7 @@ export let Wire = module (
         /// "HTTP/" DIGIT "." DIGIT, the status is outside 100 through 599, or the reason holds a control byte other
         /// than tab.
         export let init = func(version_text: string, status_code: int, reason_text: string,
-                fields: http_headers.Headers) {
+            fields: http_headers.Headers) {
             if (version_major(version_text) < 0) {
                 trap_with_message("invalid argument: version");
             }
@@ -755,7 +755,7 @@ export let Wire = module (
 
     /// @brief The fields of lines[from, to), all non-empty.
     let fields_from_lines = func(lines: string[list], from: int, to: int, limits: Limits, lenient: bool)
-            -> Result<http_headers.Headers> {
+        -> Result<http_headers.Headers> {
         last names: string[list] = new;
         last values: string[list] = new;
         for (let i = from; i < to; i++) {
@@ -892,9 +892,9 @@ export let Wire = module (
             last alnum = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
             // - . _ ~ ! $ & ' ( ) * + , ; = % : [ ]
             if (!alnum && !(b == 45 or 46 or 95 or 126 or 33 or 36 or 38 or 39 or 40 or 41 or 42 or 43 or 44 or 59
-                    or 61 or 37 or 58 or 91 or 93)) {
-                return false;
-            }
+                or 61 or 37 or 58 or 91 or 93)) {
+                    return false;
+                }
         }
         return true;
     };

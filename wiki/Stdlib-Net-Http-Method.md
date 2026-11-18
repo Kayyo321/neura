@@ -24,15 +24,15 @@ The following public declarations are taken from the module source; each links t
   The method named by `text` (exact case), or None when `text` is not a token. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **Method** · [`export let standard = func(text: string) -> Optional<HttpMethod>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L29)
   One of the nine standard methods named by `text`, or None. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Method** · [`export let name = func(m: HttpMethod) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L44)
+- **Method** · [`export let name = func(m: HttpMethod) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L62)
   The method's token. Tagged `#Pure`, `#ThreadSafe`.
-- **Method** · [`export let is_safe = func(m: HttpMethod) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L59)
+- **Method** · [`export let is_safe = func(m: HttpMethod) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L77)
   Whether the method is safe: GET, HEAD, OPTIONS, TRACE (RFC 9110 section 9.2.1). Tagged `#Pure`, `#ThreadSafe`.
-- **Method** · [`export let is_idempotent = func(m: HttpMethod) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L63)
+- **Method** · [`export let is_idempotent = func(m: HttpMethod) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L81)
   Whether the method is idempotent: the safe methods, PUT and DELETE (RFC 9110 section 9.2.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Method** · [`export let is_safe_name = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L67)
+- **Method** · [`export let is_safe_name = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L85)
   `is_safe` for a method token. Tagged `#Pure`, `#ThreadSafe`.
-- **Method** · [`export let is_idempotent_name = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L72)
+- **Method** · [`export let is_idempotent_name = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/method.nra#L90)
   `is_idempotent` for a method token. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

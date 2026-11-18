@@ -47,7 +47,7 @@ export let AltSvc = module (
 
         /// @brief Stores the fields; the parameter lists are copied.
         export let init = func(written_id: string, decoded: uint8[list], alt_host: string, alt_port: int, ma: int64,
-                keep: bool, names: string[list], values: string[list]) {
+            keep: bool, names: string[list], values: string[list]) {
             protocol_id = written_id;
             protocol = new;
             for (let b in decoded) {

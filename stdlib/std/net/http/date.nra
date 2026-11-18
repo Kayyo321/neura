@@ -362,7 +362,7 @@ export let Date = module (
 
     /// @brief Checks the date and the weekday and builds the instant, or returns the recorded failure.
     let assemble = func(reader: Reader, weekday: int, year: int, month: int, day: int, day_at: int, seconds: int,
-            time_at: int) -> Result<instant.Instant> {
+        time_at: int) -> Result<instant.Instant> {
         if (!reader.ok()) {
             return Result<instant.Instant>.Err(reader.error());
         }
