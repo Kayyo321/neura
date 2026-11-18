@@ -910,8 +910,11 @@ if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura_core_library PRIVATE "-Wl,--exclude-libs,libffi.a")
 endif()
 if(NEURA_SDK)
+    # The project layer (neura_app, neura_project; defined below) is in the SDK library once, for neurac and
+    # the project tools. neura-run, a core tool, keeps its own static copy, so that a runtime-only
+    # installation runs bundles without libneura-sdk.
     neura_add_shared(neura_sdk_library neura-sdk sdk neura_core_library neura_cli_sdk neura_cli_artifact neura_cli_explain
-        neura_cli_tags neura_cli_debug neura_compiler neura_decompiler neura_libclang)
+        neura_cli_tags neura_cli_debug neura_compiler neura_decompiler neura_libclang neura_app neura_project)
 endif()
 
 set(NEURA_TOOL_TARGETS)
@@ -1070,21 +1073,20 @@ if(NEURA_ENABLE_SERVER_TLS)
     target_compile_definitions(neura_app PRIVATE NEURA_HAS_TLS_PROVIDER)
 endif()
 neura_target_defaults(neura_app)
+# neura-run belongs to the core (docs/design/Products030.md) and links the layer statically; neurac and the
+# project tools take it from libneura-sdk.
 target_link_libraries(neura-run PRIVATE neura_app)
-if(TARGET neurac)
-    target_link_libraries(neurac PRIVATE neura_app)
-endif()
 if(NEURA_SDK)
     # `neura new` (src/app/new.cpp) and the project templates it copies.
-    neura_add_tool(neura-new sdk src/app/new.cpp neura_core_library neura_app)
+    neura_add_tool(neura-new sdk src/app/new.cpp neura_core_library neura_sdk_library)
     add_dependencies(neura neura-new)
     install(DIRECTORY templates/ DESTINATION share/neura/templates COMPONENT sdk)
     # `neura package` (src/app/package.cpp); a desktop package goes through the desktop packager, which finds
     # the desktop host in hosts/desktop beside its own parent directory, as in this repository.
-    neura_add_tool(neura-package sdk src/app/package.cpp neura_core_library neura_app)
+    neura_add_tool(neura-package sdk src/app/package.cpp neura_core_library neura_sdk_library)
     add_dependencies(neura neura-package)
     # `neura dev` (src/app/dev.cpp): build, run and rebuild in the foreground.
-    neura_add_tool(neura-dev sdk src/app/dev.cpp neura_core_library neura_app)
+    neura_add_tool(neura-dev sdk src/app/dev.cpp neura_core_library neura_sdk_library)
     add_dependencies(neura neura-dev)
     install(FILES scripts/package-desktop.py DESTINATION share/neura/scripts COMPONENT sdk)
     install(FILES hosts/desktop/main.js hosts/desktop/preload.js DESTINATION share/neura/hosts/desktop COMPONENT sdk)
