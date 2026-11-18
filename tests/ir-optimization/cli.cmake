@@ -96,6 +96,8 @@ function(check_both_modes label)
 endfunction()
 
 file(GLOB_RECURSE examples "${SOURCE_DIR}/examples/*.nra")
+# An example project's sources are built with `neura build --project` (tests/project), as in frontend.cmake.
+list(FILTER examples EXCLUDE REGEX "/examples/apps/stock/")
 list(SORT examples)
 list(LENGTH examples example_count)
 if(example_count EQUAL 0)

@@ -21,13 +21,8 @@ let ToStringTests = module (
         test.assert_equal_string("Guarded", guarded.create<int>(new func() -> int => 1).to_string());
     };
 
-    export let test_item_limits_equals_and_hash_agree = func() -> void {
+    export let test_item_limits_shows_both_bounds = func() -> void {
         last a = parallel.limits(1000, 64);
-        last b = parallel.limits(1000, 64);
-        test.assert(a.equals(b));
-        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
-        test.assert(not a.equals(parallel.limits(1000, 65)));
-        test.assert(not a.equals(atomic.create(1)));
         test.assert_equal_string("ItemLimits(1000 steps, 64 heap cells)", a.to_string());
     };
 );

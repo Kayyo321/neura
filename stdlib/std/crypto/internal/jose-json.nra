@@ -18,7 +18,8 @@ export let JoseJson = module (
 
     /// @brief The members of a JSON object text, or `Custom` code `code`: not JSON, not an object, or a repeated
     /// member name.
-    export let parse_object = func(text: string, code: string) -> Result<[string, json.JsonValue][list]> {
+    export let parse_object = func(text: string, code: string, reject_nested_duplicates: bool = false)
+        -> Result<[string, json.JsonValue][list]> {
         match (json.parse(text)) {
             Result.Err(_) => {
                 return fail<[string, json.JsonValue][list]>(code, "not valid JSON");
@@ -26,7 +27,8 @@ export let JoseJson = module (
             Result.Ok(value) => {
                 match (value) {
                     json.JsonValue.Object(members) => {
-                        if (top_level_names(text) != members.length) {
+                        last parsed_names = reject_nested_duplicates ? tree_names(value) : members.length;
+                        if (text_names(text, reject_nested_duplicates) != parsed_names) {
                             return fail<[string, json.JsonValue][list]>(code, "repeated member name");
                         }
                         return Result<[string, json.JsonValue][list]>.Ok(members);
@@ -40,20 +42,20 @@ export let JoseJson = module (
     };
 
     /// @brief `parse_object` of UTF-8 bytes; bytes that are not UTF-8 fail with the code.
-    export let parse_object_bytes = func(bytes: uint8[list], code: string) -> Result<[string, json.JsonValue][list]> {
+    export let parse_object_bytes = func(bytes: uint8[list], code: string, reject_nested_duplicates: bool = false)
+        -> Result<[string, json.JsonValue][list]> {
         match (utf8.decode(bytes)) {
             Result.Err(_) => {
                 return fail<[string, json.JsonValue][list]>(code, "not UTF-8");
             },
             Result.Ok(text) => {
-                return parse_object(text, code);
+                return parse_object(text, code, reject_nested_duplicates);
             },
         }
     };
 
-    /// @brief The number of member names of the top-level object of a valid JSON text: the colons at depth 1
-    /// outside strings.
-    let top_level_names = func(text: string) -> int {
+    /// @brief Counts member names at the requested depth in validated JSON.
+    let text_names = func(text: string, all_objects: bool) -> int {
         let depth = 0;
         let count = 0;
         let in_string = false;
@@ -75,8 +77,35 @@ export let JoseJson = module (
                 depth++;
             } else if (c == 125 || c == 93) {
                 depth--;
-            } else if (c == 58 && depth == 1) {
+            } else if (c == 58 && (all_objects || depth == 1)) {
                 count++;
+            }
+        }
+        return count;
+    };
+
+    // The JSON parser combines repeated keys. Counting members across the resulting tree detects any
+    // parsed key lost at any depth, including objects within arrays.
+    let tree_names = func(root: json.JsonValue) -> int {
+        let pending: json.JsonValue[list] = new([root]);
+        let count = 0;
+        while (pending.length > 0) {
+            last index = pending.length - 1;
+            last value = pending[index];
+            pending.remove_at(index);
+            match (value) {
+                json.JsonValue.Object(members) => {
+                    count += members.length;
+                    for (let member in members) {
+                        pending.append(member[1]);
+                    }
+                },
+                json.JsonValue.Array(values) => {
+                    for (let element in values) {
+                        pending.append(element);
+                    }
+                },
+                _ => {},
             }
         }
         return count;

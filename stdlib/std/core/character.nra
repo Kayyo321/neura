@@ -829,14 +829,14 @@ export let Character = module (
         }
         let position = index;
         if (offset >= 0) {
-            for (let i = 0; i < offset; i += 1) {
+            for (let i in 0 .. offset) {
                 if (position >= units.length) {
                     trap_with_message("invalid argument: offset outside the list");
                 }
                 position += char_count(code_point_at(units, position));
             }
         } else {
-            for (let i = 0; i < -offset; i += 1) {
+            for (let i in 0 .. -offset) {
                 if (position <= 0) {
                     trap_with_message("invalid argument: offset outside the list");
                 }

@@ -1,0 +1,660 @@
+// A range literal as a for-each source is counted without building the
+// range (docs/lang/CoreLanguage.md, Loops). Each case visits the range in a
+// loop and the same range built into a variable first; both must give the
+// same elements, at the ends of each integer type's domain, for empty,
+// reversed and stepped ranges, and with `break`, `continue`, closures and
+// bounds evaluated once. range-loops.expected was produced by the compiler
+// that built every range, before the counted loop.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Log = class (
+    export let text: string = "";
+
+    export let note = func(label: string, result: int) -> int {
+        text = text + label;
+        return result;
+    };
+);
+
+let Limit = class (
+    export let stop: int = 0;
+);
+
+let compare = func(label: string, counted: string, built: string) -> void {
+    console.print_line(label + ":" + counted + (counted == built ? "" : " MISMATCH" + built));
+};
+
+let first_square_above = func(limit: int) -> int {
+    for (let value in 0 ..= limit) {
+        if (value * value > limit) {
+            return value;
+        }
+    }
+    return -1;
+};
+
+let up_to = func(limit: Limit, fallback: int) -> string {
+    let text = "";
+    for (let value in 0 ..= limit?.stop ?? fallback) {
+        text = text + " " + value.to_string();
+    }
+    return text;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        {
+            let counted = "";
+            for (let value in 0 .. 5) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 .. 5;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("exclusive", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 0 ..= 5) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 ..= 5;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("inclusive", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 0 .. 9 : 2) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 .. 9 : 2;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("step two", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 0 ..= 6 : 3) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 ..= 6 : 3;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("inclusive step", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 0 .. 10 : 100) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 .. 10 : 100;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("large step", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 0 ..= 10 : 1000000) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 ..= 10 : 1000000;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("larger step", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 5 .. 0 : -1) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 5 .. 0 : -1;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("down", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 5 ..= 0 : -2) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 5 ..= 0 : -2;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("down inclusive", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 3 ..= 3) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 3 ..= 3;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("one", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 3 .. 3) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 3 .. 3;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("empty", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 3 ..= 2) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 3 ..= 2;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("empty inclusive", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 5 .. 0) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 5 .. 0;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("reversed", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 0 .. 5 : -1) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 0 .. 5 : -1;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("reversed down", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in {0 .. 3}) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = {0 .. 3};
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("braced", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in (0 ..= 2 : 1)) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = (0 ..= 2 : 1);
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("grouped", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 2147483640 ..= 2147483647 : 3) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 2147483640 ..= 2147483647 : 3;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int32 top", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 2147483645 .. 2147483647) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 2147483645 .. 2147483647;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int32 top exclusive", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 2147483645 ..= 2147483647) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 2147483645 ..= 2147483647;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int32 top inclusive", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in -2147483647 - 1 ..= -2147483646) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = -2147483647 - 1 ..= -2147483646;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int32 bottom", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 2147483647 ..= 2147483640 : -4) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 2147483647 ..= 2147483640 : -4;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int32 from top", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in -2147483640 ..= -2147483647 - 1 : -4) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = -2147483640 ..= -2147483647 - 1 : -4;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int32 to bottom", counted, built);
+        }
+        {
+            let top: int64 = 9223372036854775807;
+            let counted = "";
+            for (let value in top - 6 ..= top : 3) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = top - 6 ..= top : 3;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int64 top", counted, built);
+        }
+        {
+            let top: int64 = 9223372036854775807;
+            let counted = "";
+            for (let value in top ..= top - 9 : -4) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = top ..= top - 9 : -4;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int64 from top", counted, built);
+        }
+        {
+            let top: int64 = 9223372036854775807;
+            let counted = "";
+            for (let value in -top - 1 ..= -top + 2) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = -top - 1 ..= -top + 2;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int64 bottom", counted, built);
+        }
+        {
+            let top: int64 = 9223372036854775807;
+            let counted = "";
+            for (let value in -top + 2 ..= -top - 1 : -1) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = -top + 2 ..= -top - 1 : -1;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int64 to bottom", counted, built);
+        }
+        {
+            let zero: int64 = 0;
+            let top: int64 = 9223372036854775807;
+            let counted = "";
+            for (let value in zero ..= top : 4611686018427387904) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = zero ..= top : 4611686018427387904;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int64 wide", counted, built);
+        }
+        {
+            let top: int64 = 9223372036854775807;
+            let counted = "";
+            for (let value in -top - 1 .. top : 4611686018427387904) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = -top - 1 .. top : 4611686018427387904;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int64 wide exclusive", counted, built);
+        }
+        {
+            let low: uint8 = 250;
+            let counted = "";
+            for (let value in low ..= 255) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = low ..= 255;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("uint8 top", counted, built);
+        }
+        {
+            let low: uint8 = 0;
+            let counted = "";
+            for (let value in low ..= 255 : 51) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = low ..= 255 : 51;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("uint8 whole", counted, built);
+        }
+        {
+            let low: uint8 = 250;
+            let counted = "";
+            for (let value in low .. 255) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = low .. 255;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("uint8 exclusive", counted, built);
+        }
+        {
+            let low: int8 = -128;
+            let counted = "";
+            for (let value in low ..= 127 : 85) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = low ..= 127 : 85;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int8 whole", counted, built);
+        }
+        {
+            let high: int8 = 127;
+            let counted = "";
+            for (let value in high ..= -128 : -127) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = high ..= -128 : -127;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("int8 down", counted, built);
+        }
+        {
+            let low: uint32 = 4294967290;
+            let counted = "";
+            for (let value in low ..= 4294967295 : 2) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = low ..= 4294967295 : 2;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("uint32 top", counted, built);
+        }
+        {
+            let low: uint64 = 18446744073709551610;
+            let counted = "";
+            for (let value in low ..= 18446744073709551615 : 5) {
+                counted = counted + " " + value.to_string();
+            }
+            let range = low ..= 18446744073709551615 : 5;
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("uint64 top", counted, built);
+        }
+        {
+            let counted = "";
+            for (let value in 'a' ..= 'e') {
+                counted = counted + " " + value.to_string();
+            }
+            let range = 'a' ..= 'e';
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            compare("characters", counted, built);
+        }
+        {
+            let log = new Log();
+            let counted = "";
+            for (let value in log.note("a", 1) .. log.note("b", 7) : log.note("s", 2)) {
+                counted = counted + " " + value.to_string();
+            }
+            counted = counted + " " + log.text;
+            let built_log = new Log();
+            let range = built_log.note("a", 1) .. built_log.note("b", 7) : built_log.note("s", 2);
+            let built = "";
+            for (let value in range) {
+                built = built + " " + value.to_string();
+            }
+            built = built + " " + built_log.text;
+            compare("evaluated once", counted, built);
+        }
+        {
+            let stop = 3;
+            let counted = "";
+            for (let value in 0 .. stop) {
+                stop = stop + 1;
+                counted = counted + " " + value.to_string();
+            }
+            counted = counted + " " + stop.to_string();
+            compare("stop changed", counted, " 0 1 2 6");
+        }
+        {
+            let counted = "";
+            for (let value in 0 .. 4) {
+                value = value * 10;
+                counted = counted + " " + value.to_string();
+            }
+            compare("binding assigned", counted, " 0 10 20 30");
+        }
+        {
+            let counted = "";
+            for (let value in 0 .. 10) {
+                if (value == 7) {
+                    break;
+                }
+                if (value % 2 == 0) {
+                    continue;
+                }
+                counted = counted + " " + value.to_string();
+            }
+            let built = "";
+            let range = 0 .. 10;
+            for (let value in range) {
+                if (value == 7) {
+                    break;
+                }
+                if (value % 2 == 0) {
+                    continue;
+                }
+                built = built + " " + value.to_string();
+            }
+            compare("break and continue", counted, built);
+        }
+        {
+            let top = 2147483647;
+            let counted = "";
+            for (let value in top - 3 ..= top) {
+                if (value == top - 2) {
+                    continue;
+                }
+                counted = counted + " " + value.to_string();
+            }
+            compare("continue at the top", counted, " 2147483644 2147483646 2147483647");
+        }
+        {
+            let actions: (func() -> int)[list] = new;
+            for (let value in 0 .. 4) {
+                actions.append(new func() -> int => value * value);
+            }
+            for (const value in 10 ..= 11) {
+                actions.append(new func() -> int => value);
+            }
+            let counted = "";
+            for (let action in actions) {
+                counted = counted + " " + action().to_string();
+            }
+            let built_actions: (func() -> int)[list] = new;
+            let squares = 0 .. 4;
+            for (let value in squares) {
+                built_actions.append(new func() -> int => value * value);
+            }
+            let tens = 10 ..= 11;
+            for (const value in tens) {
+                built_actions.append(new func() -> int => value);
+            }
+            let built = "";
+            for (let action in built_actions) {
+                built = built + " " + action().to_string();
+            }
+            compare("closures", counted, built);
+        }
+        {
+            let top: int64 = 9223372036854775807;
+            let low: uint8 = 253;
+            let counted_actions: (func() -> string)[list] = new;
+            for (let value in 0 .. 9 : 4) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in top - 2 ..= top) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in low .. 255) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in low ..= 255) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in 3 .. 0 : -1) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            let counted = "";
+            for (let action in counted_actions) {
+                counted = counted + " " + action();
+            }
+            let built_actions: (func() -> string)[list] = new;
+            let stepped = 0 .. 9 : 4;
+            for (let value in stepped) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let wide = top - 2 ..= top;
+            for (let value in wide) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let narrow = low .. 255;
+            for (let value in narrow) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let narrow_inclusive = low ..= 255;
+            for (let value in narrow_inclusive) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let down = 3 .. 0 : -1;
+            for (let value in down) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let built = "";
+            for (let action in built_actions) {
+                built = built + " " + action();
+            }
+            compare("captured in every form", counted, built);
+        }
+        {
+            let counted = "";
+            for (let outer in 0 ..= 3) {
+                for (let inner: int in outer .. 3) {
+                    counted = counted + " " + outer.to_string() + inner.to_string();
+                }
+            }
+            let built = "";
+            let outers = 0 ..= 3;
+            for (let outer in outers) {
+                let inners = outer .. 3;
+                for (let inner: int in inners) {
+                    built = built + " " + outer.to_string() + inner.to_string();
+                }
+            }
+            compare("nested", counted, built);
+        }
+        {
+            let limit = new Limit();
+            limit.stop = 4;
+            compare("coalesced stop", up_to(nil, 2) + " /" + up_to(limit, 2), " 0 1 2 / 0 1 2 3 4");
+            compare("return", " " + first_square_above(10).to_string() + " " + first_square_above(-1).to_string(),
+                " 4 -1");
+        }
+        {
+            let total = 0;
+            for (let value in 0 .. 3000000) {
+                total = (total + value) % 1000003;
+            }
+            console.print_line("long: " + total.to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

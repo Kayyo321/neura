@@ -1,0 +1,178 @@
+// test-options: --gpu=off --deny-all --max-steps 800000000
+let base64 = import:Std.Encoding.Base64;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let jwe = import:Std.Crypto.Token.Jwe;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JweEcdhVectors;
+
+let JweEcdhTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let text = func(data: string) -> string => test.assert_ok(utf8.decode(bytes(data)));
+
+    let code = func(cause: error.Error) -> string => match (cause) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let curve = func(name: string) -> ecdsa.Curve {
+        if (name == "P-256") {
+            return ecdsa.Curve.P256;
+        }
+        if (name == "P-384") {
+            return ecdsa.Curve.P384;
+        }
+        if (name == "P-521") {
+            return ecdsa.Curve.P521;
+        }
+        test.fail("unknown fixture curve");
+        return ecdsa.Curve.P256;
+    };
+
+    let algorithm = func(name: string) -> jwe.EcdhAlgorithm {
+        if (name == "ECDH-ES") {
+            return jwe.EcdhAlgorithm.Es;
+        }
+        if (name == "ECDH-ES+A128KW") {
+            return jwe.EcdhAlgorithm.EsA128Kw;
+        }
+        if (name == "ECDH-ES+A192KW") {
+            return jwe.EcdhAlgorithm.EsA192Kw;
+        }
+        if (name == "ECDH-ES+A256KW") {
+            return jwe.EcdhAlgorithm.EsA256Kw;
+        }
+        test.fail("unknown fixture algorithm");
+        return jwe.EcdhAlgorithm.Es;
+    };
+
+    let encryption = func(name: string) -> jwe.ContentEncryption {
+        if (name == "A128GCM") {
+            return jwe.ContentEncryption.A128Gcm;
+        }
+        if (name == "A192GCM") {
+            return jwe.ContentEncryption.A192Gcm;
+        }
+        if (name == "A128CBC-HS256") {
+            return jwe.ContentEncryption.A128CbcHs256;
+        }
+        if (name == "A256CBC-HS512") {
+            return jwe.ContentEncryption.A256CbcHs512;
+        }
+        test.fail("unknown fixture content encryption");
+        return jwe.ContentEncryption.A128Gcm;
+    };
+
+    let compare_case = func(offset: int) {
+        last row = vectors.cases;
+        last alg = algorithm(row[offset + 1]);
+        last enc = encryption(row[offset + 2]);
+        last group = curve(row[offset + 3]);
+        last recipient = new ecdsa.EcPrivateKey(group, bytes(row[offset + 4]));
+        last ephemeral = new ecdsa.EcPrivateKey(group, bytes(row[offset + 5]));
+        last sender = new jwe.EcdhEncryptionKey(recipient.public_key(), alg, enc);
+        last receiver = new jwe.EcdhDecryptionKey(recipient, alg, enc);
+        last iv = bytes(row[offset + 7]);
+        last plaintext = bytes(row[offset + 8]);
+        last protected = text(row[offset + 9]);
+        last token = row[offset + 10];
+        last expected = alg == jwe.EcdhAlgorithm.Es
+            ? jwe.seal_with(sender, plaintext, ephemeral, iv, protected)
+            : jwe.seal_with(sender, plaintext, ephemeral, bytes(row[offset + 6]), iv, protected);
+        test.assert_equal_string(token, test.assert_ok(expected));
+        test.assert_equal_string(row[offset + 8], hex.encode(test.assert_ok(jwe.open(receiver, token))));
+    };
+
+    export let test_rfc7518_appendix_c_party_information = func {
+        compare_case(0);
+        last row = vectors.cases;
+        last recipient = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[4]));
+        last ephemeral = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[5]));
+        last sender = new jwe.EcdhEncryptionKey(recipient.public_key(), jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        test.assert_equal_string(row[10], test.assert_ok(jwe.seal_with(sender, bytes(row[8]), ephemeral, bytes(row[7]),
+            utf8.encode("Alice"), utf8.encode("Bob"))));
+    };
+
+    export let test_rfc7520_exact_compact = func {
+        compare_case(11);
+        compare_case(22);
+    };
+
+    export let test_rfc7520_a256kw_and_p521_a192kw = func {
+        compare_case(33);
+        compare_case(44);
+    };
+
+    export let test_p521_two_block_concat_kdf = func {
+        compare_case(55);
+    };
+
+    export let test_malformed_protected_headers = func {
+        last row = vectors.cases;
+        last recipient = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[4]));
+        last key = new jwe.EcdhDecryptionKey(recipient, jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        last segments = strings.split(row[10], ".");
+        last malformed = vectors.malformed;
+        for (let offset = 0; offset < malformed.length; offset += 3) {
+            segments[0] = base64.encode_url_unpadded(bytes(malformed[offset + 1]));
+            test.assert_equal_string(malformed[offset + 2], code(test.assert_err(jwe.open(key, strings.join(segments, ".")))));
+        }
+    };
+
+    export let test_bound_algorithms_and_ephemeral_key = func {
+        last row = vectors.cases;
+        last recipient = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[4]));
+        last for_wrapping = new jwe.EcdhDecryptionKey(recipient, jwe.EcdhAlgorithm.EsA128Kw, jwe.ContentEncryption.A128Gcm);
+        last another_enc = new jwe.EcdhDecryptionKey(recipient, jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A192Gcm);
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(for_wrapping, row[10]))));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(another_enc, row[10]))));
+
+        last wrong_recipient = new jwe.EcdhDecryptionKey(new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[15])),
+            jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(wrong_recipient, row[10]))));
+
+        last ephemeral = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[16]));
+        last sender = new jwe.EcdhEncryptionKey(recipient.public_key(), jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.seal_with(sender, bytes(row[8]), ephemeral,
+            bytes(row[7]), text(row[9])))));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.seal_with(sender, bytes(row[8]), ephemeral,
+            bytes(row[7]), utf8.encode("same"), utf8.encode("same")))));
+
+        last receiver = new jwe.EcdhDecryptionKey(recipient, jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        last parts = strings.split(row[10], ".");
+        parts[1] = "AQ";
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(receiver, strings.join(parts, ".")))));
+    };
+
+    export let test_aes_kw_authentication_failure = func {
+        last row = vectors.cases;
+        last receiver = new jwe.EcdhDecryptionKey(new ecdsa.EcPrivateKey(ecdsa.Curve.P384, bytes(row[26])),
+            jwe.EcdhAlgorithm.EsA128Kw, jwe.ContentEncryption.A128Gcm);
+        last parts = strings.split(row[32], ".");
+        let wrapped = test.assert_ok(base64.decode_url_unpadded(parts[1]));
+        wrapped[0] = wrapped[0] ^ 1;
+        parts[1] = base64.encode_url_unpadded(wrapped);
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(receiver, strings.join(parts, ".")))));
+    };
+
+    export let test_drbg_generates_new_ephemeral_keys = func {
+        last row = vectors.cases;
+        last recipient = new ecdsa.EcPrivateKey(ecdsa.Curve.P256, bytes(row[4]));
+        last receiver = new jwe.EcdhDecryptionKey(recipient, jwe.EcdhAlgorithm.EsA256Kw, jwe.ContentEncryption.A128Gcm);
+        last sender = new jwe.EcdhEncryptionKey(recipient.public_key(), receiver.algorithm, receiver.encryption);
+        last random = new drbg.ChaCha20Drbg(bytes(row[4]));
+        last plaintext = utf8.encode("explicit DRBG");
+        last producer = utf8.encode("sender");
+        last consumer = utf8.encode("recipient");
+        last first = test.assert_ok(jwe.seal(sender, plaintext, producer, consumer, random));
+        last second = test.assert_ok(jwe.seal(sender, plaintext, producer, consumer, random));
+        test.assert_not_equal(strings.split(first, ".")[0], strings.split(second, ".")[0]);
+        test.assert_equal_string("explicit DRBG", test.assert_ok(utf8.decode(test.assert_ok(jwe.open(receiver, first)))));
+        test.assert_equal_string("explicit DRBG", test.assert_ok(utf8.decode(test.assert_ok(jwe.open(receiver, second)))));
+        test.assert_equal_string("Jwe.EcdhDecryptionKey(<redacted>)", receiver.to_string());
+    };
+);

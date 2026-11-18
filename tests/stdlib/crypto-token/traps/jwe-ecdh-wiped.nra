@@ -1,0 +1,16 @@
+// run-options: --gpu=off --deny-all
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: JWE ECDH key is wiped
+let ec = import:Std.Crypto.Asymmetric.Ecdsa;
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last private_key = new ec.EcPrivateKey(ec.Curve.P256, new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
+        last recipient = new jwe.EcdhDecryptionKey(private_key, jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        private_key.wipe();
+        let _ = jwe.open(recipient, "");
+        return program.ExitCode.Ok;
+    };
+);

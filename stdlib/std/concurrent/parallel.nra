@@ -1,10 +1,13 @@
-let hashing = import:Std.Core.Hash;
 /// @brief Multicore computation over isolated work (Concurrency.md section 12). A map means what calling the
 /// worker on each item in index order would return; more workers may change only wall time and peak process
 /// memory.
 /// @see [Std.Concurrent.Parallel](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Parallel)
 #Since("0.1.0")
 export let Parallel = module (
+    // ItemLimits keeps identity equality: an `equals(other: class)` reads `other`, which can run any class's
+    // getter (docs/design/Hooks030.md, Events), so this #ThreadSafe class would fail E0608 in every program
+    // that declares a getter that is not task-safe.
+
     /// @brief The limits each item of a map runs under, the same under any number of workers. An item that
     /// exceeds one traps as that item. The fields are read-only.
     #[Final, Immutable, ThreadSafe]
@@ -26,18 +29,6 @@ export let Parallel = module (
             max_steps = steps;
             max_heap_cells = heap_cells;
         };
-
-        /// @brief Limits are equal when both bounds are.
-        export let.override equals = func(other: class) -> bool {
-            if (other is not that: ItemLimits) {
-                return false;
-            }
-            return max_steps == that.max_steps && max_heap_cells == that.max_heap_cells;
-        };
-
-        /// @brief Combines both bounds into a hash that agrees with equals.
-        export let.override hash_code = func -> uint32 =>
-            hashing.combine(hashing.combine(17, max_steps.hash_code()), max_heap_cells.hash_code());
 
         /// @brief Formats the limits with both bounds.
         export let.override to_string = func -> string =>

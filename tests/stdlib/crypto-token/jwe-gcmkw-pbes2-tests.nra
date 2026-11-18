@@ -1,0 +1,205 @@
+// test-options: --gpu=off --deny-entropy --max-steps 1000000000
+let base64 = import:Std.Encoding.Base64;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let jwe = import:Std.Crypto.Token.Jwe;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JweGcmkwPbes2Vectors;
+
+let JweGcmkwPbes2Tests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let text = func(data: string) -> string => test.assert_ok(utf8.decode(bytes(data)));
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let encryption = func(name: string) -> jwe.ContentEncryption {
+        if (name == "A128GCM") {
+            return jwe.ContentEncryption.A128Gcm;
+        }
+        if (name == "A192GCM") {
+            return jwe.ContentEncryption.A192Gcm;
+        }
+        test.assert_equal_string("A128CBC-HS256", name);
+        return jwe.ContentEncryption.A128CbcHs256;
+    };
+
+    let gcm_algorithm = func(name: string) -> jwe.GcmWrapAlgorithm {
+        if (name == "A128GCMKW") {
+            return jwe.GcmWrapAlgorithm.A128GcmKw;
+        }
+        if (name == "A192GCMKW") {
+            return jwe.GcmWrapAlgorithm.A192GcmKw;
+        }
+        test.assert_equal_string("A256GCMKW", name);
+        return jwe.GcmWrapAlgorithm.A256GcmKw;
+    };
+
+    let pbes2_algorithm = func(name: string) -> jwe.Pbes2Algorithm {
+        if (name == "PBES2-HS256+A128KW") {
+            return jwe.Pbes2Algorithm.Hs256A128Kw;
+        }
+        if (name == "PBES2-HS384+A192KW") {
+            return jwe.Pbes2Algorithm.Hs384A192Kw;
+        }
+        test.assert_equal_string("PBES2-HS512+A256KW", name);
+        return jwe.Pbes2Algorithm.Hs512A256Kw;
+    };
+
+    let gcm_case = func(row: int) {
+        last cases = vectors.cases;
+        last key = new jwe.GcmWrappingKey(encryption(cases[row + 2]), gcm_algorithm(cases[row + 1]), bytes(cases[row + 3]));
+        defer key.wipe();
+        test.assert_equal_string(cases[row + 8], hex.encode(test.assert_ok(jwe.open(key, cases[row + 10]))));
+        last wire = jwe.seal_with(key, bytes(cases[row + 8]), bytes(cases[row + 4]), bytes(cases[row + 5]),
+            bytes(cases[row + 6]), text(cases[row + 9]));
+        test.assert_equal_string(cases[row + 10], test.assert_ok(wire));
+    };
+
+    let pbes2_case = func(row: int) {
+        last cases = vectors.cases;
+        last iterations = test.assert_ok(int.parse(cases[row + 7]));
+        last key = new jwe.Pbes2Key(encryption(cases[row + 2]), pbes2_algorithm(cases[row + 1]),
+            bytes(cases[row + 3]), iterations);
+        defer key.wipe();
+        test.assert_equal_string(cases[row + 8], hex.encode(test.assert_ok(jwe.open(key, cases[row + 10]))));
+        last wire = jwe.seal_with(key, bytes(cases[row + 8]), bytes(cases[row + 4]), bytes(cases[row + 5]),
+            bytes(cases[row + 6]), iterations, text(cases[row + 9]));
+        test.assert_equal_string(cases[row + 10], test.assert_ok(wire));
+    };
+
+    export let test_rfc_7520_gcm_wrap_exact_compact = func => gcm_case(0);
+    export let test_rfc_7520_pbes2_exact_compact = func => pbes2_case(11);
+    export let test_independent_gcm_wrap_widths = func {
+        gcm_case(22);
+        gcm_case(33);
+    };
+
+    export let test_independent_pbes2_widths = func {
+        pbes2_case(44);
+        pbes2_case(55);
+    };
+
+    let with_header = func(compact, header: string) -> string {
+        let parts = strings.split(compact, ".");
+        parts[0] = base64.encode_url_unpadded(utf8.encode(header));
+        return strings.join(parts, ".");
+    };
+
+    let flip_segment = func(compact: string, i: int) -> string {
+        let parts = strings.split(compact, ".");
+        let changed = test.assert_ok(base64.decode_url_unpadded(parts[i]));
+        changed[0] ^= 1;
+        parts[i] = base64.encode_url_unpadded(changed);
+        return strings.join(parts, ".");
+    };
+
+    export let test_gcm_wrapping_header_validation_and_authentication = func {
+        last cases = vectors.cases;
+        last row = 22;
+        last encryption_alg = jwe.ContentEncryption.A128Gcm;
+        last key = new jwe.GcmWrappingKey(encryption_alg, jwe.GcmWrapAlgorithm.A128GcmKw, bytes(cases[row + 3]));
+        defer key.wipe();
+        last legacy_key = new jwe.WrappingKey(jwe.WrapAlgorithm.A128Kw, encryption_alg, bytes(cases[row + 3]));
+        defer legacy_key.wipe();
+        last token = cases[row + 10];
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(legacy_key, token))));
+        last headers = [
+            "{\"alg\":\"A128GCMKW\",\"enc\":\"A128GCM\"}",
+            "{\"alg\":\"A128GCMKW\",\"enc\":\"A128GCM\",\"iv\":\"AA\",\"tag\":\"AAAAAAAAAAAAAAAAAAAAAA\"}",
+            "{\"alg\":\"A128GCMKW\",\"enc\":\"A128GCM\",\"iv\":\"AAAAAAAAAAAAAAAA\",\"tag\":\"AA\"}",
+            "{\"alg\":\"A128GCMKW\",\"enc\":\"A128GCM\",\"iv\":\"AAAAAAAAAAAAAAAA\",\"tag\":\"AAAAAAAAAAAAAAAAAAAAAA=\"}",
+            "{\"alg\":\"A128GCMKW\",\"enc\":\"A128GCM\",\"iv\":\"AAAAAAAAAAAAAAAA\",\"iv\":\"AAAAAAAAAAAAAAAA\",\"tag\":\"AAAAAAAAAAAAAAAAAAAAAA\"}"
+        ];
+        for (let protected in headers) {
+            test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(key, with_header(token, protected)))));
+        }
+
+        for (let segment in [1, 2, 3, 4]) {
+            test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(key, flip_segment(token, segment)))));
+        }
+        let parts = strings.split(token, ".");
+        parts[1] = "AA";
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(key, strings.join(parts, ".")))));
+
+        // Different protected bytes with the exact same key-wrapping IV/tag fail content authentication.
+        last header = text(cases[row + 9]);
+        last reformatted = " " .. header;
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(key, with_header(token, reformatted)))));
+
+        let changed_iv = bytes(cases[row + 6]);
+        changed_iv[0] ^= 1;
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.seal_with(key, bytes(cases[row + 8]),
+            bytes(cases[row + 4]), bytes(cases[row + 5]), changed_iv, header))));
+        last invalid_tag = "{\"alg\":\"A128GCMKW\",\"enc\":\"A128GCM\",\"iv\":\""
+            .. base64.encode_url_unpadded(bytes(cases[row + 6])) .. "\",\"tag\":\"AAAAAAAAAAAAAAAAAAAAAA\"}";
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.seal_with(key, bytes(cases[row + 8]),
+            bytes(cases[row + 4]), bytes(cases[row + 5]), bytes(cases[row + 6]), invalid_tag))));
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(key, with_header(token, invalid_tag)))));
+    };
+
+    export let test_pbes2_rejects_bad_count_and_salt_before_derivation = func {
+        last cases = vectors.cases;
+        last row = 11;
+        last key = new jwe.Pbes2Key(jwe.ContentEncryption.A128CbcHs256, jwe.Pbes2Algorithm.Hs512A256Kw,
+            bytes(cases[row + 3]), 8191);
+        // Wipe the password to prove bad public parameters fail without an attempted derivation.
+        key.wipe();
+        last token = cases[row + 10];
+        last diagnostic = test.assert_err(jwe.open(key, token));
+        test.assert_equal_string("crypto.invalid_jwe", code(diagnostic));
+        test.assert(error.message(diagnostic).contains("budget"));
+
+        last prefix = "{\"alg\":\"PBES2-HS512+A256KW\",\"enc\":\"A128CBC-HS256\",\"p2s\":\"8Q1SzinasR3xchYz6ZZcHA\",\"p2c\":";
+        for (let number in ["0", "-1", "1.5", "1e3", "\"1000\"", "2147483648", "9223372036854775808"]) {
+            test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(key, with_header(token, prefix .. number .. "}")))));
+        }
+        last bad_salting = [
+            "{\"alg\":\"PBES2-HS512+A256KW\",\"enc\":\"A128CBC-HS256\",\"p2c\":1000}",
+            "{\"alg\":\"PBES2-HS512+A256KW\",\"enc\":\"A128CBC-HS256\",\"p2c\":1000,\"p2s\":\"AA\"}",
+            "{\"alg\":\"PBES2-HS512+A256KW\",\"enc\":\"A128CBC-HS256\",\"p2c\":1000,\"p2s\":\"8Q1SzinasR3xchYz6ZZcHA=\"}"
+        ];
+        for (let protected in bad_salting) {
+            test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(key, with_header(token, protected)))));
+        }
+    };
+
+    export let test_pbes2_wrong_password_and_wrapped_key = func {
+        last cases = vectors.cases;
+        last row = 44;
+        last alg = jwe.Pbes2Algorithm.Hs256A128Kw;
+        last enc = jwe.ContentEncryption.A128Gcm;
+        last key = new jwe.Pbes2Key(enc, alg, bytes(cases[row + 3]), 2000);
+        defer key.wipe();
+        last wrong = new jwe.Pbes2Key(enc, alg, new([1, 2]), 1000);
+        defer wrong.wipe();
+        last token = cases[row + 10];
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(wrong, token))));
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(key, flip_segment(token, 1)))));
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(key, with_header(token, " " .. text(cases[row + 9]))))));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.seal_with(key, bytes(cases[row + 8]),
+            bytes(cases[row + 4]), bytes(cases[row + 5]), bytes(cases[row + 6]), 1001, text(cases[row + 9])))));
+    };
+
+    export let test_seeded_sealing_and_os_refusal = func {
+        last cases = vectors.cases;
+        last random = new drbg.ChaCha20Drbg(bytes("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"));
+        last gcm = new jwe.GcmWrappingKey(jwe.ContentEncryption.A128Gcm, jwe.GcmWrapAlgorithm.A128GcmKw, bytes(cases[25]));
+        defer gcm.wipe();
+        last pbes2 = new jwe.Pbes2Key(jwe.ContentEncryption.A128Gcm, jwe.Pbes2Algorithm.Hs256A128Kw, bytes(cases[47]), 1000);
+        defer pbes2.wipe();
+        last message: uint8[list] = new([5, 6]);
+        last first = test.assert_ok(jwe.seal(gcm, message, random));
+        last second = test.assert_ok(jwe.seal(pbes2, message, 1000, random));
+        test.assert_equal_string("0506", hex.encode(test.assert_ok(jwe.open(gcm, first))));
+        test.assert_equal_string("0506", hex.encode(test.assert_ok(jwe.open(pbes2, second))));
+        test.assert_equal_string("CapabilityDenied: entropy request failed", error.message(test.assert_err(jwe.seal(gcm, message))));
+        test.assert_equal_string("CapabilityDenied: entropy request failed", error.message(test.assert_err(jwe.seal(pbes2, message, 1000))));
+        test.assert_equal_string("Jwe.GcmWrappingKey(<redacted>)", gcm.to_string());
+        test.assert_equal_string("Jwe.Pbes2Key(<redacted>)", pbes2.to_string());
+    };
+);

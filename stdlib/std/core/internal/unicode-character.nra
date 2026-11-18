@@ -158,7 +158,7 @@ export let UnicodeCharacter = module (
         last texts = data.NumericTexts;
         let start = 0;
         let field = 1;
-        for (let i = 0; i < texts.byte_length; i += 1) {
+        for (let i in 0 .. texts.byte_length) {
             if (texts.byte_at(i) == 59) {
                 if (field == index) {
                     return texts.slice(start, i);

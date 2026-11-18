@@ -1,0 +1,13 @@
+// run-options: --gpu=off --deny-entropy
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: JWE PBES2 sealing needs at least 1000 iterations within the key budget
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last key = new jwe.Pbes2Key(jwe.ContentEncryption.A128Gcm, jwe.Pbes2Algorithm.Hs256A128Kw, new([1]), 1000);
+        let _ = jwe.seal(key, new, 1001);
+        return program.ExitCode.Ok;
+    };
+);

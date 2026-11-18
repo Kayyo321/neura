@@ -1,12 +1,25 @@
+let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let asym_hash = import:Std.Crypto.Internal.AsymHash;
+let blinding = import:Std.Crypto.Internal.RsaBlinding;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let entropy = import:Std.Crypto.Random.Entropy;
+let characters = import:Std.Core.Character;
 let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
 let jose = import:Std.Crypto.Internal.JoseJson;
 let jwk = import:Std.Crypto.Token.Jwk;
+let mp = import:Std.Crypto.Internal.Mp;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
 let json = import:Std.Encoding.Json;
+let strings = import:Std.Text.Strings;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Compact JSON Web Signatures (RFC 7515), with caller-selected verification keys.
+/// @brief Compact JSON Web Signatures (RFC 7515), with caller-selected signing and verification keys.
 /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
 #Since("0.3.0")
 export let Jws = module (
@@ -48,6 +61,217 @@ export let Jws = module (
         return jose.decode(parts[1], InvalidFormat, "the payload must be base64url");
     };
 
+    let JsonSignature = record (protected_segment: string, signature: string, algorithm: string, base64_payload: bool);
+    let JsonEnvelope = record (selected: JsonSignature, payload: Optional<string>);
+    const MaximumSerializationBytes = 1048576;
+    const MaximumSignatures = 32;
+
+    let protected_fields = func(encoded: string) -> Result<[string, json.JsonValue][list]> {
+        last bytes = jose.decode(encoded, InvalidHeader, "the protected header must be base64url")?;
+        return jose.parse_object_bytes(bytes, InvalidHeader, true);
+    };
+
+    let payload_uses_base64 = func(members: [string, json.JsonValue][list]) -> Result<bool> {
+        match (json.member(members, "b64")) {
+            Optional.None => {
+                if (jose.has(members, "crit")) {
+                    return jose.fail<bool>(InvalidHeader, "unknown critical extension");
+                }
+                return Result<bool>.Ok(true);
+            },
+            Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Boolean(encoded) => {
+                        match (json.member(members, "crit")) {
+                            Optional.Some(json.JsonValue.Array(options)) => {
+                                if (options.length == 1) {
+                                    match (options[0]) {
+                                        json.JsonValue.Text(option) => {
+                                            if (option == "b64") {
+                                                return Result<bool>.Ok(encoded);
+                                            }
+                                        },
+                                        _ => {},
+                                    }
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    _ => {},
+                }
+            },
+        }
+        return jose.fail<bool>(InvalidHeader, "the b64 option must be Boolean and the sole protected critical extension");
+    };
+
+    let authenticate = func<Alg>(signature: JsonSignature, signed_payload: uint8[list], key: jwk.VerifierKey<Alg>) -> Result<Unit> {
+        if (signature.algorithm == "none" || signature.algorithm != key.jose_algorithm()) {
+            return jose.fail<Unit>(InvalidHeader, "the protected algorithm does not match the verification key");
+        }
+        last tag = jose.decode(signature.signature, InvalidFormat, "the signature must be base64url")?;
+        last input = words.concat(words.utf8(signature.protected_segment .. "."), signed_payload);
+        if (not key.verify_signature(input, tag)) {
+            return jose.fail<Unit>("jws.signature", "signature verification failed");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let detached_payload_bytes = func(base64_payload: bool, payload: uint8[list]) -> uint8[list] =>
+        base64_payload ? words.utf8(jose.encode(payload)) : payload;
+
+    /// @brief Authenticates externally supplied bytes using a compact JWS with an empty payload segment.
+    /// The compact token is limited to 1 MiB. The protected RFC 7797 b64 option requires crit containing only b64.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_detached = func<Alg>(token: string, payload: uint8[list], key: jwk.VerifierKey<Alg>) -> Result<Unit> {
+        if (token.byte_length > MaximumSerializationBytes) {
+            return jose.fail<Unit>(InvalidFormat, "detached compact JWS exceeds the size limit");
+        }
+        last separator = strings.index_of(token, "..");
+        if (separator < 1) {
+            return jose.fail<Unit>(InvalidFormat, "a detached compact JWS must have an empty payload segment");
+        }
+        last header = token.slice(0, separator);
+        last tag = token.slice(separator + 2, token.byte_length);
+        last members = protected_fields(header)?;
+        last algorithm = jose.required_text(members, "alg", InvalidHeader)?;
+        last encoded = payload_uses_base64(members)?;
+        last identified = new JsonSignature(header, tag, algorithm, encoded);
+        return authenticate(identified, detached_payload_bytes(encoded, payload), key);
+    };
+
+    let validate_unprotected = func(fields: [string, json.JsonValue][list],
+        protected_fields: [string, json.JsonValue][list]) -> Result<Unit> {
+        match (json.member(fields, "header")) {
+            Optional.None => {},
+            Optional.Some(json.JsonValue.Object(unprotected)) => {
+                last protected_names = json.index(protected_fields);
+                for (let field in unprotected) {
+                    last name = field[0];
+                    if (name == "alg" || name == "crit" || name == "b64" || protected_names.contains_key(name)) {
+                        return jose.fail<Unit>(InvalidHeader, "an unprotected JWS header member overlaps a protected member or rule");
+                    }
+                }
+            },
+            _ => {
+                return jose.fail<Unit>(InvalidHeader, "the unprotected JWS header must be an object");
+            },
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let read_signature = func(fields: [string, json.JsonValue][list]) -> Result<JsonSignature> {
+        last encoded = jose.required_text(fields, "protected", InvalidHeader)?;
+        last tag = jose.required_text(fields, "signature", InvalidFormat)?;
+        last _ = jose.decode(tag, InvalidFormat, "the signature must be base64url")?;
+        last members = protected_fields(encoded)?;
+        last algorithm = jose.required_text(members, "alg", InvalidHeader)?;
+        if (algorithm == "none") {
+            return jose.fail<JsonSignature>(InvalidHeader, "unsecured JWS signatures are unsupported");
+        }
+        validate_unprotected(fields, members)?;
+        last base64_payload = payload_uses_base64(members)?;
+        return Result<JsonSignature>.Ok(new JsonSignature(encoded, tag, algorithm, base64_payload));
+    };
+
+    let select_json_signature = func(fields: [string, json.JsonValue][list], index: int) -> Result<JsonSignature> {
+        match (json.member(fields, "signatures")) {
+            Optional.None => {
+                if (index != 0) {
+                    return jose.fail<JsonSignature>(InvalidFormat, "the flattened JWS has one signature");
+                }
+                return read_signature(fields);
+            },
+            Optional.Some(json.JsonValue.Array(items)) => {
+                if (items.length == 0 || items.length > MaximumSignatures || index >= items.length
+                    || jose.has(fields, "protected") || jose.has(fields, "header") || jose.has(fields, "signature")) {
+                    return jose.fail<JsonSignature>(InvalidFormat, "invalid JWS signatures list or index");
+                }
+                let parsed: JsonSignature[list] = new;
+                for (let entry in items) {
+                    match (entry) {
+                        json.JsonValue.Object(signature_members) => {
+                            last signature = read_signature(signature_members)?;
+                            if (parsed.length > 0 && parsed[0].base64_payload != signature.base64_payload) {
+                                return jose.fail<JsonSignature>(InvalidHeader, "the JWS signatures use different b64 modes");
+                            }
+                            parsed.append(signature);
+                        },
+                        _ => {
+                            return jose.fail<JsonSignature>(InvalidFormat, "each JWS signature must be an object");
+                        },
+                    }
+                }
+                return Result<JsonSignature>.Ok(parsed[index]);
+            },
+            _ => {
+                return jose.fail<JsonSignature>(InvalidFormat, "JWS signatures must be an array");
+            },
+        }
+    };
+
+    let read_json = func(token: string, signature_index: int) -> Result<JsonEnvelope> {
+        if (signature_index < 0) {
+            trap_with_message("invalid argument: negative JWS signature index");
+        }
+        if (token.byte_length > MaximumSerializationBytes) {
+            return jose.fail<JsonEnvelope>(InvalidFormat, "JWS JSON serialization exceeds the size limit");
+        }
+        last members = jose.parse_object(token, InvalidFormat, true)?;
+        last selected = select_json_signature(members, signature_index)?;
+        last payload = jose.string_member(members, "payload", InvalidFormat)?;
+        return Result<JsonEnvelope>.Ok(new JsonEnvelope(selected, payload));
+    };
+
+    /// @brief Verifies one caller-selected signature from a flattened or general JWS JSON object and returns
+    /// its authenticated attached payload. For a multi-signer policy, authenticate every required trusted key.
+    /// Select an index explicitly. Signature order and unprotected headers are unauthenticated.
+    /// The envelope is limited to 1 MiB and 32 signatures. The alg and any b64/crit members must be protected.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_json = func<Alg>(token: string, key: jwk.VerifierKey<Alg>, signature_index: int = 0) -> Result<uint8[list]> {
+        last envelope = read_json(token, signature_index)?;
+        match (envelope.payload) {
+            Optional.None => {
+                return jose.fail<uint8[list]>(InvalidFormat, "the JWS JSON payload is missing");
+            },
+            Optional.Some(payload) => {
+                if (not envelope.selected.base64_payload) {
+                    for (let scalar in strings.scalars(payload)) {
+                        if (characters.get_type(scalar) == characters.GeneralCategory.Unassigned) {
+                            return jose.fail<uint8[list]>(InvalidFormat, "the unencoded JWS payload contains an unassigned character");
+                        }
+                    }
+                }
+                last signing = words.utf8(payload);
+                last bytes = envelope.selected.base64_payload
+                    ? jose.decode(payload, InvalidFormat, "the payload must be base64url")?
+                    : signing;
+                authenticate(envelope.selected, signing, key)?;
+                return Result<uint8[list]>.Ok(bytes);
+            },
+        }
+    };
+
+    /// @brief Verifies one signature from a JWS JSON object that omits the payload member. External bytes
+    /// follow the protected b64 mode and may contain arbitrary binary content. Uses the verify_json limits.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_json_detached = func<Alg>(token: string, payload: uint8[list], key: jwk.VerifierKey<Alg>,
+        signature_index: int = 0) -> Result<Unit> {
+        last envelope = read_json(token, signature_index)?;
+        match (envelope.payload) {
+            Optional.Some(_) => {
+                return jose.fail<Unit>(InvalidFormat, "a detached JWS JSON object must omit payload");
+            },
+            Optional.None => {
+                last signing = detached_payload_bytes(envelope.selected.base64_payload, payload);
+                return authenticate(envelope.selected, signing, key);
+            },
+        }
+    };
+
     /// @brief Signs a compact JWS with the caller's Ed25519 private key and a standard EdDSA protected header.
     /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
     #[NoDiscard, Since("0.3.0")]
@@ -56,5 +280,130 @@ export let Jws = module (
         last header = jose.encode(words.utf8("{\"alg\":\"EdDSA\"}"));
         last input = header .. "." .. jose.encode(payload);
         return input .. "." .. jose.encode(signer.sign(words.utf8(input)));
+    };
+
+    // Preserve the caller's exact protected JSON bytes. Validate all protected headers before signing.
+    let signing_input = func(payload: uint8[list], expected: string, protected: string) -> Result<string> {
+        let header = protected;
+        if (header == "") {
+            header = "{\"alg\":" .. jose.quote(expected) .. "}";
+        } else {
+            last members = jose.parse_object(header, InvalidHeader)?;
+            require_algorithm(members, expected)?;
+        }
+        return Result<string>.Ok(jose.encode(words.utf8(header)) .. "." .. jose.encode(payload));
+    };
+
+    let compact = func(input: string, signature: uint8[list]) -> string => input .. "." .. jose.encode(signature);
+
+    /// @brief Signs a compact JWS using the HMAC algorithm selected by the signing key.
+    /// An empty protected argument selects the default algorithm header. Other protected JSON is validated and used byte for byte.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_hmac = func(payload: uint8[list], key: jwk.HmacSigningKey, protected: string = "") -> Result<string> {
+        last input = signing_input(payload, key.jose_algorithm(), protected)?;
+        return Result<string>.Ok(compact(input, key.sign_input(words.utf8(input))));
+    };
+
+    let check_rsa_key = func(key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm) {
+        key.core.require_live();
+        crypto_policy.require(jwk.is_pss(algorithm) ? Algorithm.RsaPss : Algorithm.RsaPkcs1v15);
+        crypto_policy.require(jwk.rsa_hash(algorithm));
+        if (key.public_key.bits() < 2048) {
+            trap_with_message("invalid argument: JWS RSA key must have at least 2048 bits");
+        }
+    };
+
+    let sign_rsa_input = func(input: string, key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm, salt: uint8[list],
+        factor: uint32[list]) -> Result<string> {
+        if (factor.length > 0 && mp.equal(factor, mp.small(1, factor.length)) == 1) {
+            blinding.wipe_limbs(factor);
+            return jose.fail<string>("crypto.blinding", "RSA blinding factor must be greater than one");
+        }
+        last digest = asym_hash.digest(jwk.rsa_hash(algorithm), words.utf8(input));
+        last public = key.core.public_core;
+        let encoded = jwk.is_pss(algorithm)
+            ? rsa_core.pss_encode(jwk.rsa_hash(algorithm), digest, salt, public.bits - 1)
+            : rsa_core.pkcs1v15_encode(jwk.rsa_hash(algorithm), digest, public.k);
+        last representative = rsa_core.os2ip_below(public, encoded);
+        words.wipe(encoded);
+        if (representative.length == 0) {
+            blinding.wipe_limbs(factor);
+            return jose.fail<string>("crypto.fault", "RSA signing representative is out of range");
+        }
+        defer blinding.wipe_limbs(representative);
+        return Result<string>.Ok(compact(input, blinding.apply(key.core, representative, factor)?));
+    };
+
+    /// @brief Signs under the selected RSA JOSE algorithm using independent OS entropy for RSA blinding.
+    /// PS algorithms also request a fresh salt as long as their digest. Entropy failures are returned.
+    /// A wiped key or a key shorter than 2048 bits traps before entropy is requested.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_rsa = func(payload: uint8[list], key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm, protected: string = "")
+        -> Result<string> {
+        check_rsa_key(key, algorithm);
+        last input = signing_input(payload, jwk.rsa_name(algorithm), protected)?;
+        let salt: uint8[list] = new;
+        if (jwk.is_pss(algorithm)) {
+            salt = entropy.os_bytes(jwk.hash_length(jwk.rsa_hash(algorithm)))?;
+        }
+        defer words.wipe(salt);
+        last factor = blinding.sample_factor(key.core.public_core, func(count: int) -> Result<uint8[list]> =>
+            entropy.os_bytes(count))?;
+        return sign_rsa_input(input, key, algorithm, salt, factor);
+    };
+
+    /// @brief Signs for RS256, RS384, or RS512 using a caller-supplied modulus-width RSA blinding factor.
+    /// Use fresh, independent cryptographic randomness for the factor in production.
+    /// A PS algorithm or a wrong factor length traps. An unusable factor returns an error.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_rsa_with_factor = func(payload: uint8[list], key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm,
+        factor: uint8[list], protected: string = "") -> Result<string> {
+        check_rsa_key(key, algorithm);
+        if (jwk.is_pss(algorithm) || factor.length != key.core.public_core.k) {
+            trap_with_message("invalid argument: JWS RS signing needs an RS algorithm and a modulus-width factor");
+        }
+        last input = signing_input(payload, jwk.rsa_name(algorithm), protected)?;
+        return sign_rsa_input(input, key, algorithm, new, rsa_core.os2ip_below(key.core.public_core, factor));
+    };
+
+    /// @brief Signs for PS256, PS384, or PS512 with a caller-supplied salt and modulus-width RSA blinding factor.
+    /// In production, draw the salt and factor independently from fresh cryptographic randomness.
+    /// The salt must have the selected digest's byte length. Wrong algorithms or lengths trap.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_rsa_with_salt = func(payload: uint8[list], key: rsa.RsaPrivateKey, algorithm: jwk.RsaAlgorithm,
+        salt: uint8[list], factor: uint8[list], protected: string = "") -> Result<string> {
+        check_rsa_key(key, algorithm);
+        if (not jwk.is_pss(algorithm) || salt.length != jwk.hash_length(jwk.rsa_hash(algorithm))
+            || factor.length != key.core.public_core.k) {
+            trap_with_message("invalid argument: JWS PS signing needs a PS algorithm, a hash-sized salt, and a modulus-width factor");
+        }
+        last input = signing_input(payload, jwk.rsa_name(algorithm), protected)?;
+        return sign_rsa_input(input, key, algorithm, salt, rsa_core.os2ip_below(key.core.public_core, factor));
+    };
+
+    /// @brief Signs for ES256, ES384, or ES512 as selected by the private key's NIST curve.
+    /// The signature uses the fixed-width JOSE r || s representation. Another curve returns an error.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_ec = func(payload: uint8[list], key: ecdsa.EcPrivateKey, protected: string = "") -> Result<string> {
+        if (key.curve == ecdsa.Curve.Secp256k1) {
+            return jose.fail<string>("jws.algorithm", "JWS EC signing requires P-256, P-384, or P-521");
+        }
+        last input = signing_input(payload, jwk.ec_name(key.curve), protected)?;
+        last signer = new ecdsa.EcdsaSigner(key, jwk.ec_hash(key.curve));
+        return Result<string>.Ok(compact(input, signer.sign_raw(words.utf8(input))));
+    };
+
+    /// @brief Signs a compact JWS with the fully specified Ed448 algorithm of RFC 9864.
+    /// An empty protected argument selects the default Ed448 header.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_ed448 = func(payload: uint8[list], key: ed448.Ed448PrivateKey, protected: string = "") -> Result<string> {
+        last input = signing_input(payload, "Ed448", protected)?;
+        return Result<string>.Ok(compact(input, new ed448.Ed448Signer(key).sign(words.utf8(input))));
     };
 );

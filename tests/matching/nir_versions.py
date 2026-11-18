@@ -16,6 +16,7 @@ import tempfile
 
 NEURA = pathlib.Path(sys.argv[1]).resolve()
 PROGRAMS = pathlib.Path(sys.argv[2]).resolve()
+EXPRESSIONS_MINOR = 15
 ANY_MINOR = 12
 
 
@@ -40,6 +41,10 @@ def main():
                                        ('propagation', ANY_MINOR, ANY_MINOR)):
             data = emit(PROGRAMS / (name + '.nra'), scratch / (name + '.nir'))
             minor = data[6] | (data[7] << 8)
+            # A program that links a string chain (concat text, NeuraIR 1.15) is 1.15 whatever else it
+            # uses: the standard library's error messages are chains since the 0.3.0 modernization.
+            if 'concat_text' in run('emit-ir', str(scratch / (name + '.nir'))).stdout:
+                minimum = maximum = EXPRESSIONS_MINOR
             if not minimum <= minor <= maximum:
                 failures.append(f'{name}: NeuraIR 1.{minor}, expected 1.{minimum} to 1.{maximum}')
         data = bytearray((scratch / 'propagation.nir').read_bytes())

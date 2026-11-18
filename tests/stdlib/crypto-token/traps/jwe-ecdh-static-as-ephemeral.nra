@@ -1,0 +1,15 @@
+// run-options: --gpu=off --deny-all
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: JWE ECDH ephemeral key must differ from the recipient key
+let ec = import:Std.Crypto.Asymmetric.Ecdsa;
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last private_key = new ec.EcPrivateKey(ec.Curve.P256, new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
+        last sender = new jwe.EcdhEncryptionKey(private_key.public_key(), jwe.EcdhAlgorithm.Es, jwe.ContentEncryption.A128Gcm);
+        let _ = jwe.seal_with(sender, new, private_key, new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), new, new);
+        return program.ExitCode.Ok;
+    };
+);

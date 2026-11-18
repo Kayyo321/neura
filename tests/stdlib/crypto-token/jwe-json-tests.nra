@@ -1,0 +1,162 @@
+// test-options: --gpu=off --deny-all --max-steps 800000000
+let.promote _ = import:Std.Core.Result;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let json = import:Std.Encoding.Json;
+let jwe = import:Std.Crypto.Token.Jwe;
+let pbes2_vectors = import:JweGcmkwPbes2Vectors;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_vectors = import:JweRsaVectors;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JweJsonVectors;
+
+let JweJsonTests = module (
+    const Columns = 8;
+    const InvalidJwe = "crypto.invalid_jwe";
+    const AuthenticationFailed = "crypto.authentication_failed";
+
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let text = func(data: string) -> string => test.assert_ok(utf8.decode(bytes(data)));
+
+    let require_error = func(expected: string, result: Result<uint8[list]>) {
+        last cause = test.assert_err(result);
+        last actual = match (cause) {
+            error.Error.Custom(detail) => detail.code(),
+            _ => "",
+        };
+        test.assert_equal_string(expected, actual);
+    };
+
+    let open_kw = func(row: int, enc: jwe.ContentEncryption) {
+        last cases = vectors.cases;
+        last offset = row * Columns;
+        test.assert_equal_string("A128KW", cases[offset + 1]);
+        last key = new jwe.WrappingKey(jwe.WrapAlgorithm.A128Kw, enc, bytes(cases[offset + 4]));
+        defer key.wipe();
+        last recipient = test.assert_ok(int.parse(cases[offset + 3]));
+        last plaintext = test.assert_ok(jwe.open_json(key, text(cases[offset + 7]), recipient, bytes(cases[offset + 6])));
+        test.assert_equal_string(cases[offset + 5], hex.encode(plaintext));
+    };
+
+    export let test_rfc7520_external_aad_general_and_flattened = func {
+        open_kw(0, jwe.ContentEncryption.A128Gcm);
+        open_kw(1, jwe.ContentEncryption.A128Gcm);
+        last cases = vectors.cases;
+        last key = new jwe.WrappingKey(jwe.WrapAlgorithm.A128Kw, jwe.ContentEncryption.A128Gcm, bytes(cases[4]));
+        defer key.wipe();
+        last wire = text(cases[7]);
+        require_error(AuthenticationFailed, jwe.open_json(key, wire, 0));
+        last wrong_context = bytes(cases[6]);
+        wrong_context[0] ^= 1;
+        require_error(AuthenticationFailed, jwe.open_json(key, wire, 0, wrong_context));
+    };
+
+    export let test_rfc7520_headers_split_between_protected_and_shared = func {
+        open_kw(2, jwe.ContentEncryption.A128Gcm);
+        open_kw(3, jwe.ContentEncryption.A128Gcm);
+    };
+
+    export let test_rfc7520_without_protected_header = func {
+        open_kw(4, jwe.ContentEncryption.A128Gcm);
+        open_kw(5, jwe.ContentEncryption.A128Gcm);
+    };
+
+    export let test_rfc7516_flattened_ciphertext = func {
+        open_kw(8, jwe.ContentEncryption.A128CbcHs256);
+        last cases = vectors.cases;
+        last offset = 8 * Columns;
+        last key = new jwe.WrappingKey(jwe.WrapAlgorithm.A128Kw, jwe.ContentEncryption.A128CbcHs256, bytes(cases[offset + 4]));
+        defer key.wipe();
+        require_error(InvalidJwe, jwe.open_json(key, text(cases[offset + 7]), 1));
+    };
+
+    export let test_rfc7520_multiple_recipients_select_ecdh_or_gcmkw = func {
+        last cases = vectors.cases;
+        last ec = 6 * Columns;
+        last gcm = 7 * Columns;
+        last enc = jwe.ContentEncryption.A128CbcHs256;
+        last private_key = new ecdsa.EcPrivateKey(ecdsa.Curve.P384, bytes(cases[ec + 4]));
+        defer private_key.wipe();
+        last agreement = new jwe.EcdhDecryptionKey(private_key, jwe.EcdhAlgorithm.EsA256Kw, enc);
+        last wrapping = new jwe.GcmWrappingKey(enc, jwe.GcmWrapAlgorithm.A256GcmKw, bytes(cases[gcm + 4]));
+        defer wrapping.wipe();
+        last wire = text(cases[gcm + 7]);
+        test.assert_equal_string(cases[ec + 7], cases[gcm + 7]);
+        test.assert_equal_string(cases[ec + 5], hex.encode(test.assert_ok(jwe.open_json(agreement, wire, 1))));
+        test.assert_equal_string(cases[gcm + 5], hex.encode(test.assert_ok(jwe.open_json(wrapping, wire, 2))));
+
+        // Neither typed key can select a different recipient or fall back to its own index.
+        for (let i in [0, 1, 3]) {
+            require_error(InvalidJwe, jwe.open_json(wrapping, wire, i));
+        }
+        require_error(InvalidJwe, jwe.open_json(agreement, wire, 2));
+        last wrong_key = bytes(cases[gcm + 4]);
+        wrong_key[0] ^= 1;
+        last wrong = new jwe.GcmWrappingKey(enc, jwe.GcmWrapAlgorithm.A256GcmKw, wrong_key);
+        defer wrong.wipe();
+        require_error(AuthenticationFailed, jwe.open_json(wrong, wire, 2));
+    };
+
+    let flattened = func(compact: string) -> string {
+        last parts = strings.split(compact, ".");
+        test.assert_equal_int32(5, parts.length);
+        return json.write(json.JsonValue.Object(new([
+            ["protected", json.JsonValue.Text(parts[0])],
+            ["encrypted_key", json.JsonValue.Text(parts[1])],
+            ["iv", json.JsonValue.Text(parts[2])],
+            ["ciphertext", json.JsonValue.Text(parts[3])],
+            ["tag", json.JsonValue.Text(parts[4])]
+        ])));
+    };
+
+    export let test_rfc7520_pbes2_compact_vector_in_flattened_form = func {
+        last cases = pbes2_vectors.cases;
+        last offset = 11;
+        last count = test.assert_ok(int.parse(cases[offset + 7]));
+        last key = new jwe.Pbes2Key(jwe.ContentEncryption.A128CbcHs256, jwe.Pbes2Algorithm.Hs512A256Kw,
+            bytes(cases[offset + 3]), count);
+        defer key.wipe();
+        last plaintext = test.assert_ok(jwe.open_json(key, flattened(cases[offset + 10]), 0));
+        test.assert_equal_string(cases[offset + 8], hex.encode(plaintext));
+    };
+
+    export let test_independent_rsa_oaep256_compact_vector_in_flattened_form = func {
+        last row = rsa_vectors.rsa256;
+        last private_key = test.assert_ok(rsa.parse_private_key(bytes(row[0]), bytes(row[1]), bytes(row[2]), bytes(row[3]),
+            bytes(row[4]), bytes(row[5]), bytes(row[6]), bytes(row[7])));
+        defer private_key.wipe();
+        last key = new jwe.RsaUnwrappingKey(jwe.ContentEncryption.A256Gcm, private_key);
+        last plaintext = test.assert_ok(jwe.open_json(key, flattened(row[13]), 0));
+        test.assert_equal_string(row[11], hex.encode(plaintext));
+        require_error(AuthenticationFailed, jwe.open_json(key, flattened(row[14]), 0));
+    };
+
+    export let test_strict_header_union_and_authenticated_bytes = func {
+        last cases = vectors.cases;
+        last key = new jwe.WrappingKey(jwe.WrapAlgorithm.A128Kw, jwe.ContentEncryption.A128Gcm, bytes(cases[4]));
+        defer key.wipe();
+        last rejected = vectors.rejected;
+        for (let row in 0 .. (rejected.length / 4)) {
+            last offset = row * 4;
+            require_error(rejected[offset + 3], jwe.open_json(key, text(rejected[offset + 1]), 0, bytes(rejected[offset + 2])));
+        }
+    };
+
+    export let test_absent_and_present_empty_aad_authenticate_different_bytes = func {
+        last cases = vectors.cases;
+        last absent = 9 * Columns;
+        last present = 10 * Columns;
+        last key = new jwe.DirectKey(jwe.ContentEncryption.A128Gcm, bytes(cases[absent + 4]));
+        defer key.wipe();
+        last absent_wire = text(cases[absent + 7]);
+        last present_wire = text(cases[present + 7]);
+        test.assert_equal_string(cases[absent + 5], hex.encode(test.assert_ok(jwe.open_json(key, absent_wire, 0))));
+        test.assert_equal_string(cases[present + 5], hex.encode(test.assert_ok(jwe.open_json(key, present_wire, 0, new))));
+        require_error(AuthenticationFailed, jwe.open_json(key, absent_wire, 0, new([1])));
+        require_error(AuthenticationFailed, jwe.open_json(key, strings.replace_first(absent_wire, "{", "{\"aad\":\"\","), 0));
+        require_error(AuthenticationFailed, jwe.open_json(key, strings.replace_first(present_wire, "\"aad\":\"\",", ""), 0));
+    };
+);
