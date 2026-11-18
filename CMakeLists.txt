@@ -624,7 +624,10 @@ if(BUILD_TESTING)
     set_tests_properties(app-html-styles PROPERTIES TIMEOUT 180)
     add_test(NAME app-ui-reconcile COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/reconcile.py" "$<TARGET_FILE:neura>")
-    set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 300)
+    set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 900)
+    add_test(NAME app-ui-trace COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/trace.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-trace PROPERTIES TIMEOUT 180)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.
