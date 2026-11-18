@@ -225,6 +225,67 @@ class LanguageServerTests(unittest.TestCase):
         self.assertIn('variant Mode.Quick: "Fast";', pinned[0])
         self.assertEqual(sorted(edit['newText'] for edit in edits if 'annotationId' not in edit), ['Quick', 'Quick'])
 
+    def test_payload_field_rename_reaches_patterns_constructors_and_pins(self):
+        # docs/design/Records030.md, Tooling: a named payload field renames
+        # with its constructor labels, braced patterns and mapping paths, a
+        # field of the same name in another variant stays, and an unpinned
+        # derivation keeps the old wire name.
+        path = self.root / 'payload.nra'
+        source = ('let console = import:Std.Io.Console;\n'
+                  'let json = import:Std.Encoding.Json;\n'
+                  'let program = import:Std.Program;\n'
+                  'let.promote _ = import:Std.Core.Result;\n'
+                  'let Mode = enum (Fast, Slow { speed: int, limit: int }, Odd { speed: int });\n'
+                  'let ModeJson = derive json.Codec<Mode>;\n'
+                  'let Other = derive json.Codec<Mode> { field Mode.Slow.speed: "pace"; };\n'
+                  'let describe = func(mode: Mode) -> int {\n'
+                  '    return match (mode) {\n'
+                  '        Mode.Slow { speed: s, limit: l } => s + l,\n'
+                  '        Mode.Odd { speed: s } => s,\n'
+                  '        _ => 0,\n'
+                  '    };\n'
+                  '};\n'
+                  'let App = module:program.Entry (\n'
+                  '    export let.override main = func(args: string[]) -> program.ExitCode {\n'
+                  '        let slow = Mode.Slow { speed: 3, limit: 4 };\n'
+                  '        console.print_line((describe(slow) + describe(Mode.Odd { speed: 9 })).to_string());\n'
+                  '        match (ModeJson.encode(slow)) { Result.Ok(text) => { console.print_line(text); }, '
+                  'Result.Err(_) => {}, }\n'
+                  '        match (Other.encode(slow)) { Result.Ok(text) => { console.print_line(text); }, '
+                  'Result.Err(_) => {}, }\n'
+                  '        return program.ExitCode.Ok;\n'
+                  '    };\n'
+                  ');\n')
+        self.client.open(path, source)
+        slow_speed = [(4, 30), (6, 54), (9, 20), (16, 31)]
+        for line, character in slow_speed:
+            with self.subTest(at=(line, character)):
+                rename = self.client.request('textDocument/rename',
+                                             {**params(path, line, character), 'newName': 'rate'})
+                edits = rename['documentChanges'][0]['edits']
+                plain = sorted((edit['range']['start']['line'], edit['range']['start']['character'])
+                               for edit in edits if 'annotationId' not in edit)
+                self.assertEqual(plain, slow_speed)
+                pinned = [edit['newText'] for edit in edits if edit.get('annotationId') == 'neura.preserveSchema']
+                self.assertEqual(len(pinned), 1)
+                self.assertIn('field Mode.Slow.rate: "speed";', pinned[0])
+        lines = source.splitlines(keepends=True)
+        for edit in sorted(edits, key=lambda e: (e['range']['start']['line'], e['range']['start']['character']),
+                           reverse=True):
+            start, end = edit['range']['start'], edit['range']['end']
+            line = lines[start['line']]
+            lines[start['line']] = line[:start['character']] + edit['newText'] + line[end['character']:]
+        renamed = ''.join(lines)
+        self.assertIn('Odd { speed: int }', renamed)
+        self.assertIn('Mode.Odd { speed: s }', renamed)
+        for snapshot in (source, renamed):
+            path.write_text(snapshot)
+            image = self.root / 'payload.nvr'
+            subprocess.run([BINARY, 'build', path, '-o', image], check=True, capture_output=True)
+            program = subprocess.run([BINARY, 'run', image], check=True, text=True, capture_output=True)
+            self.assertEqual(program.stdout, '16\n{"variant":"Slow","payload":{"speed":3,"limit":4}}\n'
+                                             '{"variant":"Slow","payload":{"pace":3,"limit":4}}\n')
+
     def test_record_field_rename_reaches_labels_and_copies(self):
         # docs/design/Records030.md, Tooling: the component, the constructor's
         # label, a copy's replacement name and a use rename together.

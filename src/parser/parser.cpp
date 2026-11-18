@@ -2409,7 +2409,9 @@ private:
                 auto construct = make_expression(Expr::Kind::NamedVariant, result.span);
                 construct.operands.push_back(std::move(result));
                 while (!at("}")) {
-                    construct.field_names.push_back(identifier().text);
+                    const auto& field = identifier();
+                    construct.field_names.push_back(field.text);
+                    construct.field_spans.push_back(field.span);
                     expect(":");
                     construct.operands.push_back(expression());
                     if (!match(",")) break;

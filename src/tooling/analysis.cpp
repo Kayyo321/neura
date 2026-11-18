@@ -1093,6 +1093,130 @@ void AnalysisSession::index_compiler() {
         IrNode use{IrOp::Reference, {}, span, symbol, {}, {}, {}, {}, {}};
         reference(use, false);
     }
+    // A named payload field has no compiler symbol (docs/design/Records030.md,
+    // Tooling). The name of a field in `Enum.Variant { name: value }`, in a
+    // braced pattern and in a derivation's `field Enum.Variant.name` refers
+    // to the field that the variant those words name declares, so it is a
+    // reference to that field's editor symbol, found through the reference
+    // to the variant.
+    {
+        std::map<std::pair<std::string, std::size_t>, std::size_t, std::less<>> variant_at;
+        for (const auto &r : references)
+            if (symbols[r.symbol].kind == 22)
+                variant_at[{r.span.file, r.span.offset}] = r.symbol;
+        const auto field_of = [&](std::size_t variant, const std::string &name) -> std::optional<std::size_t> {
+            for (std::size_t i = 0; i < symbols.size(); ++i)
+                if (symbols[i].parent == variant && symbols[i].name == name && symbols[i].kind == 13)
+                    return i;
+            return std::nullopt;
+        };
+        // The variant named by the identifier `last` inside `span`.
+        const auto variant_in = [&](const EditorDocument &doc, const Span &span,
+                                    std::string_view last) -> std::optional<std::size_t> {
+            const auto first = std::lower_bound(doc.tokens.begin(), doc.tokens.end(), span.offset,
+                [](const Token &token, std::size_t at) { return token.span.offset < at; });
+            for (auto it = first; it != doc.tokens.end() && it->span.offset < span.offset + span.length; ++it)
+                if (it->text == last)
+                    if (const auto found = variant_at.find({doc.path, it->span.offset}); found != variant_at.end())
+                        return found->second;
+            return std::nullopt;
+        };
+        // The variant a qualified name such as `Mode.Slow` declares, through
+        // the editor's scopes: a pattern's variant has no reference of its
+        // own.
+        const auto variant_named = [&](const EditorDocument &doc, const std::string &name,
+                                       std::size_t at) -> std::optional<std::size_t> {
+            std::size_t begin = 0;
+            auto end = name.find('.');
+            auto current = resolve_name(doc, name.substr(0, end), at);
+            while (current && end != std::string::npos) {
+                begin = end + 1;
+                end = name.find('.', begin);
+                const auto part = name.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+                std::optional<std::size_t> child;
+                for (std::size_t i = 0; i < symbols.size() && !child; ++i)
+                    if (symbols[i].parent == *current && symbols[i].name == part) child = i;
+                current = child;
+            }
+            if (current && symbols[*current].kind == 22) return current;
+            return std::nullopt;
+        };
+        std::vector<EditorReference> payload_references;
+        const auto fields = [&](std::optional<std::size_t> variant, const std::vector<std::string> &names,
+                                const std::vector<Span> &spans) {
+            if (!variant) return;
+            for (std::size_t i = 0; i < names.size() && i < spans.size(); ++i)
+                if (const auto field = field_of(*variant, names[i]))
+                    payload_references.push_back({spans[i], *field, false, symbols[*field].token_type});
+        };
+        for (const auto &[path, doc] : documents) {
+            // A library's payload fields are not renamed from the workspace.
+            if (doc.library) continue;
+            std::function<void(const Declaration &)> declaration;
+            std::function<void(const Statement &)> statement;
+            std::function<void(const Expr &)> expression;
+            std::function<void(const PatternSyntax &)> pattern = [&](const PatternSyntax &p) {
+                if (p.kind == PatternSyntax::Kind::Variant && p.named) {
+                    const auto dot = p.name.rfind('.');
+                    auto variant = variant_in(doc, p.span, dot == std::string::npos ? p.name : p.name.substr(dot + 1));
+                    if (!variant) variant = variant_named(doc, p.name, p.span.offset);
+                    fields(variant, p.fields, p.field_spans);
+                }
+                for (const auto &element : p.elements) pattern(element);
+            };
+            expression = [&](const Expr &e) {
+                if (e.kind == Expr::Kind::NamedVariant && !e.operands.empty())
+                    fields(variant_in(doc, e.operands.front().span, e.operands.front().text), e.field_names,
+                           e.field_spans);
+                if (e.lambda) declaration(*e.lambda);
+                if (e.match) statement(*e.match);
+                for (const auto &operand : e.operands) expression(operand);
+            };
+            statement = [&](const Statement &s) {
+                if (s.declaration) declaration(*s.declaration);
+                for (const auto &e : s.expressions) expression(e);
+                for (const auto *body : {&s.body, &s.alternative, &s.initializer, &s.step})
+                    for (const auto &child : *body) statement(child);
+                for (const auto &arm : s.arms) {
+                    if (arm.pattern) pattern(*arm.pattern);
+                    if (arm.guard) expression(*arm.guard);
+                    for (const auto &child : arm.body) statement(child);
+                    if (arm.value) expression(*arm.value);
+                }
+                for (const auto &arm : s.select_arms) {
+                    for (const auto &child : arm.body) statement(child);
+                    if (arm.operation) expression(*arm.operation);
+                }
+            };
+            declaration = [&](const Declaration &d) {
+                if (d.initializer) expression(*d.initializer);
+                for (const auto &parameter : d.parameters)
+                    if (parameter.default_value) expression(*parameter.default_value);
+                for (const auto *body : {&d.body, &d.startup_blocks})
+                    for (const auto &s : *body) statement(s);
+                for (const auto &member : d.members) declaration(member);
+                for (const auto &overload : d.overloads) declaration(overload);
+                for (const auto &accessor : d.accessors) {
+                    for (const auto &s : accessor.body) statement(s);
+                    if (accessor.expression) expression(*accessor.expression);
+                }
+                for (const auto &hook : d.hooks) {
+                    for (const auto &s : hook.body) statement(s);
+                    if (hook.expression) expression(*hook.expression);
+                }
+                if (d.derive)
+                    for (const auto &mapping : d.derive->mappings) {
+                        const auto n = mapping.part_spans.size();
+                        if (mapping.variant || n < 3 || mapping.parts.size() != n) continue;
+                        if (const auto variant = variant_at.find({doc.path, mapping.part_spans[n - 2].offset});
+                            variant != variant_at.end())
+                            fields(variant->second, {mapping.parts.back()}, {mapping.part_spans.back()});
+                    }
+            };
+            for (const auto &s : doc.syntax.statements) statement(s);
+        }
+        references.insert(references.end(), payload_references.begin(), payload_references.end());
+    }
     std::sort(references.begin(), references.end(), [](const auto &a, const auto &b) {
         return std::tie(a.span.file, a.span.offset, a.symbol) < std::tie(b.span.file, b.span.offset, b.symbol);
     });

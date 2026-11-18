@@ -394,6 +394,16 @@ class Server {
         }
         return family;
     }
+    // The compiler symbol of the variant that declares `symbol`, when
+    // `symbol` is a named payload field, which has none of its own.
+    std::optional<SymbolId> payload_variant(const EditorSymbol &symbol) const {
+        if (!session_.program || symbol.kind != 13 || symbol.parent >= session_.symbols.size()) return std::nullopt;
+        const auto &variant = session_.symbols[symbol.parent];
+        if (variant.kind != 22 || variant.compiler_id >= session_.program->symbols.size() || !variant.declaration ||
+            !variant.declaration->named_payload)
+            return std::nullopt;
+        return variant.compiler_id;
+    }
     std::vector<Span> all_references(const EditorSymbol &selected, bool declarations,
                                      std::vector<DiagnosticEdit>* schema_edits = nullptr,
                                      const std::string& new_name = {}) {
@@ -520,6 +530,38 @@ class Server {
                     }
                 }
             }
+            // A named payload field (docs/design/Records030.md, Tooling): its
+            // references come from the syntax (AnalysisSession::index_compiler),
+            // and a derivation that reaches it unpinned gets the mapping that
+            // keeps its wire name.
+            if (const auto variant = payload_variant(session_.symbols[*found]); variant && schema_edits)
+                for (const auto &codec : session_.program->derived_codecs)
+                    for (const auto &member : codec.members) {
+                        if (member.symbol != *variant || member.payload_field != selected.name || member.pinned)
+                            continue;
+                        auto insertion = codec.close_brace.value_or(codec.declaration);
+                        if (!codec.close_brace) insertion.offset += insertion.length - 1;
+                        insertion.length = 0;
+                        const auto owner = member.path.substr(0, member.path.rfind('.') + 1);
+                        const auto pin = "field " + owner + new_name + ": \"" + member.wire + "\";";
+                        const auto text = codec.close_brace ? " " + pin + " " : " { " + pin + " }";
+                        if (std::ranges::none_of(*schema_edits, [&](const auto &prior) {
+                                return prior.span.file == insertion.file && prior.span.offset == insertion.offset &&
+                                       prior.replacement == text;
+                            }))
+                            schema_edits->push_back({insertion, text});
+                        for (const auto &[alias, source] : codec.schema_imports) {
+                            if (!member.path.starts_with(alias + ".")) continue;
+                            auto at = codec.declaration;
+                            at.length = 0;
+                            const auto import = "let " + alias + " = import:" + source + ";\n";
+                            if (std::ranges::none_of(*schema_edits, [&](const auto &prior) {
+                                    return prior.span.file == at.file && prior.span.offset == at.offset &&
+                                           prior.replacement == import;
+                                }))
+                                schema_edits->push_back({at, import});
+                        }
+                    }
             for (const auto &reference : session_.references)
                 if (family.contains(reference.symbol))
                     spans.push_back(reference.span);
@@ -552,7 +594,7 @@ class Server {
             throw RequestError(-32602, "This language-defined or library symbol cannot be renamed");
         if (!valid_identifier(name))
             throw RequestError(-32602, "The new name must be a Neura identifier");
-        if (!session_.program || selected.compiler_id == no_symbol)
+        if (!session_.program || (selected.compiler_id == no_symbol && !payload_variant(selected)))
             throw RequestError(-32803, "Resolve source errors before renaming this symbol");
         RenamePlan plan;
         auto references = all_references(selected, true, &plan.schema_edits, name);
