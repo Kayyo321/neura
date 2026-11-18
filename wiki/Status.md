@@ -33,7 +33,7 @@ Arrays use [activation and static regions](Collections#array-lifetime). An owned
 
 | Area | Status |
 | --- | --- |
-| Standard library extensions | Time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, `BigInteger` bitwise operations, and concurrent collections ([specification, section 16](Stdlib-Design#16-not-provided)). Collection facades that re-export every type need generic re-exports. |
+| Standard library extensions | Time zones, locale-sensitive sorting and formatting, Unicode normalization, ciphers and TLS, HTTP, UDP, `BigInteger` bitwise operations, and concurrent collections ([specification, section 16](Stdlib-Design#16-not-provided)). Collection facades that re-export every type need generic re-exports. |
 | Concurrency | Tasks in a program that uses `Std.DynamicForeign` or a C import (the compiler rejects the combination); running tasks on several cores (only `Parallel.map` uses more than one); overlapping file I/O; concurrent collections. Tasks are tested on Linux; Windows is unverified. The limits are listed in [Concurrency, section 16](Concurrency#16-limits). |
 | Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Class hooks | Class hook clauses (`\| get:` and `\| set:` after a class's `(`) are parsed, checked (`E0215`, `E0216`, `E0538` to `E0546`), written to `.nir`, and lowered on the linked program to executable NVR 1.8 events. Policy-carrying references preserve typed nil through storage, calls and scheduler boundaries ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md)). |

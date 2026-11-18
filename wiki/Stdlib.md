@@ -71,6 +71,7 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.BFloat16`](Stdlib-Core-BFloat16) | [Contracts](Stdlib-Core-BFloat16#detailed-contracts) | [Declarations](Stdlib-Core-BFloat16#exported-declarations) |
 | [`Std.Core.Bool`](Stdlib-Core-Bool) | [Contracts](Stdlib-Core-Bool#detailed-contracts) | [Declarations](Stdlib-Core-Bool#exported-declarations) |
 | [`Std.Core.Cell`](Stdlib-Core-Cell) | [Contracts](Stdlib-Core-Cell#detailed-contracts) | [Declarations](Stdlib-Core-Cell#exported-declarations) |
+| [`Std.Core.Character`](Stdlib-Core-Character) | [Contracts](Stdlib-Core-Character#detailed-contracts) | [Declarations](Stdlib-Core-Character#exported-declarations) |
 | [`Std.Core.Comparable`](Stdlib-Core-Comparable) | [Contracts](Stdlib-Core-Comparable#detailed-contracts) | [Declarations](Stdlib-Core-Comparable#exported-declarations) |
 | [`Std.Core.Comparators`](Stdlib-Core-Comparators) | [Contracts](Stdlib-Core-Comparators#detailed-contracts) | [Declarations](Stdlib-Core-Comparators#exported-declarations) |
 | [`Std.Core.Error`](Stdlib-Core-Error) | [Contracts](Stdlib-Core-Error#detailed-contracts) | [Declarations](Stdlib-Core-Error#exported-declarations) |
@@ -89,6 +90,8 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.Result`](Stdlib-Core-Result) | [Contracts](Stdlib-Core-Result#detailed-contracts) | [Declarations](Stdlib-Core-Result#exported-declarations) |
 | [`Std.Core.String`](Stdlib-Core-String) | [Contracts](Stdlib-Core-String#detailed-contracts) | [Declarations](Stdlib-Core-String#exported-declarations) |
 | [`Std.Core.StringBuilder`](Stdlib-Core-StringBuilder) | [Contracts](Stdlib-Core-StringBuilder#detailed-contracts) | [Declarations](Stdlib-Core-StringBuilder#exported-declarations) |
+| [`Std.Core.UnicodeBlock`](Stdlib-Core-UnicodeBlock) | [Contracts](Stdlib-Core-UnicodeBlock#detailed-contracts) | [Declarations](Stdlib-Core-UnicodeBlock#exported-declarations) |
+| [`Std.Core.UnicodeScript`](Stdlib-Core-UnicodeScript) | [Contracts](Stdlib-Core-UnicodeScript#detailed-contracts) | [Declarations](Stdlib-Core-UnicodeScript#exported-declarations) |
 | [`Std.Core.UInt16`](Stdlib-Core-UInt16) | [Contracts](Stdlib-Core-UInt16#detailed-contracts) | [Declarations](Stdlib-Core-UInt16#exported-declarations) |
 | [`Std.Core.UInt32`](Stdlib-Core-UInt32) | [Contracts](Stdlib-Core-UInt32#detailed-contracts) | [Declarations](Stdlib-Core-UInt32#exported-declarations) |
 | [`Std.Core.UInt64`](Stdlib-Core-UInt64) | [Contracts](Stdlib-Core-UInt64#detailed-contracts) | [Declarations](Stdlib-Core-UInt64#exported-declarations) |
@@ -276,6 +279,7 @@ The [complete specification](Stdlib-Design) has these sections.
   - [8.2 `StringBuilder`](Stdlib-Design#82-stringbuilder)
   - [8.3 `Scalars`](Stdlib-Design#83-scalars)
   - [8.4 `Regex`](Stdlib-Design#84-regex)
+  - [8.5 `Character`](Stdlib-Design#85-character)
 - [9. `Std.Collections`](Stdlib-Design#9-stdcollections)
   - [9.1 Contracts](Stdlib-Design#91-contracts)
   - [9.2 Equality of collections](Stdlib-Design#92-equality-of-collections)
