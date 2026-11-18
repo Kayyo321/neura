@@ -105,6 +105,10 @@ let RouterTests = module (
         test.assert_equal<int>(0, head.body().length);
         test.assert_equal_string("6", test.assert_some<string>(head.headers.get("Content-Length")));
         test.assert_equal_string("text/plain; charset=utf-8", test.assert_some<string>(head.headers.get("Content-Type")));
+        // For a host that drops the body itself, the GET route's body is kept.
+        last for_host = router.dispatch_for_host(http.request("HEAD", "/parts/7"));
+        test.assert_equal_string("part 7", body_of(for_host));
+        test.assert_none<string>(for_host.headers.get("Content-Length"));
     };
 
     export let test_duplicate_routes_fail_the_startup_check = func {

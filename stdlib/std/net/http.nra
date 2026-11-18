@@ -1210,7 +1210,16 @@ export let Http = module (
         /// @brief Answers `request`. Never fails: an `Err` from a handler or middleware is logged and becomes 500
         /// with the framework envelope.
         #NoDiscard
-        export let dispatch = func(request: Request) -> Response {
+        export let dispatch = func(request: Request) -> Response => answer(request, true);
+
+        /// @brief `dispatch` for a host that drops a HEAD response's body itself and computes `Content-Length`
+        /// from the body it was given (the `Std.App` server host): a HEAD request is answered from the GET route
+        /// with the body kept.
+        #NoDiscard
+        export let dispatch_for_host = func(request: Request) -> Response => answer(request, false);
+
+        /// @brief Dispatches; `strip_head` removes a HEAD answer's body.
+        let answer = func(request: Request, strip_head: bool) -> Response {
             last head = request.method == "HEAD";
             last lookup = head ? "GET" : request.method;
             last segments = split_path(request.path);
@@ -1242,7 +1251,7 @@ export let Http = module (
             last outcome = service.call(request);
             match (outcome) {
                 Result.Ok(response) => {
-                    return head ? response.without_body() : response;
+                    return head && strip_head ? response.without_body() : response;
                 },
                 Result.Err(problem) => {
                     last sink = error_sink;

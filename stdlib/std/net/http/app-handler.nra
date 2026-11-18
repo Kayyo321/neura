@@ -1,0 +1,93 @@
+// Compiled and tested only at the merge with the runtime-services branch: Std.App is not on the std-net base, so
+// this file does not type-check here, and no module or test on this branch imports it. Its tests are
+// /home/dev/neura-gate/030/std-net/post-merge/app-handler-tests.nra, to be moved into tests/stdlib/net-http-app/
+// at the merge.
+let app = import:Std.App;
+let header_maps = import:Std.Net.Http.Headers;
+let http = import:Std.Net.Http;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief A `Std.Net.Http.Router` as a `Std.App.Handler`, so `context.serve(...)` can dispatch through it
+/// (docs/design/Backend030.md, "Handler interface for `Std.Net.Http`").
+///
+/// The adapter turns the host's `app.Request` (lowercase header names in arrival order, complete body) into an
+/// `http.Request` with the same method, target, fields, body, client, scheme and request identifier, and a body
+/// limit equal to the body's length, since the host already enforced its own. It answers with
+/// `Router.dispatch_for_host`: a HEAD request is answered from the GET route with its body, because the host
+/// drops the body itself and computes `Content-Length` from it. The response becomes an `app.Response` with its
+/// fields in order, minus the fields the host owns or that only describe one connection (`Content-Length`,
+/// `Transfer-Encoding`, `Connection`, `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Upgrade`; RFC 9110
+/// section 7.6.1), and its body; a streamed body is collected in memory first, and a failure while producing
+/// it is returned as an error, which the context answers with 500. A request field whose name is not a token or
+/// whose value has a control character is skipped (the host has already refused such requests).
+/// @see [Std.Net.Http.AppHandler](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-AppHandler)
+#Since("0.3.0")
+export let AppHandler = module (
+    /// @brief The fields the host owns or that apply to one connection only, lowercase.
+    const HostOwned: string[] = ["content-length", "transfer-encoding", "connection", "keep-alive",
+        "proxy-connection", "te", "trailer", "upgrade"];
+
+    /// @brief A router answering the requests `Std.App.Context.serve` receives.
+    #[Final, NotThreadSafe]
+    export let RouterHandler = class implements app.Handler (
+        /// @brief The router.
+        last router: http.Router;
+
+        /// @brief Wraps `routes`.
+        export let init = func(routes: http.Router) {
+            router = routes;
+        };
+
+        /// @brief Converts, dispatches and converts back.
+        export let handle = func(request: app.Request) -> Result<app.Response> =>
+            to_app_response(router.dispatch_for_host(to_http_request(request)));
+
+        /// @brief The text "RouterHandler(Router(N routes))".
+        export let.override to_string = func -> string => "RouterHandler(" + router.to_string() + ")";
+    );
+
+    /// @brief `router` as a handler.
+    #NoDiscard
+    export let handler = func(router: http.Router) -> app.Handler => new RouterHandler(router);
+
+    /// @brief The `http.Request` for a host request.
+    #NoDiscard
+    export let to_http_request = func(request: app.Request) -> http.Request {
+        last fields = new http.Headers();
+        for (let field in request.headers) {
+            if (header_maps.is_token(field[0]) && header_maps.is_valid_value(field[1])) {
+                fields.add(field[0], field[1]);
+            }
+        }
+        return new http.Request(request.method, request.target, fields, new http.MemoryBody(request.body),
+            request.body.length as int64, request.client, request.scheme, request.request_id);
+    };
+
+    /// @brief The `app.Response` for a router response: status, fields without the host-owned ones, and the
+    /// body (a stream collected in memory).
+    #NoDiscard
+    export let to_app_response = func(response: http.Response) -> Result<app.Response> {
+        last sink = new http.MemorySink();
+        response.write_to(sink)?;
+        last fields: [string, string][list] = new;
+        for (let i = 0; i < response.headers.size(); i++) {
+            last name = response.headers.name_at(i);
+            if (!is_host_owned(name)) {
+                fields.append([name, response.headers.value_at(i)]);
+            }
+        }
+        return Result<app.Response>.Ok(new app.Response(response.status, fields, sink.bytes()));
+    };
+
+    /// @brief Whether the host owns field `name`.
+    let is_host_owned = func(name: string) -> bool {
+        last lower = strings.to_ascii_lower(name);
+        for (let owned in HostOwned) {
+            if (owned == lower) {
+                return true;
+            }
+        }
+        return false;
+    };
+);
