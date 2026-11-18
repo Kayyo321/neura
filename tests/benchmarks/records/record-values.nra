@@ -1,0 +1,36 @@
+// sizes: 1000 2000
+// scaling: 2.1
+// Record equality and hashing (docs/design/Records030.md, Gate and
+// acceptance): n records compared with an equal copy and with a different
+// one, and hashed.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Point = record (x: int, y: int, label: string);
+
+let RecordValues = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int>(int32s.parse(args[0]), 0);
+        let equal = 0;
+        let mixed: uint32 = 0;
+        for (let i = 0; i < n; i++) {
+            last point = new Point(i, i * 3, "p");
+            last same = new with(point) { };
+            last other = new with(point) { y: i * 3 + 1 };
+            if (point.equals(same)) {
+                equal++;
+            }
+            if (point.equals(other)) {
+                equal--;
+            }
+            mixed = mixed ^ point.hash_code();
+        }
+        if (equal != n || (n > 0 && mixed == 0 && n == 1)) {
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);
