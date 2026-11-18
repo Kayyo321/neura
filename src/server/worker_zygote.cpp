@@ -106,6 +106,7 @@ int run_worker_zygote(const WorkerOptions& options) {
                 ::close(channel);
                 ::prctl(PR_SET_NAME, "neura-worker", 0, 0, 0);
                 auto worker_options = options;
+                worker_options.refuse_assign = (flags & ZygoteClient::refuse_assign_flag) != 0;
                 int status = 1;
                 try {
                     status = serve_assignment(worker_options, *prepared);

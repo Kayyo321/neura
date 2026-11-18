@@ -106,6 +106,14 @@ def comm(pid):
         return ""
 
 
+def metric(port, name):
+    status, _, body = request(port, "GET", "/metrics")
+    for line in body.decode().splitlines():
+        if line.startswith(name + " "):
+            return int(line.split()[1])
+    return None
+
+
 def request(port, method, path, body=None, headers=None, timeout=30):
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     connection.request(method, path, body=body, headers=headers or {})
@@ -518,6 +526,50 @@ def test_dead_ready_worker(args, image):
     check("a ready worker had ended" in host.stderr(), "the discarded worker is logged")
 
 
+def test_refused_assignment(args, image):
+    # A worker whose channel refuses the Assign has run nothing: the request
+    # goes to a new worker, once, and runs exactly once. The test hook
+    # NEURA_SERVER_TEST_REFUSE_ASSIGN=N makes the first N workers refuse.
+    for start in ("zygote", "exec"):
+        for ready in ("0", "1"):
+            env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="1")
+            host = Host(args, image, "--worker-start", start, "--ready-workers", ready, "--no-startup-check",
+                        "--admin-listen", "127.0.0.1:0", env=env)
+            label = f"{start}, {ready} ready"
+            try:
+                if ready == "1":
+                    # The ready worker took the refusal; it must be in the
+                    # pool before the request, or the request starts its own.
+                    deadline = time.time() + 10
+                    while metric(host.ports["admin"], "neura_workers_ready") != 1 and time.time() < deadline:
+                        time.sleep(0.01)
+                status, _, _ = request(host.port, "GET", "/metric")
+                check(status == 200, f"refused assignment ({label}): {status}")
+                admin = host.ports["admin"]
+                check(metric(admin, "test_requests_total") == 2, f"the request ran once ({label})")
+                check(metric(admin, "neura_worker_retries_total") == 1, f"one retry ({label})")
+                # A worker that took its Assign is never replaced.
+                status, _, _ = request(host.port, "GET", "/trap")
+                check(status == 500, f"trap after a retry ({label}): {status}")
+                check(metric(admin, "neura_worker_retries_total") == 1, f"a trap is not retried ({label})")
+            finally:
+                host.stop()
+            check("a worker refused its assignment; using a new one" in host.stderr(), f"retry logged ({label})")
+    # The new worker refuses too: no third worker, the client gets 500.
+    env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="2")
+    host = Host(args, image, "--ready-workers", "0", "--no-startup-check", "--admin-listen", "127.0.0.1:0", env=env)
+    try:
+        status, _, body = request(host.port, "GET", "/metric")
+        check(status == 500 and body == b'{"error":"internal"}', f"two refusals: {status} {body!r}")
+        check(metric(host.ports["admin"], "test_requests_total") is None, "nothing ran after two refusals")
+        check(metric(host.ports["admin"], "neura_worker_retries_total") == 1, "two refusals are one retry")
+        status, _, _ = request(host.port, "GET", "/hello")
+        check(status == 200, f"after two refusals: {status}")
+    finally:
+        host.stop()
+    check("the new worker refused its assignment too" in host.stderr(), "second refusal logged")
+
+
 def test_zygote_restart(args, image):
     # A zygote that ends is replaced; requests are still served.
     host = Host(args, image, "--ready-workers", "0")
@@ -723,7 +775,7 @@ def main():
         print(build.stdout + build.stderr)
         return 1
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
-             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_zygote_restart,
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_refused_assignment, test_zygote_restart,
              test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:

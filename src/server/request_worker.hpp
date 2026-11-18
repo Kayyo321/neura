@@ -28,6 +28,10 @@ struct WorkerOptions {
     // (RunLimits::tier and ::jit), or the runner's defaults.
     std::optional<std::uint8_t> tier;
     std::optional<std::string> jit;
+    // A test hook (NEURA_SERVER_TEST_REFUSE_ASSIGN on the host): after the
+    // greeting the worker refuses its Assign by shutting down the reading
+    // side of its channel, and waits until it is killed. It runs nothing.
+    bool refuse_assign = false;
 };
 
 inline constexpr int worker_channel_descriptor = 3;

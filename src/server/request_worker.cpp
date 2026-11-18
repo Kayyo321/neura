@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <sys/socket.h>
+#include <unistd.h>
 
 namespace neura::server {
 namespace {
@@ -240,6 +242,16 @@ int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared
     hello.identity = worker::server_identity(image_digest);
     // A ready worker waits as long as the host keeps it.
     const auto forever = Clock::time_point::max();
+    if (options.refuse_assign) {
+        // The host's Hello comes first; the channel stops reading before
+        // this worker's Hello, so the host's Assign is refused for certain.
+        const auto host_hello = channel.receive(forever);
+        if (!host_hello || host_hello->kind != FrameKind::Hello) return 70;
+        ::shutdown(worker_channel_descriptor, SHUT_RD);
+        const auto encoded = worker::encode_hello(hello);
+        if (channel.send(FrameKind::Hello, encoded.bytes, forever) != Channel::Status::Ok) return 70;
+        for (;;) ::pause();
+    }
     if (channel.greet(hello, forever) != Channel::Status::Ok) return 70;
 
     auto assign = channel.receive(forever);

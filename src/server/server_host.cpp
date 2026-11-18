@@ -318,6 +318,9 @@ public:
         nvr_check(bytes);
         std::random_device device;
         id_prefix_ = (static_cast<std::uint64_t>(device()) << 32) | device();
+        if (const char* text = std::getenv("NEURA_SERVER_TEST_REFUSE_ASSIGN")) {
+            refusals_left_ = std::strtol(text, nullptr, 10);
+        }
         worker_arguments_ = worker_arguments();
         if (options_.zygote) start_zygote();
         if (::pipe(wake_) != 0) throw std::runtime_error("cannot create the reaper's wake pipe");
@@ -421,10 +424,10 @@ public:
         request.deadline = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch()).count() + left.count();
 
-        // A worker that provably ran nothing (its channel ended before it
-        // took the Assign) is replaced once; no request is run twice. The
-        // ended worker is killed and reaped before its replacement starts,
-        // so the slot never stands for two processes.
+        // A worker that provably ran nothing (its channel refused the
+        // Assign) is replaced once; no request is run twice. The refused
+        // worker is killed and reaped before its replacement starts, so the
+        // slot never stands for two processes.
         Outcome outcome;
         std::optional<Worker> worker;
         for (int attempt = 0; attempt < 2; ++attempt) {
@@ -432,8 +435,10 @@ public:
             if (!worker) break;
             outcome = exchange(*worker, request, &body, writer, deadline);
             if (!outcome.unassigned) break;
-            log(3, request.request_id, "a ready worker had ended before its assignment; using a new one");
-            ++metrics_.retried;
+            log(attempt == 0 ? 3 : 4, request.request_id,
+                attempt == 0 ? "a worker refused its assignment; using a new one"
+                             : "the new worker refused its assignment too");
+            if (attempt == 0) ++metrics_.retried;
             discard(*worker);
             worker.reset();
         }
@@ -649,12 +654,20 @@ private:
         if (!zygote_) log(4, {}, "the worker zygote did not start; starting workers with exec", {{"reason", problem}});
     }
 
+    // The test hook NEURA_SERVER_TEST_REFUSE_ASSIGN=N: the first N workers
+    // started refuse their Assign (WorkerOptions::refuse_assign).
+    bool take_refusal() {
+        auto left = refusals_left_.load();
+        while (left > 0 && !refusals_left_.compare_exchange_weak(left, left - 1)) {}
+        return left > 0;
+    }
+
     // A worker forked by the zygote, or -1. A zygote that has ended is
     // replaced, up to three times; after that, or when a new one does not
     // start, workers are started with exec.
-    pid_t fork_from_zygote(int channel) {
+    pid_t fork_from_zygote(int channel, bool refuse) {
         std::lock_guard lock(zygote_mutex_);
-        const unsigned char flags = 0;
+        const unsigned char flags = refuse ? ZygoteClient::refuse_assign_flag : 0;
         for (;;) {
             if (!zygote_) return -1;
             const pid_t pid = zygote_->fork_worker(channel, flags);
@@ -669,8 +682,9 @@ private:
         }
     }
 
-    pid_t exec_worker(int channel) {
+    pid_t exec_worker(int channel, bool refuse) {
         std::vector<std::string> arguments{executable_.string(), "--worker"};
+        if (refuse) arguments.emplace_back("--test-refuse-assign");
         arguments.insert(arguments.end(), worker_arguments_.begin(), worker_arguments_.end());
         std::vector<char*> argv;
         for (auto& argument : arguments) argv.push_back(argument.data());
@@ -703,8 +717,9 @@ private:
             ::close(pair[1]);
             pair[1] = moved;
         }
-        pid_t pid = fork_from_zygote(pair[1]);
-        if (pid < 0) pid = exec_worker(pair[1]);
+        const bool refuse = take_refusal();
+        pid_t pid = fork_from_zygote(pair[1], refuse);
+        if (pid < 0) pid = exec_worker(pair[1], refuse);
         ::close(pair[1]);
         if (pid < 0) {
             ::close(pair[0]);
@@ -1177,6 +1192,7 @@ private:
     std::mutex zygote_mutex_;
     std::unique_ptr<ZygoteClient> zygote_;
     int zygote_restarts_ = 0;
+    std::atomic<long> refusals_left_{0};
 
     struct Metrics {
         std::array<std::atomic<std::uint64_t>, 5> responses{};
@@ -1397,6 +1413,8 @@ WorkerOptions read_worker_options(int argc, char** argv) {
             options.tier = static_cast<std::uint8_t>(std::stoul(std::string(arg.substr(7))));
         } else if (arg.starts_with("--jit=")) {
             options.jit = std::string(arg.substr(6));
+        } else if (arg == "--test-refuse-assign") {
+            options.refuse_assign = true;
         } else {
             options.image = arg;
         }

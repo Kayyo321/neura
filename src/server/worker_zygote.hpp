@@ -43,6 +43,8 @@ public:
     ZygoteClient(const ZygoteClient&) = delete;
     ZygoteClient& operator=(const ZygoteClient&) = delete;
 
+    static constexpr unsigned char refuse_assign_flag = 1;
+
     // A worker forked with `channel` (the worker's end, which the caller
     // keeps and closes) as its descriptor 3, or -1. After -1, failed() tells
     // whether the zygote has ended (it is then of no further use) or only
