@@ -311,6 +311,31 @@ class LanguageServerTests(unittest.TestCase):
         items = self.client.request('textDocument/completion', params(other, 2, 9))['items']
         self.assertEqual([item['label'] for item in items], ['get', 'set'])
 
+    def test_unfinished_member_inside_a_module(self):
+        # Edge cases 141 and 143 one level down: the module around the
+        # unfinished record or interface keeps it, with one error.
+        for name, source, code, path_names in (
+                ('nested-record.nra', 'let before = 1;\nlet M = module (\n    export let P = record (id: int64,',
+                 'E0203', ['M', 'P']),
+                ('nested-interface.nra', 'let before = 1;\nlet M = module (\n    export let Named = interface (\n'
+                 '        let other = func() -> int;\n        let name: string;\n            |', 'E0202',
+                 ['M', 'Named', 'other'])):
+            with self.subTest(name=name):
+                path = self.root / name
+                self.client.open(path, source)
+                symbols = self.client.request('textDocument/documentSymbol',
+                                              {'textDocument': {'uri': path.as_uri()}})
+                self.assertEqual([symbol['name'] for symbol in symbols], ['before', 'M'])
+                found, level = [], symbols[1]
+                while level is not None:
+                    found.append(level['name'])
+                    children = [child for child in level.get('children', []) if child['name'] in path_names]
+                    level = children[0] if children else None
+                self.assertEqual(found, path_names)
+                reports = [n['params']['diagnostics'] for n in self.client.notifications
+                           if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+                self.assertEqual([item['code'] for item in reports[-1]], [code])
+
     def test_property_rename_reaches_requirement_fields_and_overrides(self):
         # docs/design/Records030.md, Tooling: a property is one name across
         # its interface requirement, the field that satisfies it, the

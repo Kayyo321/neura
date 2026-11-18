@@ -1121,7 +1121,9 @@ private:
                 // Edge case 143 (docs/design/Records030.md): a member whose
                 // error ran to the end of the file has reported it; the body
                 // keeps its other members, as a record does (edge case 141).
-                if (member_failed_at_end && at_end())
+                // A body around such a member, or around such a record,
+                // stops in the same way.
+                if ((member_failed_at_end || unfinished_at_end_) && at_end())
                     unfinished_at_end_ = true;
                 else
                     expect(")");
