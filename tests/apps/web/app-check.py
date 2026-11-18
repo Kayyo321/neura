@@ -1,7 +1,9 @@
 """Run a Neura web application in headless browsers: tests/apps/web/app/app.nra, mounted with Std.Web.mount on
 the browser runtime, driven by app-test.mjs, and the portfolio of tests/apps/web/portfolio/portfolio.nra (router,
 deep link, contact form with validation over Std.Ui.Controls), driven by portfolio-test.mjs. Each image's native run
-must first report that the ui services are not granted. Then bundles the walkthrough's example
+must first report that the ui services are not granted. tests/apps/web/events/events.nra, driven by
+events-test.mjs, covers the mount errors 1, 3 and 100, the event kinds beyond click, input and submit, the input
+overflow and reset. Then bundles the walkthrough's example
 (examples/apps/web-counter/app.nra, which docs/apps/WebApp.md shows verbatim) and the test application with
 scripts/build-web-bundle.py, and loads both bundles in each browser with bundle-probe.mjs added to the page.
 
@@ -60,7 +62,8 @@ def main():
                     ('portfolio', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0, 'hash', '/'),
                     ('portfolio-history', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0, 'history',
                      '/projects/neura'),
-                    ('tasks', HERE / 'tasks/tasks.nra', 'tasks-test.mjs', 0, 'hash', '/'))
+                    ('tasks', HERE / 'tasks/tasks.nra', 'tasks-test.mjs', 0, 'hash', '/'),
+                    ('events', HERE / 'events/events.nra', 'events-test.mjs', 1, 'hash', '/'))
         for name, source, module, linked, routing, start in journeys:
             if args.only and name not in args.only:
                 continue
