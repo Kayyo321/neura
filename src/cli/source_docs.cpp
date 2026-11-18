@@ -293,7 +293,9 @@ private:
             }
             return result + " (" + components(declaration) + ")";
         } else {
-            result = declaration.name + " = ";
+            // A static function, including an interface's static requirement.
+            if (declaration.kind == DeclKind::Function && declaration.static_member) result = "static ";
+            result += declaration.name + " = ";
             result += declaration.kind == DeclKind::Function ? "func" : kind;
         }
         if (!declaration.generics.empty()) {

@@ -353,6 +353,11 @@ let User = record implements Named (
     id: int64,
     name: string,
 );
+/// A type with a zero.
+let Zero = interface<T> (
+    /// The zero of the type.
+    static let zero = func() -> T;
+);
 /// The user's JSON form.
 export let UserJson = derive json.Codec<User> {
     field User.name: "display_name";
@@ -360,8 +365,8 @@ export let UserJson = derive json.Codec<User> {
 ]=])
 run_docs(index "${records}")
 string(JSON count LENGTH "${index}" files 0 symbols)
-if(NOT count EQUAL 10)
-    message(FATAL_ERROR "Expected 10 documented declarations in the records file, got ${count}\n${index}")
+if(NOT count EQUAL 12)
+    message(FATAL_ERROR "Expected 12 documented declarations in the records file, got ${count}\n${index}")
 endif()
 expect_json("let name: string { get }" files 0 symbols 1 signature)
 expect_json("User" files 0 symbols 2 name)
@@ -372,9 +377,10 @@ expect_json("init = func(id: int64, name: string) => set" files 0 symbols 3 sign
 expect_json("User" files 0 symbols 3 scope 0)
 expect_json("" files 0 symbols 3 documentation text)
 expect_json("last id: int64" files 0 symbols 4 signature)
-expect_json("UserJson = derive json.Codec<User> { field User.name: \"display_name\"; }" files 0 symbols 5 signature)
-expect_json("to_json = func(value: User) -> Result<JsonValue>" files 0 symbols 6 signature)
-expect_json("encode = func(value: User) -> Result<string>" files 0 symbols 7 signature)
-expect_json("from_json = func(value: JsonValue) -> Result<User>" files 0 symbols 8 signature)
-expect_json("decode = func(text: string) -> Result<User>" files 0 symbols 9 signature)
-expect_json("UserJson" files 0 symbols 9 scope 0)
+expect_json("UserJson = derive json.Codec<User> { field User.name: \"display_name\"; }" files 0 symbols 7 signature)
+expect_json("to_json = func(value: User) -> Result<JsonValue>" files 0 symbols 8 signature)
+expect_json("encode = func(value: User) -> Result<string>" files 0 symbols 9 signature)
+expect_json("from_json = func(value: JsonValue) -> Result<User>" files 0 symbols 10 signature)
+expect_json("decode = func(text: string) -> Result<User>" files 0 symbols 11 signature)
+expect_json("static zero = func() -> T" files 0 symbols 6 signature)
+expect_json("UserJson" files 0 symbols 11 scope 0)
