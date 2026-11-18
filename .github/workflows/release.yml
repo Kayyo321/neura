@@ -171,19 +171,22 @@ jobs:
           "-DNEURA_VERSION_PRERELEASE=$PRERELEASE"
           "-DNEURA_BUILD_COMMIT=$GITHUB_SHA"
           -DNEURA_ENABLE_SERVER_TLS=ON "-DOPENSSL_ROOT_DIR=$SERVER_COMPONENTS/openssl"
+          "-DOPENSSL_INCLUDE_DIR=$SERVER_COMPONENTS/openssl/include"
           -DNEURA_ENABLE_SERVER_HTTP2=ON "-DNEURA_NGHTTP2_ROOT=$SERVER_COMPONENTS/nghttp2"
           -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$SERVER_COMPONENTS/postgresql"
           "-DNEURA_LIBPQ_BUILD=$SERVER_COMPONENTS/postgresql"
           "-DNEURA_COMPONENT_LICENSES=$SERVER_COMPONENTS/licenses"
           "-DNEURA_SERVER_TEST_OPENSSL=$SERVER_COMPONENTS/openssl/bin/openssl"
 
-      # The build must link the pinned libraries, never a system or Homebrew
-      # OpenSSL that happens to be 3.5 as well.
+      # The build must compile against and link the pinned libraries, never a
+      # system or Homebrew OpenSSL: FindOpenSSL may take the headers from the
+      # pkg-config file of Homebrew's OpenSSL, so the include directory is
+      # given too.
       - name: Require the pinned server components
         run: |
           status=0
-          for entry in OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY NEURA_NGHTTP2_LIBRARY; do
-            value=$(sed -n "s/^$entry:FILEPATH=//p" build/CMakeCache.txt)
+          for entry in OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY OPENSSL_INCLUDE_DIR NEURA_NGHTTP2_LIBRARY; do
+            value=$(sed -n "s/^$entry:[A-Z]*=//p" build/CMakeCache.txt)
             echo "$entry: $value"
             case "$value" in
               "$SERVER_COMPONENTS"/*) ;;
