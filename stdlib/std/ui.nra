@@ -487,6 +487,15 @@ export let Ui = module (
         export let dirty: bool = false;
         #Internal
         export let view: View = nil;
+        /// What the root's reconciler keeps of the component's mounted nodes, so that a commit in which neither
+        /// the component nor a component below it rendered reuses them (`Std.Ui.Internal.Reconcile`).
+        #Internal
+        export let reconciled: class = nil;
+        /// The reconciler and pass of the last commit for which the component rendered.
+        #Internal
+        export let rendered_by: class = nil;
+        #Internal
+        export let rendered_pass: uint64 = 0;
         let generation_count: uint64 = 0;
         let render_total: int64 = 0;
         /// Called with the root each time the component is mounted, after it subscribes.

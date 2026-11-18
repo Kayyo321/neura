@@ -345,8 +345,37 @@ export let Reconcile = module (
         export let removed: bool = false;
         // False for a node of a component that was not rendered in this commit; its properties are not written.
         export let fresh: bool = true;
+        // The pass that reused this mounted node, with its whole subtree, for a component that did not render.
+        export let reused: uint64 = 0;
 
         export let init = func(element: bool, name: string, svg: bool, origin: string, key: string) => set;
+    );
+
+    // A component's part of the mounted tree: its top-level nodes, under the key path they were expanded at, the
+    // views claimed and the nodes counted while expanding them, and the memos of the components inside it. It is
+    // valid while `pass` is the pass of the mounted tree.
+    #NotThreadSafe
+    let Memo = class (
+        export last owner: class;
+        export last key: string;
+        export last nodes: VNode[list];
+        export last views: ui.View[list];
+        export last count: int;
+        export last nested: Memo[list];
+        export let pass: uint64 = 0;
+        // The pass in which the component or a component below it rendered.
+        export let touched: uint64 = 0;
+
+        export let init = func(owner: class, key: string, nodes: VNode[list], views: ui.View[list], count: int,
+                               nested: Memo[list], pass: uint64) {
+            instance.owner = owner;
+            instance.key = key;
+            instance.nodes = nodes;
+            instance.views = views;
+            instance.count = count;
+            instance.nested = nested;
+            instance.pass = pass;
+        };
     );
 
     /// @brief The result of `prepare`: a refusal, or the operations of a valid commit.
@@ -359,6 +388,9 @@ export let Reconcile = module (
         export let tree: VNode[list] = new();
         #Internal
         export let pass: uint64 = 0;
+        // Set when a reused node could not keep its place, so the plan must be computed without reuse.
+        #Internal
+        export let reuse_failed: bool = false;
 
         /// @brief The operations in the commit encoding, version 1 (docs/runtime/Providers.md).
         export let encode = func -> uint8[list] => encode_commit(operations);
@@ -393,10 +425,43 @@ export let Reconcile = module (
         // Whether every view is new (prepare of a whole view); otherwise only the components of `rendered` rendered.
         export let whole: bool = true;
         export let rendered: ui.Rendered[list] = new();
+        // Whether a component that did not render, and has no component below it that rendered, reuses its
+        // mounted nodes instead of expanding its views again.
+        export let reuse: bool = false;
+        // Every view claimed and every memo made or reused, in order; a memo keeps its slices.
+        export let claimed: ui.View[list] = new();
+        export let memos: Memo[list] = new();
+        export let reuse_failed: bool = false;
+        // The pass of this expansion, which marks the nodes it reused.
+        export let claimed_pass: uint64 = 0;
     );
 
     // The descriptor of the view that `ui.slot` makes: one payload, the embedded component.
     let SlotDescriptor: string = "neura:slot";
+
+    let slice_nodes = func(items: VNode[list], from: int) -> VNode[list] {
+        last out: VNode[list] = new();
+        for (let i = from; i < items.length; i++) {
+            out.append(items[i]);
+        }
+        return out;
+    };
+
+    let slice_views = func(items: ui.View[list], from: int) -> ui.View[list] {
+        last out: ui.View[list] = new();
+        for (let i = from; i < items.length; i++) {
+            out.append(items[i]);
+        }
+        return out;
+    };
+
+    let slice_memos = func(items: Memo[list], from: int) -> Memo[list] {
+        last out: Memo[list] = new();
+        for (let i = from; i < items.length; i++) {
+            out.append(items[i]);
+        }
+        return out;
+    };
 
     #[Final, NotThreadSafe]
     export let Reconciler = class (
@@ -461,20 +526,13 @@ export let Reconcile = module (
             }
             view.owner = instance;
             view.pass = pass;
+            state.claimed.append(view);
             return true;
         };
 
-        let was_rendered = func(state: Expansion, component: ui.Component) -> bool {
-            if (state.whole) {
-                return true;
-            }
-            for (let entry in state.rendered) {
-                if (entry.component === component) {
-                    return true;
-                }
-            }
-            return false;
-        };
+        // The components of `state.rendered` carry this reconciler and the pass, stamped by `plan_from`.
+        let was_rendered = func(state: Expansion, component: ui.Component) -> bool =>
+            state.whole || (component.rendered_by === instance && component.rendered_pass == state.claimed_pass);
 
         // A component boundary: the embedded component's current view takes the slot's place, expanded as fresh
         // when the component rendered for this commit and as retained otherwise. Its listeners belong to it.
@@ -487,13 +545,71 @@ export let Reconcile = module (
             if (current == nil) {
                 trap_with_message("a component in a slot has not rendered");
             }
+            if (state.reuse && child.reconciled is Memo) {
+                last memo = child.reconciled as Memo;
+                if (memo.owner === instance && memo.pass == mounted_pass && memo.touched != pass && memo.key == key) {
+                    reuse_memo(memo, pass, state, out);
+                    return;
+                }
+            }
             last outer = state.component;
             last outer_fresh = state.fresh;
+            last first_node = out.length;
+            last first_view = state.claimed.length;
+            last first_memo = state.memos.length;
+            last counted = state.nodes;
             state.component = child;
             state.fresh = was_rendered(state, child);
             expand_view(current, key, pass, state, out);
             state.component = outer;
             state.fresh = outer_fresh;
+            if (state.reuse && state.refusal == nil) {
+                last memo = new Memo(instance, key, slice_nodes(out, first_node), slice_views(state.claimed, first_view),
+                                     state.nodes - counted, slice_memos(state.memos, first_memo), pass);
+                child.reconciled = memo;
+                state.memos.append(memo);
+            }
+        };
+
+        // A component that did not render, and has no component below it that rendered, keeps the mounted nodes it
+        // last expanded to: they join the new tree as they are, with their views claimed for this pass.
+        let reuse_memo = func(memo: Memo, pass: uint64, state: Expansion, out: VNode[list]) {
+            for (let view in memo.views) {
+                view.pass = pass;
+                state.claimed.append(view);
+            }
+            for (let node in memo.nodes) {
+                node.reused = pass;
+                out.append(node);
+            }
+            last before = state.nodes;
+            state.nodes += memo.count;
+            if (before <= MaxNodes && state.nodes > MaxNodes) {
+                refuse(state, ui.DiagnosticKind.LimitExceeded, "U-5: a root holds at most 100000 nodes", 0, -1, "");
+            }
+            memo.pass = pass;
+            for (let inner in memo.nested) {
+                inner.pass = pass;
+            }
+            state.memos.append(memo);
+            for (let inner in memo.nested) {
+                state.memos.append(inner);
+            }
+        };
+
+        // Marks the memo of each component that rendered, or has a component below it that rendered, as touched in
+        // `pass`; returns whether `component` is touched.
+        let mark_touched = func(component: ui.Component, pass: uint64, state: Expansion) -> bool {
+            let touched = was_rendered(state, component);
+            for (let child in component.children) {
+                if (mark_touched(child, pass, state)) {
+                    touched = true;
+                }
+            }
+            if (touched && component.reconciled is Memo) {
+                (component.reconciled as Memo).touched = pass;
+            }
+            return touched;
         };
 
         let expand_view = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
@@ -655,12 +771,25 @@ export let Reconcile = module (
             if (view == nil) {
                 trap_with_message("the root component has not rendered");
             }
+            // Reusing the nodes of components that did not render gives the operations of expanding them again,
+            // as long as each reused node keeps its place; otherwise the turn is planned again without reuse,
+            // from the same node identifiers.
+            last ids = next_id;
+            last plan = plan_from(view, turn_state(top, rendered, true));
+            if (!plan.reuse_failed) {
+                return plan;
+            }
+            next_id = ids;
+            return plan_from(view, turn_state(top, rendered, false));
+        };
+
+        let turn_state = func(top: ui.Component, rendered: ui.Rendered[list], reuse: bool) -> Expansion {
             last state = new Expansion();
             state.whole = false;
             state.rendered = rendered;
             state.component = top;
-            state.fresh = was_rendered(state, top);
-            return plan_from(view, state);
+            state.reuse = reuse;
+            return state;
         };
 
         let plan_from = func(view: ui.View, state: Expansion) -> Plan {
@@ -668,6 +797,17 @@ export let Reconcile = module (
             last pass = passes + 1;
             passes = pass;
             plan.pass = pass;
+            state.claimed_pass = pass;
+            if (!state.whole) {
+                for (let entry in state.rendered) {
+                    entry.component.rendered_by = instance;
+                    entry.component.rendered_pass = pass;
+                }
+                state.fresh = was_rendered(state, state.component);
+            }
+            if (state.reuse) {
+                mark_touched(state.component, pass, state);
+            }
             expand_view(view, "", pass, state, plan.tree);
             if (state.refusal != nil) {
                 plan.diagnostic = state.refusal;
@@ -679,10 +819,14 @@ export let Reconcile = module (
             last contents: Operation[list] = new();
             last listeners: Operation[list] = new();
             last properties: Operation[list] = new();
-            match_children(mounted, plan.tree);
-            collect_removals(mounted, removals);
-            place_children(0, plan.tree, creations);
-            changes(plan.tree, contents, listeners, properties);
+            match_children(mounted, plan.tree, state);
+            if (state.reuse_failed) {
+                plan.reuse_failed = true;
+                return plan;
+            }
+            collect_removals(mounted, removals, pass);
+            place_children(0, plan.tree, creations, pass);
+            changes(plan.tree, contents, listeners, properties, pass);
             for (let list in [removals, creations, contents, listeners, properties]) {
                 for (let operation in list) {
                     plan.operations.append(operation);
@@ -693,24 +837,46 @@ export let Reconcile = module (
 
         // Match each new child to the old child with its key and origin, recursively, and decide which matched
         // children keep their place: the longest run of matched children whose old order is increasing.
-        let match_children = func(old: VNode[list], fresh: VNode[list]) {
-            last positions = string_maps.create<int>();
+        let match_children = func(old: VNode[list], fresh: VNode[list], state: Expansion) {
+            // Siblings whose keys are those of the old siblings in the same order, the common case, are matched by
+            // position without a map.
+            let in_order = old.length == fresh.length;
             let i = 0;
             while (i < old.length) {
                 old[i].removed = true;
-                positions.set(old[i].key, i);
+                if (in_order && !(old[i].key == fresh[i].key)) {
+                    in_order = false;
+                }
                 i += 1;
             }
+            last positions = string_maps.create<int>();
+            if (!in_order) {
+                i = 0;
+                while (i < old.length) {
+                    positions.set(old[i].key, i);
+                    i += 1;
+                }
+            }
             last matched: int[list] = new();
+            let place = 0;
             for (let node in fresh) {
                 let index = -1;
-                last position = positions.get(node.key);
-                if (optional.is_some<int>(position)) {
-                    last at = optional.expect<int>(position, "position");
+                let at = place;
+                place += 1;
+                if (!in_order) {
+                    last position = positions.get(node.key);
+                    at = optional.is_some<int>(position) ? optional.expect<int>(position, "position") : -1;
+                }
+                if (at >= 0) {
                     last candidate = old[at];
                     if (candidate.origin == node.origin && candidate.element == node.element) {
                         index = at;
                     }
+                }
+                if (node.reused == state.claimed_pass && (index < 0 || !(old[index] === node))) {
+                    // A reused node matches only itself; anywhere else the turn is planned without reuse.
+                    state.reuse_failed = true;
+                    return;
                 }
                 matched.append(index);
                 if (index >= 0) {
@@ -719,12 +885,20 @@ export let Reconcile = module (
                     node.old = previous;
                     node.id = previous.id;
                     node.state = 2;
-                    match_children(previous.children, node.children);
+                    if (node.reused != state.claimed_pass) {
+                        match_children(previous.children, node.children, state);
+                        if (state.reuse_failed) {
+                            return;
+                        }
+                    }
                 } else {
                     node.id = next_id;
                     next_id += 1;
                     node.state = 0;
-                    allocate(node.children);
+                    allocate(node.children, state);
+                    if (state.reuse_failed) {
+                        return;
+                    }
                 }
             }
             // Longest increasing subsequence of the matched old positions.
@@ -763,26 +937,31 @@ export let Reconcile = module (
             }
         };
 
-        let allocate = func(nodes: VNode[list]) {
+        let allocate = func(nodes: VNode[list], state: Expansion) {
             for (let node in nodes) {
+                if (node.reused == state.claimed_pass) {
+                    state.reuse_failed = true;
+                    return;
+                }
                 node.id = next_id;
                 next_id += 1;
                 node.state = 0;
-                allocate(node.children);
+                allocate(node.children, state);
             }
         };
 
-        let collect_removals = func(old: VNode[list], out: Operation[list]) {
+        // A node reused in `pass` keeps its whole subtree, so nothing below it is removed.
+        let collect_removals = func(old: VNode[list], out: Operation[list], pass: uint64) {
             for (let node in old) {
                 if (node.removed) {
                     out.append(new Operation(OpKind.Remove, node.id));
-                } else {
-                    collect_removals(node.children, out);
+                } else if (node.reused != pass) {
+                    collect_removals(node.children, out, pass);
                 }
             }
         };
 
-        let place_children = func(parent: uint32, nodes: VNode[list], out: Operation[list]) {
+        let place_children = func(parent: uint32, nodes: VNode[list], out: Operation[list], pass: uint64) {
             // The anchor of each child is the next sibling that stays in place, found in one pass from the end so
             // that placing n children costs O(n).
             last anchors: uint32[list] = new();
@@ -816,14 +995,20 @@ export let Reconcile = module (
                     }
                     out.append(operation);
                 }
-                place_children(node.id, node.children, out);
+                if (node.reused != pass) {
+                    place_children(node.id, node.children, out, pass);
+                }
                 i += 1;
             }
         };
 
+        // A node reused in `pass` is its own old node, with its whole subtree: nothing in it changes.
         let changes = func(nodes: VNode[list], contents: Operation[list], listeners: Operation[list],
-                           properties: Operation[list]) {
+                           properties: Operation[list], pass: uint64) {
             for (let node in nodes) {
+                if (node.reused == pass) {
+                    continue;
+                }
                 last old = node.old;
                 if (!node.element) {
                     if (old != nil && old.text != node.text) {
@@ -952,7 +1137,7 @@ export let Reconcile = module (
                         properties.append(operation);
                     }
                 }
-                changes(node.children, contents, listeners, properties);
+                changes(node.children, contents, listeners, properties, pass);
             }
         };
 

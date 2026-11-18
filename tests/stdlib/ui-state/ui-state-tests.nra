@@ -40,6 +40,30 @@ let page_view = html(title: string, on_next: func(ui.ClickEvent) -> void, first:
     <main><h1>{title}</h1><button type="button" on:click={on_next}>Next</button>{first}{second}</main>
 };
 
+let moved_row_view = html(key: string, count: int32) {
+    <span data-key={key}>{count}</span>
+};
+
+let moved_rows_view = html(indexes: frozen.FrozenList<int32>, keys: string[list], views: ui.View[list]) {
+    <ul>
+        @for (const index in indexes; key: keys[index]) {
+            <li>{views[index]}</li>
+        }
+    </ul>
+};
+
+let section_view = html(inner: ui.View) {
+    <section><div>{inner}</div></section>
+};
+
+let article_view = html(inner: ui.View) {
+    <article><div>{inner}</div></article>
+};
+
+let switching_view = html(mode: int32, a: ui.View, b: ui.View, list: ui.View) {
+    <main>{mode % 2 == 0 ? a : b}{list}</main>
+};
+
 let click = func -> ui.ClickEvent => new ui.ClickEvent(0, 0.0, 0.0, new ui.Modifiers(false, false, false, false), 1);
 
 let UiStateTests = module (
@@ -536,5 +560,105 @@ let UiStateTests = module (
         root.run();
         test.assert_equal_string("commit 3 on root 1: 1 render, 3 operations", host.log[0]);
         test.assert_equal_string("nodes 12, listeners 2, templates 3, queued 0", root.host_stats().to_string());
+    };
+
+    // Retained components keep their nodes without being expanded again (Components030, "Subtree commits"): row
+    // components that do not render move when their list reverses and rotates, a row renders alone, dropped rows
+    // are removed, and a retained component whose parent switches template at the same place is planned again
+    // without reuse. The operations are those of the reconciler that expanded every view (recorded from it).
+    export let test_retained_components_move_and_switch = func() -> void {
+        let host = new model.Host();
+        host.reconcile_commits();
+        let states: ui.State<int32>[list] = new;
+        let parts: ui.Component[list] = new;
+        for (let i = 0; i < 4; i = i + 1) {
+            last state = new ui.State<int32>(0);
+            last key = "r" + i.to_string();
+            states.append(state);
+            parts.append(ui.component<int32>(state, new func(value: int32) -> ui.View => moved_row_view(key, value)));
+        }
+        let order = new ui.State<int32>(0);
+        let list = ui.component<int32>(order, new func(turn: int32) -> ui.View {
+            last indexes: int32[list] = new;
+            last keys: string[list] = new;
+            last views: ui.View[list] = new;
+            for (let i = 0; i < parts.length; i++) {
+                let at = i;
+                if (turn == 1) {
+                    at = parts.length - 1 - i;
+                } else if (turn == 2) {
+                    at = (i + 1) % parts.length;
+                }
+                if (turn == 3 && at % 3 == 0) {
+                    continue;
+                }
+                indexes.append(indexes.length as int32);
+                keys.append("r" + at.to_string());
+                views.append(ui.slot(parts[at]));
+            }
+            return moved_rows_view(frozen.copy_of_list<int32>(indexes), keys, views);
+        });
+        let mode = new ui.State<int32>(0);
+        let inner = ui.component<int32>(states[0], new func(value: int32) -> ui.View => moved_row_view("inner", value));
+        let shell = ui.component<int32>(mode, new func(value: int32) -> ui.View =>
+            switching_view(value, section_view(ui.slot(inner)), article_view(ui.slot(inner)), ui.slot(list)));
+        let root = mounted(host, "#app", shell);
+        host.clear_log();
+        let step = func(change: func() -> void) {
+            host.click(1, shell, new func(event: ui.ClickEvent) {
+                change();
+            });
+            host.end_batch();
+            root.turn();
+        };
+        for (let t = 1; t <= 3; t = t + 1) {
+            last turn = t;
+            step(new func() {
+                order.set(turn);
+            });
+            step(new func() {
+                states[turn].update(func(value: int32) -> int32 => value + 1);
+            });
+        }
+        step(new func() {
+            mode.set(1);
+        });
+        step(new func() {
+            states[2].update(func(value: int32) -> int32 => value + 1);
+        });
+        step(new func() {
+            mode.set(2);
+        });
+        test.assert_equal_string("commit 2 on root 1: 1 render, 3 operations; "
+                                 + "  {\"op\":\"move\",\"id\":16,\"parent\":6,\"before\":7}; "
+                                 + "  {\"op\":\"move\",\"id\":13,\"parent\":6,\"before\":7}; "
+                                 + "  {\"op\":\"move\",\"id\":10,\"parent\":6,\"before\":7}; "
+                                 + "commit 3 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":12,\"value\":\"1\"}; "
+                                 + "commit 4 on root 1: 1 render, 2 operations; "
+                                 + "  {\"op\":\"move\",\"id\":10,\"parent\":6,\"before\":16}; "
+                                 + "  {\"op\":\"move\",\"id\":13,\"parent\":6,\"before\":16}; "
+                                 + "commit 5 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":15,\"value\":\"1\"}; "
+                                 + "commit 6 on root 1: 1 render, 2 operations; "
+                                 + "  {\"op\":\"remove\",\"id\":16}; "
+                                 + "  {\"op\":\"remove\",\"id\":7}; "
+                                 + "commit 7 on root 1: 1 render, 6 operations; "
+                                 + "  {\"op\":\"remove\",\"id\":2}; "
+                                 + "  {\"op\":\"element\",\"id\":19,\"parent\":1,\"before\":6,\"name\":\"article\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":20,\"parent\":19,\"before\":null,\"name\":\"div\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":21,\"parent\":20,\"before\":null,\"name\":\"span\",\"svg\":false}; "
+                                 + "  {\"op\":\"text\",\"id\":22,\"parent\":21,\"before\":null,\"value\":\"0\"}; "
+                                 + "  {\"op\":\"attribute\",\"id\":21,\"name\":\"data-key\",\"value\":\"inner\"}; "
+                                 + "commit 8 on root 1: 1 render, 1 operations; "
+                                 + "  {\"op\":\"setText\",\"id\":15,\"value\":\"2\"}; "
+                                 + "commit 9 on root 1: 1 render, 6 operations; "
+                                 + "  {\"op\":\"remove\",\"id\":19}; "
+                                 + "  {\"op\":\"element\",\"id\":23,\"parent\":1,\"before\":6,\"name\":\"section\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":24,\"parent\":23,\"before\":null,\"name\":\"div\",\"svg\":false}; "
+                                 + "  {\"op\":\"element\",\"id\":25,\"parent\":24,\"before\":null,\"name\":\"span\",\"svg\":false}; "
+                                 + "  {\"op\":\"text\",\"id\":26,\"parent\":25,\"before\":null,\"value\":\"0\"}; "
+                                 + "  {\"op\":\"attribute\",\"id\":25,\"name\":\"data-key\",\"value\":\"inner\"}", join(host.log));
+        root.close();
     };
 );
