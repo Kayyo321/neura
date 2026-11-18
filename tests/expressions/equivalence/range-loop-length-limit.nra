@@ -1,0 +1,20 @@
+// A counted int32 `..=` range exactly as long as the int32 maximum is
+// accepted, as the built range's length is, and runs without the stack
+// cells the built range would need (the previous compiler ran out of them)
+// (docs/lang/CoreLanguage.md, Loops). The body prints and leaves, so a
+// missing length check shows as output instead of a long loop.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let top = 2147483647;
+        for (let value in 0 ..= top - 1) {
+            console.print_line(value.to_string());
+            break;
+        }
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

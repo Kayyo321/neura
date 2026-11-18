@@ -180,7 +180,7 @@ export let UnicodeBlock = module (
     #[Pure, ThreadSafe]
     export let all = func() -> UnicodeBlock[list] {
         last result: UnicodeBlock[list] = new;
-        for (let index = 0; index < 347; index += 1) {
+        for (let index in 0 .. 347) {
             result.append(variant(index));
         }
         return result;

@@ -62,7 +62,7 @@ export let Main = module : program.Entry (
 10 0 255
 ```
 
-When the first operand of `..` is a `string`, the expression is a [string chain](CoreLanguage.md#string-chains), `"a" .. name .. "!"`, which joins text and takes no step, instead of a range. Binary operators bind more tightly than `..` and `..=`, and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
+When the first operand of `..` is a `string`, the expression is a [string chain](CoreLanguage.md#string-chains), `"a" .. name .. "!"`, which joins text and takes no step, instead of a range. Binary operators bind more tightly than `..` and `..=`, and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source. A range literal written directly as a for-each source is counted without being built, so it allocates nothing and is not bound by the stack or heap limit ([Loops](CoreLanguage.md#loops)); its elements, evaluation order and failures are those of the built range.
 
 A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`, of type `int` (`int32`). `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
 

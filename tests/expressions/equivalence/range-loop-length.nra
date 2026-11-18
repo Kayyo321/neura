@@ -1,0 +1,18 @@
+// A counted range loop over the whole int64 domain fails before its first
+// iteration with the length failure of the built range
+// (docs/lang/CoreLanguage.md, Loops; docs/design/Expressions030.md, edge
+// case 32).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let top: int64 = 9223372036854775807;
+        for (let value in -top - 1 ..= top) {
+            console.print_line(value.to_string());
+        }
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);
