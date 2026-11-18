@@ -15,8 +15,8 @@ namespace {
 // Runs every test registered for the suite and reports each failure.
 int run_suite(int argc, char** argv) {
     using namespace neura::testing;
-    if (argc != 3) {
-        std::cerr << "usage: neura_ir_tests <structure|verifier|behavior|concurrency> <source-dir>\n";
+    if (argc != 3 && argc != 4) {
+        std::cerr << "usage: neura_ir_tests <structure|verifier|behavior|concurrency> <source-dir> [test-name]\n";
         return 2;
     }
     const std::string suite = argv[1];
@@ -25,7 +25,7 @@ int run_suite(int argc, char** argv) {
     std::size_t run = 0;
     std::size_t failed = 0;
     for (const auto& test : registry()) {
-        if (test.suite != suite) {
+        if (test.suite != suite || (argc == 4 && test.name != argv[3])) {
             continue;
         }
         ++run;
@@ -69,7 +69,7 @@ void* run_on_thread(void* raw) {
 
 } // namespace
 
-// Usage: neura_ir_tests <suite> <source-dir>
+// Usage: neura_ir_tests <suite> <source-dir> [test-name]
 //
 // The reference evaluator recurses on the native stack, once per evaluated
 // call and expression, up to the call depth its tests allow (400). An

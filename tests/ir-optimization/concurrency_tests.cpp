@@ -8,16 +8,21 @@
 #include "ir-optimization/optimizer.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <future>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <chrono>
 #include <thread>
 #include <set>
 
 #ifdef __APPLE__
 #include <mach/mach.h>
+#include <mach/thread_info.h>
 #endif
 
 namespace neura::testing {
@@ -367,34 +372,103 @@ NEURA_TEST(concurrency, the_comparison_notices_a_removed_poll) {
           "polls changed the schedule at the default quantum");
 }
 
+namespace {
+
+using ThreadIds = std::set<std::uint64_t>;
+
+// Only threads absent from the baseline can have been left by a run. A
+// baseline thread may finish after it was observed, so its disappearance is
+// not evidence of a leak.
+ThreadIds new_threads(const ThreadIds& baseline, const ThreadIds& current) {
+    ThreadIds extra;
+    std::ranges::set_difference(current, baseline, std::inserter(extra, extra.end()));
+    return extra;
+}
+
+std::optional<ThreadIds> process_threads() {
+#ifdef __APPLE__
+    thread_act_array_t list = nullptr;
+    mach_msg_type_number_t count = 0;
+    if (::task_threads(::mach_task_self(), &list, &count) != KERN_SUCCESS) return std::nullopt;
+    ThreadIds ids;
+    bool complete = true;
+    for (mach_msg_type_number_t i = 0; i < count; ++i) {
+        thread_identifier_info_data_t info{};
+        mach_msg_type_number_t size = THREAD_IDENTIFIER_INFO_COUNT;
+        if (::thread_info(list[i], THREAD_IDENTIFIER_INFO, reinterpret_cast<thread_info_t>(&info), &size)
+            == KERN_SUCCESS) {
+            ids.insert(info.thread_id);
+        } else {
+            complete = false;
+        }
+        ::mach_port_deallocate(::mach_task_self(), list[i]);
+    }
+    ::vm_deallocate(::mach_task_self(), reinterpret_cast<vm_address_t>(list), count * sizeof(thread_act_t));
+    return complete ? std::optional{ids} : std::nullopt;
+#elif defined(__linux__)
+    ThreadIds ids;
+    std::error_code error;
+    fs::directory_iterator entry("/proc/self/task", error), end;
+    while (!error && entry != end) {
+        const auto name = entry->path().filename().string();
+        try {
+            ids.insert(std::stoull(name));
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        entry.increment(error);
+    }
+    return error ? std::nullopt : std::optional{ids};
+#else
+    return std::nullopt;
+#endif
+}
+
+// A thread can exit between task_threads and thread_info on macOS. Retry an
+// incomplete snapshot instead of treating the disappearing entry as a leak.
+std::optional<ThreadIds> complete_thread_snapshot() {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    auto ids = process_threads();
+    while (!ids && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        ids = process_threads();
+    }
+    return ids;
+}
+
+} // namespace
+
 // The evaluator runs each task on its own thread. Every run, whether it ends
 // by returning, trapping, a process exit, or the task limit, must leave none
 // alive and none unjoined (a std::thread destroyed while joinable terminates
-// the process, so an unjoined one would end this test run). Only a thread that
-// is still alive shows in /proc/self/task, so that is what is counted.
+// the process, so an unjoined one would end this test run).
 NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
-#ifdef __APPLE__
-    // macOS has no procfs: the kernel lists the task's threads instead.
-    const auto threads = [] {
-        thread_act_array_t list = nullptr;
-        mach_msg_type_number_t count = 0;
-        if (::task_threads(::mach_task_self(), &list, &count) != KERN_SUCCESS) return std::optional<std::size_t>{};
-        for (mach_msg_type_number_t i = 0; i < count; ++i) ::mach_port_deallocate(::mach_task_self(), list[i]);
-        ::vm_deallocate(::mach_task_self(), reinterpret_cast<vm_address_t>(list), count * sizeof(thread_act_t));
-        return std::optional<std::size_t>{count};
-    };
+    check(new_threads(ThreadIds{1, 2, 3}, ThreadIds{1, 2}).empty(),
+          "a finished baseline thread was reported as a leak");
+    check(new_threads(ThreadIds{1, 2, 3}, ThreadIds{1, 2, 4}) == ThreadIds{4},
+          "a new thread replacing a baseline thread was not detected");
+#if defined(__linux__) || defined(__APPLE__)
+    const auto start = complete_thread_snapshot();
 #else
-    const auto threads = [] {
-        std::size_t count = 0;
-        std::error_code error;
-        for (const auto& entry : fs::directory_iterator("/proc/self/task", error)) {
-            (void)entry;
-            ++count;
-        }
-        return error ? std::optional<std::size_t>{} : std::optional{count};
-    };
+    const auto start = process_threads();
 #endif
-    const auto start = threads();
+#if defined(__linux__) || defined(__APPLE__)
+    check(start.has_value(), "could not enumerate the process's baseline threads");
+#endif
+    if (start) {
+        // Exercise the detector with a live extra thread, then release and
+        // join it before making assertions, even if enumeration fails.
+        std::promise<void> ready, release;
+        auto ready_signal = ready.get_future();
+        auto release_signal = release.get_future();
+        std::thread extra([&] { ready.set_value(); release_signal.wait(); });
+        ready_signal.wait();
+        const auto with_extra = complete_thread_snapshot();
+        release.set_value();
+        extra.join();
+        check(with_extra.has_value(), "could not enumerate the deliberately live thread");
+        check(!new_threads(*start, *with_extra).empty(), "a deliberately live thread was not detected");
+    }
     std::set<Status> exits;
     for (const auto& fixture : concurrency_fixtures(environment)) {
         const auto program = prepare_concurrent(fixture.path);
@@ -412,10 +486,17 @@ NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
                     // never joined stays for as long as the process does, so
                     // a generous limit still finds it.
                     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-                    while (*threads() != *start && std::chrono::steady_clock::now() < deadline) {
+                    auto current = process_threads();
+                    while ((!current || !new_threads(*start, *current).empty()) &&
+                           std::chrono::steady_clock::now() < deadline) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        current = process_threads();
                     }
-                    check_equal(*threads(), *start, fixture.name + ": task threads still alive 30 seconds after the run");
+                    check(current.has_value(), fixture.name + ": could not enumerate task threads after the run");
+                    const auto extra = new_threads(*start, *current);
+                    std::string ids;
+                    for (const auto id : extra) ids += (ids.empty() ? "" : ", ") + std::to_string(id);
+                    check(extra.empty(), fixture.name + ": task threads still alive 30 seconds after the run: " + ids);
                 }
             }
         }
@@ -423,7 +504,7 @@ NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
     check(exits.contains(Status::Returned) && exits.contains(Status::Trapped) && exits.contains(Status::Exited) &&
               exits.contains(Status::LimitReached),
           "the runs did not cover returning, trapping, exiting, and the task limit");
-    if (!start) std::cout << "  this platform lists no threads: thread counts were not checked\n";
+    if (!start) std::cout << "  this platform lists no threads: thread identities were not checked\n";
 }
 
 } // namespace neura::testing
