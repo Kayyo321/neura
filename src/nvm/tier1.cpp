@@ -1,4 +1,5 @@
 #include "tier1.hpp"
+#include "environment.hpp"
 
 #include "tier3.hpp"
 
@@ -34,6 +35,7 @@ std::string reason_class(const std::string& rejection) {
 
 std::uint8_t tier_ceiling() {
     static const std::uint8_t ceiling = [] {
+        require_bound_environment("NEURA_TIER");
         const char* text = std::getenv("NEURA_TIER");
         if (text && std::strcmp(text, "0") == 0) return std::uint8_t{0};
         if (text && std::strcmp(text, "1") == 0) return std::uint8_t{1};
@@ -47,6 +49,7 @@ namespace {
 // NEURA_TIER_CHECK: 1 or 2, or 0 for any other value.
 int tier_check_mode() {
     static const int mode = [] {
+        require_bound_environment("NEURA_TIER_CHECK");
         const char* text = std::getenv("NEURA_TIER_CHECK");
         if (text && std::strcmp(text, "1") == 0) return 1;
         if (text && std::strcmp(text, "2") == 0) return 2;
@@ -63,6 +66,7 @@ bool tier_shadow_enabled() { return tier_check_mode() == 2; }
 
 bool tier_shadow_heap_always() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER_CHECK_HEAP");
         const char* text = std::getenv("NEURA_TIER_CHECK_HEAP");
         return text && std::strcmp(text, "1") == 0;
     }();
@@ -222,6 +226,7 @@ std::string TierTimes::describe(Clock::time_point end) const {
 
 bool tier_eager() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER_EAGER");
         const char* text = std::getenv("NEURA_TIER_EAGER");
         return text && std::strcmp(text, "1") == 0;
     }();
@@ -230,6 +235,7 @@ bool tier_eager() {
 
 bool tier_programs_enabled() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER_PROGRAMS");
         const char* text = std::getenv("NEURA_TIER_PROGRAMS");
         return text && std::strcmp(text, "1") == 0;
     }();
@@ -238,6 +244,7 @@ bool tier_programs_enabled() {
 
 TierOptions::Tier3 tier3_environment() {
     static const TierOptions::Tier3 mode = [] {
+        require_bound_environment("NEURA_TIER3");
         const char* text = std::getenv("NEURA_TIER3");
         // Unset is the default, native tier 3 where native code is available
         // (tier3_environment_implicit); anything unrecognized is off.
@@ -250,12 +257,13 @@ TierOptions::Tier3 tier3_environment() {
 }
 
 bool tier3_environment_implicit() {
-    static const bool implicit = std::getenv("NEURA_TIER3") == nullptr;
+    static const bool implicit = (require_bound_environment("NEURA_TIER3"), std::getenv("NEURA_TIER3") == nullptr);
     return implicit;
 }
 
 std::uint32_t tier3_after() {
     static const std::uint32_t value = [] {
+        require_bound_environment("NEURA_TIER3_AFTER");
         const char* text = std::getenv("NEURA_TIER3_AFTER");
         if (!text || *text == '\0') return std::uint32_t{0};
         std::uint64_t number = 0;

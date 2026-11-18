@@ -43,6 +43,16 @@ when NEURA_TIER_CHECK is not 2.
     NEURA_TIER_EAGER=1 NEURA_TIER_CHECK=2 scripts/runtime-identity.py capture --neura build/neura --images DIR --out shadow --extended --jit on
     scripts/runtime-identity.py compare t0 shadow
 
+The runtime service (docs/design/Service030.md) is checked the same way:
+--service sends each `run` it supports through `--runtime=required`, and
+the capture must equal a direct one. Give the capture its own
+XDG_RUNTIME_DIR and XDG_STATE_HOME; it starts a supervisor on demand and
+leaves it to its idle exit.
+
+    scripts/runtime-identity.py capture --neura build/neura --images DIR --out direct
+    scripts/runtime-identity.py capture --neura build/neura --images DIR --out service --service
+    scripts/runtime-identity.py compare direct service
+
 Images are built once, by the first capture, so both runs execute the same
 NVR bytes and the comparison isolates the runtime. Each case records the
 exit status, stdout, stderr, `--stats`, `--profile`, and for some cases a
@@ -286,6 +296,12 @@ EXTENDED_SWEEP = [
 
 
 RUN_OPTIONS = []
+# --service: each `run` that the runtime service supports goes through it
+# with --runtime=required (docs/design/Service030.md, "Gate and
+# acceptance"); a record, a replay and --each stay direct. The count of
+# such runs is printed, so that a capture that never reached the service
+# cannot pass as identical.
+SERVICE = {"enabled": False, "runs": 0}
 
 # The line a run prints under NEURA_TIER_CHECK=2 when the oracle cannot check
 # it (docs/runtime/NVM.md, "Controls").
@@ -296,6 +312,10 @@ def run(command, cwd):
     # The capture's run options follow `run` or `test`.
     if len(command) > 1 and command[1] in ("run", "test"):
         command = command[:2] + RUN_OPTIONS + command[2:]
+    if SERVICE["enabled"] and len(command) > 1 and command[1] == "run" and not (
+            {"--record", "--replay", "--each"} & set(command)):
+        command = command[:2] + ["--runtime=required"] + command[2:]
+        SERVICE["runs"] += 1
     result = subprocess.run(command, cwd=cwd, capture_output=True, timeout=600, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout, result.stderr
 
@@ -317,6 +337,7 @@ def capture(args):
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     RUN_OPTIONS[:] = args.run_option + ([f"--jit={args.jit}"] if args.jit else [])
+    SERVICE["enabled"] = args.service
     programs = PROGRAMS + (extended_programs() + generated_programs(images) if args.extended else [])
     build_images(neura, images, programs)
     if "--jit=on" in RUN_OPTIONS:
@@ -428,6 +449,8 @@ def capture(args):
     failing.write_text(FAILING_TESTS)
     record("test-failing", [neura, "test", "--stats", "failing-tests.nra"])
     summary = f"captured {len(list(out.glob('*.status')))} cases in {out}"
+    if args.service:
+        summary += f"; {SERVICE['runs']} runs through the service"
     if shadowed:
         cases = sum(unchecked.values())
         summary += f"; {cases} cases not checked by the oracle" + (
@@ -470,6 +493,8 @@ def main():
                                      "library, and concurrency programs, step sweeps, replays, and --each)")
     capture_parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
                                 help="pass OPTION to every run and test, for example --run-option=--tier=0")
+    capture_parser.add_argument("--service", action="store_true",
+                                help="run each supported `run` through the runtime service (--runtime=required)")
     capture_parser.add_argument("--jit", choices=["off", "on", "auto"],
                                 help="run tier 2 regions as native code (on), on the interpreter (off), or as the "
                                      "binary decides (auto): --run-option=--jit=MODE")

@@ -1,0 +1,29 @@
+// Writes the first argument's count of 64 KiB blocks to standard output:
+// every byte value in turn, NUL bytes included.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Binary = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last block: uint8[list] = new;
+        let i = 0;
+        while (i < 65536) {
+            block.append((i % 256) as uint8);
+            i = i + 1;
+        }
+        last sink = console.output();
+        last blocks = result.value_or<int>(int.parse(args[0]), 0);
+        let written = 0;
+        while (written < blocks) {
+            match (sink(block)) {
+                result.Result.Ok(_) => {},
+                result.Result.Err(_) => {
+                    return program.ExitCode.Failure;
+                },
+            }
+            written = written + 1;
+        }
+        return program.ExitCode.Ok;
+    };
+);

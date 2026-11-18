@@ -1,0 +1,14 @@
+// Prints its arguments and exits with the status the first one names.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ExitStatus = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let argument in args) {
+            console.print_line("argument: " + argument);
+        }
+        program.Process.exit(result.value_or<int>(int.parse(args[0]), 1));
+        return program.ExitCode.Ok;
+    };
+);

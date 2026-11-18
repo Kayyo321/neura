@@ -389,6 +389,11 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     nvm::TaskClock* clock = options.virtual_time && !options.replay ? &virtual_clock : nullptr;
     host.services.set_clock(clock);
     nvm::RunResult result;
+    const auto begin = [&] {
+        if (!options.ending) return;
+        options.ending->started = true;
+        options.ending->started_at = std::chrono::steady_clock::now();
+    };
     // NEURA_TIER_CHECK=2 does not check a replayed run. A recorded run is
     // checked: every input the recorder gives it reaches the shadow too.
     if (options.replay) limits.tier_check_off = "the run replays a trace";
@@ -397,6 +402,7 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         // output is reproduced from the recorded requests so that the
         // replayed run prints what the recorded one printed.
         const auto expected = read_trace_file(*options.replay);
+        begin();
         const auto replayed = nvm::replay(
             image, expected, arguments, limits, [&](const nvm::TraceEntry& entry) {
                 nvm::replay_console_output(entry.import, entry.version, entry.arguments, entry.completion,
@@ -408,6 +414,7 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         result = result_of(replayed.trace);
     } else if (options.record) {
         const auto bindings = nvm::bind(image, host.registry);
+        begin();
         const auto trace = nvm::record(image, bindings, arguments, limits, clock);
         host.services.end_run();
         const auto text = nvm::write_trace(trace);
@@ -415,6 +422,7 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         result = result_of(trace);
     } else {
         const auto bindings = nvm::bind(image, host.registry);
+        begin();
         result = nvm::run(image, bindings, arguments, limits, clock);
         host.services.end_run();
     }
@@ -441,6 +449,10 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         print_profile(image, result);
     }
     if (!result.completed) {
+        if (options.ending) {
+            options.ending->trapped = true;
+            options.ending->trap_class = std::string(nvm::describe(result.trap.kind));
+        }
         std::cerr << name << ": trap: " << nvm::describe(result.trap, image) << '\n';
         return nvm::exit_status(result.trap);
     }

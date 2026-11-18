@@ -1,0 +1,35 @@
+// Counts in a global and in a class static, writes the first argument's
+// text to the file the second argument names, then waits for a line of
+// input and prints both counts. Every application starts from zero: two
+// runs at once, or one after another, never see each other's counts.
+let console = import:Std.Io.Console;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let launches = 0;
+
+let Counter = class (
+    export static let count = 0;
+);
+
+export let State = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        launches = launches + 1;
+        let i = 0;
+        while (i < 1000) {
+            Counter.count = Counter.count + 1;
+            i = i + 1;
+        }
+        match (fs.write_text(path.of(args[1]), args[0])) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(_) => {
+                return program.ExitCode.Failure;
+            },
+        }
+        let _ = console.read_line();
+        console.print_line(args[0] + ": launches " + launches.to_string() + ", count " + Counter.count.to_string());
+        return program.ExitCode.Ok;
+    };
+);

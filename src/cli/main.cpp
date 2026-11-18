@@ -1,70 +1,31 @@
-#include "argument_lists.hpp"
-#include "diagnostic_render.hpp"
-#include "explain.hpp"
-#include "neura-ir/class_hooks.hpp"
-#include "neura-ir/tags.hpp"
-#include "util/diagnostic_codes.hpp"
-#include "util/suggest.hpp"
-#include "backend/converter.hpp"
-#include "decompiler/assembly.hpp"
-#include "decompiler/decompile.hpp"
-#include "gpu_run.hpp"
-#include "neura/version.hpp"
-#include "ir-optimization/optimizer.hpp"
-#include "launcher/container.hpp"
-#include "lifecycle.hpp"
-#include "lift/hints.hpp"
-#include "neura-ir/containment.hpp"
-#include "neura-ir/inline_limit.hpp"
-#include "neura-ir/ir.hpp"
-#include "neura-ir/nir_format.hpp"
-#include "neura-ir/reference_storage.hpp"
-#include "neura-ir/specialize.hpp"
-#include "neura-ir/storage.hpp"
-#include "neura-ir/task_analysis.hpp"
-#include "neura-ir/verifier.hpp"
-#include "nvm/fleet.hpp"
-#include "nvm/host.hpp"
-#include "nvm/machine.hpp"
-#include "nvm/providers.hpp"
-#include "nvm/schedule.hpp"
-#include "nvm/tier1.hpp"
-#include "nvr/format.hpp"
-#include "runner/runner.hpp"
-#include "source_docs.hpp"
-#include "tooling/test_protocol.hpp"
-#include "tooling/coverage.hpp"
-#include "source_loader.hpp"
-#include "util/source_map.hpp"
-#include "tooling/lsp.hpp"
-#include "tooling/debug.hpp"
-#include "tooling/formatter.hpp"
-#include "tooling/json.hpp"
-#include "tooling/inspect.hpp"
+// neura: the dispatcher of the Neura tools (docs/design/Products030.md).
+//
+// It answers --version, help and capabilities itself and starts the sibling
+// tool of every other command from the directory of its own real
+// executable, with an argument vector: never through a shell, never from
+// the working directory or PATH. It links the tool registry and nothing of
+// the compiler or the runtime, and uses no streams or std::filesystem, so it
+// stays small when a portable release links the C++ runtime into it.
 
-#include <algorithm>
-#include <charconv>
-#include <chrono>
-#include <cstring>
+#include "tool.hpp"
+#include "neura/version.hpp"
+
+#include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <iterator>
-#include <optional>
-#include <map>
-#include <set>
-#include <span>
-#include <sstream>
-#include <stdexcept>
+#include <cstring>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
-#ifndef _WIN32
-#include <sys/ioctl.h>
+#ifdef _WIN32
+#include <filesystem>
+#include <process.h>
+#else
+#include <climits>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -72,2039 +33,283 @@
 #include <mach-o/dyld.h>
 #endif
 
-#ifdef _WIN32
-#include <fcntl.h>
-#include <io.h>
-#endif
-
 namespace {
 
-namespace fs = std::filesystem;
+namespace tool = neura::tool;
 
-using neura::runner::Host;
-using neura::runner::image_costs;
-using neura::runner::provide_native_library;
-using neura::runner::read_file;
-using neura::runner::write_file;
-
-void usage(std::ostream& out) {
-    out << "usage: neura lsp --stdio\n"
-           "       neura debug --stdio\n"
-           "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
-           "       neura capabilities --json\n"
-           "       neura check [-I source-root] [--task-safety | --fix | --show-derived[=Name]] <file.nra>...\n"
-           "       neura docs <file.nra>... [-o <file.json>]\n"
-           "       neura docs --doxygen <file.nra>\n"
-           "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
-           "       neura emit-ir [--no-optimize] <file.nir>\n"
-           "       neura build [-I source-root] [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nra>... -o <file.nvr>\n"
-           "       neura build [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nir> -o <file.nvr>\n"
-           "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
-           "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
-           "       neura inspect <file> [-o <file.nvr>]\n"
-           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--max-stack-cells N] [--stats] [--profile] [--tier=0|1|2] "
-           "[--jit=off|on|auto] [--tier-stats] [capabilities] "
-           "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
-           "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
-           "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--list --format=json] [--filter <exact-id>] [--reporter=json]\n"
-           "                  [--workspace-root <directory>]\n"
-           "                  [--max-heap-cells N] [--max-stack-cells N] [--stats] [--tier=0|1|2] [--jit=off|on|auto]\n"
-           "                  [--tier-stats] [capabilities]\n"
-           "                  [--gpu=auto|always|off] [--no-gpu]\n"
-           "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
-           "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
-           "       neura assemble <file.nvra> -o <file.nvr>\n"
-           "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
-           "       neura c-bindings [--linked] [c-options] <header.h>\n"
-           "       neura explain <code> | --explain <code> | explain --list\n"
-           "       neura tags [<Name>]\n"
-           "       neura --version | version\n"
-           "       neura --help | help\n"
-           "       neura doctor\n"
-           "       neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]\n"
-           "       neura uninstall [--dry-run] [--yes]\n"
-           "\n"
-           "doctor, update, and uninstall manage an installed neura and are described in docs/Install.md.\n"
-           "update and uninstall exit with status 3 for an install that neura did not make, and update --check\n"
-           "exits with status 4 when a newer version is available.\n"
-           "\n"
-           "capabilities: run and test, and the policy that build --native records, grant every host\n"
-           "service by default: files, network, environment, clock, entropy, and native code. A denied\n"
-           "service fails with error 14 (CapabilityDenied). Options apply in command-line order.\n"
-           "  --deny-fs                files and directories\n"
-           "  --deny-net               TCP connections and listeners\n"
-           "  --deny-env               environment variables\n"
-           "  --deny-clock             wall and monotonic clocks and sleeping\n"
-           "  --deny-entropy           operating-system entropy\n"
-           "  --deny-native            native libraries, memory, and calls\n"
-           "  --deny-all               every group above\n"
-           "  --allow-fs[=prefix,...]  grant files again: every path, or only below the prefixes\n"
-           "  --allow-net, --allow-env, --allow-clock, --allow-entropy, --allow-native\n"
-           "                           grant that group again after a --deny option (native code is unsafe)\n"
-           "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
-           "  --record <file>          (run) write every host request and response to a trace\n"
-           "  --profile                (run) print the steps each function took\n"
-           "  --tier=0|1|2             the highest execution tier: 0 evaluates every graph by reference, 1 also\n"
-           "                           runs proven lifted blocks natively, 2 (the default) also runs regions of\n"
-           "                           them without returning to the dispatcher; the result is the same\n"
-           "  --jit=off|on|auto        tier 2 runs its regions as native code: on fails the run when this platform\n"
-           "                           cannot, auto (the default) uses it where it is enabled by default, off\n"
-           "                           interprets them (and, with it, runs no native tier 3 programs); the result\n"
-           "                           is the same (--deny-native does not apply)\n"
-           "  --tier-stats             print the blocks lifted, the regions formed, the steps each tier ran, and\n"
-           "                           where the wall time went\n"
-           "  --replay <file>          (run) answer host requests from a trace instead of services; a trace of a\n"
-           "                           concurrent run carries its own quantum and limits, which replace the options\n"
-           "\n"
-           "graph execution: run and test choose between the CPU and a GPU by predicted speed.\n"
-           "  --gpu=auto               decide automatically (default)\n"
-           "  --gpu=always             evaluate every eligible graph on a GPU when one is usable\n"
-           "  --gpu=off, --no-gpu      evaluate graphs on the CPU\n"
-           "  --require-gpu            --gpu=always, and fail unless a GPU device is available\n"
-           "  --gpu-software           also accept software Vulkan implementations\n"
-           "  --gpu-verify             check every GPU evaluation against the CPU\n"
-           "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
-           "  --max-tasks N            bound the number of live tasks in a concurrent image\n"
-           "  --task-quantum N         polls per turn for a concurrent image\n"
-           "  --max-queued-messages N  bound the values buffered in all channels\n"
-           "  --max-pending-requests N bound the overlapping host requests in flight\n"
-           "  --parallel-workers N     threads that evaluate the items of a parallel map (default 1)\n"
-           "  --task-dump[=text|json]  print every task when one traps; SIGQUIT prints a dump at any time\n"
-           "  --virtual-time           timers, deadlines, and the clock follow a clock that moves only when\n"
-           "                           every task is parked, so a timeout takes no real time\n"
-           "  --schedules N            (test) run each test under up to N legal task schedules\n"
-           "  --schedule-seed S        (test) the seed of the explored schedules (default 0)\n"
-           "  --save-schedule FILE     (test) write the first failing schedule to FILE\n"
-           "  --schedule FILE          (test) run the test of a saved schedule under exactly that schedule\n"
-           "  --trace-events FILE      write one JSON line per scheduler event (run only)\n"
-           "  --trace-wall-time        add wall-clock times to --trace-events\n"
-           "\n"
-           "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
-           "  --c-include <dir>        search a directory for C headers\n"
-           "  --c-define <name[=value]> define a macro while reading C headers\n"
-           "  --libclang <file>        the libclang library to load (default: NEURA_LIBCLANG, then a search)\n"
-           "  --cc <compiler>          the C compiler that links the native library (default: $CC, then cc)\n"
-           "  --c-link-arg <arg>       pass an argument to that link\n"
-           "\n"
-           "diagnostics: every command accepts the first two; the others apply to check, emit-ir, build, and test\n"
-           "  --error-format=human|short|json\n"
-           "                           human (default) shows source snippets; short is one stable line\n"
-           "                           per diagnostic, file:line:column: error[CODE]: message; json is one\n"
-           "                           object per line\n"
-           "  --color=auto|always|never\n"
-           "                           color human output; auto colors a terminal unless NO_COLOR is set\n"
-           "                           or TERM is dumb\n"
-           "  --max-errors N           stop after N syntax errors (default 20); the lexer and the parser\n"
-           "                           recover and report several, and any of them stops compilation\n"
-           "  -W<name>, -Wno-<name>    enable or disable the warning <name>\n"
-           "  -Werror                  report every warning as an error\n"
-           "  --warn-library           also report warnings in the standard library\n"
-           "  --fix                    (check) apply machine-applicable suggestions to the source files\n";
+void print(std::FILE* stream, std::string_view text) {
+    std::fwrite(text.data(), 1, text.size(), stream);
 }
 
-enum class Command {
-    Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
-    Version, Help, Doctor, Update, Uninstall, Explain, Tags
-};
-
-constexpr const char* commands =
-    "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
-    "doctor, update, uninstall, explain, tags, version, or help";
-
-neura::nvm::Capabilities granted_capabilities() {
-    neura::nvm::Capabilities capabilities;
-    capabilities.fs = capabilities.net = capabilities.env = capabilities.clock = capabilities.entropy = true;
-    capabilities.native = true;
-    return capabilities;
+int fail(const std::string& message) {
+    print(stderr, "neura: error: " + message + "\n");
+    return 1;
 }
 
-struct Options {
-    Command command = Command::Check;
-    bool optimize = true;
-    bool source_map = true;
-    // build: emit the optional LIFT section (--no-lift-hints omits it).
-    bool lift_hints = true;
-    // run and test: report blocks lifted and steps per execution tier.
-    bool tier_stats = false;
-    bool provenance = true;
-    bool doxygen = false;
-    bool native_executable = false;
-    bool sealed = false;
-    bool static_launcher = false;
-    std::optional<std::string> native_target;
-    std::optional<fs::path> launcher;
-    // Report execution costs: steps, peak heap cells, and image size.
-    bool stats = false;
-    std::optional<neura::nvm::TaskDumpFormat> task_dump;
-    // check --task-safety: report every function instead of only checking.
-    bool task_safety = false;
-    std::optional<std::string> show_derived;
-    // check --fix: apply machine-applicable suggestions in place.
-    bool fix = false;
-    // Editor test discovery and execution. Human terminal output is the default.
-    bool list_tests = false;
-    bool test_format_json = false;
-    bool test_format_set = false;
-    bool test_reporter_json = false;
-    std::vector<std::string> test_filters;
-    std::optional<fs::path> test_workspace;
-    std::optional<fs::path> test_coverage;
-    neura::cli::DiagnosticConfig diagnostics;
-    std::optional<fs::path> trace_events;
-    bool trace_wall_time = false;
-    // Testing concurrent code (Concurrency.md section 14.4).
-    bool virtual_time = false;
-    std::uint64_t schedules = 1;
-    std::uint64_t schedule_seed = 0;
-    bool exploration_options = false;
-    std::optional<fs::path> save_schedule;
-    std::optional<fs::path> schedule;
-    std::vector<fs::path> files;
-    std::vector<fs::path> roots;
-    fs::path library;
-    fs::path executable;
-    std::optional<fs::path> output;
-    std::vector<std::string> arguments;
-    neura::nvm::RunLimits limits;
-    // The command-line tools start with every group granted; the C++
-    // default of nvm::Capabilities denies every group.
-    neura::nvm::Capabilities capabilities = granted_capabilities();
-    // An explicit --allow-native that is still in effect; the static
-    // launcher cannot honor it.
-    bool allow_native_requested = false;
-    std::optional<fs::path> record;
-    std::optional<fs::path> replay;
-    std::optional<fs::path> each;
-    neura::cli::GpuOptions gpu;
-    // C imports: header search and definitions, the libclang library, and
-    // the C compiler and extra arguments that link the native library.
-    neura::CImportOptions c_import;
-    std::string cc;
-    std::vector<std::string> link_arguments;
-    // c-bindings: generate as if the import named libraries.
-    bool linked = false;
-    // explain: a code, or --list.
-    std::string explain_code;
-    bool explain_list = false;
-    // update and uninstall.
-    neura::lifecycle::UpdateOptions update;
-    neura::lifecycle::UninstallOptions uninstall;
-};
+// --version, version, --help and help take no arguments, as in 0.2.
+int builtin(std::string_view name, int argc, char** argv) {
+    for (int i = 2; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        if (arg.starts_with('-')) return fail("unknown option for " + std::string(name) + ": " + std::string(arg));
+        return fail(std::string(name) + " takes no files");
+    }
+    if (name == "--version" || name == "version") {
+        print(stdout, tool::version_line() + "\n");
+    } else {
+        print(stdout, tool::usage_text());
+    }
+    return 0;
+}
 
-fs::path executable_path(const fs::path& launch) {
+#ifdef _WIN32
+std::string directory_of_self(const char* launch) {
+    const auto path = tool::executable_path(launch);
+    return path.empty() ? std::string() : path.parent_path().string();
+}
+
+bool present(const std::string& bin, std::string_view name) {
     std::error_code error;
+    return !bin.empty() && std::filesystem::is_regular_file(std::filesystem::path(bin) / tool::executable_file(name), error);
+}
+#else
+// The real path of this executable, as tool::executable_path resolves it:
+// /proc/self/exe on Linux, the loader's path on macOS, else argv[0] and PATH.
+std::string real_path(const std::string& path) {
+    char buffer[PATH_MAX];
+    return ::realpath(path.c_str(), buffer) ? std::string(buffer) : std::string();
+}
+
+bool regular_file(const std::string& path) {
+    struct stat info {};
+    return ::stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode);
+}
+
+// The real path of this executable, kept for its lease.
+std::string self_path;
+
+std::string directory_of_self(const char* launch) {
+    std::string self;
 #ifdef __linux__
-    if (const auto actual = fs::canonical("/proc/self/exe", error); !actual.empty()) return actual;
+    self = real_path("/proc/self/exe");
 #endif
 #ifdef __APPLE__
-    {
+    if (self.empty()) {
         std::uint32_t size = 0;
         _NSGetExecutablePath(nullptr, &size);
         std::string buffer(size, '\0');
-        if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
-            buffer.resize(std::strlen(buffer.c_str()));
-            if (const auto actual = fs::canonical(buffer, error); !actual.empty()) return actual;
-        }
+        if (_NSGetExecutablePath(buffer.data(), &size) == 0) self = real_path(buffer.c_str());
     }
 #endif
-    if (launch.has_parent_path()) return fs::canonical(launch, error);
-    const auto* path = std::getenv("PATH");
-    if (!path) return {};
-#ifdef _WIN32
-    constexpr char separator = ';';
-    auto file = launch;
-    if (!file.has_extension()) file += ".exe";
-#else
-    constexpr char separator = ':';
-    const auto& file = launch;
+    const std::string_view name(launch ? launch : "");
+    if (self.empty() && name.find('/') != std::string_view::npos) self = real_path(std::string(name));
+    if (self.empty() && !name.empty()) {
+        const char* path = std::getenv("PATH");
+        std::string_view remaining(path ? path : "");
+        while (path && self.empty()) {
+            const auto end = remaining.find(':');
+            const auto candidate = std::string(remaining.substr(0, end)) + "/" + std::string(name);
+            if (regular_file(candidate)) self = real_path(candidate);
+            if (end == std::string_view::npos) break;
+            remaining.remove_prefix(end + 1);
+        }
+    }
+    self_path = self;
+    const auto slash = self.rfind('/');
+    return slash == std::string::npos ? std::string() : self.substr(0, slash == 0 ? 1 : slash);
+}
+
+bool present(const std::string& bin, std::string_view name) {
+    return !bin.empty() && regular_file(bin + "/" + tool::executable_file(name));
+}
 #endif
-    std::string_view remaining(path);
-    for (;;) {
-        const auto end = remaining.find(separator);
-        const auto candidate = fs::path(remaining.substr(0, end)) / file;
-        if (fs::is_regular_file(candidate, error)) return fs::canonical(candidate, error);
-        if (end == std::string_view::npos) return {};
-        remaining.remove_prefix(end + 1);
-    }
-}
 
-fs::path standard_library(const fs::path& executable) {
-    if (executable.empty()) return {};
-    const auto prefix = executable.parent_path().parent_path();
-    std::error_code error;
-    for (const auto& candidate : {prefix / "share/neura/stdlib", prefix / "stdlib"}) {
-        if (fs::is_directory(candidate / "std", error)) return fs::canonical(candidate, error);
-    }
-    return {};
-}
-
-std::uint64_t parse_limit(std::string_view option, const char* text) {
-    std::uint64_t value = 0;
-    const std::string_view digits(text);
-    const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
-    if (error != std::errc{} || end != digits.data() + digits.size() || value == 0) {
-        throw std::runtime_error("expected a positive integer after " + std::string(option));
-    }
-    return value;
-}
-
-template <class Next>
-bool parse_policy_option(Options& options, std::string_view arg, Next next) {
-    if (arg == "--max-steps") {
-        options.limits.max_steps = parse_limit(arg, next());
-    } else if (arg == "--max-frames") {
-        const auto value = parse_limit(arg, next());
-        if (value > 0xffffffffU) {
-            throw std::runtime_error("--max-frames is too large");
-        }
-        options.limits.max_frames = static_cast<std::uint32_t>(value);
-    } else if (arg == "--max-heap-cells") {
-        options.limits.max_heap_cells = parse_limit(arg, next());
-    } else if (arg == "--max-stack-cells") {
-        options.limits.max_stack_cells = parse_limit(arg, next());
-    } else if (arg == "--allow-fs") {
-        // Every path, replacing any earlier prefix list.
-        options.capabilities.fs = true;
-        options.capabilities.fs_prefixes.clear();
-    } else if (arg.starts_with("--allow-fs=")) {
-        auto list = arg.substr(std::string_view("--allow-fs=").size());
-        std::vector<std::string> prefixes;
-        for (;;) {
-            const auto comma = list.find(',');
-            const auto prefix = list.substr(0, comma);
-            if (prefix.empty()) {
-                throw std::runtime_error("--allow-fs= expects a comma-separated list of path prefixes");
-            }
-            prefixes.emplace_back(prefix);
-            if (comma == std::string_view::npos) break;
-            list.remove_prefix(comma + 1);
-        }
-        // A list narrows "every path" or "denied" to the listed prefixes and
-        // adds to a list that is already in effect.
-        auto& capabilities = options.capabilities;
-        if (!capabilities.fs) capabilities.fs_prefixes.clear();
-        capabilities.fs = true;
-        capabilities.fs_prefixes.insert(capabilities.fs_prefixes.end(), prefixes.begin(), prefixes.end());
-    } else if (arg == "--allow-net") {
-        options.capabilities.net = true;
-    } else if (arg == "--allow-env") {
-        options.capabilities.env = true;
-    } else if (arg == "--allow-clock") {
-        options.capabilities.clock = true;
-    } else if (arg == "--allow-entropy") {
-        options.capabilities.entropy = true;
-    } else if (arg == "--allow-native") {
-        options.capabilities.native = true;
-        options.allow_native_requested = true;
-    } else if (arg == "--deny-fs") {
-        options.capabilities.fs = false;
-        options.capabilities.fs_prefixes.clear();
-    } else if (arg == "--deny-net") {
-        options.capabilities.net = false;
-    } else if (arg == "--deny-env") {
-        options.capabilities.env = false;
-    } else if (arg == "--deny-clock") {
-        options.capabilities.clock = false;
-    } else if (arg == "--deny-entropy") {
-        options.capabilities.entropy = false;
-    } else if (arg == "--deny-native") {
-        options.capabilities.native = false;
-        options.allow_native_requested = false;
-    } else if (arg == "--deny-all") {
-        options.capabilities = {};
-        options.allow_native_requested = false;
-    } else {
-        return false;
-    }
-    return true;
-}
-
-// The commands that manage the installed tool take no files.
-void read_lifecycle_options(Options& options, int argc, char** argv) {
-    const std::string name = argv[1];
-    for (int i = 2; i < argc; ++i) {
-        const std::string_view arg = argv[i];
-        const auto value = [&]() -> std::string {
-            if (++i == argc) throw std::runtime_error("expected a value after " + std::string(arg));
-            return argv[i];
-        };
-        if (options.command == Command::Update && arg == "--check") {
-            options.update.check = true;
-        } else if (options.command == Command::Update && arg == "--nightly") {
-            options.update.nightly = true;
-        } else if (options.command == Command::Update && arg == "--source") {
-            options.update.source = value();
-        } else if (options.command == Command::Update && arg == "--require-attestation") {
-            options.update.require_attestation = true;
-        } else if (options.command == Command::Uninstall && arg == "--dry-run") {
-            options.uninstall.dry_run = true;
-        } else if (options.command == Command::Uninstall && arg == "--yes") {
-            options.uninstall.yes = true;
-        } else if (arg.starts_with('-')) {
-            throw std::runtime_error("unknown option for " + name + ": " + std::string(arg));
-        } else {
-            throw std::runtime_error(name + " takes no files");
-        }
-    }
-}
-
-Options read_options(int argc, char** argv) {
-    if (argc < 2) {
-        throw std::runtime_error(commands);
-    }
-    Options options;
-    options.executable = executable_path(argv[0]);
-    options.library = standard_library(options.executable);
-    const std::string_view command = argv[1];
-    if (command == "check") {
-        options.command = Command::Check;
-    } else if (command == "docs") {
-        options.command = Command::Docs;
-    } else if (command == "emit-ir") {
-        options.command = Command::EmitIr;
-    } else if (command == "build") {
-        options.command = Command::Build;
-    } else if (command == "inspect") {
-        options.command = Command::Inspect;
-    } else if (command == "run") {
-        options.command = Command::Run;
-    } else if (command == "test") {
-        options.command = Command::Test;
-    } else if (command == "disassemble") {
-        options.command = Command::Disassemble;
-    } else if (command == "assemble") {
-        options.command = Command::Assemble;
-    } else if (command == "decompile") {
-        options.command = Command::Decompile;
-    } else if (command == "c-bindings") {
-        options.command = Command::CBindings;
-    } else if (command == "--version" || command == "version") {
-        options.command = Command::Version;
-    } else if (command == "--help" || command == "help") {
-        options.command = Command::Help;
-    } else if (command == "doctor") {
-        options.command = Command::Doctor;
-    } else if (command == "update") {
-        options.command = Command::Update;
-    } else if (command == "uninstall") {
-        options.command = Command::Uninstall;
-    } else if (command == "tags") {
-        // The tag catalogue (docs/lang/Tags.md), or one tag's entry.
-        options.command = Command::Tags;
-        for (int i = 2; i < argc; ++i) {
-            const std::string_view arg = argv[i];
-            if (arg.starts_with('-')) throw std::runtime_error("unknown option for tags: " + std::string(arg));
-            if (!options.explain_code.empty()) throw std::runtime_error("tags takes at most one tag name");
-            options.explain_code = arg.starts_with('#') ? arg.substr(1) : arg;
-        }
-        return options;
-    } else if (command == "explain" || command == "--explain") {
-        options.command = Command::Explain;
-        for (int i = 2; i < argc; ++i) {
-            const std::string_view arg = argv[i];
-            if (arg == "--list") options.explain_list = true;
-            else if (arg.starts_with('-')) throw std::runtime_error("unknown option for explain: " + std::string(arg));
-            else if (!options.explain_code.empty()) throw std::runtime_error("explain takes one code");
-            else options.explain_code = arg;
-        }
-        if (options.explain_list == !options.explain_code.empty())
-            throw std::runtime_error("explain expects a code, such as `neura explain E0401`, or --list");
-        return options;
-    } else {
-        throw std::runtime_error(commands);
-    }
-    if (options.command >= Command::Version) {
-        read_lifecycle_options(options, argc, argv);
-        return options;
-    }
-    const bool runs = options.command == Command::Run || options.command == Command::Test;
-    const bool compiles = options.command == Command::Check || options.command == Command::EmitIr ||
-                          options.command == Command::Build || options.command == Command::Test ||
-                          options.command == Command::CBindings;
-    const bool single_input = options.command == Command::Run || options.command == Command::Disassemble ||
-                              options.command == Command::Assemble || options.command == Command::Decompile ||
-                              options.command == Command::CBindings || options.command == Command::Inspect;
-    const bool builds = options.command == Command::Build;
-    std::optional<std::string_view> first_policy_flag;
-    bool positional_only = false;
-    for (int i = 2; i < argc; ++i) {
-        const std::string_view arg = argv[i];
-        if (!positional_only && options.gpu.parse(arg, runs)) continue;
-        auto next = [&]() -> const char* {
-            if (++i == argc) {
-                throw std::runtime_error("expected a value after " + std::string(arg));
-            }
-            return argv[i];
-        };
-        if (!positional_only && (runs || builds) && parse_policy_option(options, arg, next)) {
-            if (builds && !first_policy_flag) first_policy_flag = arg;
-            continue;
-        }
-        if (positional_only) {
-            if (options.command == Command::Run) {
-                options.arguments.emplace_back(arg);
-            } else {
-                options.files.push_back(fs::canonical(argv[i]));
-            }
-        } else if (arg == "--") {
-            positional_only = true;
-        } else if (arg == "--list") {
-            if (options.command != Command::Test) throw std::runtime_error("--list applies only to test");
-            options.list_tests = true;
-        } else if (arg.starts_with("--format=")) {
-            if (options.command != Command::Test) throw std::runtime_error("--format applies only to test --list");
-            const auto format = arg.substr(9);
-            if (format != "json" && format != "human") throw std::runtime_error("--format expects json or human");
-            options.test_format_json = format == "json";
-            options.test_format_set = true;
-        } else if (arg == "--coverage" || arg.starts_with("--coverage=")) {
-            if (options.command != Command::Test) throw std::runtime_error("--coverage applies only to test");
-            const std::string_view path = arg == "--coverage" ? std::string_view(next()) : arg.substr(11);
-            if (path.empty()) throw std::runtime_error("--coverage expects an output JSON path");
-            options.test_coverage = fs::path(path);
-        } else if (arg == "--workspace-root") {
-            if (options.command != Command::Test) throw std::runtime_error("--workspace-root applies only to test");
-            const auto directory = fs::canonical(next());
-            if (!fs::is_directory(directory)) throw std::runtime_error("--workspace-root expects a directory");
-            options.test_workspace = directory;
-        } else if (arg == "--filter" || arg.starts_with("--filter=")) {
-            if (options.command != Command::Test) throw std::runtime_error("--filter applies only to test");
-            const std::string_view filter = arg == "--filter" ? std::string_view(next()) : arg.substr(9);
-            if (filter.empty()) throw std::runtime_error("--filter expects an exact test id");
-            options.test_filters.emplace_back(filter);
-        } else if (arg.starts_with("--reporter=")) {
-            if (options.command != Command::Test) throw std::runtime_error("--reporter applies only to test");
-            const auto reporter = arg.substr(11);
-            if (reporter != "json" && reporter != "human") throw std::runtime_error("--reporter expects json or human");
-            options.test_reporter_json = reporter == "json";
-        } else if (arg.starts_with("--error-format=")) {
-            const auto format = arg.substr(15);
-            if (format == "human") options.diagnostics.format = neura::cli::ErrorFormat::Human;
-            else if (format == "short") options.diagnostics.format = neura::cli::ErrorFormat::Short;
-            else if (format == "json") options.diagnostics.format = neura::cli::ErrorFormat::Json;
-            else throw std::runtime_error("--error-format expects human, short, or json");
-        } else if (arg.starts_with("--color=")) {
-            const auto choice = arg.substr(8);
-            if (choice == "auto") options.diagnostics.color = neura::cli::ColorChoice::Auto;
-            else if (choice == "always") options.diagnostics.color = neura::cli::ColorChoice::Always;
-            else if (choice == "never") options.diagnostics.color = neura::cli::ColorChoice::Never;
-            else throw std::runtime_error("--color expects auto, always, or never");
-        } else if (arg.starts_with("-W") || arg == "--warn-library") {
-            if (!compiles || options.command == Command::CBindings)
-                throw std::runtime_error(std::string(arg) + " applies only to check, emit-ir, build, and test");
-            if (arg == "--warn-library") {
-                options.diagnostics.library_warnings = true;
-            } else if (arg == "-Werror") {
-                options.diagnostics.warnings_are_errors = true;
-            } else {
-                const bool enable = !arg.starts_with("-Wno-");
-                const auto warning = arg.substr(enable ? 2 : 5);
-                if (warning.empty() || warning.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") !=
-                                           std::string_view::npos)
-                    throw std::runtime_error("expected a warning name after " + std::string(enable ? "-W" : "-Wno-"));
-                if (!neura::find_warning(warning)) {
-                    std::vector<std::string> names;
-                    for (const auto& entry : neura::warning_codes) names.emplace_back(entry.name);
-                    std::string message = "unknown warning '" + std::string(warning) + "'";
-                    if (const auto close = neura::closest_name(warning, names))
-                        message += "; did you mean " + *close + "?";
-                    else message += "; `neura explain --list` lists the warnings and their names";
-                    throw std::runtime_error(message);
-                }
-                options.diagnostics.warnings.insert_or_assign(std::string(warning), enable);
-            }
-        } else if (arg == "--max-errors" || arg.starts_with("--max-errors=")) {
-            if (!compiles) throw std::runtime_error("--max-errors applies only to check, emit-ir, build, and test");
-            const std::string_view text = arg == "--max-errors" ? std::string_view(next()) : arg.substr(13);
-            std::size_t limit = 0;
-            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), limit);
-            if (error != std::errc{} || end != text.data() + text.size() || limit == 0)
-                throw std::runtime_error("expected a positive integer after --max-errors");
-            neura::error_limit() = limit;
-        } else if (arg == "--fix") {
-            if (options.command != Command::Check) throw std::runtime_error("--fix applies only to check");
-            options.fix = true;
-        } else if (compiles && arg == "-I") {
-            const auto root = fs::canonical(next());
-            if (!fs::is_directory(root)) {
-                throw std::runtime_error("source root is not a directory: " + root.string());
-            }
-            options.roots.push_back(root);
-        } else if (arg == "--no-optimize") {
-            if (options.command != Command::EmitIr && options.command != Command::Build &&
-                options.command != Command::Test) {
-                throw std::runtime_error("--no-optimize applies only to emit-ir, build, and test");
-            }
-            options.optimize = false;
-        } else if (arg == "--no-provenance") {
-            if (options.command != Command::Decompile) {
-                throw std::runtime_error("--no-provenance applies only to decompile");
-            }
-            options.provenance = false;
-        } else if (arg == "--doxygen") {
-            if (options.command != Command::Docs)
-                throw std::runtime_error("--doxygen applies only to docs");
-            options.doxygen = true;
-        } else if (arg == "--native") {
-            if (options.command != Command::Build) throw std::runtime_error("--native applies only to build");
-            options.native_executable = true;
-        } else if (arg == "--sealed") {
-            if (!builds) throw std::runtime_error("--sealed applies only with --native");
-            options.sealed = true;
-            if (!first_policy_flag) first_policy_flag = arg;
-        } else if (arg == "--static" || arg == "--target" || arg == "--launcher") {
-            if (!builds) throw std::runtime_error(std::string(arg) + " applies only with --native");
-            if (!first_policy_flag) first_policy_flag = arg;
-            if (arg == "--static") {
-                options.static_launcher = true;
-            } else if (arg == "--target") {
-                const std::string triple = next();
-                if (options.native_target && *options.native_target != triple) {
-                    throw std::runtime_error("conflicting --target values");
-                }
-                if (triple.empty() || triple == "." || triple == ".." ||
-                    triple.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != std::string::npos) {
-                    throw std::runtime_error("--target expects an ELF target triple");
-                }
-                options.native_target = triple;
-            } else {
-                const fs::path file = next();
-                if (options.launcher && *options.launcher != file) throw std::runtime_error("conflicting --launcher values");
-                options.launcher = file;
-            }
-        } else if (arg == "--no-source-map") {
-            if (options.command != Command::Build) {
-                throw std::runtime_error("--no-source-map applies only to build");
-            }
-            options.source_map = false;
-        } else if (arg == "--no-lift-hints") {
-            if (options.command != Command::Build) {
-                throw std::runtime_error("--no-lift-hints applies only to build");
-            }
-            options.lift_hints = false;
-        } else if (arg == "--tier=0" || arg == "--tier=1" || arg == "--tier=2") {
-            if (!runs) throw std::runtime_error("--tier applies only to run and test");
-            options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');
-        } else if (arg.starts_with("--tier=")) {
-            throw std::runtime_error("--tier expects 0, 1, or 2");
-        } else if (arg.starts_with("--jit=")) {
-            if (!runs) throw std::runtime_error("--jit applies only to run and test");
-            if (!neura::jit::parse_mode(std::string(arg.substr(6)), options.limits.jit)) {
-                throw std::runtime_error("--jit expects off, on, or auto");
-            }
-        } else if (arg == "--tier-stats") {
-            if (!runs) throw std::runtime_error("--tier-stats applies only to run and test");
-            options.tier_stats = true;
-        } else if (arg == "-o") {
-            if (options.command != Command::Docs && options.command != Command::EmitIr &&
-                options.command != Command::Build && options.command != Command::Inspect &&
-                options.command != Command::Disassemble && options.command != Command::Assemble &&
-                options.command != Command::Decompile) {
-                throw std::runtime_error("-o applies only to docs, emit-ir, build, inspect, disassemble, assemble, and decompile");
-            }
-            options.output = fs::path(next());
-        } else if (options.command == Command::Run && arg == "--profile") {
-            options.limits.profile = true;
-        } else if (arg == "--max-tasks" || arg == "--task-quantum" || arg == "--max-queued-messages" ||
-                   arg == "--max-pending-requests" || arg == "--parallel-workers") {
-            // build --native records these in the executable's policy.
-            if (!runs && !builds) throw std::runtime_error(std::string(arg) + " applies only to run and test");
-            if (builds && !first_policy_flag) first_policy_flag = arg;
-            const auto value = parse_limit(arg, next());
-            if (arg == "--max-tasks") options.limits.max_tasks = value;
-            else if (arg == "--task-quantum") options.limits.task_quantum = value;
-            else if (arg == "--max-queued-messages") options.limits.max_queued_messages = value;
-            else if (arg == "--max-pending-requests") options.limits.max_pending_requests = value;
-            else if (value > 1024) throw std::runtime_error("--parallel-workers is at most 1024");
-            else options.limits.parallel_workers = static_cast<std::uint32_t>(value);
-        } else if (arg == "--task-dump" || arg.starts_with("--task-dump=")) {
-            if (!runs) throw std::runtime_error("--task-dump applies only to run and test");
-            const auto form = arg == "--task-dump" ? std::string_view("text") : arg.substr(12);
-            if (form == "text") options.task_dump = neura::nvm::TaskDumpFormat::Text;
-            else if (form == "json") options.task_dump = neura::nvm::TaskDumpFormat::Json;
-            else throw std::runtime_error("--task-dump expects text or json");
-        } else if (arg == "--show-derived" || arg.starts_with("--show-derived=")) {
-            if (options.command != Command::Check) throw std::runtime_error("--show-derived applies only to check");
-            if (arg == "--show-derived=") throw std::runtime_error("--show-derived= needs a module name");
-            options.show_derived = arg == "--show-derived" ? "" : std::string(arg.substr(15));
-        } else if (arg == "--task-safety") {
-            if (options.command != Command::Check) throw std::runtime_error("--task-safety applies only to check");
-            options.task_safety = true;
-        } else if (arg == "--trace-events") {
-            if (options.command != Command::Run) throw std::runtime_error("--trace-events applies only to run");
-            options.trace_events = fs::path(next());
-        } else if (arg == "--trace-wall-time") {
-            if (options.command != Command::Run) throw std::runtime_error("--trace-wall-time applies only to run");
-            options.trace_wall_time = true;
-        } else if (arg == "--virtual-time") {
-            if (!runs) throw std::runtime_error("--virtual-time applies only to run and test");
-            options.virtual_time = true;
-        } else if (arg == "--schedules" || arg == "--schedule-seed" || arg == "--save-schedule" || arg == "--schedule") {
-            if (options.command != Command::Test) throw std::runtime_error(std::string(arg) + " applies only to test");
-            if (arg == "--schedules") {
-                options.schedules = parse_limit(arg, next());
-                options.exploration_options = true;
-            } else if (arg == "--schedule-seed") {
-                const std::string_view digits(next());
-                const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(),
-                                                          options.schedule_seed);
-                if (digits.empty() || error != std::errc{} || end != digits.data() + digits.size()) {
-                    throw std::runtime_error("expected an unsigned integer after --schedule-seed");
-                }
-                options.exploration_options = true;
-            } else if (arg == "--save-schedule") {
-                options.save_schedule = fs::path(next());
-                options.exploration_options = true;
-            } else {
-                if (options.schedule) throw std::runtime_error("--schedule given more than once");
-                options.schedule = fs::path(next());
-            }
-        } else if (runs && arg == "--stats") {
-            options.stats = true;
-        } else if (compiles && arg == "--c-include") {
-            options.c_import.include_dirs.push_back(fs::canonical(next()).string());
-        } else if (compiles && arg == "--c-define") {
-            options.c_import.defines.emplace_back(next());
-        } else if (compiles && arg == "--libclang") {
-            options.c_import.libclang = next();
-        } else if (compiles && arg == "--cc") {
-            options.cc = next();
-        } else if (compiles && arg == "--c-link-arg") {
-            options.link_arguments.emplace_back(next());
-        } else if (options.command == Command::CBindings && arg == "--linked") {
-            options.linked = true;
-        } else if (options.command == Command::Run && arg == "--record") {
-            options.record = fs::path(next());
-        } else if (options.command == Command::Run && arg == "--replay") {
-            options.replay = fs::path(next());
-        } else if (arg == "--each") {
-            if (options.command != Command::Run) throw std::runtime_error("--each applies only to run");
-            if (options.each) throw std::runtime_error("--each given more than once");
-            options.each = fs::path(next());
-        } else if (arg.starts_with('-')) {
-            throw std::runtime_error("unknown option: " + std::string(arg));
-        } else if (options.command == Command::Run && !options.files.empty()) {
-            throw std::runtime_error("program arguments follow --");
-        } else if (single_input && !options.files.empty()) {
-            throw std::runtime_error("expected one input file");
-        } else {
-            options.files.push_back(fs::canonical(argv[i]));
-        }
-    }
-    if (options.test_coverage) {
-        if (options.list_tests) throw std::runtime_error("--coverage cannot be combined with --list");
-        // Count every source-mapped block, without optimizer removal or
-        // lifted/JIT regions bypassing the reference block observer.
-        options.optimize = false;
-        options.limits.tier = 0;
-        options.limits.jit = neura::jit::Mode::Off;
-        options.limits.parallel_workers = 1;
-        options.gpu = {};
-        options.gpu.mode = neura::cli::GpuMode::Off;
-    }
-    if (options.test_format_set && !options.list_tests)
-        throw std::runtime_error("--format requires test --list");
-    if (options.list_tests && options.test_reporter_json)
-        throw std::runtime_error("--reporter=json cannot be combined with --list; use --format=json");
-    if (options.test_format_json || options.test_reporter_json)
-        options.diagnostics.format = neura::cli::ErrorFormat::Json;
-    if (first_policy_flag && !options.native_executable) {
-        throw std::runtime_error(std::string(*first_policy_flag) + " applies only with --native");
-    }
-    if (options.files.empty()) {
-        throw std::runtime_error(options.command == Command::Run ? "expected an image file"
-                                                                : "expected at least one input file");
-    }
-    if (options.command == Command::Build && !options.output) {
-        throw std::runtime_error(options.native_executable ? "build --native requires -o <file>" : "build requires -o <file.nvr>");
-    }
-    if (options.show_derived && (options.fix || options.task_safety))
-        throw std::runtime_error("--show-derived cannot be combined with --fix or --task-safety");
-    if (options.fix && options.task_safety) {
-        throw std::runtime_error("--fix cannot be combined with --task-safety");
-    }
-    if (options.doxygen && options.files.size() != 1) {
-        throw std::runtime_error("--doxygen requires one source file");
-    }
-    if (options.command == Command::Assemble && !options.output) {
-        throw std::runtime_error("assemble requires -o <file.nvr>");
-    }
-    if (options.each) {
-        if (options.record) throw std::runtime_error("--each cannot be combined with --record");
-        if (options.replay) throw std::runtime_error("--each cannot be combined with --replay");
-        if (options.limits.profile) throw std::runtime_error("--each cannot be combined with --profile");
-        if (options.virtual_time) throw std::runtime_error("--each cannot be combined with --virtual-time");
-    }
-    if (options.virtual_time && options.replay) {
-        throw std::runtime_error("--virtual-time cannot be combined with --replay: a replay takes its clock from the trace");
-    }
-    if (options.schedule && options.exploration_options) {
-        throw std::runtime_error("--schedule cannot be combined with --schedules, --schedule-seed, or --save-schedule");
-    }
-    if (options.record && options.replay) {
-        throw std::runtime_error("--record and --replay cannot be combined");
-    }
-    if (runs) options.gpu.read_environment();
-    options.gpu.validate();
-    return options;
-}
-
-bool is_nir_input(const fs::path& path) {
-    return path.extension() == ".nir";
-}
-
-bool has_image_magic(std::span<const std::uint8_t> bytes) {
-    return bytes.size() >= 4 && std::ranges::equal(bytes.first(4), std::string_view("NEUR"));
-}
-
-// Runs `arguments` and returns its exit status, with standard output and
-// standard error in `output`.
-int run_command(const std::vector<std::string>& arguments, std::string& output, const fs::path& log) {
-    std::string command;
-    for (const auto& argument : arguments) {
-        command += command.empty() ? "" : " ";
-        command += "'";
-        for (const char c : argument) {
-            if (c == '\'') command += "'\\''";
-            else command += c;
-        }
-        command += "'";
-    }
-    command += " > '" + log.string() + "' 2>&1";
-    const int status = std::system(command.c_str());
-    std::ifstream input(log);
-    output.assign(std::istreambuf_iterator<char>{input}, {});
-    return status;
-}
-
-// Links the static libraries of the program's C imports, and wrappers for
-// their inline functions, into one shared object for the image's NATV
-// section (ForeignInterop.md, C imports).
-void link_native(neura::IrProgram& program, const Options& options) {
-    if (program.native_units.empty()) return;
-#ifdef _WIN32
-    throw std::runtime_error("linking C imports is not supported on Windows in this release");
-#else
-    std::error_code ignored;
-    const auto directory = fs::temp_directory_path() / ("neura-link-" + std::to_string(::getpid()));
-    fs::remove_all(directory, ignored);
-    fs::create_directories(directory);
-    std::string shim = "/* Wrappers generated by neura for C imports. */\ntypedef int neura_native_unit;\n";
-    std::vector<std::string> libraries;
-    std::set<std::string> include_dirs;
-    std::set<std::string> symbols;
-    for (const auto& unit : program.native_units) {
-        shim += unit.shim;
-        if (!neura::is_system_header_directory(fs::path(unit.header).parent_path()))
-            include_dirs.insert(fs::path(unit.header).parent_path().string());
-        for (const auto& library : unit.libraries)
-            if (std::find(libraries.begin(), libraries.end(), library) == libraries.end()) libraries.push_back(library);
-        symbols.insert(unit.symbols.begin(), unit.symbols.end());
-    }
-    {
-        std::ofstream file(directory / "neura-native.c");
-        file << shim;
-    }
-    std::string compiler = options.cc;
-    if (compiler.empty()) {
-        const char* environment = std::getenv("CC");
-        compiler = environment != nullptr && *environment != '\0' ? environment : "cc";
-    }
-#ifdef __APPLE__
-    // A Mach-O dynamic library: the install name is fixed so that the bytes
-    // do not depend on the scratch directory, and each archive is loaded
-    // whole, as --whole-archive does for an ELF link.
-    constexpr const char* object_name = "neura-native.dylib";
-    std::vector<std::string> command{compiler, "-dynamiclib", "-fPIC", "-O2", "-o", (directory / object_name).string(),
-                                     (directory / "neura-native.c").string(),
-                                     "-ffile-prefix-map=" + directory.string() + "=.", "-Wl,-install_name,neura-native"};
-#else
-    constexpr const char* object_name = "neura-native.so";
-    std::vector<std::string> command{compiler, "-shared", "-fPIC", "-O2", "-o", (directory / object_name).string(),
-                                     (directory / "neura-native.c").string(),
-                                     "-ffile-prefix-map=" + directory.string() + "=.", "-Wl,--build-id=none"};
-#endif
-    for (const auto& dir : include_dirs) command.push_back("-I" + dir);
-    for (const auto& dir : options.c_import.include_dirs) command.push_back("-I" + dir);
-    for (const auto& define : options.c_import.defines) command.push_back("-D" + define);
-#ifdef __APPLE__
-    // -force_load takes archives only; an object file is always linked whole.
-    for (const auto& library : libraries)
-        command.push_back(fs::path(library).extension() == ".a" ? "-Wl,-force_load," + library : library);
-#else
-    if (!libraries.empty()) {
-        command.push_back("-Wl,--whole-archive");
-        command.insert(command.end(), libraries.begin(), libraries.end());
-        command.push_back("-Wl,--no-whole-archive");
-    }
-#endif
-    command.insert(command.end(), options.link_arguments.begin(), options.link_arguments.end());
-    std::string output;
-    const auto status = run_command(command, output, directory / "link.log");
-    if (status != 0) {
-        fs::remove_all(directory, ignored);
-        std::string message = "linking the native library of the C imports failed:\n" + output;
-        if (output.find("-fPIC") != std::string::npos || output.find("relocation") != std::string::npos)
-            message += "hint: a static library linked into an image must be compiled with -fPIC\n";
-        throw std::runtime_error(message);
-    }
-    const auto object = read_file(directory / object_name);
-    fs::remove_all(directory, ignored);
-    neura::IrNativeLibrary library;
-    library.triple = neura::nvm::native_target_triple();
-    library.object = object;
-    library.symbols.assign(symbols.begin(), symbols.end());
-    program.native_library = std::move(library);
-    program.native_units.clear();
-#endif
-}
-
-neura::IrProgram load_source_program(const Options& options) {
-    auto roots = options.roots;
-    for (const auto& file : options.files) {
-        roots.push_back(file.parent_path());
-    }
-    neura::set_c_import_options(options.c_import);
-    auto program = neura::lower_sources(options.files, roots, options.library);
-    if (options.command != Command::Check) link_native(program, options);
-    return program;
-}
-
-int c_bindings(const Options& options) {
-    neura::set_c_import_options(options.c_import);
-    std::cout << neura::c_import_source(options.files.front(), options.roots, options.linked);
-    return 0;
-}
-
-// Loads the program from source files or from one .nir file.
-neura::IrProgram load_program(const Options& options) {
-    const bool nir = std::any_of(options.files.begin(), options.files.end(), is_nir_input);
-    if (!nir) return load_source_program(options);
-    if (options.files.size() != 1) {
-        throw std::runtime_error("a .nir input must be the only input file");
-    }
-    if (!options.roots.empty()) {
-        throw std::runtime_error("-I applies only to source inputs");
-    }
-    const auto bytes = read_file(options.files.front());
-    try {
-        return neura::read_nir(bytes, options.files.front().string());
-    } catch (const neura::NirError& error) {
-        throw std::runtime_error(error.what());
-    }
-}
-
-int emit_ir(const Options& options) {
-    auto program = load_program(options);
-    if (options.output) {
-        // .nir holds NeuraIR as lowered, before optimization.
-        neura::require_valid_ir(program, "before writing .nir");
-        write_file(options.output.value(), neura::write_nir(program));
-        return 0;
-    }
-    // Unoptimized emission shows lowering's output and skips verification, so
-    // that IR produced by a faulty lowering can still be inspected. The
-    // default listing is what conversion receives: specialized and optimized.
-    if (options.optimize) {
-        neura::require_valid_ir(program, "before specialization");
-        neura::specialize(program);
-        neura::check_storage(program, neura::StorageStage::Specialized);
-        neura::materialize_reference_storage(program);
-        neura::elaborate_class_hooks(program);
-        neura::optimize(program);
-    }
-    neura::print_ir(std::cout, program);
-    return 0;
-}
-
-std::vector<std::uint8_t> build_image_bytes(const Options& options) {
-    const bool nvr_input = std::ranges::any_of(options.files, [](const fs::path& file) { return file.extension() == ".nvr"; });
-    if (nvr_input) {
-        if (!options.native_executable) {
-            throw std::runtime_error("build takes sources or one .nir file; packaging a .nvr needs --native");
-        }
-        if (options.files.size() != 1) throw std::runtime_error("a .nvr input must be the only input file");
-        if (!options.roots.empty()) throw std::runtime_error("-I applies only to source inputs");
-        if (!options.optimize) throw std::runtime_error("--no-optimize cannot be applied to an image that is already built");
-        if (!options.source_map) throw std::runtime_error("--no-source-map cannot be applied to an image that is already built");
-        if (!options.lift_hints) {
-            // Hints are optional metadata: stripping them from a built image
-            // changes nothing it does.
-            auto image = neura::nvr::load(read_file(options.files.front()));
-            neura::lift::strip_hints(image);
-            return neura::nvr::encode(image);
-        }
-        if (fs::file_size(options.files.front()) >= (std::uint64_t{1} << 32)) {
-            throw std::runtime_error("native executable: image must be smaller than 4 GiB");
-        }
-        return read_file(options.files.front());
-    }
-    neura::backend::BuildOptions build_options;
-    build_options.optimize = options.optimize;
-    build_options.source_map = options.source_map;
-    build_options.lift_hints = options.lift_hints;
-    const auto conversion = neura::backend::build(load_program(options), build_options);
-    return neura::nvr::encode(conversion.image);
-}
-
-void note_denied_imports(const neura::nvr::Image& image, const neura::nvm::Capabilities& capabilities) {
-    struct Group {
-        std::string_view flag;
-        std::string_view prefix;
-        bool granted;
-    };
-    const Group groups[] = {
-        {"fs", "neura.fs.", capabilities.fs}, {"net", "neura.net.", capabilities.net},
-        {"env", "neura.env.", capabilities.env}, {"clock", "neura.clock.", capabilities.clock},
-        {"entropy", "neura.entropy.", capabilities.entropy}, {"native", "neura.ffi.", capabilities.native},
-    };
-    for (const auto& group : groups) {
-        if (!group.granted && std::ranges::any_of(image.imports, [&](const auto& import) {
-            return import.name.starts_with(group.prefix);
-        })) {
-            std::cerr << "neura: note: the image uses " << group.flag << " services, which are denied; they fail with CapabilityDenied\n";
-        }
-    }
-}
-
-void package_native(const Options& options, std::span<const std::uint8_t> bytes) {
-    constexpr const char* static_interop_error =
-        "--static: the image uses native interop, which the static launcher does not provide";
-    if (options.static_launcher && options.allow_native_requested) throw std::runtime_error(static_interop_error);
-    const auto triple = options.native_target.value_or(neura::nvm::native_target_triple());
-    auto prefix = options.executable.parent_path();
-    if (prefix.filename() == "bin") prefix = prefix.parent_path();
-    const auto directory = prefix / "lib/neura/launchers" / triple;
-    const auto file = options.launcher.value_or(directory / (options.static_launcher ? "neura-launcher-static" : "neura-launcher"));
-    if (!fs::is_regular_file(file)) {
-        if (options.launcher) throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
-        if (triple.ends_with("-apple-darwin")) {
-            throw std::runtime_error("--native: Neura has no native launcher for macOS (" + triple +
-                                     "); native executables are built for Linux targets only. Run the image with "
-                                     "'neura run' instead");
-        }
-        throw std::runtime_error("--native: no launcher for " + triple + " in " + directory.string() +
-                                 "; pass --launcher or install one");
-    }
-    const auto launcher = read_file(file);
-    const auto descriptor = neura::launcher::read_descriptor(launcher);
-    if (!descriptor || descriptor->nvr_major != neura::nvr::major_version ||
-        (!options.launcher && (descriptor->triple != triple || descriptor->flavor != unsigned{options.static_launcher}))) {
-        throw std::runtime_error("--native: " + file.string() + " is not a Neura launcher");
-    }
-    if (options.native_target && descriptor->triple != triple) {
-        throw std::runtime_error("--target: launcher is for " + descriptor->triple + ", expected " + triple);
-    }
-    if (options.static_launcher && descriptor->flavor == 0) {
-        throw std::runtime_error("--static: " + file.string() + " is a default launcher");
-    }
-    if (bytes.size() >= 8 && has_image_magic(bytes)) {
-        const unsigned major = bytes[4] | (unsigned{bytes[5]} << 8);
-        const unsigned minor = bytes[6] | (unsigned{bytes[7]} << 8);
-        if (major == 1 && minor > descriptor->nvr_minor) {
-            throw std::runtime_error("--native: the image is NVR 1." + std::to_string(minor) +
-                                     "; this launcher runs up to 1." + std::to_string(descriptor->nvr_minor));
-        }
-    }
-    const auto image = neura::nvr::load(bytes);
-    if (image.native_library && image.native_library->triple != descriptor->triple) {
-        throw std::runtime_error("--native: the image's native library is for " + image.native_library->triple +
-                                 "; the launcher is for " + descriptor->triple);
-    }
-    // The static launcher has no native interop, so the default policy it
-    // records grants every group except native code.
-    auto capabilities = options.capabilities;
-    if (descriptor->flavor == 1) capabilities.native = false;
-    if (descriptor->flavor == 1 && (options.allow_native_requested || image.native_library ||
-        std::ranges::any_of(image.imports, [](const auto& import) { return import.name.starts_with("neura.ffi."); }))) {
-        throw std::runtime_error(static_interop_error);
-    }
-    const neura::launcher::Policy policy{capabilities, options.limits, options.sealed};
-    neura::launcher::write_executable(*options.output, launcher, bytes, policy);
-    note_denied_imports(image, policy.capabilities);
-}
-
-int build(const Options& options) {
-    const auto bytes = build_image_bytes(options);
-    if (options.native_executable) {
-        package_native(options, bytes);
-        return 0;
-    }
-    // Load the encoded image before publishing it, so that a writer or
-    // converter fault cannot produce an executable the runtime rejects.
-    neura::nvr::load(bytes);
-    write_file(options.output.value(), bytes);
-    return 0;
-}
-
-neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count = nullptr) {
-    try {
-        auto bytes = read_file(path);
-        if (!has_image_magic(bytes) && neura::launcher::is_container(bytes)) {
-            bytes = neura::launcher::read_container(bytes).image;
-        }
-        auto image = neura::nvr::load(bytes);
-        if (byte_count) *byte_count = bytes.size();
-        return image;
-    } catch (const neura::nvr::LoadError& error) {
-        throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
-                                 error.what());
-    }
-}
-
-int inspect(const Options& options) {
-    const auto& path = options.files.front();
-    const auto bytes = read_file(path);
-    if (!neura::launcher::is_container(bytes) && !neura::launcher::read_descriptor(bytes)) {
-        throw std::runtime_error(path.string() + ": not a native executable (no NEURAEXE footer)");
-    }
-    const auto executable = neura::launcher::read_container(bytes);
-    const auto descriptor = neura::launcher::read_descriptor(std::span(bytes).first(executable.launcher_size));
-    if (!descriptor) throw std::runtime_error(path.string() + ": not a Neura launcher");
-    const auto image = neura::nvr::load(executable.image);
-    if (options.output) write_file(*options.output, executable.image);
-
-    const auto& policy = executable.policy;
-    const auto& caps = policy.capabilities;
-    std::cout << "native executable: " << path.filename().string() << '\n'
-              << "launcher: neura " << descriptor->toolchain_version << ", " << descriptor->triple << ", "
-              << (descriptor->flavor == 0 ? "default" : "static") << ", runs NVR up to "
-              << descriptor->nvr_major << '.' << descriptor->nvr_minor << '\n'
-              << "capabilities: console, process exit";
-    if (caps.fs) {
-        std::cout << ", files";
-        if (!caps.fs_prefixes.empty()) {
-            std::cout << " (" << caps.fs_prefixes.front();
-            for (const auto& prefix : std::span(caps.fs_prefixes).subspan(1)) std::cout << ", " << prefix;
-            std::cout << ')';
-        }
-    }
-    if (caps.net) std::cout << ", network";
-    if (caps.env) std::cout << ", environment";
-    if (caps.clock) std::cout << ", clock";
-    if (caps.entropy) std::cout << ", entropy";
-    if (caps.native) std::cout << ", native";
-    std::cout << "\nlimits: steps " << policy.limits.max_steps << ", frames " << policy.limits.max_frames
-              << ", heap cells " << policy.limits.max_heap_cells << ", stack cells " << policy.limits.max_stack_cells
-              << (executable.version < 3
-                      ? " (default: container version " + std::to_string(executable.version) + " records none)"
-                      : "")
-              << "\ntasks: at most " << policy.limits.max_tasks << ", quantum " << policy.limits.task_quantum
-              << ", queued messages " << policy.limits.max_queued_messages << ", pending requests "
-              << policy.limits.max_pending_requests << ", parallel workers " << policy.limits.parallel_workers
-              << (executable.version < 2 ? " (defaults: container version 1 records none)" : "")
-              << "\nrun options: " << (policy.sealed ? "sealed" : "accepted")
-              << "\nimage: " << executable.image.size() << " bytes, NVR 1." << image.minor_version
-              << ", " << image.graphs.size() << " graphs, source map " << (image.source_map ? "present" : "absent")
-              << ", native library " << (image.native_library ? "present" : "absent") << '\n';
-    return 0;
-}
-
-void write_text(const Options& options, const std::string& text) {
-    if (options.output) {
-        write_file(*options.output, std::vector<std::uint8_t>(text.begin(), text.end()));
-    } else {
-        std::cout << text;
-    }
-}
-
-int docs(const Options& options) {
-    std::ostringstream index;
-    if (options.doxygen) neura::write_doxygen_source(index, options.files.front());
-    else neura::write_source_docs(index, options.files);
-    write_text(options, std::move(index).str());
-    return 0;
-}
-
-int disassemble(const Options& options) {
-    write_text(options, neura::decompiler::disassemble(load_image(options.files.front())));
-    return 0;
-}
-
-int decompile(const Options& options) {
-    neura::decompiler::DecompileOptions decompile_options;
-    decompile_options.provenance = options.provenance;
-    write_text(options, neura::decompiler::decompile(load_image(options.files.front()), decompile_options).text);
-    return 0;
-}
-
-int assemble(const Options& options) {
-    const auto bytes = read_file(options.files.front());
-    neura::nvr::Image image;
-    try {
-        image = neura::decompiler::assemble(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
-    } catch (const neura::decompiler::AssemblyError& error) {
-        throw std::runtime_error(options.files.front().string() + ": " + error.what());
-    }
-    std::vector<std::uint8_t> encoded;
-    try {
-        encoded = neura::nvr::encode(image);
-        // The assembled image passes the same validation as any other.
-        neura::nvr::load(encoded);
-    } catch (const std::invalid_argument& error) {
-        throw std::runtime_error(options.files.front().string() + ": cannot encode the image: " + error.what());
-    } catch (const neura::nvr::LoadError& error) {
-        throw std::runtime_error(options.files.front().string() + ": the assembled image is " +
-                                 std::string(neura::nvr::describe(error.kind)) + ": " + error.what());
-    }
-    write_file(*options.output, encoded);
-    return 0;
-}
-
-// The exact sum of up to 1,048,576 uint64 counters fits in these two decimal parts.
-struct MemberTotal {
-    void add(std::uint64_t value) {
-        low += value % base;
-        high += value / base + low / base;
-        low %= base;
-    }
-
-    std::string text() const {
-        const auto tail = std::to_string(low);
-        if (high == 0) return tail;
-        return std::to_string(high) + std::string(18 - tail.size(), '0') + tail;
-    }
-
-private:
-    static constexpr std::uint64_t base = 1'000'000'000'000'000'000;
-    std::uint64_t high = 0;
-    std::uint64_t low = 0;
-};
-
-// The lifted blocks shared by every run of one image (docs/runtime/NVM.md,
-// "Execution tiers"), unless the runs use a graph device or tier 0.
-std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image, neura::nvm::RunLimits& limits,
-                                                  const neura::nvm::GraphDevice* device) {
-    std::unique_ptr<neura::nvm::TierCache> cache;
-    if (!device && std::min(limits.tier, neura::nvm::tier_ceiling()) >= 1) {
-        cache = std::make_unique<neura::nvm::TierCache>(image);
-        limits.tier_cache = cache.get();
-    }
-    return cache;
-}
-
-// --tier-stats: the timeline of the runs of one command, from `started`, or
-// none when they cannot be timed (neura::runner::times_runs).
-std::optional<neura::nvm::TierTimes> tier_times(const neura::nvm::RunLimits& limits,
-                                                std::optional<std::chrono::steady_clock::time_point> started,
-                                                bool device) {
-    std::optional<neura::nvm::TierTimes> times;
-    if (started && !device && neura::runner::times_runs(limits)) times.emplace(*started);
-    return times;
-}
-
-void report_tiers(const Options& options, const std::unique_ptr<neura::nvm::TierCache>& cache,
-                  const std::optional<neura::nvm::TierTimes>& times) {
-    if (!options.tier_stats) return;
-    std::cerr << (cache ? neura::nvm::describe(cache->statistics()) : std::string("tier: tier 0\n"));
-    if (times) std::cerr << times->describe(std::chrono::steady_clock::now());
-}
-
-int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
-             std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes, neura::nvm::GraphDevice* device,
-             std::optional<std::chrono::steady_clock::time_point> started) {
-    const auto& path = options.files.front();
-    const auto bindings = neura::nvm::bind(image, host.registry);
-    const auto report_prefix = path.string() + ": " + options.each->string() + ':';
-    MemberTotal steps;
-    MemberTotal requests;
-    std::uint64_t peak_heap_cells = 0;
-    std::uint64_t peak_stack_cells = 0;
-    int first_status = 0;
-    const auto finished = [&](std::size_t member, const neura::nvm::RunResult& result) {
-        host.services.end_run();
-        if (options.stats) {
-            steps.add(result.steps);
-            requests.add(result.host_requests);
-            peak_heap_cells = std::max(peak_heap_cells, result.peak_heap_cells);
-            peak_stack_cells = std::max(peak_stack_cells, result.peak_stack_cells);
-        }
-        const auto status = result.completed ? result.status : neura::nvm::exit_status(result.trap);
-        if (!result.completed) {
-            std::cerr << report_prefix << lists[member].line << ": trap: "
-                      << neura::nvm::describe(result.trap, image) << '\n';
-        } else if (status != 0) {
-            std::cerr << report_prefix << lists[member].line << ": exit status " << status << '\n';
-        }
-        if (first_status == 0) first_status = status;
-    };
-
-    const auto append_list = [](std::vector<std::string>& arguments, std::vector<std::string>& listed) {
-        arguments.insert(arguments.end(), std::make_move_iterator(listed.begin()), std::make_move_iterator(listed.end()));
-    };
-    neura::runner::TaskDumps dumps(options.task_dump);
-    auto limits = options.limits;
-    limits.task_dump = dumps.request();
-    const auto tiers = tier_cache(image, limits, device);
-    // Without a device the members run one after another on one timeline.
-    auto times = tier_times(limits, started, device != nullptr);
-    if (times) limits.tier_times = &*times;
-    if (device) {
-        neura::nvm::Fleet fleet(image, {limits, device});
-        for (auto& list : lists) {
-            if (options.arguments.empty()) {
-                fleet.add(image.entry, std::move(list.arguments));
-            } else {
-                auto arguments = options.arguments;
-                append_list(arguments, list.arguments);
-                fleet.add(image.entry, std::move(arguments));
-            }
-        }
-        neura::nvm::run_fleet(fleet, bindings, finished);
-    } else {
-        auto arguments = options.arguments;
-        for (std::size_t member = 0; member < lists.size(); ++member) {
-            arguments.resize(options.arguments.size());
-            append_list(arguments, lists[member].arguments);
-            finished(member, neura::nvm::run(image, bindings, arguments, limits));
-        }
-    }
-    if (options.stats) {
-        std::cerr << "stats: members " << lists.size() << ", steps " << steps.text()
-                  << ", peak heap cells " << peak_heap_cells
-                  // Only an image that uses regions reports their cells (NVR 1.7).
-                  << (neura::nvr::uses_regions(image) ? ", peak stack cells " + std::to_string(peak_stack_cells)
-                                                      : std::string())
-                  << ", host requests " << requests.text()
-                  << ", " << image_costs(image) << ", image bytes " << image_bytes << '\n';
-    }
-    report_tiers(options, tiers, times);
-    return first_status;
-}
-
-int run(const Options& options) {
-    // --tier-stats times the command from before the image is read.
-    const auto started = options.tier_stats ? std::optional(std::chrono::steady_clock::now()) : std::nullopt;
-    const auto& path = options.files.front();
-    std::size_t image_bytes = 0;
-    const auto image = load_image(path, &image_bytes);
-    auto lists = options.each ? neura::cli::read_argument_lists(*options.each) : std::vector<neura::cli::ArgumentList>{};
-    const auto max_jobs = options.each ? std::min<std::size_t>(lists.size(), neura::nvm::FleetOptions{}.window) : 1;
-    neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
-#ifdef _WIN32
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
-    Host host(options.capabilities);
-    provide_native_library(image, host.services);
-    if (options.each) {
-        return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device(), started), options.stats);
-    }
-    neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay,
-                                          options.task_dump, options.trace_events, options.trace_wall_time};
-    run_options.limits.graph_device = gpu.device();
-    run_options.virtual_time = options.virtual_time;
-    run_options.tier_stats = options.tier_stats;
-    run_options.started = started;
-    const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
-    return gpu.finish(status, options.stats);
-}
-
-// The source location of a block, when the image has a source map entry.
-std::optional<neura::nvr::SourceLocation> block_location(const neura::nvr::Image& image, std::uint32_t function,
-                                                         std::uint32_t block) {
-    if (!image.source_map) return std::nullopt;
-    for (const auto& entry : *image.source_map) {
-        if (entry.function == function && entry.block == block) return entry;
-    }
-    return std::nullopt;
-}
-
-// A message trap (reason 3) reports its message, such as a failed Std.Test
-// assertion's text, at the innermost frame that belongs to one of the listed
-// test files: the assertion's call site rather than the library line that
-// trapped. Other traps keep their runtime diagnostic.
-std::optional<std::string> test_failure_message(const neura::nvm::Trap& trap, const neura::nvr::Image& image,
-                                                const std::set<std::string>& test_labels) {
-    if (trap.kind != neura::nvm::TrapKind::Program ||
-        trap.reason != static_cast<std::uint32_t>(neura::nvr::TrapReason::ProgramFailure) ||
-        trap.function == neura::nvr::absent) {
-        return std::nullopt;
-    }
-    auto text = trap.detail;
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> frames{{trap.function, trap.block}};
-    frames.insert(frames.end(), trap.callers.begin(), trap.callers.end());
-    for (const auto& [function, block] : frames) {
-        const auto location = block_location(image, function, block);
-        if (location && test_labels.contains(location->path)) {
-            return text + " at " + location->path + ":" + std::to_string(location->line) + ":" +
-                   std::to_string(location->column);
-        }
-    }
-    if (const auto location = block_location(image, trap.function, trap.block)) {
-        text += " at " + location->path + ":" + std::to_string(location->line) + ":" +
-                std::to_string(location->column);
-    }
-    return text;
-}
-
-// Testing.md: every exported, zero-argument, void function whose name starts
-// with test_ in a module of the listed files is a test. Each test runs in a
-// fresh execution of one image, so no state carries over between tests.
-int run_tests(const Options& options) {
-    // Discovery does semantic analysis but never links native code, converts
-    // circuits, initializes modules, or executes any user function.
-    auto analysis_options = options;
-    if (options.list_tests) analysis_options.command = Command::Check;
-    auto program = load_program(analysis_options);
-    if (options.test_coverage) {
-        for (const auto& item : program.symbols) {
-            if (item.kind != neura::SymbolKind::File) continue;
-            const auto file = item.span.file.empty() ? item.name : item.span.file;
-            std::error_code error;
-            if (!file.empty() && fs::equivalent(*options.test_coverage, file, error) && !error)
-                throw std::runtime_error("coverage output must not replace a source file: " + file);
-        }
-    }
-    neura::require_valid_ir(program, "before specialization");
-    auto catalog = neura::tooling::discover_tests(program, options.files,
-                                                   options.test_workspace.value_or(fs::current_path()));
-    if (!options.test_filters.empty()) {
-        const std::set<std::string> selected(options.test_filters.begin(), options.test_filters.end());
-        for (const auto& id : selected) {
-            if (std::ranges::none_of(catalog, [&](const auto& item) { return item.id == id; }))
-                throw std::runtime_error("unknown test id: " + id + "; use test --list --format=json");
-        }
-        std::erase_if(catalog, [&](const auto& item) { return !selected.contains(item.id); });
-    }
-    if (options.list_tests) {
-        if (options.test_format_json) {
-            neura::tooling::Json records = neura::tooling::Json::Array{};
-            for (const auto& test : catalog) records.push_back(neura::tooling::test_info_json(test));
-            std::cout << neura::tooling::Json{{"version", 1}, {"tests", std::move(records)}}.dump() << '\n';
-        } else {
-            for (const auto& test : catalog) std::cout << test.id << '\n';
-        }
-        return 0;
-    }
-    std::vector<neura::SymbolId> tests;
-    std::vector<std::string> names;
-    for (const auto& test : catalog) {
-        tests.push_back(test.symbol);
-        names.push_back(test.label);
-    }
-    if (tests.empty()) {
-        throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
-                                 "test_* in a module of the listed files");
-    }
-    neura::specialize(program);
-    neura::check_storage(program, neura::StorageStage::Specialized);
-    neura::materialize_reference_storage(program);
-    neura::check_containment(program);
-    neura::check_inline_limit(program);
-    neura::elaborate_class_hooks(program);
-    if (options.optimize) {
-        neura::optimize(program);
-    } else {
-        neura::require_valid_ir(program, "before conversion");
-    }
-    neura::backend::ConversionOptions conversion_options;
-    conversion_options.entries = tests;
-    if (options.test_coverage) {
-        // Emit concrete project functions even when no selected test calls
-        // them, so their mapped locations appear as unexecuted coverage.
-        for (const auto& body : program.bodies) {
-            const auto& item = program.symbols[body.owner];
-            auto owner = body.owner;
-            while (owner < program.symbols.size() && program.symbols[owner].kind != neura::SymbolKind::File)
-                owner = program.symbols[owner].owner;
-            if (owner >= program.symbols.size() || !program.symbols[owner].library_path.empty() ||
-                !item.generics.empty() || item.span.file.empty() || !fs::is_regular_file(item.span.file)) continue;
-            conversion_options.extra_functions.push_back(body.owner);
-        }
-    }
-    auto conversion = neura::backend::convert(program, conversion_options);
-    // --tier-stats times the tests from the loading of their built image.
-    std::optional<neura::nvm::TierTimes> times;
-    if (options.tier_stats) times.emplace(std::chrono::steady_clock::now());
-    auto image = neura::nvr::load(neura::nvr::encode(conversion.image));
-    std::unique_ptr<neura::tooling::LineCoverage> coverage;
-    if (options.test_coverage) {
-        std::map<std::string, fs::path> sources;
-        std::map<std::string, fs::path> all_labels;
-        for (const auto& item : program.symbols) {
-            if (item.kind != neura::SymbolKind::File) continue;
-            const auto file = item.span.file.empty() ? item.name : item.span.file;
-            if (file.empty() || !fs::is_regular_file(file)) continue;
-            const auto path = fs::canonical(file);
-            const auto label = neura::backend::source_label(program, file);
-            const auto [previous, inserted] = all_labels.try_emplace(label, path);
-            if (!inserted && previous->second != path)
-                throw std::runtime_error("coverage: source-map path '" + label +
-                                         "' names more than one file; use separate source roots");
-            if (item.library_path.empty()) sources.insert_or_assign(label, path);
-        }
-        coverage = std::make_unique<neura::tooling::LineCoverage>(image, sources);
-    }
-    const auto max_jobs = std::min<std::size_t>(tests.size(), neura::nvm::FleetOptions{}.window);
-    neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
-
-#ifdef _WIN32
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
-    std::set<std::string> test_labels;
-    for (const auto& file : options.files) {
-        test_labels.insert(neura::backend::source_label(program, file.generic_string()));
-    }
-    std::unique_ptr<neura::tooling::TestReporter> reporter;
-    if (options.test_reporter_json) {
-        reporter = std::make_unique<neura::tooling::TestReporter>();
-        reporter->event("runStart", {{"count", options.schedule ? std::size_t{1} : tests.size()}});
-    }
-    std::unique_ptr<neura::tooling::TestOutputCapture> captured;
-    std::vector<std::chrono::steady_clock::time_point> started(tests.size());
-    const auto begin = [&](std::size_t i) {
-        if (!reporter) return;
-        reporter->event("testStart", neura::tooling::test_info_json(catalog[i]));
-        started[i] = std::chrono::steady_clock::now();
-        captured = std::make_unique<neura::tooling::TestOutputCapture>(
-            [&, i](std::string_view stream, std::string_view text) {
-                reporter->event("output", neura::tooling::test_output_json(catalog[i].id, stream, text));
-            });
-    };
-    Host host(options.capabilities);
-    provide_native_library(image, host.services);
-    const auto bindings = neura::nvm::bind(image, host.registry);
-    std::size_t failed = 0;
-    std::optional<std::size_t> saved_schedule_test;
-    // `note` follows the test's name: which schedule failed, or how many ran.
-    const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result, const std::string& note = {},
-                              const std::string& forced_failure = {}) {
-        // Each test is its own run: files and sockets it left open close now.
-        host.services.end_run();
-        std::string message = forced_failure;
-        if (message.empty() && result.completed && result.status != 0)
-            message = "the test exited with status " + std::to_string(result.status);
-        if (message.empty() && !result.completed) {
-            if (const auto assertion = test_failure_message(result.trap, image, test_labels)) message = *assertion;
-            else message = neura::nvm::describe(result.trap, image, false);
-        }
-        const bool success = message.empty();
-        if (!success) ++failed;
-        if (reporter) {
-            if (captured) {
-                captured->finish([&](std::string_view stream, std::string_view text) {
-                    reporter->event("output", neura::tooling::test_output_json(catalog[i].id, stream, text));
-                });
-                captured.reset();
-            }
-            const auto duration = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - started[i]).count();
-            neura::tooling::Json event{{"id", catalog[i].id}, {"name", catalog[i].name},
-                {"state", success ? "passed" : "failed"}, {"duration", duration},
-                {"steps", result.steps}, {"peakHeapCells", result.peak_heap_cells},
-                {"message", message}, {"note", note}};
-            if (neura::nvr::uses_regions(image)) event["peakStackCells"] = result.peak_stack_cells;
-            if (!success && !result.completed) {
-                std::optional<neura::nvr::SourceLocation> place;
-                if (test_failure_message(result.trap, image, test_labels)) {
-                    std::vector<std::pair<std::uint32_t, std::uint32_t>> frames{
-                        {result.trap.function, result.trap.block}};
-                    frames.insert(frames.end(), result.trap.callers.begin(), result.trap.callers.end());
-                    for (const auto& [function, block] : frames) {
-                        const auto location = block_location(image, function, block);
-                        if (location && test_labels.contains(location->path)) { place = location; break; }
-                    }
-                }
-                if (!place) place = block_location(image, result.trap.function, result.trap.block);
-                if (place) {
-                    std::string file;
-                    for (const auto& input : options.files) {
-                        if (neura::backend::source_label(program, input.generic_string()) == place->path) {
-                            file = input.generic_string(); break;
-                        }
-                    }
-                    event["location"] = neura::tooling::Json{{"path", place->path}, {"file", file},
-                                                           {"line", place->line}, {"column", place->column}};
-                }
-            }
-            if (!success && saved_schedule_test == i && options.save_schedule)
-                event["savedSchedule"] = fs::absolute(*options.save_schedule).generic_string();
-            if (!success && options.schedule)
-                event["savedSchedule"] = fs::absolute(*options.schedule).generic_string();
-            reporter->event("testResult", std::move(event));
-            return;
-        }
-        std::cout << (success ? "PASS " : "FAIL ") << names[i] << note;
-        if (!success) std::cout << ": " << message;
-        else if (options.stats)
-            std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells
-                      << (neura::nvr::uses_regions(image) ? ", peak stack cells " + std::to_string(result.peak_stack_cells)
-                                                          : std::string())
-                      << ")";
-        std::cout << '\n';
-    };
-    neura::runner::TaskDumps dumps(options.task_dump);
-    auto limits = options.limits;
-    limits.task_dump = dumps.request();
-    if (coverage) limits.block_observer = [&](std::uint32_t function, std::uint32_t block) {
-        coverage->block(function, block);
-    };
-    const bool fleet_device = options.schedule || options.schedules > 1 || options.virtual_time ||
-                                      options.save_schedule
-                                  ? false
-                                  : gpu.device() != nullptr;
-    const auto tiers = tier_cache(image, limits, fleet_device ? gpu.device() : nullptr);
-    // Without a device the tests run one after another on one timeline.
-    if (fleet_device || !neura::runner::times_runs(limits)) times.reset();
-    if (times) limits.tier_times = &*times;
-    // One test, alone, under a chooser (null: the reference scheduler) and
-    // its own virtual clock when virtual time is on.
-    const auto run_test = [&](std::size_t i, neura::nvm::ScheduleChooser* chooser, std::uint64_t quantum,
-                              bool virtual_time) {
-        neura::nvm::VirtualTaskClock virtual_clock;
-        neura::nvm::TaskClock* clock = virtual_time ? &virtual_clock : nullptr;
-        host.services.set_clock(clock);
-        auto test_limits = limits;
-        test_limits.chooser = chooser;
-        test_limits.task_quantum = quantum;
-        // The start functions share the entry signature, so any of them can
-        // be the entry of a validated image.
-        image.entry = static_cast<std::uint32_t>(i);
-        auto result = neura::nvm::run(image, bindings, {}, test_limits, clock);
-        host.services.set_clock(nullptr);
-        return result;
-    };
-    const auto passed = [](const neura::nvm::RunResult& result) { return result.completed && result.status == 0; };
-    std::size_t ran = tests.size();
-    if (options.schedule) {
-        // Reproduction: the one test of the saved schedule, under exactly
-        // its choices, quantum, and clock.
-        const auto saved = neura::nvm::read_schedule(*options.schedule);
-        const auto found = std::ranges::find(names, saved.test);
-        if (found == names.end()) {
-            throw std::runtime_error(options.schedule->string() + ": the schedule is for test " + saved.test +
-                                     ", which these files do not define");
-        }
-        const auto i = static_cast<std::size_t>(found - names.begin());
-        neura::nvm::RecordedChooser chooser(saved.choices);
-        begin(i);
-        const auto result = run_test(i, &chooser, saved.quantum, saved.virtual_time || options.virtual_time);
-        if (chooser.diverged()) {
-            finished(i, result, " [saved schedule]", "the schedule does not fit this program: at decision " +
-                     std::to_string(chooser.diverged_tick()) + " fewer tasks could run than its choice needs");
-        } else {
-            finished(i, result, " [saved schedule]");
-        }
-        ran = 1;
-    } else if (auto* device = options.schedules > 1 || options.virtual_time || options.save_schedule
-                                  ? nullptr : gpu.device()) {
-        if (reporter) {
-            // A single member per fleet preserves GPU behavior while making
-            // every native/console byte unambiguously attributable to a test.
-            for (std::size_t i = 0; i < tests.size(); ++i) {
-                begin(i);
-                neura::nvm::Fleet fleet(image, {limits, device, 1});
-                fleet.add(static_cast<std::uint32_t>(i), {});
-                neura::nvm::run_fleet(fleet, bindings,
-                    [&](std::size_t, const neura::nvm::RunResult& result) { finished(i, result); });
-            }
-        } else {
-            neura::nvm::Fleet fleet(image, {limits, device});
-            for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
-            neura::nvm::run_fleet(fleet, bindings,
-                                  [&](std::size_t i, const neura::nvm::RunResult& result) { finished(i, result); });
-        }
-    } else {
-        // Schedule 1 is the reference scheduler's. Each later one varies
-        // which runnable task goes next, from the seed. Exploration is
-        // bounded: it says nothing about schedules it did not run.
-        std::uint64_t explored = 0;
-        bool saved = false;
-        for (std::size_t i = 0; i < tests.size(); ++i) {
-            begin(i);
-            auto result = run_test(i, nullptr, limits.task_quantum, options.virtual_time);
-            std::uint64_t count = 1;
-            std::string note;
-            neura::nvm::SavedSchedule failing{names[i], options.schedule_seed, limits.task_quantum,
-                                              options.virtual_time, {}};
-            for (std::uint64_t k = 1; passed(result) && k < options.schedules; ++k) {
-                host.services.end_run();
-                neura::nvm::ExploringChooser chooser(options.schedule_seed + k);
-                result = run_test(i, &chooser, limits.task_quantum, options.virtual_time);
-                // No decision offered a choice: the test has one schedule.
-                if (chooser.offered() == 0) break;
-                ++count;
-                failing.seed = options.schedule_seed + k;
-                failing.choices = chooser.choices();
-            }
-            explored += count;
-            if (options.schedules > 1) {
-                note = passed(result) ? " [" + std::to_string(count) + (count == 1 ? " schedule]" : " schedules]")
-                                      : " [schedule " + std::to_string(count) + " of " +
-                                            std::to_string(options.schedules) + ", seed " +
-                                            std::to_string(failing.seed) + "]";
-            }
-            if (!passed(result) && options.save_schedule && !saved) {
-                neura::nvm::write_schedule(*options.save_schedule, failing);
-                saved = true;
-                saved_schedule_test = i;
-                std::cerr << "neura: note: the failing schedule of " << names[i] << " was written to "
-                          << options.save_schedule->string() << '\n';
-            }
-            finished(i, result, note);
-        }
-        if (options.schedules > 1 && !reporter) {
-            std::cout << "explored " << explored << " schedule(s) of " << tests.size() << " test(s), seed "
-                      << options.schedule_seed << '\n';
-        }
-    }
-    if (coverage) {
-        const auto json = coverage->report().dump() + "\n";
-        write_file(*options.test_coverage, std::vector<std::uint8_t>(json.begin(), json.end()));
-        const auto path = fs::absolute(*options.test_coverage).generic_string();
-        if (reporter) reporter->event("coverage", {{"path", path}, {"granularity", "mapped-block-line"}});
-        else std::cerr << "neura: source-map line coverage was written to " << path << '\n';
-    }
-    if (reporter) reporter->event("summary", {{"total", ran}, {"passed", ran - failed}, {"failed", failed}});
-    else std::cout << ran << " test(s), " << ran - failed << " passed, " << failed << " failed\n";
-    std::cout.flush();
-    report_tiers(options, tiers, times);
-    return gpu.finish(failed == 0 ? 0 : 1, options.stats);
-}
-
-} // namespace
-
-// `check --task-safety`: for every function of the linked program, whether
-// a task may call it (Concurrency.md section 5.2) and whether it can be the
-// worker of a parallel map (section 12), with the first reason when not.
-// The analysis runs on the specialized program, so a generic function is
-// listed once for each specialization the program uses.
-int task_safety_report(neura::IrProgram program) {
-    neura::require_valid_ir(program, "before specialization");
-    neura::specialize(program);
-    neura::check_storage(program, neura::StorageStage::Specialized);
-    neura::materialize_reference_storage(program);
-    neura::elaborate_class_hooks(program);
-    const neura::TaskAnalysis analysis(program);
-    const auto file_of = [&](neura::SymbolId id) {
-        for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
-            if (program.symbols[id].kind == neura::SymbolKind::File) return id;
-            id = program.symbols[id].owner;
-        }
-        return neura::no_symbol;
-    };
-    const auto qualified = [&](neura::SymbolId id) {
-        std::string name = program.symbols[id].name;
-        for (auto owner = program.symbols[id].owner; owner < program.symbols.size();
-             owner = program.symbols[owner].owner) {
-            if (program.symbols[owner].kind == neura::SymbolKind::File) break;
-            name = program.symbols[owner].name + "." + name;
-        }
-        return name;
-    };
-    const auto place = [](const neura::Span& span) {
-        const auto slash = span.file.find_last_of("/\\");
-        return (slash == std::string::npos ? span.file : span.file.substr(slash + 1)) + ":" +
-               std::to_string(span.line) + ":" + std::to_string(span.column);
-    };
-    std::map<std::string, std::vector<std::string>> by_file;
-    std::size_t safe = 0;
-    std::size_t isolated = 0;
-    std::size_t total = 0;
-    std::set<neura::SymbolId> with_body;
-    for (const auto& body : program.bodies) with_body.insert(body.owner);
-    for (neura::SymbolId id = 0; id < program.symbols.size(); ++id) {
-        const auto& item = program.symbols[id];
-        if (item.kind != neura::SymbolKind::Function || !with_body.contains(id)) continue;
-        const auto file = file_of(id);
-        if (file == neura::no_symbol) continue;
-        // Functions the compiler generates (closures, initializers) are
-        // covered through the functions that use them.
-        if (qualified(id).find('$') != std::string::npos) continue;
-        const auto& source = program.symbols[file];
-        const auto label = source.library_path.empty() ? fs::path(source.name).filename().string() : source.library_path;
-        std::string line = "  " + qualified(id) + ": ";
-        ++total;
-        if (const auto reason = analysis.unsafe(id)) {
-            line += "not task-safe: " + reason->operation + " at " + place(reason->span);
-        } else if (const auto impure = analysis.not_isolated(id)) {
-            ++safe;
-            line += "task-safe; not for a parallel map: " + impure->operation + " at " + place(impure->span);
-        } else {
-            ++safe;
-            ++isolated;
-            line += "task-safe";
-        }
-        by_file[label].push_back(std::move(line));
-    }
-    for (auto& [label, lines] : by_file) {
-        std::sort(lines.begin(), lines.end());
-        std::cout << label << "\n";
-        for (const auto& line : lines) std::cout << line << "\n";
-    }
-    std::cout << total << " function(s): " << safe << " task-safe, of which " << isolated
-              << " can also be the worker of a parallel map\n";
-    return 0;
-}
-
-namespace {
-
-int check_program(neura::IrProgram program) {
-    neura::require_valid_ir(program, "before specialization");
-    neura::specialize(program);
-    neura::check_storage(program, neura::StorageStage::Specialized);
-    neura::materialize_reference_storage(program);
-    neura::elaborate_class_hooks(program);
-    return 0;
-}
-
-// check --fix: checks the program, applies the machine-applicable suggestions
-// of what it reports to user source files, and repeats until no suggestion
-// applies (or a bound is reached), then reports what remains as check does.
-int check_fix(const Options& options) {
-    auto& sources = neura::SourceMap::global();
-    auto* sink = neura::DiagnosticSink::current();
-    // Each round reports one error, so the bound allows a file with many
-    // missing semicolons while still ending a loop of suggestions.
-    constexpr int rounds = 200;
-    std::size_t applied = 0;
-    std::set<std::string> edited;
-    std::map<std::string, std::string> refused;
-    for (int round = 0; round < rounds; ++round) {
-        sources.clear();
-        if (sink) sink->clear();
-        std::vector<neura::Diagnostic> found;
-        try {
-            check_program(load_source_program(options));
-        } catch (const neura::Diagnostic& error) {
-            found.push_back(error);
-            found.insert(found.end(), error.following().begin(), error.following().end());
-        }
-        if (sink) found.insert(found.end(), sink->entries().begin(), sink->entries().end());
-        std::map<std::string, std::vector<neura::DiagnosticEdit>> edits;
-        for (const auto& diagnostic : found) {
-            const auto* data = diagnostic.data();
-            if (!data) continue;
-            for (const auto& suggestion : data->suggestions) {
-                if (suggestion.applicability != neura::Applicability::MachineApplicable) continue;
-                // A suggestion applies whole or not at all.
-                bool usable = !suggestion.edits.empty();
-                for (const auto& edit : suggestion.edits) {
-                    const auto file = sources.find(edit.span.file);
-                    if (!file) {
-                        usable = false;
-                    } else if (file->kind() != neura::SourceKind::User) {
-                        refused.emplace(file->name(), file->kind() == neura::SourceKind::Library
-                                                          ? "it is a standard library file"
-                                                          : "it was generated from a C header");
-                        usable = false;
-                    }
-                }
-                if (!usable) continue;
-                for (const auto& edit : suggestion.edits) edits[edit.span.file].push_back(edit);
-            }
-        }
-        std::size_t this_round = 0;
-        for (auto& [name, list] : edits) {
-            const auto file = sources.find(name);
-            const auto bytes = read_file(name);
-            if (!std::ranges::equal(bytes, file->text(), [](std::uint8_t a, char b) {
-                    return a == static_cast<unsigned char>(b);
-                })) {
-                refused.emplace(name, "it changed while it was being checked");
-                continue;
-            }
-            auto text = file->text();
-            const auto count = neura::cli::apply_edits(text, std::move(list));
-            if (count == 0) continue;
-            write_file(name, std::vector<std::uint8_t>(text.begin(), text.end()));
-            this_round += count;
-            edited.insert(name);
-        }
-        applied += this_round;
-        if (this_round == 0) break;
-    }
-    sources.clear();
-    if (sink) sink->clear();
-    for (const auto& [name, reason] : refused)
-        std::cerr << "neura: check --fix did not edit " << name << ": " << reason << "\n";
-    std::cerr << "neura: check --fix applied " << applied << (applied == 1 ? " edit" : " edits") << " to "
-              << edited.size() << (edited.size() == 1 ? " file" : " files") << "\n";
-    return check_program(load_source_program(options));
-}
-
-// Whether human diagnostics are colored (Tooling.md, Diagnostics).
-bool use_color(neura::cli::ColorChoice choice) {
-    if (choice != neura::cli::ColorChoice::Auto) return choice == neura::cli::ColorChoice::Always;
-    if (const char* no_color = std::getenv("NO_COLOR"); no_color && *no_color) return false;
-    if (const char* term = std::getenv("TERM"); term && std::string_view(term) == "dumb") return false;
-#ifdef _WIN32
-    return false;
-#else
-    return ::isatty(2) == 1;
-#endif
-}
-
-// The terminal width: the terminal's own, then COLUMNS, then 100.
-std::size_t terminal_width() {
 #ifndef _WIN32
-    winsize size{};
-    if (::ioctl(2, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) return size.ws_col;
-#endif
-    if (const char* columns = std::getenv("COLUMNS"); columns && *columns) {
-        std::size_t value = 0;
-        const std::string_view text(columns);
-        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-        if (error == std::errc{} && end == text.data() + text.size() && value > 0) return value;
-    }
-    return 100;
-}
-
-// Commands after which an update notice may appear: the ones that do their
-// work and exit. run and test execute user programs, and the lifecycle
-// commands manage the install themselves.
-bool shows_update_notice(Command command) {
-    switch (command) {
-    case Command::Check: case Command::Docs: case Command::EmitIr: case Command::Build: case Command::Inspect:
-    case Command::Disassemble: case Command::Assemble: case Command::Decompile: case Command::CBindings:
-        return true;
-    default:
+// Whether the generation of `bin` is one that a 0.2 updater placed and that
+// is not migrated: a schema 1 marker at the root and a core component
+// manifest in the generation (docs/Install.md, "From 0.2"), the lifecycle's
+// own test, read from the files alone. Every service start is refused there.
+bool unmigrated_generation(const std::string& bin) {
+    const auto parent = bin.substr(0, bin.rfind('/'));
+    const auto versions = parent.substr(0, parent.rfind('/'));
+    const auto root = versions.substr(0, versions.rfind('/'));
+    if (versions.size() < 9 || versions.compare(versions.size() - 9, 9, "/versions") != 0 ||
+        !regular_file(parent + "/share/neura/components/core.txt")) {
         return false;
     }
+    bool unmigrated = false;
+    if (std::FILE* marker = std::fopen((root + "/neura-install.txt").c_str(), "rb")) {
+        char line[32] = {};
+        unmigrated = std::fgets(line, sizeof line, marker) && std::string_view(line) == "neura-install 1\n";
+        std::fclose(marker);
+    }
+    return unmigrated;
 }
 
-int dispatch(const Options& options) {
-    switch (options.command) {
-    case Command::Version:
-        std::cout << neura::lifecycle::version_line() << "\n";
-        return 0;
-    case Command::Help:
-        usage(std::cout);
-        return 0;
-    case Command::Doctor:
-        return neura::lifecycle::doctor(options.executable, {options.library});
-    case Command::Update:
-        return neura::lifecycle::update(options.executable, options.update);
-    case Command::Uninstall:
-        return neura::lifecycle::uninstall(options.executable, options.uninstall);
-    case Command::Tags: {
-        if (options.explain_code.empty()) {
-            neura::print_tag_catalogue(std::cout);
-            return 0;
-        }
-        if (const auto* tag = neura::find_tag(options.explain_code)) {
-            neura::print_tag(std::cout, *tag);
-            return 0;
-        }
-        std::vector<std::string> names;
-        for (const auto& tag : neura::tag_registry()) names.emplace_back(tag.name);
-        std::string message = "'" + options.explain_code + "' is not a tag";
-        if (const auto close = neura::closest_name(options.explain_code, names))
-            message += "; did you mean " + *close + "?";
-        else message += "; `neura tags` lists the tags";
-        throw std::runtime_error(message);
+// The component manifests of this generation (docs/design/Lifecycle030.md),
+// read only when a tool is missing, so that a run pays nothing for them.
+// Returns whether the generation has manifests; `declared` is set when one
+// of them has the line `tool <name>`.
+bool manifests_declare(const std::string& bin, std::string_view name, bool& declared) {
+    declared = false;
+    const auto slash = bin.rfind('/');
+    if (slash == std::string::npos) return false;
+    const std::string directory = bin.substr(0, slash) + "/share/neura/components";
+    DIR* listing = ::opendir(directory.c_str());
+    if (listing == nullptr) return false;
+    const std::string wanted = "tool " + std::string(name) + "\n";
+    bool any = false;
+    while (const dirent* entry = ::readdir(listing)) {
+        const std::string_view file = entry->d_name;
+        if (file.size() < 5 || !file.ends_with(".txt")) continue;
+        std::FILE* stream = std::fopen((directory + "/" + std::string(file)).c_str(), "rb");
+        if (stream == nullptr) continue;
+        any = true;
+        std::string text;
+        char buffer[4096];
+        std::size_t count;
+        while ((count = std::fread(buffer, 1, sizeof buffer, stream)) > 0 && text.size() < (std::size_t{4} << 20)) text.append(buffer, count);
+        std::fclose(stream);
+        if (text.find(wanted) != std::string::npos) declared = true;
     }
-    case Command::Explain:
-        if (options.explain_list) neura::cli::explain_list(std::cout);
-        else neura::cli::explain(options.explain_code, std::cout);
-        return 0;
-    case Command::Check: {
-        if (options.fix) return check_fix(options);
-        auto program = load_source_program(options);
-        if (options.task_safety) return task_safety_report(std::move(program));
-        if (options.show_derived) {
-            std::string output;
-            for (const auto& codec : program.derived_codecs) {
-                if (options.show_derived->empty() || program.symbols[codec.module].name == *options.show_derived)
-                    output += neura::tooling::format_source(codec.source, codec.declaration.file);
-            }
-            if (!options.show_derived->empty() && output.empty())
-                throw std::runtime_error("no derived module named '" + *options.show_derived + "'");
-            const auto status = check_program(std::move(program));
-            if (status == 0) std::cout << output;
-            return status;
+    ::closedir(listing);
+    return any;
+}
+#endif
+
+std::string join(const std::string& bin, std::string_view name) {
+#ifdef _WIN32
+    return (std::filesystem::path(bin) / tool::executable_file(name)).string();
+#else
+    return (bin == "/" ? bin : bin + "/") + tool::executable_file(name);
+#endif
+}
+
+// The 0.2 capability object, as tooling::Json printed it: keys sorted, no
+// spaces. A feature whose tool is not installed is false.
+int capabilities(const std::string& bin, int argc, char** argv) {
+    if (argc != 3 || std::string_view(argv[2]) != "--json") {
+        print(stderr, "neura: usage: neura capabilities --json\n");
+        return 1;
+    }
+    const auto flag = [](bool value) { return value ? "true" : "false"; };
+    const bool test = present(bin, "neura-test");
+    std::string text = "{\"features\":{";
+    text += std::string("\"coverage\":") + flag(test) + ",\"debugger\":" + flag(present(bin, "neura-debug")) +
+            ",\"documentation\":" + flag(present(bin, "neura-doc")) + ",\"formatter\":" + flag(present(bin, "neura-fmt")) +
+            ",\"imageInspection\":" + flag(present(bin, "neura-inspect")) + ",\"lsp\":" + flag(present(bin, "neura-lsp")) +
+            ",\"testCoverage\":" + flag(test) + ",\"testDiscovery\":" + flag(test) + ",\"testFilter\":" + flag(test) +
+            ",\"testReporter\":" + flag(test);
+    // The runtime service component (docs/design/Service030.md, "Editors"),
+    // from the files of the installation only: nothing is connected to or
+    // started. An installation that a 0.2 updater produced and that is not
+    // migrated (a schema 1 marker and a core manifest) refuses every service
+    // start, so the component is reported as unmigrated there.
+    std::string service = "{\"installed\":false,\"state\":\"missing\"}";
+#ifndef _WIN32
+    if (present(bin, tool::service_executable)) {
+        service = std::string("{\"installed\":true,\"protocol\":\"1.0\",\"state\":\"") +
+                  (unmigrated_generation(bin) ? "unmigrated" : "ready") + "\"}";
+    }
+#endif
+    // The version holds only letters, digits, '.' and '-', which JSON needs
+    // no escapes for (CMakeLists.txt checks it).
+    text += std::string("},\"schemaVersion\":1,\"service\":") + service + ",\"version\":\"" + neura::version::full +
+            "\"}\n";
+    print(stdout, text);
+    return 0;
+}
+
+int forward(const std::string& program, const tool::Command& command, int argc, char** argv) {
+    std::vector<std::string> arguments{program, tool::dispatch_token(), std::string(command.word)};
+    for (int i = 2; i < argc; ++i) arguments.emplace_back(argv[i]);
+    std::fflush(stdout);
+    std::fflush(stderr);
+#ifdef _WIN32
+    // Windows has no exec: start the tool, wait, and return its status.
+    // _spawnv joins the arguments into one command line, so each is quoted.
+    std::vector<std::string> quoted;
+    for (const auto& argument : arguments) {
+        std::string text = "\"";
+        std::size_t slashes = 0;
+        for (const char c : argument) {
+            if (c == '\\') { ++slashes; continue; }
+            text.append(c == '"' ? slashes * 2 + 1 : slashes, '\\');
+            slashes = 0;
+            text += c;
         }
-        return check_program(std::move(program));
+        text.append(slashes * 2, '\\');
+        quoted.push_back(text + "\"");
     }
-    case Command::Docs:
-        return docs(options);
-    case Command::EmitIr:
-        return emit_ir(options);
-    case Command::Build:
-        return build(options);
-    case Command::Inspect:
-        return inspect(options);
-    case Command::Run:
-        return run(options);
-    case Command::Test:
-        return run_tests(options);
-    case Command::Disassemble:
-        return disassemble(options);
-    case Command::Assemble:
-        return assemble(options);
-    case Command::Decompile:
-        return decompile(options);
-    case Command::CBindings:
-        return c_bindings(options);
-    }
-    return 1;
+    auto quoted_pointers = tool::argv_of(quoted);
+    const auto status = _spawnv(_P_WAIT, program.c_str(), quoted_pointers.data());
+    if (status != -1) return static_cast<int>(status);
+#else
+    std::vector<char*> pointers;
+    for (auto& argument : arguments) pointers.push_back(argument.data());
+    pointers.push_back(nullptr);
+    ::execv(program.c_str(), pointers.data());
+#endif
+    return fail("cannot run " + program + ": " + std::strerror(errno));
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        usage(std::cerr);
+        print(stderr, tool::usage_text());
         return 1;
     }
-    // Protocol commands own stdout. Dispatch before ordinary option/diagnostic
-    // handling so no terminal notices can corrupt their transport.
-    const std::string_view tooling_command(argv[1]);
-    if (tooling_command == "lsp" || tooling_command == "fmt" || tooling_command == "debug" || tooling_command == "capabilities" || tooling_command == "inspect-image") {
-        try {
-            std::vector<std::string> arguments;
-            for (int i = 2; i < argc; ++i) arguments.emplace_back(argv[i]);
-            if (tooling_command == "lsp") return neura::tooling::run_lsp(arguments);
-            if (tooling_command == "fmt") return neura::tooling::run_formatter(arguments);
-            if (tooling_command == "inspect-image") return neura::tooling::run_image_inspector(arguments);
-            if (tooling_command == "debug") {
-                if (arguments != std::vector<std::string>{"--stdio"}) throw std::runtime_error("usage: neura debug --stdio");
-                return neura::tooling::run_debug(std::cin, std::cout, fs::absolute(argv[0]));
-            }
-            if (arguments != std::vector<std::string>{"--json"}) throw std::runtime_error("usage: neura capabilities --json");
-            const neura::tooling::Json info = neura::tooling::Json::Object{
-                {"schemaVersion", 1}, {"version", neura::version::full},
-                {"features", neura::tooling::Json::Object{{"lsp", true}, {"formatter", true}, {"debugger", true},
-                    {"testDiscovery", true}, {"testFilter", true}, {"testReporter", true}, {"coverage", true}, {"testCoverage", true}, {"documentation", true}, {"imageInspection", true}}}
-            };
-            std::cout << info.dump() << '\n'; return 0;
-        } catch (const neura::Diagnostic& error) {
-            neura::cli::DiagnosticConfig config;
-            neura::cli::DiagnosticPrinter print(config, {use_color(config.color), terminal_width()}, neura::SourceMap::global());
-            print.print(std::cerr, error);
-            for (const auto& next : error.following()) print.print(std::cerr, next);
-            print.finish(std::cerr);
+    const std::string_view name = argv[1];
+    if (name == "--version" || name == "version" || name == "--help" || name == "help") return builtin(name, argc, argv);
+    const auto bin = directory_of_self(argv[0]);
+    if (name == "capabilities") return capabilities(bin, argc, argv);
+    const auto* command = tool::find_command(name);
+    if (!command) return fail(tool::command_list);
+#ifndef _WIN32
+    // The dispatcher holds the lease of its generation until it becomes the
+    // tool, which takes its own (close-on-exec).
+    {
+        bool removed = false;
+        tool::take_lease(self_path.c_str(), removed);
+        if (removed) {
+            print(stderr, tool::removed_generation_message);
             return 1;
-        } catch (const std::exception& error) { std::cerr << "neura: " << error.what() << '\n'; return 1; }
-    }
-    // Warnings collect here while a command runs and print before its error
-    // or at its end.
-    neura::DiagnosticSink sink;
-    const neura::DiagnosticSinkScope sink_scope(sink);
-    neura::cli::DiagnosticConfig diagnostics;
-    const auto printer = [&] {
-        return neura::cli::DiagnosticPrinter(diagnostics, {use_color(diagnostics.color), terminal_width()},
-                                             neura::SourceMap::global());
-    };
-    try {
-        const auto options = read_options(argc, argv);
-        diagnostics = options.diagnostics;
-        int status = dispatch(options);
-        if (!sink.entries().empty()) {
-            auto print = printer();
-            if (print.warnings(std::cerr, sink.entries()) > 0 && diagnostics.warnings_are_errors) status = 1;
         }
-        if (status == 0 && shows_update_notice(options.command)) neura::lifecycle::update_notice(options.executable);
-        return status;
-    } catch (const neura::Diagnostic& error) {
-        auto print = printer();
-        print.warnings(std::cerr, sink.entries());
-        print.print(std::cerr, error);
-        for (const auto& next : error.following()) print.print(std::cerr, next);
-        print.finish(std::cerr);
-    } catch (const std::exception& error) {
-        std::cerr << "neura: error: " << error.what() << '\n';
     }
-    return 1;
+#endif
+    const auto where = bin.empty() ? std::string("the directory of neura (its path could not be determined)") : bin;
+    if (command->component == tool::Component::Service && !present(bin, tool::service_executable)) {
+#ifndef _WIN32
+        // An installation that a 0.2 updater produced has no neurad (the
+        // legacy archive holds none), and every service start there is
+        // refused with the migration instruction first, as `run --runtime`
+        // refuses (Service030.md case 60, Lifecycle030.md).
+        if (argc > 2 && (std::string_view(argv[2]) == "start" || std::string_view(argv[2]) == "enable") &&
+            unmigrated_generation(bin)) {
+            print(stderr, "neura: runtime: finish the 0.3.0 install first: run \"neura update --migrate-install\"\n");
+            return 5;
+        }
+#endif
+        return fail("'neura " + std::string(name) + "' needs the Neura-runtime service component (" +
+                    std::string(tool::service_executable) + "), which is not in " + where +
+                    ". 'neura run' runs images directly without it");
+    }
+    if (!present(bin, command->tool)) {
+#ifndef _WIN32
+        // In an installed generation the manifests say which components are
+        // there: a tool that none declares belongs to a product that is not
+        // installed here.
+        bool declared = false;
+        if (manifests_declare(bin, command->tool, declared) && !declared && command->component == tool::Component::Sdk) {
+            print(stderr, "neura: \"" + std::string(name) + "\" needs Neura-sdk, which is not installed here\n");
+            return 1;
+        }
+#endif
+        const auto* entry = tool::find_tool(command->tool);
+        const bool core = entry && entry->component == tool::Component::Core;
+        return fail("'neura " + std::string(name) + "' needs " + std::string(command->tool) + ", which is not in " + where +
+                    (core ? "; it is part of the Neura core, so this installation is incomplete. Reinstall Neura"
+                          : "; it is part of the Neura-sdk component. Install the SDK, or reinstall Neura"));
+    }
+    return forward(join(bin, command->tool), *command, argc, argv);
 }

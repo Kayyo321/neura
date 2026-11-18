@@ -7,15 +7,16 @@ GitHub Actions checks every pull request before it is merged and publishes the [
 
 ## Tier 1: pull request checks
 
-[`tier1.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/tier1.yml) runs on every pull request, on every push to `main`, and on merge queue entries. It has three jobs.
+[`tier1.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/tier1.yml) runs on every pull request, on every push to `main`, and on merge queue entries. It has four jobs.
 
 | Job | What it runs | Fails when |
 | --- | --- | --- |
 | Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, `scripts/update-stdlib-wiki-api.py --check`, `scripts/generate-wiki.py --check`, `scripts/gen-kernels.py --check`, and `scripts/build-site.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; a standard library reference page is stale; a generated wiki page differs from the docs page it is generated from, or `wiki/` holds a page that is neither generated nor listed as hand-written; or the kernel table, the kernel reference, or the `Std.Internal.Kernels` declarations differ from what `src/kernels/` generates. |
-| Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04, `scripts/check-kernels.sh`, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; the kernel archive calls a libm function or a libc function other than the memory builtins; a test fails, including `doc-examples` when a documentation example does not compile or run as its directive says; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
-| Tier 1 | Reads the results of the other two jobs | Either job ended as anything other than `success`, including `skipped` and `cancelled`. |
+| Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04, `scripts/check-kernels.sh`, `scripts/check-core-closure.py`, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; the kernel archive calls a libm function or a libc function other than the memory builtins; a binary of the execution core holds an object of a compiler library or loads `libneura-sdk`, or `libneura-sdk` holds a copy of a core object ([tools](Tooling#tools-and-the-neura-dispatcher)); a test fails, including `doc-examples` when a documentation example does not compile or run as its directive says; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
+| Runtime-only build (Linux x86-64) | A Release build with `-DNEURA_SDK=OFF` and no submodule, `scripts/check-core-closure.py`, an install of the `core` component, `neura --version`, `neura doctor`, and `neura build`, which must fail and name the missing SDK | The core does not build or install without the SDK; the build reports a warning; `doctor` fails; or `neura build` does not report the missing SDK. |
+| Tier 1 | Reads the results of the other three jobs | Any job ended as anything other than `success`, including `skipped` and `cancelled`. |
 
-**Tier 1** is the status check that a branch rule should require. GitHub treats a skipped job as passing, so requiring the other two jobs directly would let a pull request merge without them having run. The Tier 1 job always runs and fails unless both succeeded.
+**Tier 1** is the status check that a branch rule should require. GitHub treats a skipped job as passing, so requiring the other two jobs directly would let a pull request merge without them having run. The Tier 1 job always runs and fails unless all three succeeded.
 
 The CTest entry `doc-examples` runs [`scripts/check-doc-examples.py`](https://github.com/Kayyo321/neura/blob/main/scripts/check-doc-examples.py), which compiles or runs every fenced `neura` block in `README.md`, `docs/`, and `prompts/`. Each block must have a directive on the line above it (one blank line is allowed): `<!-- example: check -->` for a complete source file that `neura check` accepts; `<!-- example: run -->` for a program whose exact output under `neura build` and `neura run --deny-all` is the `text` block after it; `<!-- example: test -->` for a test module that `neura test` passes; `<!-- example: rejected: <text> -->` for a file that `neura check` rejects with a diagnostic containing `<text>`; and `<!-- example: fragment: <reason> -->` for a block that is not a complete file, which is not compiled and must say why. The check fails, naming `file:line`, for a block with a missing or unknown directive, a fragment with no reason, or a `run` with no `text` block after it. Each block runs in a fresh temporary directory as `example.nra` with `NEURA_GPU=off` and a 60-second limit.
 
@@ -76,8 +77,9 @@ python3 scripts/build-site.py --check
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 scripts/check-kernels.sh build
+python3 scripts/check-core-closure.py build
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 197
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 220
 ```
 
 To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
@@ -86,7 +88,7 @@ The scripts need Python 3 and Git, and use no packages outside the Python standa
 
 ## Tier 3: release qualification
 
-[`release.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds and tests the tagged commit, packs the release archive, and runs the lifecycle checks of [`packaging/qualify.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/qualify.sh) on the packed archive on a second runner. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess) describes each job and check.
+[`release.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds and tests the tagged commit, packs the three archives of the target (Neura-sdk, Neura-runtime, and the legacy archive for 0.2 clients), and runs the lifecycle checks of [`packaging/qualify.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/qualify.sh) on them on a second runner, including the update from the published 0.2 releases with their own clients. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess) describes each job and check.
 
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings).
 
