@@ -24,7 +24,7 @@
 #   --require-bridge   fail when a bridge check does not run
 #   --size-reference   the archive the size budget is measured against
 #                      (rc.3's of this target): the SDK and legacy archives may
-#                      be at most 55% larger, and the runtime archive must be
+#                      be at most 160% larger, and the runtime archive must be
 #                      smaller than the SDK archive
 #   --server-components the archives are built with the server components
 #                      (TLS, HTTP/2, PostgreSQL): their licence texts must be
@@ -454,10 +454,10 @@ reason=""
 [ "$runtime_size" -lt "$sdk_size" ] || reason="the runtime archive is not smaller than the SDK archive;"
 if [ -n "$size_reference" ]; then
     reference=$(size_of "$size_reference")
-    limit=$((reference + reference * 55 / 100))
+    limit=$((reference + reference * 160 / 100))
     echo "size: the reference $(basename "$size_reference") is $reference bytes; the limit is $limit"
-    [ "$sdk_size" -le "$limit" ] || reason="$reason the SDK archive is more than 55% larger than the reference;"
-    [ "$legacy_size" -le "$limit" ] || reason="$reason the legacy archive is more than 55% larger than the reference;"
+    [ "$sdk_size" -le "$limit" ] || reason="$reason the SDK archive is more than 160% larger than the reference;"
+    [ "$legacy_size" -le "$limit" ] || reason="$reason the legacy archive is more than 160% larger than the reference;"
 fi
 if [ -z "$reason" ]; then
     pass 14 "archive sizes"

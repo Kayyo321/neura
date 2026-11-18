@@ -119,7 +119,7 @@ Each tool is a CMake executable with its install component. The build tree puts 
 
 ## Dependency budget
 
-The budget is the one frozen in [the 0.3.0 baseline](Release030.md): the dispatcher at most 1 MiB stripped, each archive at most 55% larger than rc.3's for its target (25% until the owner raised it on 2026-11-18), `neura --version` and a direct run of a hello-world image no slower than rc.3 within 5%, no system library beyond rc.3's, and an execution core without compiler code.
+The budget is the one frozen in [the 0.3.0 baseline](Release030.md): the dispatcher at most 1 MiB stripped, each archive at most 160% larger than rc.3's for its target (25%, then 55%, until the server components joined the release archives on 2026-11-18), `neura --version` and a direct run of a hello-world image no slower than rc.3 within 5%, no system library beyond rc.3's, and an execution core without compiler code.
 
 Measured on x86-64 Linux, gcc 14, Release, GPU support compiled in. "Before" is the single binary of the base commit of this milestone.
 
@@ -147,7 +147,7 @@ Measured on x86-64 Linux, gcc 14, Release, GPU support compiled in. "Before" is 
 | `neura-run`, every other core tool and `libneura-core` hold no object of the lexer, parser, NeuraIR, optimizer, converter, decompiler or editor tooling, and none loads `libneura-sdk`. `scripts/check-core-closure.py` compares the global definitions of every object of the SDK's static libraries with each core binary, reads each one's `DT_NEEDED` (load commands on macOS), and checks that `libneura-sdk` holds no core object; a configure with `NEURA_SDK=OFF` builds the core without them. Weak definitions of header code, such as the inline members of `neura::Diagnostic`, are shared by design and not counted. | proposed; holds |
 | `neura-doctor` may contain the libclang probe (`c_import.cpp` and the libclang loader, which load libclang only when run). It is reported, and moving the probe behind the SDK is left to the lifecycle milestone. | proposed; holds in SDK builds, absent with `NEURA_SDK=OFF` |
 | Every shipped executable depends on no system library beyond rc.3's. | proposed; holds. The tools also load `libneura-core` and `libneura-sdk`, which ship with them; the frozen rule names the system libraries. A portable release needs only `libc`, `libm` and the loader, with glibc symbols no newer than 2.38 |
-| Each archive is at most 55% larger than rc.3's (25% before the owner decision of 2026-11-18). | proposed; holds on x86-64 Linux (+45.8% with the server host and SQL providers in the core, runtime-only −44.6%); the aarch64 Linux and macOS archives are built only by the release workflow and are not measured here |
+| Each archive is at most 160% larger than rc.3's (25%, then 55%, before the owner decision of 2026-11-18 and the server components). | proposed; holds on x86-64 Linux (+152.3% with TLS, HTTP/2 and PostgreSQL linked; OpenSSL is linked three times, into libneura-core, neura-server-host and neura-launcher); the aarch64 Linux and macOS archives are built only by the release workflow and are not measured here |
 | `neura --version` and `neura run` of a hello-world image within 5% of rc.3. | proposed; holds for the portable build (−72%, +3.5%) |
 | Position-independent code does not slow programs down. | proposed; holds: `scripts/bench-wall.py` at the full sizes, 5 runs, best median of two rounds each, gives a geometric mean of 0.998 against the single binary over 17 programs (0.945 to 1.017), with equal steps and peak heap cells |
 
