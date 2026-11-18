@@ -210,6 +210,8 @@ let SqlTests = module (
         test.assert_equal_string("Cursor(n; open)", cursor.to_string());
         last busy = test.assert_err<int64>(connection.execute("SELECT 1"));
         test.assert(kind(busy) == sql.ErrorKind.InvalidInput);
+        test.assert(cursor.columns.equals(new sql.Columns(new(["n"]))));
+        test.assert_equal<uint32>(cursor.columns.hash_code(), new sql.Columns(new(["n"])).hash_code());
         last first = page(cursor.fetch(2));
         test.assert_equal<int>(2, first.size());
         test.assert(cursor.has_more());

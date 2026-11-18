@@ -27,6 +27,13 @@ struct Watch {
     const Wait* wait = nullptr;
 };
 
+// The busy timeout: the time left until the deadline, or 60 s for a
+// statement without one (neura run and neura test).
+int busy_milliseconds(const Wait& wait) {
+    if (wait.deadline == Clock::time_point::max()) return 60'000;
+    return std::max(1, milliseconds_left(wait));
+}
+
 int on_progress(void* context) {
     const auto* watch = static_cast<Watch*>(context);
     if (!watch->wait) return 0;
@@ -116,7 +123,7 @@ public:
 
     Status execute_script(std::string_view sql, const Wait& wait) override {
         watch_.wait = &wait;
-        sqlite3_busy_timeout(db_, std::max(1, milliseconds_left(wait)));
+        sqlite3_busy_timeout(db_, busy_milliseconds(wait));
         char* message = nullptr;
         const std::string text(sql);
         const int code = sqlite3_exec(db_, text.c_str(), nullptr, nullptr, &message);
@@ -142,7 +149,7 @@ public:
     int step(sqlite3_stmt* statement, const Wait& wait) {
         if (wait.expired() || wait.cancel_requested()) return SQLITE_INTERRUPT;
         watch_.wait = &wait;
-        sqlite3_busy_timeout(db_, std::max(1, milliseconds_left(wait)));
+        sqlite3_busy_timeout(db_, busy_milliseconds(wait));
         const int code = sqlite3_step(statement);
         watch_.wait = nullptr;
         return code;

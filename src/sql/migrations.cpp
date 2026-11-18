@@ -12,6 +12,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <cstdlib>
 
 namespace neura::sql {
 
@@ -221,22 +222,38 @@ LocalSql::LocalSql(const std::vector<std::string>& options) {
     if (options.empty()) return;
     std::vector<PoolConfig> pools;
     std::map<std::string, fs::path, std::less<>> directories;
+    std::map<std::string, std::string, std::less<>> passwords;
     for (const auto& option : options) {
         const auto equals = option.find('=');
         const auto dot = option.find('.');
-        if (dot != std::string::npos && equals != std::string::npos && dot < equals &&
-            option.substr(dot, equals - dot) == ".migrations") {
-            directories[option.substr(0, dot)] = fs::absolute(option.substr(equals + 1));
-            continue;
+        if (dot != std::string::npos && equals != std::string::npos && dot < equals) {
+            const auto setting = option.substr(dot + 1, equals - dot - 1);
+            const auto value = option.substr(equals + 1);
+            if (setting == "migrations") {
+                directories[option.substr(0, dot)] = fs::absolute(value);
+                continue;
+            }
+            if (setting == "password_env") {
+                const char* secret = std::getenv(value.c_str());
+                if (!secret) throw std::runtime_error("--sql-pool " + option + ": the variable is not set");
+                passwords[option.substr(0, dot)] = secret;
+                continue;
+            }
+            throw std::runtime_error("--sql-pool " + option.substr(0, equals) + ": the settings are migrations and password_env");
         }
         pools.push_back(parse_pool_option(option));
     }
     for (auto& pool : pools) {
+        if (const auto found = passwords.find(pool.name); found != passwords.end()) {
+            pool.password = found->second;
+            passwords.erase(found);
+        }
         if (const auto found = directories.find(pool.name); found != directories.end()) {
             pool.migrations = found->second;
             directories.erase(found);
         }
     }
+    if (!passwords.empty()) throw std::runtime_error("--sql-pool " + passwords.begin()->first + ".password_env names no pool");
     if (!directories.empty()) {
         throw std::runtime_error("--sql-pool " + directories.begin()->first + ".migrations names no pool");
     }

@@ -785,6 +785,31 @@ if(BUILD_TESTING)
             --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-host-test"
             ${NEURA_SERVER_HOST_TEST_OPTIONS})
         set_tests_properties(server-host PROPERTIES TIMEOUT 300)
+        if(TARGET neura_sql)
+            # Std.Data.Sql under the server host (docs/runtime/Sql.md): the
+            # CRUD example with curl, leases, deadlines, migrations and
+            # replay on SQLite; the same against PostgreSQL 16, 17 and 18 in
+            # Docker, skipped without Docker or the PostgreSQL provider.
+            set(NEURA_SQL_TEST_OPTIONS)
+            if(NEURA_SERVER_TEST_CURL)
+                list(APPEND NEURA_SQL_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
+            endif()
+            if(NEURA_ENABLE_POSTGRES)
+                list(APPEND NEURA_SQL_TEST_OPTIONS --postgres-build)
+            endif()
+            add_test(NAME server-sql COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/sql_host_test.py"
+                --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+                --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-sql-test"
+                ${NEURA_SQL_TEST_OPTIONS})
+            set_tests_properties(server-sql PROPERTIES TIMEOUT 300)
+            add_test(NAME server-sql-postgres COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/sql_host_test.py" --postgres
+                --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+                --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-sql-postgres-test"
+                ${NEURA_SQL_TEST_OPTIONS})
+            set_tests_properties(server-sql-postgres PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+        endif()
     endif()
     foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")

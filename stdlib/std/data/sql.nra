@@ -573,6 +573,34 @@ export let Sql = module (
             return -1;
         };
 
+        /// @brief Equal names in the same order.
+        #Pure
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Columns)) {
+                return false;
+            }
+            last that = other as Columns;
+            if (names.length != that.names.length) {
+                return false;
+            }
+            for (let i = 0; i < names.length; i += 1) {
+                if (names[i] != that.names[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the names' hashes.
+        #Pure
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 23;
+            for (let name in names) {
+                hash = hashing.combine(hash, name.hash_code());
+            }
+            return hash;
+        };
+
         /// @brief The names separated by commas.
         #Pure
         export let.override to_string = func -> string {

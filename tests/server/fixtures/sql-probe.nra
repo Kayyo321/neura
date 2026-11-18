@@ -1,0 +1,101 @@
+// A server image for tests/server/sql_host_test.py: probes of the SQL leases the host keeps for a request.
+//
+//   GET  /config?KEY  the host configuration value of KEY, or "none"
+//   POST /setup       creates the table probe (v TEXT NOT NULL UNIQUE)
+//   POST /insert?V    inserts V; a duplicate answers 409 with the error's code and detail
+//   POST /leak        acquires a connection, begins a transaction, inserts "leaked", and answers without
+//                     committing or closing anything
+//   GET  /count       the number of rows in probe
+//   GET  /slow        a statement that does not end by itself (probe.db=postgresql: pg_sleep(60))
+//   GET  /pool?NAME   200 when the host has the pool NAME, 404 otherwise
+let app = import:Std.App;
+let errors = import:Std.Core.Error;
+let program = import:Std.Program;
+let sql = import:Std.Data.Sql;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let SqlProbe = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode => app.run(serve);
+
+    /// @brief Serves one request with the pool "main".
+    let serve = func(context: app.Context) -> Result<Unit> {
+        match (context.sql_pool("main")) {
+            Result.Err(problem) => {
+                return Result<Unit>.Err(problem);
+            },
+            Result.Ok(pool) => {
+                last database = optional.value_or<string>(context.config("probe.db"), "sqlite");
+                return context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+                    route(context, pool, database, request)));
+            },
+        }
+    };
+
+    /// @brief The probe of the request's path.
+    let route = func(context: app.Context, pool: sql.Pool, database: string, request: app.Request)
+        -> Result<app.Response> {
+        if (request.path == "/config") {
+            return Result<app.Response>.Ok(app.text(200, optional.value_or<string>(context.config(request.query), "none")));
+        }
+        if (request.path == "/setup") {
+            return answer(pool.execute("CREATE TABLE IF NOT EXISTS probe (v TEXT NOT NULL UNIQUE)"));
+        }
+        if (request.path == "/insert") {
+            return answer(pool.execute("INSERT INTO probe (v) VALUES ($1)", request.query));
+        }
+        if (request.path == "/leak") {
+            match (pool.acquire()) {
+                Result.Err(problem) => {
+                    return Result<app.Response>.Err(problem);
+                },
+                Result.Ok(connection) => {
+                    match (connection.begin()) {
+                        Result.Err(problem) => {
+                            return Result<app.Response>.Err(problem);
+                        },
+                        Result.Ok(transaction) => {
+                            return answer(transaction.execute("INSERT INTO probe (v) VALUES ($1)", "leaked"));
+                        },
+                    }
+                },
+            }
+        }
+        if (request.path == "/count") {
+            return match (pool.query_one("SELECT count(*) AS n FROM probe")) {
+                Result.Err(problem) => Result<app.Response>.Err(problem),
+                Result.Ok(row) => match (row.int64("n")) {
+                    Result.Err(problem) => Result<app.Response>.Err(problem),
+                    Result.Ok(count) => Result<app.Response>.Ok(app.text(200, count.to_string())),
+                },
+            };
+        }
+        if (request.path == "/slow") {
+            last statement = database == "postgresql" ? "SELECT pg_sleep(60)"
+                : "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
+            return answer(pool.execute(statement));
+        }
+        if (request.path == "/pool") {
+            return match (sql.pool(request.query)) {
+                Result.Ok(_) => Result<app.Response>.Ok(app.text(200, "found")),
+                Result.Err(problem) => Result<app.Response>.Ok(app.text(404, errors.message(problem))),
+            };
+        }
+        return Result<app.Response>.Ok(app.text(404, "not found"));
+    };
+
+    /// @brief 200 with the affected row count, 409 with the error for a constraint violation, and the error
+    /// itself (500) otherwise.
+    let answer = func(outcome: Result<int64>) -> Result<app.Response> {
+        return match (outcome) {
+            Result.Ok(count) => Result<app.Response>.Ok(app.text(200, count.to_string())),
+            Result.Err(problem) => match (problem) {
+                errors.Error.Custom(detail) => detail.code() == "sql.constraint_violation"
+                    ? Result<app.Response>.Ok(app.text(409, detail.code() + " " + (detail as sql.SqlError).detail))
+                    : Result<app.Response>.Err(problem),
+                _ => Result<app.Response>.Err(problem),
+            },
+        };
+    };
+);

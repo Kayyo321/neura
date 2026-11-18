@@ -644,6 +644,11 @@ private:
                                  deadline) != Channel::Status::Ok) {
                     return outcome;
                 }
+                // A statement the deadline interrupted: the request is over.
+                if (Clock::now() >= deadline) {
+                    outcome.timed_out = true;
+                    return outcome;
+                }
                 break;
             case FrameKind::Done:
                 outcome.done = true;

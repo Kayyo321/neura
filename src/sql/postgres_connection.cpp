@@ -670,6 +670,9 @@ Status open_postgres(const PoolConfig& config, const Wait& wait, std::unique_ptr
         polling = PQconnectPoll(raw);
     }
     if (PQsetnonblocking(raw, 1) != 0) return fail("cannot switch to non-blocking mode");
+    // Server notices (such as "table does not exist, skipping") are not
+    // errors; libpq would print them on standard error.
+    PQsetNoticeProcessor(raw, [](void*, const char*) {}, nullptr);
     connection = std::make_unique<PostgresConnection>(raw);
     return Status::success();
 }
