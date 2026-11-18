@@ -589,15 +589,9 @@ if(NEURA_ENABLE_SERVER_TLS)
         target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
         target_link_libraries(neura_nvm PRIVATE neura_openssl)
         target_link_libraries(neura_server_listeners PRIVATE neura_server_tls)
-
-        if(BUILD_TESTING)
-            find_package(Threads REQUIRED)
-            add_executable(neura_http_tls_tests tests/server/http_tls_tests.cpp)
-            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls neura_openssl Threads::Threads)
-            neura_target_defaults(neura_http_tls_tests)
-            add_test(NAME server-http-tls COMMAND neura_http_tls_tests)
-            set_tests_properties(server-http-tls PROPERTIES TIMEOUT 15)
-        endif()
+        # The test of this transport (server-http-tls) is registered after
+        # include(CTest), with the other server tests: BUILD_TESTING is not
+        # defined yet here.
     endfunction()
 
     neura_configure_server_tls()
@@ -1217,6 +1211,14 @@ if(BUILD_TESTING AND NEURA_SDK)
         neura_target_defaults(neura_http_connection_tests)
         add_test(NAME server-http-connection COMMAND neura_http_connection_tests)
         set_tests_properties(server-http-connection PROPERTIES TIMEOUT 15)
+
+        if(NEURA_ENABLE_SERVER_TLS)
+            add_executable(neura_http_tls_tests tests/server/http_tls_tests.cpp)
+            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls neura_openssl Threads::Threads)
+            neura_target_defaults(neura_http_tls_tests)
+            add_test(NAME server-http-tls COMMAND neura_http_tls_tests)
+            set_tests_properties(server-http-tls PROPERTIES TIMEOUT 15)
+        endif()
 
         add_executable(neura_http_listener_foreground tests/server/http_listener_foreground.cpp)
         target_link_libraries(neura_http_listener_foreground PRIVATE neura_server_listeners Threads::Threads)
@@ -2032,6 +2034,10 @@ if(BUILD_TESTING AND NEURA_SDK)
             add_test(NAME service-${suite} COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" ${suite} "$<TARGET_FILE_DIR:neura>")
             set_tests_properties(service-${suite} PROPERTIES TIMEOUT 600)
+            # A GPU build's refusal of a graph device names --gpu=off.
+            if(NEURA_HAS_GPU)
+                set_tests_properties(service-${suite} PROPERTIES ENVIRONMENT "NEURA_TEST_GPU_BUILD=1")
+            endif()
         endforeach()
     endif()
 
@@ -2071,5 +2077,44 @@ if(BUILD_TESTING AND NEURA_SDK)
             set_property(TEST "${test}" DIRECTORY "${NEURA_LIBCLANG_DIR}"
                 APPEND PROPERTY ENVIRONMENT "NEURA_GPU=off")
         endforeach()
+    endif()
+endif()
+
+# A slower target (the CI runners of docs/ContinuousIntegration.md, "Time
+# limits") multiplies every test's time limit by one whole number instead of
+# editing each limit. A test without a TIMEOUT property has CTest's default,
+# DART_TESTING_TIMEOUT, which is multiplied too. The scale is also given to
+# each test as NEURA_TEST_TIMEOUT_SCALE, for suites with limits of their own.
+set(NEURA_TEST_TIMEOUT_SCALE 1 CACHE STRING
+    "A whole number every test's time limit is multiplied by, for slower machines")
+if(BUILD_TESTING)
+    if(NOT NEURA_TEST_TIMEOUT_SCALE MATCHES "^[1-9][0-9]*$")
+        message(FATAL_ERROR "NEURA_TEST_TIMEOUT_SCALE must be a whole number of 1 or more, not '${NEURA_TEST_TIMEOUT_SCALE}'")
+    endif()
+    set(neura_default_timeout 1500)
+    if(DART_TESTING_TIMEOUT MATCHES "^[1-9][0-9]*$")
+        set(neura_default_timeout "${DART_TESTING_TIMEOUT}")
+    endif()
+    # In the submodule's directory a test property is addressed with
+    # DIRECTORY, which CMake 3.28 introduced.
+    function(neura_scale_test_timeouts)
+        get_property(tests DIRECTORY ${ARGN} PROPERTY TESTS)
+        if(ARGN)
+            set(where DIRECTORY ${ARGN})
+        endif()
+        foreach(test IN LISTS tests)
+            get_property(limit TEST "${test}" ${where} PROPERTY TIMEOUT)
+            if(NOT limit)
+                set(limit "${neura_default_timeout}")
+            endif()
+            math(EXPR limit "${limit} * ${NEURA_TEST_TIMEOUT_SCALE}")
+            set_property(TEST "${test}" ${where} PROPERTY TIMEOUT "${limit}")
+            set_property(TEST "${test}" ${where}
+                APPEND PROPERTY ENVIRONMENT "NEURA_TEST_TIMEOUT_SCALE=${NEURA_TEST_TIMEOUT_SCALE}")
+        endforeach()
+    endfunction()
+    neura_scale_test_timeouts()
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28" AND NEURA_SDK)
+        neura_scale_test_timeouts("${NEURA_LIBCLANG_DIR}")
     endif()
 endif()
