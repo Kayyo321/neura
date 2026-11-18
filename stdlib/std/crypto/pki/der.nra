@@ -10,7 +10,7 @@ let oids = import:Std.Crypto.Pki.Oid;
 let utf8 = import:Std.Encoding.Utf8;
 
 /// @brief A strict DER reader (ITU-T X.690, Distinguished Encoding Rules) over a byte list (Stdlib.md section
-/// 20.9).
+/// 21.10).
 ///
 /// `parse` checks the whole tree before it returns: definite lengths in their shortest form, no indefinite
 /// lengths, tag numbers in their shortest form, primitive encodings for the universal primitive types and

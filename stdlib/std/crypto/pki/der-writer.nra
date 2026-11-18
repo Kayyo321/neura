@@ -4,7 +4,7 @@ let der_time = import:Std.Crypto.Internal.DerTime;
 let instant = import:Std.Time.Instant;
 let utf8 = import:Std.Encoding.Utf8;
 
-/// @brief A DER writer: each function returns one complete encoding (Stdlib.md section 20.9).
+/// @brief A DER writer: each function returns one complete encoding (Stdlib.md section 21.10).
 ///
 /// Lengths are always in their shortest form and integers are minimal, so the output is DER. A SET's
 /// elements are sorted. Values outside a type's rules (a PrintableString character, a time before 1950 for

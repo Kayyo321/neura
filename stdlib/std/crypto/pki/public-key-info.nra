@@ -10,7 +10,7 @@ let oids = import:Std.Crypto.Pki.Oids;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
 /// @brief SubjectPublicKeyInfo (RFC 5280, section 4.1.2.7) with the key's algorithm identified (Stdlib.md section
-/// 20.9).
+/// 21.10).
 ///
 /// Known algorithms: rsaEncryption (RFC 3279, NULL parameters, the RSAPublicKey read), id-RSASSA-PSS (RFC 4055,
 /// optional parameters), id-ecPublicKey with a named curve (RFC 5480: P-256, P-384, P-521, secp256k1; explicit

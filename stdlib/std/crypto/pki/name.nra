@@ -9,7 +9,7 @@ let text_case = import:Std.Core.String;
 let utf8 = import:Std.Encoding.Utf8;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
-/// @brief X.500 distinguished names as X.509 uses them (RFC 5280, section 4.1.2.4) (Stdlib.md section 20.9).
+/// @brief X.500 distinguished names as X.509 uses them (RFC 5280, section 4.1.2.4) (Stdlib.md section 21.10).
 ///
 /// A `Name` is a sequence of relative distinguished names, each a set of attribute type-and-value pairs.
 /// `equals` follows RFC 5280, section 7.1: values of the string types compare after case folding and after

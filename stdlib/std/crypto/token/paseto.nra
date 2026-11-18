@@ -13,7 +13,7 @@ let hashing = import:Std.Core.Hash;
 let jose = import:Std.Crypto.Internal.JoseJson;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief PASETO version 4 (Stdlib.md section 21.10).
+/// @brief PASETO version 4 (Stdlib.md section 21.11).
 ///
 /// Local tokens encrypt and authenticate with XChaCha20 and keyed BLAKE2b; public tokens sign with
 /// Ed25519. Both authenticate the exact footer and implicit assertion. The implicit assertion is

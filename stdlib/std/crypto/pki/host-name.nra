@@ -3,7 +3,7 @@ let.promote _ = import:Std.Crypto.Pki.Certificate;
 let.promote _ = import:Std.Crypto.Pki.GeneralName;
 let utf8 = import:Std.Encoding.Utf8;
 
-/// @brief Matching a server's identity against a certificate, as RFC 9525 says (Stdlib.md section 20.9).
+/// @brief Matching a server's identity against a certificate, as RFC 9525 says (Stdlib.md section 21.10).
 ///
 /// Only subjectAltName is consulted; the subject's commonName is never used (RFC 9525, section 6.3). A DNS
 /// reference matches a dNSName case-insensitively (ASCII). A wildcard is accepted only as the whole left-most

@@ -18,7 +18,7 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
 /// @brief PKCS #8 private keys: OneAsymmetricKey (RFC 5958) and EncryptedPrivateKeyInfo with PBES2 (RFC 8018)
-/// (Stdlib.md section 20.9).
+/// (Stdlib.md section 21.10).
 ///
 /// PBES2 is supported with PBKDF2 over HMAC-SHA-224, -256, -384 or -512 and AES-128/192/256 in CBC mode (with
 /// PKCS #7 padding) or GCM (RFC 5084 parameters, a 12-byte nonce and a 16-byte tag appended to the ciphertext).

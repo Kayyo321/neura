@@ -17,21 +17,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Secret** · [`export let Secret = class<T> implements SecretMemory<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L11)
-  Wraps a value of type T so that it is never printed. Because a generic class cannot overwrite a value of unknown type, the constructor takes an `eraser` that `wipe` calls with the value (for a byte list, a function that zeroes it). The same runtime limits as `SecretBytes` apply. Tagged `#Final`. Since 0.3.0.
-- **Secret.Secret** · [`export let init = func(secret: T, erase: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L20)
+- **Secret** · [`export let Secret = class<T> implements SecretMemory<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L12)
+  Wraps a value of type T so that it is never printed. Because a generic class cannot overwrite a value of unknown type, the constructor takes an `eraser` that `wipe` calls with the value (for a byte list, a function that zeroes it). Generic values remain in the Neura heap. Use `SecretBytes` for the dedicated byte-buffer locking service. Tagged `#Final`. Since 0.3.0.
+- **Secret.Secret** · [`export let init = func(secret: T, erase: func(T) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L21)
   Wraps the value, with the function `wipe` uses to erase it.
-- **Secret.Secret** · [`export let expose = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L26)
+- **Secret.Secret** · [`export let expose = func -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L27)
   The value. Traps with "invalid state: secret wiped" after `wipe`.
-- **Secret.Secret** · [`export let wipe = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L34)
+- **Secret.Secret** · [`export let wipe = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L35)
   Calls the eraser once and marks the secret wiped.
-- **Secret.Secret** · [`export let is_wiped = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L42)
+- **Secret.Secret** · [`export let is_wiped = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L43)
   Whether `wipe` has run.
-- **Secret.Secret** · [`export let lock = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L46)
-  Locks the value's pages in memory and out of swap.
-- **Secret.Secret** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L52)
+- **Secret.Secret** · [`export let lock = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L49)
+  Requests locking for a generic value. Since 0.3.0.
+- **Secret.Secret** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L55)
   A fixed placeholder, never the value.
-- **Secret** · [`export let zero_bytes = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L57)
+- **Secret** · [`export let zero_bytes = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/core/secret.nra#L60)
   An eraser for byte lists: overwrites every byte with zero. Since 0.3.0.
 <!-- END SOURCE API -->
 

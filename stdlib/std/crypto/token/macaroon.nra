@@ -7,7 +7,7 @@ let secretbox = import:Std.Crypto.Internal.MacaroonSecretbox;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Macaroons with libmacaroons binary v1 and v2 encoding (Stdlib.md section 21.10).
+/// @brief Macaroons with libmacaroons binary v1 and v2 encoding (Stdlib.md section 21.11).
 ///
 /// The signature chains HMAC-SHA-256 over the identifier and each caveat. Anyone holding a macaroon can
 /// append caveats. Third-party caveats use NaCl XSalsa20-Poly1305 to encrypt a derived caveat key.
@@ -180,6 +180,7 @@ export let Macaroon = module (
         };
 
         /// @brief Whether the tokens have the same wire fields and signature.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
             if (!(other is Macaroon)) {
@@ -190,10 +191,12 @@ export let Macaroon = module (
         };
 
         /// @brief The hash of the canonical v2 encoding.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 => serialize().hash_code();
 
         /// @brief A fixed placeholder for the bearer credential.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Macaroon(<redacted>)";
 

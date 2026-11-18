@@ -19,7 +19,7 @@ let pem = import:Std.Crypto.Pki.Pem;
 let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
-/// @brief PKCS #10 certification requests (RFC 2986) (Stdlib.md section 20.9): parsing, and building one from a
+/// @brief PKCS #10 certification requests (RFC 2986) (Stdlib.md section 21.10): parsing, and building one from a
 /// caller-supplied signing function.
 ///
 /// The extensionRequest attribute (PKCS #9, RFC 2985) is read into `extensions`, and challengePassword into

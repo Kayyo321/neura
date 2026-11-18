@@ -1,7 +1,7 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 
-/// @brief ASN.1 object identifiers (Stdlib.md section 20.9).
+/// @brief ASN.1 object identifiers (Stdlib.md section 21.10).
 ///
 /// An `Oid` holds the DER content octets of an OBJECT IDENTIFIER and its dotted-decimal text. Arcs of any size
 /// are kept exactly, including the 128-bit arcs under 2.25. Two OIDs are equal when their encodings are.

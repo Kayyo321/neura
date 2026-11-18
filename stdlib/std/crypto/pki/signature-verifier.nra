@@ -1,7 +1,7 @@
 let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
 let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
 
-/// @brief The signature-verification step of Std.Crypto.Pki (Stdlib.md section 20.9).
+/// @brief The signature-verification step of Std.Crypto.Pki (Stdlib.md section 21.10).
 ///
 /// Path validation, OCSP and Certificate Transparency never verify a signature themselves: they ask a
 /// `SignatureVerifier` with the signature AlgorithmIdentifier, the signer's SubjectPublicKeyInfo, the signed

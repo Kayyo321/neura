@@ -8,7 +8,7 @@ let names = import:Std.Crypto.Pki.Name;
 let oid_module = import:Std.Crypto.Pki.Oid;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
-/// @brief The GeneralName CHOICE of RFC 5280, section 4.2.1.6 (Stdlib.md section 20.9).
+/// @brief The GeneralName CHOICE of RFC 5280, section 4.2.1.6 (Stdlib.md section 21.10).
 /// @see [Std.Crypto.Pki.GeneralName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-GeneralName)
 #Since("0.3.0")
 export let GeneralName = module (

@@ -22,7 +22,7 @@ let sha1 = import:Std.Crypto.Internal.PkiSha1;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
-/// @brief OCSP (RFC 6960): request building, response parsing and response verification (Stdlib.md section 20.9).
+/// @brief OCSP (RFC 6960): request building, response parsing and response verification (Stdlib.md section 21.10).
 ///
 /// CertIDs are built with SHA-256 by default. SHA-1 CertIDs (RFC 5019's profile, which many responders still
 /// require) are built and matched with an internal SHA-1 used only to name certificates, never for a signature;

@@ -14,7 +14,7 @@ let secret = import:Std.Crypto.Core.SecretBytes;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief The four SHA-384/MGF1-SHA-384 variants of RFC 9474 RSA Blind Signatures (Stdlib.md section 21.12).
+/// @brief The four SHA-384/MGF1-SHA-384 variants of RFC 9474 RSA Blind Signatures (Stdlib.md section 21.13).
 ///
 /// Prepare, blind, sign the blinded message, then finalize. The resulting signature verifies as RSA-PSS
 /// over the prepared message. Use a dedicated RSA key pair for each RSABSSA variant. RFC 9474 recommends

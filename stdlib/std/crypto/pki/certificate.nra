@@ -20,7 +20,7 @@ let pem = import:Std.Crypto.Pki.Pem;
 let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 
-/// @brief X.509 v1, v2 and v3 certificates (RFC 5280, section 4) as typed values (Stdlib.md section 20.9).
+/// @brief X.509 v1, v2 and v3 certificates (RFC 5280, section 4) as typed values (Stdlib.md section 21.10).
 ///
 /// `parse` reads the whole certificate strictly: DER throughout, a version of v1 to v3 encoded only when not
 /// v1, unique identifiers only from v2 and extensions only in v3, the inner and outer signature algorithms equal

@@ -10,7 +10,7 @@ let hex = import:Std.Encoding.Hex;
 let oids = import:Std.Crypto.Pki.Oids;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
-/// @brief The X.509 v3 extensions of RFC 5280, section 4.2, as typed values (Stdlib.md section 20.9).
+/// @brief The X.509 v3 extensions of RFC 5280, section 4.2, as typed values (Stdlib.md section 21.10).
 ///
 /// Every typed value keeps the DER of the extension's value (`der_bytes`), which `equals` and `hash_code`
 /// compare. Each `parse_<name>` reads the extnValue contents and fails with a `Parse` error on a value that

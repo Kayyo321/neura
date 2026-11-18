@@ -1,4 +1,4 @@
-/// @brief The ASN.1 BIT STRING value (Stdlib.md section 20.9).
+/// @brief The ASN.1 BIT STRING value (Stdlib.md section 21.10).
 /// @see [Std.Crypto.Pki.BitString](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-BitString)
 #Since("0.3.0")
 export let BitString = module (

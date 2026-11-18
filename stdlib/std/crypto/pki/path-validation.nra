@@ -18,7 +18,7 @@ let name_constraints = import:Std.Crypto.Internal.PkiNameConstraints;
 let oids = import:Std.Crypto.Pki.Oids;
 let policy_tree = import:Std.Crypto.Internal.PkiPolicyTree;
 
-/// @brief Certification path building and RFC 5280, section 6.1 path validation (Stdlib.md section 20.9).
+/// @brief Certification path building and RFC 5280, section 6.1 path validation (Stdlib.md section 21.10).
 ///
 /// `validate` builds paths from the leaf through the given intermediates to a trust anchor, depth first,
 /// trusting anchors before intermediates, and validates each candidate with the algorithm of section 6.1: the
@@ -133,7 +133,7 @@ export let PathValidation = module (
         export let.override to_string = func -> string => $"ValidatedPath({chain.length} certificates)";
     );
 
-    /// @brief The failure of one validation: a code such as "pki.signature" (see Stdlib.md section 20.9) and a
+    /// @brief The failure of one validation: a code such as "pki.signature" (see Stdlib.md section 21.10) and a
     /// message.
     let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
 

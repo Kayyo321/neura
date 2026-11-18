@@ -2,7 +2,7 @@ let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let base64 = import:Std.Encoding.Base64;
 
-/// @brief Strict PEM, the textual encoding of RFC 7468 (Stdlib.md section 20.9).
+/// @brief Strict PEM, the textual encoding of RFC 7468 (Stdlib.md section 21.10).
 ///
 /// A block is `-----BEGIN <label>-----`, lines of standard Base64 with padding, and `-----END <label>-----`
 /// with the same label. The strict grammar of RFC 7468, section 3 applies inside a block: every Base64 line

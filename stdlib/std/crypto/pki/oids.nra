@@ -1,4 +1,4 @@
-/// @brief Dotted forms of the object identifiers that Std.Crypto.Pki names (Stdlib.md section 20.9).
+/// @brief Dotted forms of the object identifiers that Std.Crypto.Pki names (Stdlib.md section 21.10).
 ///
 /// The sources are RFC 5280 (X.509), RFC 3279, 4055, 5480, 5758, 8410 and 8017 (algorithms), RFC 6960 (OCSP),
 /// RFC 6962 (Certificate Transparency), RFC 8018 and 5084 (PBES2), RFC 2985 (PKCS #9), and the NIST Computer

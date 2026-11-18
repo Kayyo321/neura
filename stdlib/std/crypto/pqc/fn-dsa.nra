@@ -12,6 +12,7 @@ let.promote _ = import:Std.Core.Result;
 export let FnDsa = module (
     /// @brief Placeholder names for two FN-DSA parameter sets, after the Falcon-512 and Falcon-1024 parameter sets
     /// of the Falcon submission; FIPS 206 may define them differently.
+    /// @see [Std.Crypto.Pqc.FnDsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-FnDsa)
     #Since("0.3.0")
     export let ParameterSet = enum (FnDsa512, FnDsa1024);
 

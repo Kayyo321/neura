@@ -19,7 +19,7 @@ let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 let writer = import:Std.Crypto.Pki.DerWriter;
 
-/// @brief Certificate Transparency, RFC 6962 (Stdlib.md section 20.9): signed certificate timestamps, signed
+/// @brief Certificate Transparency, RFC 6962 (Stdlib.md section 21.10): signed certificate timestamps, signed
 /// tree heads, and Merkle audit and consistency proofs.
 ///
 /// SCT lists are read in their TLS form (`parse_list`, as in the TLS extension and the OCSP extension) and from
