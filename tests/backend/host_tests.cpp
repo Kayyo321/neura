@@ -945,6 +945,98 @@ NEURA_TEST(host, datagram_and_unix_socket_services) {
 
 NEURA_TEST(host, socket_options_resolution_and_send_file) {
     Host host(everything());
+// UDP segmentation offload and receive coalescing, Multipath TCP, and
+// splice through a pipe (src/nvm/socket_provider.cpp). Each is a Linux
+// feature; elsewhere the services answer unsupported.
+NEURA_TEST(host, udp_offload_mptcp_and_splice) {
+    Host host(everything());
+#ifdef __linux__
+    const auto sender = host.call("neura.net.udp.bind", {text("127.0.0.1"), i32(0)});
+    const auto receiver = host.call("neura.net.udp.bind", {text("127.0.0.1"), i32(0)});
+    const auto receiver_port = host.call("neura.net.local_port", {receiver.value});
+    expect_ok(host.call("neura.net.option.set", {sender.value, i32(13), i64(1000)}), "UDP_SEGMENT");
+    check_equal(as_i64(host.call("neura.net.option.get", {sender.value, i32(13)}).value), std::int64_t{1000},
+                "UDP_SEGMENT reads back");
+    // One send of 2,500 bytes leaves as datagrams of 1,000, 1,000 and 500.
+    check_equal(as_i32(host.call("neura.net.udp.send_to", {sender.value, text("127.0.0.1"), receiver_port.value,
+                                                           bytes(std::string(2500, 'g'))}).value),
+                2500, "GSO send count");
+    std::vector<std::size_t> sizes;
+    for (int i = 0; i < 3; ++i) {
+        const auto got = host.call("neura.net.udp.receive_segments", {receiver.value, i32(65536), i64(2'000'000'000)});
+        expect_ok(got, "receive a segment");
+        sizes.push_back(got.value.elements.at(0).bytes.size());
+        check_equal(as_i32(got.value.elements.at(3)), static_cast<std::int32_t>(sizes.back()),
+                    "without GRO the segment size is the datagram");
+    }
+    check(sizes == std::vector<std::size_t>{1000, 1000, 500}, "segmented by the kernel");
+    // With UDP_GRO, loopback delivers a segmented send coalesced, with its
+    // segment size; a kernel that does not coalesce delivers the datagrams.
+    expect_ok(host.call("neura.net.option.set", {receiver.value, i32(14), i64(1)}), "UDP_GRO");
+    host.call("neura.net.udp.send_to", {sender.value, text("127.0.0.1"), receiver_port.value,
+                                        bytes(std::string(3000, 'h'))});
+    std::size_t total = 0;
+    while (total < 3000) {
+        const auto got = host.call("neura.net.udp.receive_segments", {receiver.value, i32(65536), i64(2'000'000'000)});
+        if (!got.success) break;
+        total += got.value.elements.at(0).bytes.size();
+        check_equal(as_i32(got.value.elements.at(3)), std::int32_t{1000}, "the GRO segment size");
+    }
+    check_equal(total, std::size_t{3000}, "every coalesced byte arrives");
+    expect_error(host.call("neura.net.option.set", {receiver.value, i32(15), i64(1)}), host_error::invalid_input,
+                 "the protocol option is read only");
+    check_equal(as_i64(host.call("neura.net.option.get", {receiver.value, i32(15)}).value), std::int64_t{17},
+                "a UDP socket's protocol");
+
+    const auto mptcp = host.call("neura.net.mptcp.listen", {text("127.0.0.1"), i32(0)});
+    if (mptcp.success) {
+        const auto port = host.call("neura.net.local_port", {mptcp.value});
+        const auto client = host.call("neura.net.mptcp.connect", {text("127.0.0.1"), port.value, i64(2'000'000'000)});
+        expect_ok(client, "MPTCP connect");
+        const auto server = host.call("neura.net.accept", {mptcp.value});
+        expect_ok(server, "MPTCP accept");
+        check_equal(as_i64(host.call("neura.net.option.get", {client.value, i32(15)}).value), std::int64_t{262},
+                    "the client is an MPTCP socket");
+        check_equal(as_i32(host.call("neura.net.write", {client.value, bytes("multipath")}).value), 9, "MPTCP write");
+        check_equal(host.call("neura.net.read", {server.value, i32(64), i64(2'000'000'000)}).value.bytes,
+                    std::string("multipath"), "MPTCP read");
+    } else {
+        check(mptcp.value.bits == host_error::unsupported, "MPTCP is supported or answers unsupported");
+        std::cout << "  (MPTCP unavailable on this kernel)\n";
+    }
+
+    // A stream into a pipe and out of it into another stream: the bytes never
+    // reach the NVM.
+    const auto [listener, client, server] = connected(host);
+    const auto [listener2, client2, server2] = connected(host);
+    const auto pipe = host.call("neura.net.pipe", {});
+    expect_ok(pipe, "pipe");
+    const auto read_end = pipe.value.elements.at(0);
+    const auto write_end = pipe.value.elements.at(1);
+    host.call("neura.net.write", {i64(client), bytes("spliced bytes")});
+    const auto in = host.call("neura.net.splice", {i64(server), write_end, i64(64)});
+    expect_ok(in, "splice a socket into the pipe");
+    check_equal(as_i64(in.value), std::int64_t{13}, "into the pipe");
+    const auto out = host.call("neura.net.splice", {read_end, i64(server2), i64(64)});
+    expect_ok(out, "splice the pipe into a socket");
+    check_equal(host.call("neura.net.read", {i64(client2), i32(64), i64(2'000'000'000)}).value.bytes,
+                std::string("spliced bytes"), "out of the other socket");
+    expect_error(host.call("neura.net.splice", {i64(server), i64(server2), i64(1)}), host_error::invalid_input,
+                 "splice needs a pipe on one side");
+    expect_error(host.call("neura.net.splice", {i64(server), write_end, i64(0)}), host_error::invalid_input, "count 0");
+    host.services.end_run();
+    check_equal(host.services.open_sockets(), std::size_t{0}, "pipes are closed with the run");
+    (void)listener;
+    (void)listener2;
+    (void)client;
+    (void)server2;
+#endif
+    Host denied({});
+    expect_error(denied.call("neura.net.pipe", {}), host_error::capability_denied, "pipe without the net group");
+    expect_error(denied.call("neura.net.mptcp.listen", {text("127.0.0.1"), i32(0)}), host_error::capability_denied,
+                 "MPTCP without the net group");
+}
+
     const auto [listener, client, server] = connected(host);
     const auto set = [&](std::int64_t socket, std::int32_t option, std::int64_t value) {
         return host.call("neura.net.option.set", {i64(socket), i32(option), i64(value)});
@@ -1051,6 +1143,11 @@ NEURA_TEST(host, entropy_comes_from_the_system_generator) {
     check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "a forked child sees the next generation");
     Host nothing({});
     expect_error(nothing.call("neura.entropy.hardware", {i32(1)}), host_error::capability_denied, "hardware denied");
+    using namespace std::string_view_literals;
+    check(nvm::vm_generation_uevent("change@/devices/LNXSYSTM:00/QEMUVGID:00\0ACTION=change\0NEW_VMGENID=1\0"sv),
+          "a vmgenid uevent is a new generation");
+    check(!nvm::vm_generation_uevent("change@/devices/x\0ACTION=change\0NEW_VMGENID=10\0"sv), "only the exact field");
+    check(!nvm::vm_generation_uevent("add@/devices/y\0ACTION=add\0"sv), "another uevent");
     expect_error(nothing.call("neura.process.generation", {}), host_error::capability_denied, "generation denied");
 }
 

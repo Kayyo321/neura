@@ -22,6 +22,16 @@ namespace neura::nvm {
 // for an image without tasks, which serves every request synchronously.
 std::vector<std::uint8_t> host_modes_for(const nvr::Image& image, const Bindings& bindings);
 
+// How the driver asks the operating system which descriptors are ready.
+// poll(2) everywhere on POSIX; on Linux, NEURA_IO_BACKEND=epoll or io_uring in the
+// environment selects epoll(7) when the kernel provides it, and anything
+// else, or a kernel without it, keeps poll. The choice is read once per
+// process and changes no completion order: ready operations are applied by
+// request sequence whichever backend reported them.
+enum class IoBackend { Poll, Epoll, IoUring, WaitForMultipleObjects };
+IoBackend io_backend();
+const char* io_backend_name(IoBackend backend);
+
 // The overlapping requests a driver has started and not yet delivered.
 class PendingRequests {
 public:

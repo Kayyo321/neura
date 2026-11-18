@@ -37,6 +37,8 @@ struct StandardServices::Tables {
         bool listener = false;
         // A UDP or Unix datagram socket (socket_provider.cpp).
         bool datagram = false;
+        // One end of a pipe of neura.net.pipe, for neura.net.splice.
+        bool pipe = false;
     };
     std::map<std::int64_t, File> files;
     std::int64_t next_file = 1;
