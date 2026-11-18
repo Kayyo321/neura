@@ -46,7 +46,7 @@ export let RsaCore = module (
         export let apply = func(x: uint32[list]) -> uint32[list] =>
             modulus.from_mont(modulus.pow(modulus.to_mont(x), e));
 
-        export let.override to_string = func -> string => "RsaCore.PublicCore(" + bits.to_string() + " bits)";
+        export let.override to_string = func -> string => "RsaCore.PublicCore(" .. bits.to_string() .. " bits)";
     );
 
     /// @brief The private numbers: the primes, the CRT exponents and the coefficient.
@@ -112,10 +112,7 @@ export let RsaCore = module (
             last limbs = public_core.n.length;
             let y = mp.resize(trim_to(qh, limbs), limbs);
             let _ = mp.add_into(y, y, mp.resize(m2, limbs));
-            if (mp.equal(public_core.apply(y), x) == 0) {
-                return new;
-            }
-            return y;
+            return if (mp.equal(public_core.apply(y), x) == 0) -> new else -> y;
         };
 
         /// @brief Text naming the size, never a value.
@@ -155,10 +152,7 @@ export let RsaCore = module (
             return new;
         }
         last x = mp.from_bytes_be(bytes, key.n.length);
-        if (mp.less(x, key.n) == 0) {
-            return new;
-        }
-        return x;
+        return if (mp.less(x, key.n) == 0) -> new else -> x;
     };
 
     /// @brief I2OSP of RFC 8017, section 4.1, to k bytes.

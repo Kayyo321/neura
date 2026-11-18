@@ -30,7 +30,7 @@ export let Bulletproofs = module (
 
     let check_shape = func(bits, values, blindings: int) {
         check_bits(bits);
-        if (!valid_count(values) || values != blindings) {
+        if (not valid_count(values) || values != blindings) {
             trap_with_message("invalid argument: Bulletproofs needs 1, 2, 4, 8 or 16 values with matching blindings");
         }
     };
@@ -87,7 +87,7 @@ export let Bulletproofs = module (
     let read_point = func(group: ristretto.Group, bytes: uint8[list], identity_allowed: bool) -> Result<edwards.Point> {
         match (group.decode(bytes)) {
             Optional.Some(point) => {
-                if (!identity_allowed && group.is_identity(point)) {
+                if (not identity_allowed && group.is_identity(point)) {
                     return fail<edwards.Point>("the identity is invalid for a Bulletproofs proof point");
                 }
                 return Result<edwards.Point>.Ok(point);
@@ -424,7 +424,7 @@ export let Bulletproofs = module (
         }
         polynomial = group.add(polynomial, group.multiply(group.scalar_subtract(adjustment, tx), gens.base));
         polynomial = group.subtract(polynomial, group.multiply(tx_blind, gens.blinding));
-        if (!group.is_identity(polynomial)) {
+        if (not group.is_identity(polynomial)) {
             return Result<bool>.Ok(false);
         }
 
@@ -558,7 +558,7 @@ export let Bulletproofs = module (
         proof: uint8[list]) -> bool {
         check_bits(bits);
         last count = commitments.length;
-        if (!valid_count(count) || proof.length != 32 * (9 + 2 * log2_bits(bits * count))) {
+        if (not valid_count(count) || proof.length != 32 * (9 + 2 * log2_bits(bits * count))) {
             return false;
         }
         for (let encoded in commitments) {

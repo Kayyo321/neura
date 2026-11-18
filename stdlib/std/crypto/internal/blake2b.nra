@@ -68,7 +68,7 @@ export let Blake2b = module (
                 h.append(w);
             }
             h[0] = h[0] ^ 16842752 ^ ((key.length as uint64) << 8) ^ (output_length as uint64);
-            for (let i = 0; i < 16; i++) {
+            for (let i in 0 .. 16) {
                 v.append(0);
                 m.append(0);
             }

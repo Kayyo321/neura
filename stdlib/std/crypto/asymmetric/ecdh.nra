@@ -45,7 +45,7 @@ export let Ecdh = module (
             return shared_secret(private_key, peer);
         };
 
-        export let.override to_string = func -> string => "Ecdh(" + curve.to_string() + ")";
+        export let.override to_string = func -> string => "Ecdh(" .. curve.to_string() .. ")";
     );
 
     /// @brief The x-coordinate of d Q. Keys on different curves trap with `invalid argument`. A result at

@@ -51,9 +51,9 @@ The following public declarations are taken from the module source; each links t
 - **PathValidation.ValidatedPath** · [`export let anchor = func -> Certificate`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L107)
   The trust anchor.
 - **PathValidation.ValidatedPath** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L109)
-- **PathValidation.ValidatedPath** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L125)
-- **PathValidation.ValidatedPath** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L133)
-- **PathValidation** · [`export let validate = func(leaf: Certificate, intermediates: Certificate[list], anchors: Certificate[list], options: ValidationOptions) -> Result<ValidatedPath>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L180)
+- **PathValidation.ValidatedPath** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L124)
+- **PathValidation.ValidatedPath** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L132)
+- **PathValidation** · [`export let validate = func(leaf: Certificate, intermediates: Certificate[list], anchors: Certificate[list], options: ValidationOptions) -> Result<ValidatedPath>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/path-validation.nra#L179)
   Builds and validates a path from the leaf to one of the anchors. Failures are `Custom` errors whose code names the check: pki.no_path, pki.signature, pki.validity, pki.issuer_name, pki.not_ca, pki.path_length, pki.key_usage, pki.name_constraints, pki.policy, pki.unknown_critical_extension, pki.extended_key_usage, pki.host_name, pki.profile, pki.weak_key or pki.budget. When several candidate paths fail, the error of the first is returned. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

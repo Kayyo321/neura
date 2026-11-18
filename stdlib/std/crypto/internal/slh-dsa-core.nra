@@ -46,10 +46,10 @@ export let SlhDsaCore = module (
         let state: uint64[list] = new;
 
         export let init = func {
-            for (let t = 0; t < 80; t++) {
+            for (let t in 0 .. 80) {
                 schedule.append(0);
             }
-            for (let i = 0; i < 8; i++) {
+            for (let i in 0 .. 8) {
                 state.append(0);
             }
         };
@@ -82,7 +82,7 @@ export let SlhDsaCore = module (
                 compress(tail, offset);
             }
             let out: uint8[list] = new;
-            for (let i = 0; i < 8; i++) {
+            for (let i in 0 .. 8) {
                 words.append64_be(out, state[i]);
             }
             return out;
@@ -279,13 +279,13 @@ export let SlhDsaCore = module (
 
         let set_type_and_clear = func(adrs: uint8[list], kind: int) {
             set_word(adrs, 16, kind as uint32);
-            for (let i = 20; i < 32; i++) {
+            for (let i in 20 .. 32) {
                 adrs[i] = 0;
             }
         };
 
         let set_tree_address = func(adrs: uint8[list], tree: uint64) {
-            for (let i = 4; i < 8; i++) {
+            for (let i in 4 .. 8) {
                 adrs[i] = 0;
             }
             set_word(adrs, 8, (tree >> 32) as uint32);
@@ -316,11 +316,11 @@ export let SlhDsaCore = module (
                 input.append(0);
             }
             input.append(adrs[3]);
-            for (let i = 8; i < 16; i++) {
+            for (let i in 8 .. 16) {
                 input.append(adrs[i]);
             }
             input.append(adrs[19]);
-            for (let i = 20; i < 32; i++) {
+            for (let i in 20 .. 32) {
                 input.append(adrs[i]);
             }
             return input;
@@ -329,11 +329,11 @@ export let SlhDsaCore = module (
         /// @brief Writes ADRSc into the input at `at`.
         let put_address = func(input: uint8[list], at: int, adrs: uint8[list]) {
             input[at] = adrs[3];
-            for (let i = 0; i < 8; i++) {
+            for (let i in 0 .. 8) {
                 input[at + 1 + i] = adrs[8 + i];
             }
             input[at + 9] = adrs[19];
-            for (let i = 0; i < 12; i++) {
+            for (let i in 0 .. 12) {
                 input[at + 10 + i] = adrs[20 + i];
             }
         };
@@ -495,7 +495,7 @@ export let SlhDsaCore = module (
         let wots_secret = func(sk_seed: uint8[list], pk_seed: uint8[list], adrs: uint8[list], chain_index: int) -> uint8[list] {
             let sk_adrs = words.copy(adrs);
             set_type_and_clear(sk_adrs, WotsPrf);
-            for (let i = 20; i < 24; i++) {
+            for (let i in 20 .. 24) {
                 sk_adrs[i] = adrs[i];
             }
             set_word(sk_adrs, 24, chain_index as uint32);
@@ -506,7 +506,7 @@ export let SlhDsaCore = module (
         let wots_compress = func(ends: uint8[list], pk_seed: uint8[list], adrs: uint8[list]) -> uint8[list] {
             let pk_adrs = words.copy(adrs);
             set_type_and_clear(pk_adrs, WotsPk);
-            for (let i = 20; i < 24; i++) {
+            for (let i in 20 .. 24) {
                 pk_adrs[i] = adrs[i];
             }
             return tweak(pk_seed, pk_adrs, ends, true);
@@ -658,7 +658,7 @@ export let SlhDsaCore = module (
         let fors_secret = func(sk_seed: uint8[list], pk_seed: uint8[list], adrs: uint8[list], idx: int) -> uint8[list] {
             let sk_adrs = words.copy(adrs);
             set_type_and_clear(sk_adrs, ForsPrf);
-            for (let i = 20; i < 24; i++) {
+            for (let i in 20 .. 24) {
                 sk_adrs[i] = adrs[i];
             }
             set_word(sk_adrs, 28, idx as uint32);
@@ -720,7 +720,7 @@ export let SlhDsaCore = module (
             }
             let pk_adrs = words.copy(adrs);
             set_type_and_clear(pk_adrs, ForsRoots);
-            for (let i = 20; i < 24; i++) {
+            for (let i in 20 .. 24) {
                 pk_adrs[i] = adrs[i];
             }
             return tweak(pk_seed, pk_adrs, roots, true);
@@ -798,6 +798,6 @@ export let SlhDsaCore = module (
             return ht_verify(fors_pk, sig, n + k * (a + 1) * n, pk_seed, indices[0], indices[1] as int, pk_root);
         };
 
-        export let.override to_string = func -> string => "SlhDsaCore.Engine(n = " + n.to_string() + ")";
+        export let.override to_string = func -> string => "SlhDsaCore.Engine(n = " .. n.to_string() .. ")";
     );
 );

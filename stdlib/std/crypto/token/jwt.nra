@@ -84,6 +84,6 @@ export let Jwt = module (
             },
             _ => {},
         }
-        return jose.fail<int64>("jwt.claims", name + " must be an integer Unix timestamp in the int64 range");
+        return jose.fail<int64>("jwt.claims", name .. " must be an integer Unix timestamp in the int64 range");
     };
 );

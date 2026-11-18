@@ -48,10 +48,10 @@ export let Ed448 = module (
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Ed448PublicKey)) {
+            if (other is not that: Ed448PublicKey) {
                 return false;
             }
-            return constant_time.ct_eq(encoded, (other as Ed448PublicKey).to_bytes());
+            return constant_time.ct_eq(encoded, that.to_bytes());
         };
 
         export let.override hash_code = func -> uint32 {

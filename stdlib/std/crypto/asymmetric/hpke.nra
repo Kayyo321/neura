@@ -203,8 +203,8 @@ export let Hpke = module (
         export let init = func(key_kem: Kem, bytes: uint8[list]) {
             crypto_policy.require(Algorithm.Hpke);
             crypto_policy.require(kem_algorithm(key_kem));
-            if (!public_key_ok(key_kem, bytes)) {
-                trap_with_message("invalid argument: not a " + name(key_kem) + " public key");
+            if (not public_key_ok(key_kem, bytes)) {
+                trap_with_message("invalid argument: not a " .. name(key_kem) .. " public key");
             }
             kem = key_kem;
             encoded = words.copy(bytes);
@@ -215,10 +215,9 @@ export let Hpke = module (
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is HpkePublicKey)) {
+            if (other is not key: HpkePublicKey) {
                 return false;
             }
-            last key = other as HpkePublicKey;
             return key.kem == kem && constant_time.ct_eq(encoded, key.to_bytes());
         };
 
@@ -230,7 +229,7 @@ export let Hpke = module (
             return h;
         };
 
-        export let.override to_string = func -> string => "HpkePublicKey(" + name(kem) + ")";
+        export let.override to_string = func -> string => "HpkePublicKey(" .. name(kem) .. ")";
     );
 
     let public_key_ok = func(kem: Kem, bytes: uint8[list]) -> bool {
@@ -265,7 +264,7 @@ export let Hpke = module (
             crypto_policy.require(kem_algorithm(key_kem));
             last public_bytes = public_of(key_kem, bytes);
             if (public_bytes.length == 0) {
-                trap_with_message("invalid argument: not a " + name(key_kem) + " private key");
+                trap_with_message("invalid argument: not a " .. name(key_kem) .. " private key");
             }
             kem = key_kem;
             material = new(bytes);
@@ -314,10 +313,7 @@ export let Hpke = module (
         if (is_montgomery(kem)) {
             last shared = kem == Kem.DhKemX25519HkdfSha256 ? montgomery.x25519(private_bytes, public_bytes)
                 : montgomery.x448(private_bytes, public_bytes);
-            if (constant_time.ct_eq(shared, words.zeros(shared.length))) {
-                return new;
-            }
-            return shared;
+            return if (constant_time.ct_eq(shared, words.zeros(shared.length))) -> new else -> shared;
         }
         last curve = new weierstrass.Curve(curve_of(kem));
         match (curve.decode(public_bytes)) {
@@ -351,7 +347,7 @@ export let Hpke = module (
         }
         last curve = new weierstrass.Curve(curve_of(kem));
         last bitmask: uint8 = kem == Kem.DhKemP521HkdfSha512 ? 1 : 255;
-        for (let counter = 0; counter < 256; counter++) {
+        for (let counter in 0 .. 256) {
             let bytes = labeled_expand(kdf, suite_id, dkp_prk, "candidate", new([counter as uint8]),
                 private_key_length(kem));
             bytes[0] = bytes[0] & bitmask;
@@ -392,8 +388,8 @@ export let Hpke = module (
     /// uncompressed point of the curve is `Custom` code `crypto.invalid_key`.
     #[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(kem: Kem, bytes: uint8[list]) -> Result<HpkePublicKey> {
-        if (!public_key_ok(kem, bytes)) {
-            return invalid<HpkePublicKey>("crypto.invalid_key", "not a " + name(kem) + " public key");
+        if (not public_key_ok(kem, bytes)) {
+            return invalid<HpkePublicKey>("crypto.invalid_key", "not a " .. name(kem) .. " public key");
         }
         return Result<HpkePublicKey>.Ok(new HpkePublicKey(kem, bytes));
     };
@@ -403,7 +399,7 @@ export let Hpke = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_private_key = func(kem: Kem, bytes: uint8[list]) -> Result<HpkePrivateKey> {
         if (public_of(kem, bytes).length == 0) {
-            return invalid<HpkePrivateKey>("crypto.invalid_key", "not a " + name(kem) + " private key");
+            return invalid<HpkePrivateKey>("crypto.invalid_key", "not a " .. name(kem) .. " private key");
         }
         return Result<HpkePrivateKey>.Ok(new HpkePrivateKey(kem, bytes));
     };
@@ -512,7 +508,7 @@ export let Hpke = module (
                     return result;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: HPKE encapsulation failed: " + e.to_string());
+                    trap_with_message("unavailable: HPKE encapsulation failed: " .. e.to_string());
                 },
             }
         };
@@ -521,7 +517,7 @@ export let Hpke = module (
         /// `crypto.invalid_ciphertext`.
         export let decapsulate = func(private_key: HpkePrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes> {
             check_kem(private_key.kem, kem);
-            if (!public_key_ok(kem, ciphertext)) {
+            if (not public_key_ok(kem, ciphertext)) {
                 return invalid<SecretBytes>("crypto.invalid_ciphertext", "malformed HPKE enc");
             }
             last dh = diffie_hellman(kem, private_key.expose(), ciphertext);
@@ -537,7 +533,7 @@ export let Hpke = module (
             -> Result<SecretBytes> {
             check_kem(private_key.kem, kem);
             check_kem(sender.kem, kem);
-            if (!public_key_ok(kem, ciphertext)) {
+            if (not public_key_ok(kem, ciphertext)) {
                 return invalid<SecretBytes>("crypto.invalid_ciphertext", "malformed HPKE enc");
             }
             last first = diffie_hellman(kem, private_key.expose(), ciphertext);
@@ -590,7 +586,7 @@ export let Hpke = module (
         /// @brief Seal or open with sequence number `sequence`.
         export let nonce = func(sequence: int64) -> uint8[list] {
             let out = words.copy(base_nonce);
-            for (let i = 0; i < 8; i++) {
+            for (let i in 0 .. 8) {
                 out[11 - i] = out[11 - i] ^ (((sequence >> (8 * i)) & 255) as uint8);
             }
             return out;
@@ -704,10 +700,9 @@ export let Hpke = module (
         /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
         #[NoDiscard, Since("0.3.0")]
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SealedMessage)) {
+            if (other is not that: SealedMessage) {
                 return false;
             }
-            last that = other as SealedMessage;
             return constant_time.ct_eq(enc, that.enc) && constant_time.ct_eq(ciphertext, that.ciphertext);
         };
 
@@ -726,7 +721,7 @@ export let Hpke = module (
         };
 
         export let.override to_string = func -> string =>
-            "Hpke.SealedMessage(" + enc.length.to_string() + " + " + ciphertext.length.to_string() + " bytes)";
+            "Hpke.SealedMessage(" .. enc.length.to_string() .. " + " .. ciphertext.length.to_string() .. " bytes)";
     );
 
     /// @brief An HPKE ciphersuite (KEM, KDF, AEAD).

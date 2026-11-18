@@ -31,17 +31,17 @@ The following public declarations are taken from the module source; each links t
   Records a checked key; use `parse` or `parse_der`.
 - **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let key_bits = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L64)
   The key size in bits: the RSA modulus length, the curve's field size, or the security category's size for the fixed-size schemes (256 for Ed25519 and X25519, 448 for Ed448 and X448); 0 for Unknown and the post-quantum schemes.
-- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let policy_algorithm = func -> Optional<Algorithm>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L101)
+- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let policy_algorithm = func -> Optional<Algorithm>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L98)
   The `Std.Crypto.Algorithm` of a key whose scheme the library names, for policy checks.
-- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L164)
-- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L180)
-- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L183)
+- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L161)
+- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L176)
+- **PublicKeyInfo.SubjectPublicKeyInfo** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L179)
   "SubjectPublicKeyInfo(<algorithm>[ <parameter set>], <n> key bytes)".
-- **PublicKeyInfo** · [`export let parse = func(e: der.Element) -> Result<SubjectPublicKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L208)
+- **PublicKeyInfo** · [`export let parse = func(e: der.Element) -> Result<SubjectPublicKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L204)
   Reads a SubjectPublicKeyInfo element. Tagged `#NoDiscard`. Since 0.3.0.
-- **PublicKeyInfo** · [`export let parse_der = func(bytes: uint8[list]) -> Result<SubjectPublicKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L338)
+- **PublicKeyInfo** · [`export let parse_der = func(bytes: uint8[list]) -> Result<SubjectPublicKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L332)
   Parses the DER encoding of a SubjectPublicKeyInfo. Tagged `#NoDiscard`. Since 0.3.0.
-- **PublicKeyInfo** · [`export let of = func(id: AlgorithmIdentifier, key: uint8[list]) -> Result<SubjectPublicKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L342)
+- **PublicKeyInfo** · [`export let of = func(id: AlgorithmIdentifier, key: uint8[list]) -> Result<SubjectPublicKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/public-key-info.nra#L336)
   A SubjectPublicKeyInfo from an AlgorithmIdentifier and the raw key bytes (checked like `parse`). Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

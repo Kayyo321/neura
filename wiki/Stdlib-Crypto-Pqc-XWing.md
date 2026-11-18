@@ -68,7 +68,7 @@ The following public declarations are taken from the module source; each links t
 - **XWing.XWing** · [`export let decapsulate = func(private_key: XWingPrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/x-wing.nra#L242)
   Recovers the shared secret, or returns an error for a wrong-length ciphertext. Since 0.3.0.
 - **XWing.XWing** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/x-wing.nra#L257)
-  The scheme name. Since 0.3.0.
+  A fixed placeholder for the encapsulation state. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Shared contracts

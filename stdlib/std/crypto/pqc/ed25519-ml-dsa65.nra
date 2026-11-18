@@ -53,10 +53,10 @@ export let Ed25519MlDsa65 = module (
         /// @see [Std.Crypto.Pqc.Ed25519MlDsa65](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-Ed25519MlDsa65)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is CompositePublicKey)) {
+            if (other is not that: CompositePublicKey) {
                 return false;
             }
-            last bytes = (other as CompositePublicKey).to_bytes();
+            last bytes = that.to_bytes();
             for (let i = 0; i < encoded.length; i++) {
                 if (encoded[i] != bytes[i]) {
                     return false;
@@ -225,7 +225,7 @@ export let Ed25519MlDsa65 = module (
                     return bytes;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: composite signing needs entropy: " + e.to_string());
+                    trap_with_message("unavailable: composite signing needs entropy: " .. e.to_string());
                 },
             }
             trap_with_message("unreachable: composite signing outcome");

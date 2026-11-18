@@ -27,8 +27,8 @@ export let AsymHash = module (
 
     /// @brief Traps unless the algorithm is a supported hash.
     export let check = func(algorithm: Algorithm) {
-        if (!is_supported(algorithm)) {
-            trap_with_message("invalid argument: " + algorithm.to_string() + " is not a supported hash here");
+        if (not is_supported(algorithm)) {
+            trap_with_message("invalid argument: " .. algorithm.to_string() .. " is not a supported hash here");
         }
     };
 

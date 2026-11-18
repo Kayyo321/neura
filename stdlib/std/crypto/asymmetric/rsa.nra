@@ -46,8 +46,8 @@ export let Rsa = module (
     };
 
     let size_denied = func -> string =>
-        "an RSA modulus below 2048 bits counts as Rsa1024, which the " + crypto_policy.policy().to_string()
-        + " policy denies";
+        "an RSA modulus below 2048 bits counts as Rsa1024, which the " .. crypto_policy.policy().to_string()
+        .. " policy denies";
 
     /// @brief Why public numbers are unusable, or an empty text.
     let public_problem = func(modulus: uint8[list], exponent: uint8[list]) -> string {
@@ -80,7 +80,7 @@ export let Rsa = module (
         export let init = func(modulus: uint8[list], exponent: uint8[list]) {
             last problem = public_problem(modulus, exponent);
             if (problem != "") {
-                trap_with_message("invalid argument: " + problem);
+                trap_with_message("invalid argument: " .. problem);
             }
             core = new(modulus, exponent);
             require_size(core.bits);
@@ -98,10 +98,9 @@ export let Rsa = module (
         export let exponent = func -> uint8[list] => rsa_core.strip(mp.to_bytes_be(core.e, core.e.length * 4));
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RsaPublicKey)) {
+            if (other is not key: RsaPublicKey) {
                 return false;
             }
-            last key = other as RsaPublicKey;
             return constant_time.ct_eq(modulus(), key.modulus()) && constant_time.ct_eq(exponent(), key.exponent());
         };
 
@@ -113,7 +112,7 @@ export let Rsa = module (
             return h;
         };
 
-        export let.override to_string = func -> string => "RsaPublicKey(" + core.bits.to_string() + " bits)";
+        export let.override to_string = func -> string => "RsaPublicKey(" .. core.bits.to_string() .. " bits)";
     );
 
     /// @brief An RSA private key in CRT form. `expose` gives the concatenated big-endian numbers d, p, q, dP, dQ
@@ -138,7 +137,7 @@ export let Rsa = module (
             }
             core = new(public_key.core, parts[0], parts[1], parts[2], parts[3], parts[4]);
             material = new(serialize(public_key.core, parts, private_exponent));
-            if (!self_check(core)) {
+            if (not self_check(core)) {
                 trap_with_message("invalid argument: inconsistent RSA private key");
             }
         } or func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list],
@@ -151,7 +150,7 @@ export let Rsa = module (
             }
             core = new(public_key.core, parts[0], parts[1], parts[2], parts[3], parts[4]);
             material = new(serialize(public_key.core, parts, private_exponent));
-            if (!self_check(core)) {
+            if (not self_check(core)) {
                 trap_with_message("invalid argument: inconsistent RSA private key");
             }
         };
@@ -198,7 +197,7 @@ export let Rsa = module (
         last half_limbs = (n.length + 1) / 2 + 1;
         last p = mp.from_bytes_be(rsa_core.strip(prime_p), half_limbs);
         last q = mp.from_bytes_be(rsa_core.strip(prime_q), half_limbs);
-        if (!product_is(p, q, n) || (p[0] & 1) == 0 || (q[0] & 1) == 0) {
+        if (not product_is(p, q, n) || (p[0] & 1) == 0 || (q[0] & 1) == 0) {
             return new;
         }
         last d = mp.from_bytes_be(rsa_core.strip(private_exponent), n.length);
@@ -216,7 +215,7 @@ export let Rsa = module (
         last half_limbs = (n.length + 1) / 2 + 1;
         last p = mp.from_bytes_be(rsa_core.strip(prime_p), half_limbs);
         last q = mp.from_bytes_be(rsa_core.strip(prime_q), half_limbs);
-        if (!product_is(p, q, n) || (p[0] & 1) == 0 || (q[0] & 1) == 0 || coefficient.length > 4 * half_limbs
+        if (not product_is(p, q, n) || (p[0] & 1) == 0 || (q[0] & 1) == 0 || coefficient.length > 4 * half_limbs
             || exponent_p.length > 4 * half_limbs || exponent_q.length > 4 * half_limbs) {
             return new;
         }
@@ -276,7 +275,7 @@ export let Rsa = module (
         if (problem != "") {
             return Result<RsaPublicKey>.Err(error.custom("crypto.invalid_key", problem));
         }
-        if (!size_allowed(modulus)) {
+        if (not size_allowed(modulus)) {
             return Result<RsaPublicKey>.Err(error.custom("crypto.policy", size_denied()));
         }
         return Result<RsaPublicKey>.Ok(new RsaPublicKey(modulus, exponent));
@@ -297,14 +296,14 @@ export let Rsa = module (
         if (problem != "") {
             return Result<RsaPrivateKey>.Err(error.custom("crypto.invalid_key", problem));
         }
-        if (!size_allowed(modulus)) {
+        if (not size_allowed(modulus)) {
             return Result<RsaPrivateKey>.Err(error.custom("crypto.policy", size_denied()));
         }
         last public_key = new RsaPublicKey(modulus, exponent);
         last crt = exponent_p.length > 0 && exponent_q.length > 0 && coefficient.length > 0;
         last parts = crt ? given(public_key, prime_p, prime_q, exponent_p, exponent_q, coefficient)
             : complete(public_key, private_exponent, prime_p, prime_q);
-        if (parts.length == 0 || !self_check(new rsa_core.PrivateCore(public_key.core, parts[0], parts[1], parts[2],
+        if (parts.length == 0 || not self_check(new rsa_core.PrivateCore(public_key.core, parts[0], parts[1], parts[2],
             parts[3], parts[4]))) {
             return Result<RsaPrivateKey>.Err(error.custom("crypto.invalid_key", "inconsistent RSA private key"));
         }
@@ -327,7 +326,7 @@ export let Rsa = module (
         }
         let out: uint32[list] = new;
         for (let i = 3; i < 2000; i += 2) {
-            if (!composite[i]) {
+            if (not composite[i]) {
                 out.append(i as uint32);
                 for (let j = i * i; j < 2000; j += 2 * i) {
                     composite[j] = true;
@@ -400,9 +399,7 @@ export let Rsa = module (
                     break;
                 }
             }
-            if (!passed) {
-                return Result<bool>.Ok(false);
-            }
+            return Result<bool>.Ok(false) unless passed;
         }
         return Result<bool>.Ok(true);
     };
@@ -495,7 +492,7 @@ export let Rsa = module (
         last r = mp.rem_small(lambda, e) as uint64;
         let inverse: uint64 = 1;
         let base = r;
-        for (let bit = 0; bit < 17; bit++) {
+        for (let bit in 0 .. 17) {
             if (((65535 >> bit) & 1) == 1) {
                 inverse = (inverse * base) % 65537;
             }

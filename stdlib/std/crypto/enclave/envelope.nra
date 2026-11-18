@@ -320,7 +320,7 @@ export let Envelope = module (
         if (envelope.length < field_at + 25 || envelope[0] != 78 || envelope[1] != 69
             || envelope[2] != 78 || envelope[3] != 86 || envelope[4] != 1 || envelope[5] != 1
             || envelope[6] != label.length as uint8
-            || !constant_time.ct_eq(words.slice(envelope, 19, field_at), label)) {
+            || not constant_time.ct_eq(words.slice(envelope, 19, field_at), label)) {
             return invalid_header();
         }
         last version = words.load32_be(envelope, 7);

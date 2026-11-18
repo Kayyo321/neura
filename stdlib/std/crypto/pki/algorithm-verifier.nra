@@ -81,14 +81,14 @@ export let AlgorithmVerifier = module (
 
     let verify_pkcs1 = func(hash: Algorithm, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
         signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
-        if (!crypto_policy.allows(Algorithm.RsaPkcs1v15) || !crypto_policy.allows(hash)) {
+        if (not crypto_policy.allows(Algorithm.RsaPkcs1v15) || not crypto_policy.allows(hash)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         // RFC 4055 section 5: expect NULL and accept absent parameters. OpenSSL also emits NULL for SHA-3.
-        if (key.key_algorithm != KeyAlgorithm.Rsa || (algorithm.has_parameters() && !algorithm.has_null_parameters())) {
+        if (key.key_algorithm != KeyAlgorithm.Rsa || (algorithm.has_parameters() && not algorithm.has_null_parameters())) {
             return SignatureCheck.Invalid;
         }
-        if (!rsa_allowed(key)) {
+        if (not rsa_allowed(key)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         return match (rsa.parse_public_key(key.rsa_modulus, key.rsa_exponent)) {
@@ -98,7 +98,7 @@ export let AlgorithmVerifier = module (
     };
 
     let pss_key_permits = func(key: SubjectPublicKeyInfo, params: RsaPssParameters) -> bool {
-        if (key.key_algorithm == KeyAlgorithm.Rsa || !key.algorithm.has_parameters()) {
+        if (key.key_algorithm == KeyAlgorithm.Rsa || not key.algorithm.has_parameters()) {
             return true;
         }
         return match (key.algorithm.pss_parameters()) {
@@ -112,11 +112,11 @@ export let AlgorithmVerifier = module (
         signature: uint8[list]) -> SignatureCheck {
         last hash = digest_oid(params.hash.dotted);
         last mask_hash = digest_oid(params.mask_hash.dotted);
-        if (hash == Algorithm.Sha1 || mask_hash == Algorithm.Sha1 || !crypto_policy.allows(hash)
-            || !crypto_policy.allows(mask_hash) || !rsa_allowed(key)) {
+        if (hash == Algorithm.Sha1 || mask_hash == Algorithm.Sha1 || not crypto_policy.allows(hash)
+            || not crypto_policy.allows(mask_hash) || not rsa_allowed(key)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
-        if (!pss_key_permits(key, params)) {
+        if (not pss_key_permits(key, params)) {
             return SignatureCheck.Invalid;
         }
         return match (rsa.parse_public_key(key.rsa_modulus, key.rsa_exponent)) {
@@ -128,7 +128,7 @@ export let AlgorithmVerifier = module (
 
     let verify_pss = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
         signature: uint8[list]) -> SignatureCheck {
-        if (!crypto_policy.allows(Algorithm.RsaPss)) {
+        if (not crypto_policy.allows(Algorithm.RsaPss)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         if (key.key_algorithm != KeyAlgorithm.Rsa && key.key_algorithm != KeyAlgorithm.RsaPss) {
@@ -159,7 +159,7 @@ export let AlgorithmVerifier = module (
 
     let verify_ecdsa_curve = func(curve: ecdsa.Curve, hash: Algorithm, key: SubjectPublicKeyInfo, signed: uint8[list],
         signature: uint8[list]) -> SignatureCheck {
-        if (!crypto_policy.allows(ecdsa.algorithm_of(curve))) {
+        if (not crypto_policy.allows(ecdsa.algorithm_of(curve))) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         return match (ecdsa.parse_public_key(curve, key.key)) {
@@ -170,7 +170,7 @@ export let AlgorithmVerifier = module (
 
     let verify_ecdsa = func(hash: Algorithm, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
         signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
-        if (!crypto_policy.allows(hash)) {
+        if (not crypto_policy.allows(hash)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
         if (algorithm.has_parameters() || key.key_algorithm != KeyAlgorithm.Ec) {
@@ -185,10 +185,10 @@ export let AlgorithmVerifier = module (
     let verify_ed = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
         signature: uint8[list]) -> SignatureCheck {
         last is_25519 = algorithm.oid.matches(oids.Ed25519);
-        if (!crypto_policy.allows(is_25519 ? Algorithm.Ed25519 : Algorithm.Ed448)) {
+        if (not crypto_policy.allows(is_25519 ? Algorithm.Ed25519 : Algorithm.Ed448)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
-        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+        if (algorithm.has_parameters() || not key.algorithm.oid.equals(algorithm.oid)) {
             return SignatureCheck.Invalid;
         }
         if (is_25519) {
@@ -213,10 +213,10 @@ export let AlgorithmVerifier = module (
         last dotted = algorithm.oid.dotted;
         last prehashed = dotted == oids.HashMlDsa44WithSha512 || dotted == oids.HashMlDsa65WithSha512
             || dotted == oids.HashMlDsa87WithSha512;
-        if (!crypto_policy.allows(which) || (prehashed && !crypto_policy.allows(Algorithm.Sha512))) {
+        if (not crypto_policy.allows(which) || (prehashed && not crypto_policy.allows(Algorithm.Sha512))) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
-        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+        if (algorithm.has_parameters() || not key.algorithm.oid.equals(algorithm.oid)) {
             return SignatureCheck.Invalid;
         }
         match (ml_dsa.parse_public_key(set, key.key)) {
@@ -236,10 +236,10 @@ export let AlgorithmVerifier = module (
 
     let verify_slh = func(set: slh_dsa.ParameterSet, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
         signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
-        if (!crypto_policy.allows(Algorithm.SlhDsa)) {
+        if (not crypto_policy.allows(Algorithm.SlhDsa)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
-        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+        if (algorithm.has_parameters() || not key.algorithm.oid.equals(algorithm.oid)) {
             return SignatureCheck.Invalid;
         }
         return match (slh_dsa.parse_public_key(set, key.key)) {
@@ -250,11 +250,11 @@ export let AlgorithmVerifier = module (
 
     let verify_composite = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
         signature: uint8[list]) -> SignatureCheck {
-        if (!crypto_policy.allows(Algorithm.Ed25519MlDsa65) || !crypto_policy.allows(Algorithm.Ed25519)
-            || !crypto_policy.allows(Algorithm.MlDsa65) || !crypto_policy.allows(Algorithm.Sha512)) {
+        if (not crypto_policy.allows(Algorithm.Ed25519MlDsa65) || not crypto_policy.allows(Algorithm.Ed25519)
+            || not crypto_policy.allows(Algorithm.MlDsa65) || not crypto_policy.allows(Algorithm.Sha512)) {
             return SignatureCheck.UnsupportedAlgorithm;
         }
-        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+        if (algorithm.has_parameters() || not key.algorithm.oid.equals(algorithm.oid)) {
             return SignatureCheck.Invalid;
         }
         return checked(composite.verify(key.key, signed, signature, new));
@@ -284,10 +284,7 @@ export let AlgorithmVerifier = module (
         if (dotted == oids.RsaWithSha3_384) {
             return Algorithm.Sha3_384;
         }
-        if (dotted == oids.RsaWithSha3_512) {
-            return Algorithm.Sha3_512;
-        }
-        return Algorithm.Sha1;
+        return if (dotted == oids.RsaWithSha3_512) -> Algorithm.Sha3_512 else -> Algorithm.Sha1;
     };
 
     let ec_hash = func(dotted: string) -> Algorithm {
@@ -312,10 +309,7 @@ export let AlgorithmVerifier = module (
         if (dotted == oids.EcdsaWithSha3_384) {
             return Algorithm.Sha3_384;
         }
-        if (dotted == oids.EcdsaWithSha3_512) {
-            return Algorithm.Sha3_512;
-        }
-        return Algorithm.Sha1;
+        return if (dotted == oids.EcdsaWithSha3_512) -> Algorithm.Sha3_512 else -> Algorithm.Sha1;
     };
 
     let digest_oid = func(dotted: string) -> Algorithm {
@@ -340,10 +334,7 @@ export let AlgorithmVerifier = module (
         if (dotted == oids.Sha3_384) {
             return Algorithm.Sha3_384;
         }
-        if (dotted == oids.Sha3_512) {
-            return Algorithm.Sha3_512;
-        }
-        return Algorithm.Sha1;
+        return if (dotted == oids.Sha3_512) -> Algorithm.Sha3_512 else -> Algorithm.Sha1;
     };
 
     let ml_set = func(dotted: string) -> Optional<ml_dsa.ParameterSet> {

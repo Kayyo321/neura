@@ -1,6 +1,7 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
 let base64 = import:Std.Encoding.Base64;
+let builders = import:Std.Core.StringBuilder;
 
 /// @brief Strict PEM, the textual encoding of RFC 7468 (Stdlib.md section 21.10).
 ///
@@ -21,7 +22,7 @@ export let Pem = module (
 
         /// @brief A block; a label outside RFC 7468's grammar traps with "invalid argument: PEM label".
         export let init = func(block_label: string, bytes: uint8[list]) {
-            if (!valid_label(block_label)) {
+            if (not valid_label(block_label)) {
                 trap_with_message("invalid argument: PEM label");
             }
             label = block_label;
@@ -29,10 +30,9 @@ export let Pem = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is PemBlock)) {
+            if (other is not that: PemBlock) {
                 return false;
             }
-            last that = other as PemBlock;
             if (that.label != label || that.der.length != der.length) {
                 return false;
             }
@@ -104,7 +104,7 @@ export let Pem = module (
         let index = 0;
         while (index < lines.length) {
             last line = lines[index];
-            if (!is_ascii(line)) {
+            if (not is_ascii(line)) {
                 // Explanatory text may hold any characters; a BEGIN line never does.
                 if (contains(line, "-----BEGIN")) {
                     return fail<PemBlock[list]>(starts[index], "malformed PEM BEGIN line");
@@ -112,7 +112,7 @@ export let Pem = module (
                 index++;
                 continue;
             }
-            if (!(line.byte_length >= 16 && line.slice(0, 11) == "-----BEGIN " && ends_with_dashes(line))) {
+            if (not (line.byte_length >= 16 && line.slice(0, 11) == "-----BEGIN " && ends_with_dashes(line))) {
                 if (contains(line, "-----BEGIN")) {
                     return fail<PemBlock[list]>(starts[index], "malformed PEM BEGIN line");
                 }
@@ -120,7 +120,7 @@ export let Pem = module (
                 continue;
             }
             last label = line.slice(11, line.byte_length - 5);
-            if (!valid_label(label)) {
+            if (not valid_label(label)) {
                 return fail<PemBlock[list]>(starts[index] + 11, "invalid PEM label");
             }
             last begin = index;
@@ -130,11 +130,11 @@ export let Pem = module (
             let ended = false;
             while (index < lines.length) {
                 last body_line = lines[index];
-                if (!is_ascii(body_line)) {
+                if (not is_ascii(body_line)) {
                     return fail<PemBlock[list]>(starts[index], "invalid character in PEM line");
                 }
                 if (body_line.byte_length >= 9 && body_line.slice(0, 9) == "-----END ") {
-                    if (body_line != "-----END " + label + "-----") {
+                    if (body_line != ("-----END " .. label .. "-----")) {
                         return fail<PemBlock[list]>(starts[index], "PEM END label does not match BEGIN");
                     }
                     ended = true;
@@ -148,7 +148,7 @@ export let Pem = module (
                 }
                 for (let i = 0; i < body_line.byte_length; i++) {
                     last c = body_line.byte_at(i);
-                    if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 43 || c == 47
+                    if (not ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 43 || c == 47
                         || c == 61)) {
                         return fail<PemBlock[list]>(starts[index] + i, "invalid character in PEM line");
                     }
@@ -159,9 +159,7 @@ export let Pem = module (
                 body += body_line;
                 index++;
             }
-            if (!ended) {
-                return fail<PemBlock[list]>(starts[begin], "PEM block has no END line");
-            }
+            return fail<PemBlock[list]>(starts[begin], "PEM block has no END line") unless ended;
             if (body.byte_length == 0) {
                 return fail<PemBlock[list]>(starts[begin], "empty PEM block");
             }
@@ -194,7 +192,7 @@ export let Pem = module (
             }
         }
         if (count != 1) {
-            return fail<uint8[list]>(0, count == 0 ? "no PEM block labelled " + label : "more than one PEM block labelled " + label);
+            return fail<uint8[list]>(0, count == 0 ? ("no PEM block labelled " .. label) : ("more than one PEM block labelled " .. label));
         }
         return Result<uint8[list]>.Ok(found);
     };
@@ -202,16 +200,18 @@ export let Pem = module (
     /// @brief The PEM text of a block: BEGIN line, Base64 in lines of 64, END line, each ending in LF.
     #[NoDiscard, Since("0.3.0")]
     export let encode = func(label: string, der: uint8[list]) -> string {
-        if (!valid_label(label)) {
+        if (not valid_label(label)) {
             trap_with_message("invalid argument: PEM label");
         }
         last body = base64.encode(der);
-        let text = "-----BEGIN " + label + "-----\n";
+        last text = builders.create();
+        text.append_line("-----BEGIN " .. label .. "-----");
         for (let i = 0; i < body.byte_length; i += 64) {
             last stop = i + 64 < body.byte_length ? i + 64 : body.byte_length;
-            text += body.slice(i, stop) + "\n";
+            text.append_line(body.slice(i, stop));
         }
-        return text + "-----END " + label + "-----\n";
+        text.append_line("-----END " .. label .. "-----");
+        return text.to_string();
     };
 
     let is_ascii = func(line: string) -> bool {

@@ -52,16 +52,15 @@ export let BiscuitExpr = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Term)) {
+            if (other is not term: Term) {
                 return false;
             }
-            last term = other as Term;
             if (kind != term.kind || text != term.text || items.length != term.items.length) {
                 return false;
             }
             for (let i = 0; i < items.length; i++) {
                 if (kind == Kind.Set) {
-                    if (!term.contains(items[i])) {
+                    if (not term.contains(items[i])) {
                         return false;
                     }
                 } else if (kind == Kind.Map) {
@@ -72,10 +71,8 @@ export let BiscuitExpr = module (
                             break;
                         }
                     }
-                    if (!equal) {
-                        return false;
-                    }
-                } else if (!items[i].equals(term.items[i])) {
+                    return false unless equal;
+                } else if (not items[i].equals(term.items[i])) {
                     return false;
                 }
             }
@@ -140,7 +137,7 @@ export let BiscuitExpr = module (
         for (let op in operations) {
             match (op.kind) {
                 OperationKind.Value => {
-                    if (op.value.kind == Kind.Variable && !contains_name(variables, op.value.text)) {
+                    if (op.value.kind == Kind.Variable && not contains_name(variables, op.value.text)) {
                         return false;
                     }
                     stack.append(op);
@@ -156,7 +153,7 @@ export let BiscuitExpr = module (
                         }
                         names.append(op.parameter);
                     }
-                    if (!valid(op.body, names, depth + 1)) {
+                    if (not valid(op.body, names, depth + 1)) {
                         return false;
                     }
                     stack.append(op);
@@ -201,7 +198,7 @@ export let BiscuitExpr = module (
     /// @brief Rejects missing callbacks even when an expression branch would skip its call.
     export let require_registered = func(operations: Operation[list], registry: externals.Registry) -> Result<Unit> {
         for (let op in operations) {
-            if (op.external_name != "" && !registry.has(op.external_name)) {
+            if (op.external_name != "" && not registry.has(op.external_name)) {
                 return externals.fail<Unit>("unregistered Biscuit external function");
             }
             if (op.kind == OperationKind.Closure) {
@@ -260,7 +257,7 @@ export let BiscuitExpr = module (
 
     let unary = func(code: int, value: Term) -> Result<Term> {
         if (code == 0) {
-            return Result<Term>.Ok(bool_term(!(as_bool(value)?)));
+            return Result<Term>.Ok(bool_term(not (as_bool(value)?)));
         }
         if (code == 1) {
             return Result<Term>.Ok(value);
@@ -293,7 +290,7 @@ export let BiscuitExpr = module (
     };
 
     let ordered = func(code: int, less: bool, equal: bool) -> Result<Term> {
-        last condition = code == 0 ? less : (code == 1 ? (!less && !equal) : (code == 2 ? (less || equal) : !less));
+        last condition = code == 0 ? less : (code == 1 ? (not less && not equal) : (code == 2 ? (less || equal) : not less));
         return Result<Term>.Ok(bool_term(condition));
     };
 
@@ -353,7 +350,7 @@ export let BiscuitExpr = module (
             if (left.byte_length + right.byte_length > MaxTextBytes) {
                 return fail<Term>("biscuit.limit", "Biscuit concatenation exceeds the byte limit");
             }
-            return Result<Term>.Ok(new Term(Kind.Text, left + right));
+            return Result<Term>.Ok(new Term(Kind.Text, left .. right));
         }
         return invalid<Term>("invalid Biscuit text operation");
     };
@@ -370,7 +367,7 @@ export let BiscuitExpr = module (
         }
         if (code == 5) {
             for (let member in right.items) {
-                if (!left.contains(member)) {
+                if (not left.contains(member)) {
                     return Result<Term>.Ok(bool_term(false));
                 }
             }
@@ -385,7 +382,7 @@ export let BiscuitExpr = module (
             }
             if (code == 16) {
                 for (let member in right.items) {
-                    if (!left.contains(member)) {
+                    if (not left.contains(member)) {
                         if (members.length == MaxCollection) {
                             return fail<Term>("biscuit.limit", "Biscuit set union exceeds the collection limit");
                         }
@@ -404,7 +401,7 @@ export let BiscuitExpr = module (
         }
         last offset = code == 6 ? 0 : left.items.length - right.items.length;
         for (let i = 0; i < right.items.length; i++) {
-            if (!left.items[i + offset].equals(right.items[i])) {
+            if (not left.items[i + offset].equals(right.items[i])) {
                 return false;
             }
         }
@@ -436,7 +433,7 @@ export let BiscuitExpr = module (
                 return invalid<Term>("strict Biscuit equality requires operands of one type");
             }
             last same = left.equals(right);
-            return Result<Term>.Ok(bool_term(code == 4 || code == 21 ? same : !same));
+            return Result<Term>.Ok(bool_term(code == 4 || code == 21 ? same : not same));
         }
         if (code == 27) {
             return get(left, right);
@@ -679,7 +676,7 @@ export let BiscuitExpr = module (
             last result = evaluate(closure.body, bindings, step, registry);
             bindings.remove_at(bindings.length - 1);
             if ((as_bool(result?)?) != unanimous) {
-                return Result<Term>.Ok(bool_term(!unanimous));
+                return Result<Term>.Ok(bool_term(not unanimous));
             }
         }
         return Result<Term>.Ok(bool_term(unanimous));
@@ -708,7 +705,7 @@ export let BiscuitExpr = module (
             return quantify(code, left.value, right, bindings, step, registry);
         }
         last test = as_bool(left.value)?;
-        if ((code == 23 && !test) || (code == 24 && test)) {
+        if ((code == 23 && not test) || (code == 24 && test)) {
             return Result<Term>.Ok(left.value);
         }
         return evaluate(right.body, bindings, step, registry);

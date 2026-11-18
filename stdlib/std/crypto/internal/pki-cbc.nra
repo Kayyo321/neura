@@ -26,7 +26,7 @@ export let PkiCbc = module (
         let previous = iv;
         for (let start = 0; start < padded.length; start += 16) {
             let block: uint8[list] = new;
-            for (let i = 0; i < 16; i++) {
+            for (let i in 0 .. 16) {
                 block.append(padded[start + i] ^ previous[i]);
             }
             previous = cipher.encrypt(block, 0);
@@ -50,11 +50,11 @@ export let PkiCbc = module (
         let previous = iv;
         for (let start = 0; start < ciphertext.length; start += 16) {
             last block = cipher.decrypt(ciphertext, start);
-            for (let i = 0; i < 16; i++) {
+            for (let i in 0 .. 16) {
                 plain.append(block[i] ^ previous[i]);
             }
             let next: uint8[list] = new;
-            for (let i = 0; i < 16; i++) {
+            for (let i in 0 .. 16) {
                 next.append(ciphertext[start + i]);
             }
             previous = next;
@@ -62,7 +62,7 @@ export let PkiCbc = module (
         last pad = plain[plain.length - 1] as int;
         // bad is nonzero when pad is 0 or above 16, or when any of the last pad bytes differs from pad.
         let bad = ((pad - 1) & 256) | ((16 - pad) & 256);
-        for (let i = 1; i <= 16; i++) {
+        for (let i in 1 ..= 16) {
             last inside = ((i - pad - 1) >> 8) & 1;
             last differs = (plain[plain.length - i] as int) ^ pad;
             bad = bad | (differs * inside);

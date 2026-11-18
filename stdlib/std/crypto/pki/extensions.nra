@@ -54,10 +54,9 @@ export let Extensions = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Extension)) {
+            if (other is not that: Extension) {
                 return false;
             }
-            last that = other as Extension;
             return that.oid.equals(oid) && that.critical == critical && same(that.value, value);
         };
 
@@ -113,12 +112,12 @@ export let Extensions = module (
             let names = "";
             last labels: string[] = ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment",
                 "keyAgreement", "keyCertSign", "cRLSign", "encipherOnly", "decipherOnly"];
-            for (let i = 0; i < 9; i++) {
+            for (let i in 0 .. 9) {
                 if (bits.bit(i)) {
                     names += (names.byte_length > 0 ? ", " : "") + labels[i];
                 }
             }
-            return "KeyUsage(" + names + ")";
+            return "KeyUsage(" .. names .. ")";
         };
     );
 
@@ -147,7 +146,7 @@ export let Extensions = module (
             && same((other as ExtendedKeyUsage).der_bytes, der_bytes);
 
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
-        export let.override to_string = func -> string => "ExtendedKeyUsage(" + oid_list(purposes) + ")";
+        export let.override to_string = func -> string => "ExtendedKeyUsage(" .. oid_list(purposes) .. ")";
     );
 
     /// @brief A GeneralSubtree of nameConstraints: the base name (minimum 0, maximum absent, as RFC 5280
@@ -164,7 +163,7 @@ export let Extensions = module (
             && (other as GeneralSubtree).base.equals(base);
 
         export let.override hash_code = func -> uint32 => base.hash_code();
-        export let.override to_string = func -> string => "GeneralSubtree(" + base.to_string() + ")";
+        export let.override to_string = func -> string => "GeneralSubtree(" .. base.to_string() .. ")";
     );
 
     /// @brief nameConstraints: permitted and excluded subtrees. `has_permitted` and `has_excluded` say
@@ -217,7 +216,7 @@ export let Extensions = module (
             && same((other as AuthorityKeyIdentifier).der_bytes, der_bytes);
 
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
-        export let.override to_string = func -> string => "AuthorityKeyIdentifier(" + hex.encode(key_identifier) + ")";
+        export let.override to_string = func -> string => "AuthorityKeyIdentifier(" .. hex.encode(key_identifier) .. ")";
     );
 
     /// @brief A policy qualifier: CPS pointer (`text` is the URI), user notice (`text` is the explicit text,
@@ -346,7 +345,7 @@ export let Extensions = module (
         export let.override hash_code = func -> uint32 =>
             ((method.hash_code() as uint64 * 31 + location.hash_code() as uint64) & 4294967295) as uint32;
 
-        export let.override to_string = func -> string => "AccessDescription(" + method.dotted + ", " + location.to_string() + ")";
+        export let.override to_string = func -> string => "AccessDescription(" .. method.dotted .. ", " .. location.to_string() .. ")";
     );
 
     let same = func(a: uint8[list], b: uint8[list]) -> bool {
@@ -374,8 +373,8 @@ export let Extensions = module (
 
     let sequence_of = func(value: uint8[list], what: string) -> Result<der.Element> {
         last e = der.parse(value)?;
-        if (!e.is_universal(der.TagSequence)) {
-            return fail<der.Element>(0, what + " must be a SEQUENCE");
+        if (not e.is_universal(der.TagSequence)) {
+            return fail<der.Element>(0, what .. " must be a SEQUENCE");
         }
         return Result<der.Element>.Ok(e);
     };
@@ -384,7 +383,7 @@ export let Extensions = module (
     /// An explicit FALSE is not DER and is refused.
     #[NoDiscard, Since("0.3.0")]
     export let parse_extension = func(e: der.Element) -> Result<Extension> {
-        if (!e.is_universal(der.TagSequence)) {
+        if (not e.is_universal(der.TagSequence)) {
             return fail<Extension>(e.offset, "Extension must be a SEQUENCE");
         }
         let r = e.reader();
@@ -393,9 +392,7 @@ export let Extensions = module (
         match (r.optional_universal(der.TagBoolean)?) {
             Optional.Some(b) => {
                 critical = b.boolean()?;
-                if (!critical) {
-                    return fail<Extension>(b.offset, "critical FALSE must be omitted in DER");
-                }
+                return fail<Extension>(b.offset, "critical FALSE must be omitted in DER") unless critical;
             },
             Optional.None => {},
         }
@@ -413,9 +410,7 @@ export let Extensions = module (
         match (r.optional_universal(der.TagBoolean)?) {
             Optional.Some(b) => {
                 ca = b.boolean()?;
-                if (!ca) {
-                    return fail<BasicConstraints>(b.offset, "cA FALSE must be omitted in DER");
-                }
+                return fail<BasicConstraints>(b.offset, "cA FALSE must be omitted in DER") unless ca;
             },
             Optional.None => {},
         }
@@ -438,7 +433,7 @@ export let Extensions = module (
         if (bits.bit_length() == 0) {
             return fail<KeyUsage>(0, "keyUsage must have a bit set");
         }
-        if (!bits.bit(bits.bit_length() - 1)) {
+        if (not bits.bit(bits.bit_length() - 1)) {
             return fail<KeyUsage>(0, "keyUsage has trailing zero bits");
         }
         return Result<KeyUsage>.Ok(new KeyUsage(bits, value));
@@ -489,9 +484,7 @@ export let Extensions = module (
         let issuer: GeneralName[list] = new;
         match (r.optional_context(1)?) {
             Optional.Some(n) => {
-                if (!n.constructed) {
-                    return fail<AuthorityKeyIdentifier>(n.offset, "authorityCertIssuer must be constructed");
-                }
+                return fail<AuthorityKeyIdentifier>(n.offset, "authorityCertIssuer must be constructed") unless n.constructed;
                 for (let child in n.children()?) {
                     issuer.append(general_names.parse(child)?);
                 }
@@ -537,19 +530,17 @@ export let Extensions = module (
             Optional.None => {},
         }
         r.finish()?;
-        if (!has_permitted && !has_excluded) {
+        if (not has_permitted && not has_excluded) {
             return fail<NameConstraints>(0, "nameConstraints must have permitted or excluded subtrees");
         }
         return Result<NameConstraints>.Ok(new NameConstraints(permitted, excluded, has_permitted, has_excluded, value));
     };
 
     let subtrees = func(e: der.Element) -> Result<GeneralSubtree[list]> {
-        if (!e.constructed) {
-            return fail<GeneralSubtree[list]>(e.offset, "GeneralSubtrees must be constructed");
-        }
+        return fail<GeneralSubtree[list]>(e.offset, "GeneralSubtrees must be constructed") unless e.constructed;
         let out: GeneralSubtree[list] = new;
         for (let child in e.children()?) {
-            if (!child.is_universal(der.TagSequence)) {
+            if (not child.is_universal(der.TagSequence)) {
                 return fail<GeneralSubtree[list]>(child.offset, "GeneralSubtree must be a SEQUENCE");
             }
             let r = child.reader();
@@ -581,7 +572,7 @@ export let Extensions = module (
         last e = sequence_of(value, "certificatePolicies")?;
         let out: PolicyInformation[list] = new;
         for (let info in e.children()?) {
-            if (!info.is_universal(der.TagSequence)) {
+            if (not info.is_universal(der.TagSequence)) {
                 return fail<PolicyInformation[list]>(info.offset, "PolicyInformation must be a SEQUENCE");
             }
             let r = info.reader();
@@ -613,7 +604,7 @@ export let Extensions = module (
     };
 
     let qualifier = func(q: der.Element) -> Result<PolicyQualifier> {
-        if (!q.is_universal(der.TagSequence)) {
+        if (not q.is_universal(der.TagSequence)) {
             return fail<PolicyQualifier>(q.offset, "PolicyQualifierInfo must be a SEQUENCE");
         }
         let r = q.reader();
@@ -622,12 +613,12 @@ export let Extensions = module (
         r.finish()?;
         let text = "";
         if (id.matches(oids.QualifierCps)) {
-            if (!body.is_universal(der.TagIa5String)) {
+            if (not body.is_universal(der.TagIa5String)) {
                 return fail<PolicyQualifier>(body.offset, "CPS pointer must be an IA5String");
             }
             text = body.text()?;
         } else if (id.matches(oids.QualifierUserNotice)) {
-            if (!body.is_universal(der.TagSequence)) {
+            if (not body.is_universal(der.TagSequence)) {
                 return fail<PolicyQualifier>(body.offset, "UserNotice must be a SEQUENCE");
             }
             let notice = body.reader();
@@ -647,7 +638,7 @@ export let Extensions = module (
         last e = sequence_of(value, "PolicyMappings")?;
         let out: PolicyMapping[list] = new;
         for (let pair in e.children()?) {
-            if (!pair.is_universal(der.TagSequence)) {
+            if (not pair.is_universal(der.TagSequence)) {
                 return fail<PolicyMapping[list]>(pair.offset, "policy mapping must be a SEQUENCE");
             }
             let r = pair.reader();
@@ -717,7 +708,7 @@ export let Extensions = module (
         last e = sequence_of(value, "CRLDistributionPoints")?;
         let out: DistributionPoint[list] = new;
         for (let point in e.children()?) {
-            if (!point.is_universal(der.TagSequence)) {
+            if (not point.is_universal(der.TagSequence)) {
                 return fail<DistributionPoint[list]>(point.offset, "DistributionPoint must be a SEQUENCE");
             }
             let r = point.reader();
@@ -727,9 +718,7 @@ export let Extensions = module (
                 Optional.Some(name) => {
                     last inner = name.explicit_inner()?;
                     if (inner.is_context(0)) {
-                        if (!inner.constructed) {
-                            return fail<DistributionPoint[list]>(inner.offset, "fullName must be constructed");
-                        }
+                        return fail<DistributionPoint[list]>(inner.offset, "fullName must be constructed") unless inner.constructed;
                         for (let child in inner.children()?) {
                             full.append(general_names.parse(child)?);
                         }
@@ -751,9 +740,7 @@ export let Extensions = module (
             let issuer: GeneralName[list] = new;
             match (r.optional_context(2)?) {
                 Optional.Some(names) => {
-                    if (!names.constructed) {
-                        return fail<DistributionPoint[list]>(names.offset, "cRLIssuer must be constructed");
-                    }
+                    return fail<DistributionPoint[list]>(names.offset, "cRLIssuer must be constructed") unless names.constructed;
                     for (let child in names.children()?) {
                         issuer.append(general_names.parse(child)?);
                     }
@@ -778,7 +765,7 @@ export let Extensions = module (
         last e = sequence_of(value, "AuthorityInfoAccessSyntax")?;
         let out: AccessDescription[list] = new;
         for (let item in e.children()?) {
-            if (!item.is_universal(der.TagSequence)) {
+            if (not item.is_universal(der.TagSequence)) {
                 return fail<AccessDescription[list]>(item.offset, "AccessDescription must be a SEQUENCE");
             }
             let r = item.reader();

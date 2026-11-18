@@ -55,7 +55,7 @@ export let Sha2Core = module (
             for (let word in iv) {
                 state.append(word);
             }
-            for (let t = 0; t < 64; t++) {
+            for (let t in 0 .. 64) {
                 schedule.append(0);
             }
             out_words = output_words;
@@ -175,7 +175,7 @@ export let Sha2Core = module (
             for (let word in iv) {
                 state.append(word);
             }
-            for (let t = 0; t < 80; t++) {
+            for (let t in 0 .. 80) {
                 schedule.append(0);
             }
             out_bytes = output_bytes;

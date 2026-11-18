@@ -36,7 +36,7 @@ export let SevSnp = module (
         export let init = func(bytes: uint8[list]) {
             last problem = format_problem(bytes);
             if (problem != "") {
-                trap_with_message("invalid argument: " + problem);
+                trap_with_message("invalid argument: " .. problem);
             }
             encoded = words.copy(bytes);
         };
@@ -114,10 +114,10 @@ export let SevSnp = module (
         if ((guest_policy & 131072) == 0 || (guest_policy >> 26) != 0) {
             return "invalid reserved bits in the guest policy";
         }
-        if (words.load32_le(bytes, 48) > 3 || !is_zero(bytes, 76, 80) || !is_zero(bytes, 392, 416)
-            || bytes[491] != 0 || bytes[495] != 0 || !is_zero(bytes, 504, SignedLength)
-            || !is_zero(bytes, 720, 744) || !is_zero(bytes, 792, 816)
-            || !is_zero(bytes, SignatureEnd, ReportLength)) {
+        if (words.load32_le(bytes, 48) > 3 || not is_zero(bytes, 76, 80) || not is_zero(bytes, 392, 416)
+            || bytes[491] != 0 || bytes[495] != 0 || not is_zero(bytes, 504, SignedLength)
+            || not is_zero(bytes, 720, 744) || not is_zero(bytes, 792, 816)
+            || not is_zero(bytes, SignatureEnd, ReportLength)) {
             return "invalid privilege level or nonzero reserved or signature padding bytes";
         }
         return "";
@@ -145,7 +145,7 @@ export let SevSnp = module (
         (der.parse(extension_data(certificate, oid)?)?).small_integer(255);
 
     let chip_id = func(certificate: certs.Certificate) -> Result<uint8[list]> {
-        last bytes = extension_data(certificate, VcekOid + "4")?;
+        last bytes = extension_data(certificate, VcekOid .. "4")?;
         // AMD's Milan KDS issued both a raw HWID extension and a DER OCTET STRING form.
         if (bytes.length == 64) {
             return Result<uint8[list]>.Ok(bytes);
@@ -160,9 +160,9 @@ export let SevSnp = module (
         && spl_at(report, 6) >= spl_at(minimum, 6) && spl_at(report, 7) >= spl_at(minimum, 7);
 
     let has_vcek_binding = func(certificate: certs.Certificate, report: uint8[list]) -> Result<bool> {
-        last version = integer_extension(certificate, VcekOid + "1")?;
-        last product = der.parse(extension_data(certificate, VcekOid + "2")?)?;
-        if (version != 0 || !product.is_universal(22)) {
+        last version = integer_extension(certificate, VcekOid .. "1")?;
+        last product = der.parse(extension_data(certificate, VcekOid .. "2")?)?;
+        if (version != 0 || not product.is_universal(22)) {
             return Result<bool>.Ok(false);
         }
         last name = product.text()?;
@@ -170,11 +170,11 @@ export let SevSnp = module (
             return Result<bool>.Ok(false);
         }
         last tcb = words.load64_le(report, 384);
-        if (!is_zero(report, 386, 390)
-            || (integer_extension(certificate, VcekOid + "3.1")?) != spl_at(tcb, 0)
-            || (integer_extension(certificate, VcekOid + "3.2")?) != spl_at(tcb, 1)
-            || (integer_extension(certificate, VcekOid + "3.3")?) != spl_at(tcb, 6)
-            || (integer_extension(certificate, VcekOid + "3.8")?) != spl_at(tcb, 7)) {
+        if (not is_zero(report, 386, 390)
+            || (integer_extension(certificate, VcekOid .. "3.1")?) != spl_at(tcb, 0)
+            || (integer_extension(certificate, VcekOid .. "3.2")?) != spl_at(tcb, 1)
+            || (integer_extension(certificate, VcekOid .. "3.3")?) != spl_at(tcb, 6)
+            || (integer_extension(certificate, VcekOid .. "3.8")?) != spl_at(tcb, 7)) {
             return Result<bool>.Ok(false);
         }
         return Result<bool>.Ok(constant_time.ct_eq(chip_id(certificate)?, words.slice(report, 416, 480)));
@@ -182,10 +182,10 @@ export let SevSnp = module (
 
     let raw_signature = func(report: uint8[list]) -> uint8[list] {
         let out: uint8[list] = new;
-        for (let i = 0; i < 48; i++) {
+        for (let i in 0 .. 48) {
             out.append(report[719 - i]);
         }
-        for (let i = 0; i < 48; i++) {
+        for (let i in 0 .. 48) {
             out.append(report[791 - i]);
         }
         return out;
@@ -199,7 +199,7 @@ export let SevSnp = module (
     export let verify = func(bytes: uint8[list], vcek_der, ask_der, trusted_ark_der: uint8[list],
         at: time.Instant, expected_data, expected_measurement: uint8[list],
         minimum_tcb: uint64, allow_debug: bool = false) -> Result<Report> {
-        if (expected_data.length != 64 || expected_measurement.length != 48 || !valid_minimum(minimum_tcb)) {
+        if (expected_data.length != 64 || expected_measurement.length != 48 || not valid_minimum(minimum_tcb)) {
             trap_with_message("invalid argument: expected report data, measurement, or Milan TCB has the wrong format");
         }
         if (is_zero(expected_data, 0, 64)) {
@@ -207,10 +207,10 @@ export let SevSnp = module (
         }
         last parsed = parse(bytes)?;
         last report = parsed.to_bytes();
-        if (parsed.vmpl() != 0 || (words.load64_le(report, 8) & 262144) != 0 || (!allow_debug && parsed.debug_allowed())
-            || !min_tcb_met(parsed.reported_tcb(), minimum_tcb)
-            || !constant_time.ct_eq(expected_data, parsed.report_data())
-            || !constant_time.ct_eq(expected_measurement, parsed.measurement())) {
+        if (parsed.vmpl() != 0 || (words.load64_le(report, 8) & 262144) != 0 || (not allow_debug && parsed.debug_allowed())
+            || not min_tcb_met(parsed.reported_tcb(), minimum_tcb)
+            || not constant_time.ct_eq(expected_data, parsed.report_data())
+            || not constant_time.ct_eq(expected_measurement, parsed.measurement())) {
             return fail<Report>("the report does not meet the expected claims or guest policy");
         }
         last vcek = certs.parse(vcek_der)?;
@@ -222,7 +222,7 @@ export let SevSnp = module (
         }
         match (vcek.key_usage) {
             Optional.Some(usage) => {
-                if (!usage.has(extensions.DigitalSignature)) {
+                if (not usage.has(extensions.DigitalSignature)) {
                     return fail<Report>("the VCEK key usage does not allow digital signatures");
                 }
             },
@@ -232,15 +232,15 @@ export let SevSnp = module (
         // Historical VCEKs omit RFC 5280 profile metadata such as AuthorityKeyIdentifier.
         validation.strict_profile = false;
         last validated = paths.validate(vcek, new([ask]), new([trusted_ark]), validation)?;
-        if (validated.chain.length != 3 || !validated.chain[1].equals(ask)) {
+        if (validated.chain.length != 3 || not validated.chain[1].equals(ask)) {
             return fail<Report>("the VCEK is not chained through the provisioned ASK");
         }
-        if (!(has_vcek_binding(vcek, report)?)) {
+        if (not (has_vcek_binding(vcek, report)?)) {
             return fail<Report>("the VCEK does not match this report's chip, product and reported TCB");
         }
         last public_key = ecdsa.parse_public_key(ecdsa.Curve.P384, vcek.public_key.key)?;
         last verifier = new ecdsa.EcdsaVerifier(public_key, Algorithm.Sha384);
-        if (!verifier.verify_raw(words.slice(report, 0, SignedLength), raw_signature(report))) {
+        if (not verifier.verify_raw(words.slice(report, 0, SignedLength), raw_signature(report))) {
             return fail<Report>("the VCEK report signature is invalid");
         }
         return Result<Report>.Ok(parsed);

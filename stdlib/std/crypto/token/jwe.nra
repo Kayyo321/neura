@@ -250,10 +250,9 @@ export let Jwe = module (
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RsaWrappingKey)) {
+            if (other is not right: RsaWrappingKey) {
                 return false;
             }
-            last right = other as RsaWrappingKey;
             return encryption == right.encryption && public_key.equals(right.public_key);
         };
 
@@ -265,7 +264,7 @@ export let Jwe = module (
         /// @brief The key management and content encryption names.
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
         #Since("0.3.0")
-        export let.override to_string = func -> string => "Jwe.RsaWrappingKey(" + content_name(encryption) + ")";
+        export let.override to_string = func -> string => "Jwe.RsaWrappingKey(" .. content_name(encryption) .. ")";
     );
 
     /// @brief An RSA private key bound to RSA-OAEP-256 and one content encryption algorithm.
@@ -338,15 +337,15 @@ export let Jwe = module (
     let wrap = func(cipher: aes_block.AesBlock, cek: uint8[list]) -> uint8[list] {
         last count = cek.length / 8;
         let out = words.concat(wrap_iv(), cek);
-        for (let j = 0; j < 6; j++) {
-            for (let i = 1; i <= count; i++) {
+        for (let j in 0 .. 6) {
+            for (let i in 1 ..= count) {
                 last offset = i * 8;
                 let input = words.slice(out, 0, 8);
                 words.append_all(input, words.slice(out, offset, offset + 8));
                 let block = cipher.encrypt_block(input);
                 let first: uint8[list] = new;
                 words.append64_be(first, words.load64_be(block, 0) ^ (count * j + i) as uint64);
-                for (let k = 0; k < 8; k++) {
+                for (let k in 0 .. 8) {
                     out[k] = first[k];
                     out[offset + k] = block[8 + k];
                 }
@@ -361,14 +360,14 @@ export let Jwe = module (
     let unwrap = func(cipher: aes_block.AesBlock, wrapped: uint8[list]) -> Result<uint8[list]> {
         last count = wrapped.length / 8 - 1;
         let data = words.copy(wrapped);
-        for (let j = 5; j >= 0; j--) {
-            for (let i = count; i > 0; i--) {
+        for (let j in 5 ..= 0 : -1) {
+            for (let i in count .. 0 : -1) {
                 last offset = i * 8;
                 let input: uint8[list] = new;
                 words.append64_be(input, words.load64_be(data, 0) ^ (count * j + i) as uint64);
                 words.append_all(input, words.slice(data, offset, offset + 8));
                 let block = cipher.decrypt_block(input);
-                for (let k = 0; k < 8; k++) {
+                for (let k in 0 .. 8) {
                     data[k] = block[k];
                     data[offset + k] = block[8 + k];
                 }
@@ -376,7 +375,7 @@ export let Jwe = module (
                 words.wipe(block);
             }
         }
-        if (!constant_time.ct_eq(words.slice(data, 0, 8), wrap_iv())) {
+        if (not constant_time.ct_eq(words.slice(data, 0, 8), wrap_iv())) {
             words.wipe(data);
             return auth_error<uint8[list]>();
         }
@@ -406,7 +405,7 @@ export let Jwe = module (
     let seal_content = func(enc: ContentEncryption, cek: uint8[list], iv: uint8[list], plaintext: uint8[list],
         aad: uint8[list]) -> uint8[list] {
         require_encryption(enc);
-        if (!cbc_mode(enc)) {
+        if (not cbc_mode(enc)) {
             return new aes_gcm.AesGcm(cek).seal(iv, plaintext, aad);
         }
         let aes_key = words.slice(cek, tag_length(enc), cek.length);
@@ -419,7 +418,7 @@ export let Jwe = module (
     let open_content = func(enc: ContentEncryption, cek: uint8[list], iv: uint8[list], ciphertext: uint8[list],
         tag: uint8[list], aad: uint8[list]) -> Result<uint8[list]> {
         require_encryption(enc);
-        if (!cbc_mode(enc)) {
+        if (not cbc_mode(enc)) {
             match (new aes_gcm.AesGcm(cek).open(iv, words.concat(ciphertext, tag), aad)) {
                 Result.Ok(plaintext) => {
                     return Result<uint8[list]>.Ok(plaintext);
@@ -429,7 +428,7 @@ export let Jwe = module (
                 },
             }
         }
-        if (!constant_time.ct_eq(cbc_tag(enc, cek, aad, iv, ciphertext), tag)) {
+        if (not constant_time.ct_eq(cbc_tag(enc, cek, aad, iv, ciphertext), tag)) {
             return auth_error<uint8[list]>();
         }
         let aes_key = words.slice(cek, tag_length(enc), cek.length);
@@ -459,15 +458,15 @@ export let Jwe = module (
     };
 
     let header = func(alg: string, enc: ContentEncryption) -> string =>
-        "{\"alg\":" + jose.quote(alg) + ",\"enc\":" + jose.quote(content_name(enc)) + "}";
+        "{\"alg\":" .. jose.quote(alg) .. ",\"enc\":" .. jose.quote(content_name(enc)) .. "}";
 
     let encode = func(protected: uint8[list], enc: ContentEncryption, cek: uint8[list], encrypted_key: uint8[list],
         iv: uint8[list], plaintext: uint8[list]) -> string {
         last header_part = jose.encode(protected);
         last sealed = seal_content(enc, cek, iv, plaintext, words.utf8(header_part));
         last split = sealed.length - tag_length(enc);
-        return header_part + "." + jose.encode(encrypted_key) + "." + jose.encode(iv) + "."
-            + jose.encode(words.slice(sealed, 0, split)) + "." + jose.encode(words.slice(sealed, split, sealed.length));
+        return header_part .. "." .. jose.encode(encrypted_key) .. "." .. jose.encode(iv) .. "."
+            .. jose.encode(words.slice(sealed, 0, split)) .. "." .. jose.encode(words.slice(sealed, split, sealed.length));
     };
 
     let CompactFields = class (

@@ -73,10 +73,7 @@ export let PublicKeyInfo = module (
                     if (parameter_set == "P-384") {
                         return 384;
                     }
-                    if (parameter_set == "P-521") {
-                        return 521;
-                    }
-                    return 256;
+                    return if (parameter_set == "P-521") -> 521 else -> 256;
                 },
                 KeyAlgorithm.Ed25519 => {
                     return 256;
@@ -162,10 +159,9 @@ export let PublicKeyInfo = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SubjectPublicKeyInfo)) {
+            if (other is not that: SubjectPublicKeyInfo) {
                 return false;
             }
-            last that = other as SubjectPublicKeyInfo;
             if (that.der_bytes.length != der_bytes.length) {
                 return false;
             }
@@ -181,7 +177,7 @@ export let PublicKeyInfo = module (
 
         /// @brief "SubjectPublicKeyInfo(<algorithm>[ <parameter set>], <n> key bytes)".
         export let.override to_string = func -> string {
-            last set = parameter_set.byte_length > 0 ? " " + parameter_set : "";
+            last set = parameter_set.byte_length > 0 ? (" " .. parameter_set) : "";
             return $"SubjectPublicKeyInfo({oids.name_of(algorithm.oid.dotted)}{set}, {key.length} key bytes)";
         };
     );
@@ -206,7 +202,7 @@ export let PublicKeyInfo = module (
     /// @brief Reads a SubjectPublicKeyInfo element.
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(e: der.Element) -> Result<SubjectPublicKeyInfo> {
-        if (!e.is_universal(der.TagSequence)) {
+        if (not e.is_universal(der.TagSequence)) {
             return fail<SubjectPublicKeyInfo>(e.offset, "SubjectPublicKeyInfo must be a SEQUENCE");
         }
         let r = e.reader();
@@ -229,9 +225,7 @@ export let PublicKeyInfo = module (
         if (dotted == oids.RsaEncryption || dotted == oids.RsaSsaPss) {
             if (dotted == oids.RsaEncryption) {
                 which = KeyAlgorithm.Rsa;
-                if (!id.has_null_parameters()) {
-                    return fail<SubjectPublicKeyInfo>(at, "rsaEncryption parameters must be NULL");
-                }
+                return fail<SubjectPublicKeyInfo>(at, "rsaEncryption parameters must be NULL") unless id.has_null_parameters();
             } else {
                 which = KeyAlgorithm.RsaPss;
                 if (id.has_parameters()) {
@@ -239,7 +233,7 @@ export let PublicKeyInfo = module (
                 }
             }
             last rsa = der.parse(key)?;
-            if (!rsa.is_universal(der.TagSequence)) {
+            if (not rsa.is_universal(der.TagSequence)) {
                 return fail<SubjectPublicKeyInfo>(key_element.offset, "RSAPublicKey must be a SEQUENCE");
             }
             let rr = rsa.reader();
@@ -257,7 +251,7 @@ export let PublicKeyInfo = module (
                 return fail<SubjectPublicKeyInfo>(at, "id-ecPublicKey needs a named curve");
             }
             last curve_element = der.parse(id.parameters)?;
-            if (!curve_element.is_universal(der.TagOid)) {
+            if (not curve_element.is_universal(der.TagOid)) {
                 return fail<SubjectPublicKeyInfo>(at, "EC parameters must be a named curve");
             }
             last curve = (curve_element.oid()?).dotted;
@@ -275,9 +269,9 @@ export let PublicKeyInfo = module (
                 set = "secp256k1";
                 field = 32;
             } else {
-                return fail<SubjectPublicKeyInfo>(at, "unsupported named curve " + curve);
+                return fail<SubjectPublicKeyInfo>(at, "unsupported named curve " .. curve);
             }
-            if (!((key.length == 2 * field + 1 && key[0] == 4) || (key.length == field + 1 && (key[0] == 2 || key[0] == 3)))) {
+            if (not ((key.length == 2 * field + 1 && key[0] == 4) || (key.length == field + 1 && (key[0] == 2 || key[0] == 3)))) {
                 return fail<SubjectPublicKeyInfo>(key_element.offset, "EC point has the wrong encoding or size");
             }
         } else {
@@ -323,10 +317,10 @@ export let PublicKeyInfo = module (
             }
             if (size >= 0) {
                 if (id.has_parameters()) {
-                    return fail<SubjectPublicKeyInfo>(at, oids.name_of(dotted) + " parameters must be absent");
+                    return fail<SubjectPublicKeyInfo>(at, oids.name_of(dotted) .. " parameters must be absent");
                 }
                 if (key.length != size) {
-                    return fail<SubjectPublicKeyInfo>(key_element.offset, oids.name_of(dotted) + " key has the wrong size");
+                    return fail<SubjectPublicKeyInfo>(key_element.offset, oids.name_of(dotted) .. " key has the wrong size");
                 }
             }
         }

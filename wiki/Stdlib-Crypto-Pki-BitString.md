@@ -22,8 +22,8 @@ The following public declarations are taken from the module source; each links t
 - **BitString.BitString** · [`export let bit = func(index: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/bit-string.nra#L35)
   Whether bit `index` is set; a bit past the end reads as unset.
 - **BitString.BitString** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/bit-string.nra#L42)
-- **BitString.BitString** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/bit-string.nra#L58)
-- **BitString.BitString** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/bit-string.nra#L67)
+- **BitString.BitString** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/bit-string.nra#L57)
+- **BitString.BitString** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/bit-string.nra#L66)
   "BitString(<bits> bits)".
 <!-- END SOURCE API -->
 

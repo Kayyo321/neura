@@ -68,7 +68,7 @@ The following public declarations are taken from the module source; each links t
 - **X25519MlKem768.X25519MlKem768** · [`export let decapsulate = func(private_key: X25519MlKem768PrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/x25519-ml-kem768.nra#L244)
   Recovers the shared secret, or returns an error for a wrong-length ciphertext. A low-order X25519 share also fails. Since 0.3.0.
 - **X25519MlKem768.X25519MlKem768** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/x25519-ml-kem768.nra#L259)
-  The scheme name. Since 0.3.0.
+  A fixed placeholder for the encapsulation state. Since 0.3.0.
 <!-- END SOURCE API -->
 
 ## Shared contracts

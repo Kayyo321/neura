@@ -84,10 +84,9 @@ export let Ocsp = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is CertId)) {
+            if (other is not that: CertId) {
                 return false;
             }
-            last that = other as CertId;
             return that.hash_algorithm.equals(hash_algorithm) && same(that.issuer_name_hash, issuer_name_hash)
                 && same(that.issuer_key_hash, issuer_key_hash) && same(that.serial, serial);
         };
@@ -95,8 +94,8 @@ export let Ocsp = module (
         export let.override hash_code = func -> uint32 => der.hash_range(issuer_key_hash, 0, issuer_key_hash.length)
             ^ der.hash_range(serial, 0, serial.length);
 
-        export let.override to_string = func -> string => "CertId(" + oids.name_of(hash_algorithm.dotted) + ", serial "
-            + hex_of(serial) + ")";
+        export let.override to_string = func -> string => "CertId(" .. oids.name_of(hash_algorithm.dotted) .. ", serial "
+            .. hex_of(serial) .. ")";
     );
 
     /// @brief One SingleResponse.
@@ -123,10 +122,9 @@ export let Ocsp = module (
 
         /// @brief Equal when the CertID, status, reason and times are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SingleResponse)) {
+            if (other is not that: SingleResponse) {
                 return false;
             }
-            last that = other as SingleResponse;
             return that.cert_id.equals(cert_id) && that.status == status && that.revocation_reason == revocation_reason
                 && that.this_update.equals(this_update) && same_time(that.next_update, next_update)
                 && same_time(that.revocation_time, revocation_time);
@@ -136,7 +134,7 @@ export let Ocsp = module (
 
         export let.override to_string = func -> string {
             last word = status == CertStatus.Good ? "good" : (status == CertStatus.Revoked ? "revoked" : "unknown");
-            return "SingleResponse(" + word + ", " + this_update.to_string() + ")";
+            return "SingleResponse(" .. word .. ", " .. this_update.to_string() .. ")";
         };
     );
 
@@ -373,7 +371,7 @@ export let Ocsp = module (
     };
 
     let parse_cert_id = func(e: der.Element) -> Result<CertId> {
-        if (!e.is_universal(der.TagSequence)) {
+        if (not e.is_universal(der.TagSequence)) {
             return fail<CertId>(e.offset, "CertID must be a SEQUENCE");
         }
         let r = e.reader();
@@ -387,7 +385,7 @@ export let Ocsp = module (
 
     let parse_extensions = func(e: der.Element) -> Result<Extension[list]> {
         last list = e.explicit_inner()?;
-        if (!list.is_universal(der.TagSequence)) {
+        if (not list.is_universal(der.TagSequence)) {
             return fail<Extension[list]>(list.offset, "Extensions must be a SEQUENCE");
         }
         let out: Extension[list] = new;
@@ -401,7 +399,7 @@ export let Ocsp = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_request = func(bytes: uint8[list]) -> Result<OcspRequest> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<OcspRequest>(0, "OCSPRequest must be a SEQUENCE");
         }
         let r = top.reader();
@@ -422,7 +420,7 @@ export let Ocsp = module (
         last list = tr.next_universal(der.TagSequence, "requestList")?;
         let ids: CertId[list] = new;
         for (let request in list.children()?) {
-            if (!request.is_universal(der.TagSequence)) {
+            if (not request.is_universal(der.TagSequence)) {
                 return fail<OcspRequest>(request.offset, "Request must be a SEQUENCE");
             }
             let rr = request.reader();
@@ -452,7 +450,7 @@ export let Ocsp = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_response = func(bytes: uint8[list]) -> Result<OcspResponse> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<OcspResponse>(0, "OCSPResponse must be a SEQUENCE");
         }
         let r = top.reader();
@@ -476,22 +474,22 @@ export let Ocsp = module (
         match (r.optional_context(0)?) {
             Optional.Some(x) => {
                 last body = x.explicit_inner()?;
-                if (!body.is_universal(der.TagSequence)) {
+                if (not body.is_universal(der.TagSequence)) {
                     return fail<OcspResponse>(body.offset, "ResponseBytes must be a SEQUENCE");
                 }
                 let br = body.reader();
                 last type = (br.next_universal(der.TagOid, "responseType")?).oid()?;
                 last inner = (br.next_universal(der.TagOctetString, "response")?).octet_string()?;
                 br.finish()?;
-                if (!type.matches(oids.OcspBasic)) {
-                    return failure<OcspResponse>("ocsp.status", "unsupported OCSP response type " + type.dotted);
+                if (not type.matches(oids.OcspBasic)) {
+                    return failure<OcspResponse>("ocsp.status", "unsupported OCSP response type " .. type.dotted);
                 }
                 basic = Optional<BasicResponse>.Some(parse_basic(inner)?);
             },
             Optional.None => {},
         }
         r.finish()?;
-        if (status == ResponseStatus.Successful && !is_some(basic)) {
+        if (status == ResponseStatus.Successful && not is_some(basic)) {
             return fail<OcspResponse>(0, "a successful response needs responseBytes");
         }
         return Result<OcspResponse>.Ok(new OcspResponse(status, basic, top.encoded()));
@@ -510,7 +508,7 @@ export let Ocsp = module (
     };
 
     let generalized_time = func(e: der.Element) -> Result<instant.Instant> {
-        if (!e.is_universal(der.TagGeneralizedTime)) {
+        if (not e.is_universal(der.TagGeneralizedTime)) {
             return fail<instant.Instant>(e.offset, "expected GeneralizedTime");
         }
         return e.time();
@@ -518,7 +516,7 @@ export let Ocsp = module (
 
     let parse_basic = func(bytes: uint8[list]) -> Result<BasicResponse> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<BasicResponse>(0, "BasicOCSPResponse must be a SEQUENCE");
         }
         let r = top.reader();
@@ -572,7 +570,7 @@ export let Ocsp = module (
     };
 
     let parse_single = func(e: der.Element) -> Result<SingleResponse> {
-        if (!e.is_universal(der.TagSequence)) {
+        if (not e.is_universal(der.TagSequence)) {
             return fail<SingleResponse>(e.offset, "SingleResponse must be a SEQUENCE");
         }
         let r = e.reader();
@@ -587,9 +585,7 @@ export let Ocsp = module (
             }
         } else if (status_element.is_context(1)) {
             status = CertStatus.Revoked;
-            if (!status_element.constructed) {
-                return fail<SingleResponse>(status_element.offset, "RevokedInfo must be constructed");
-            }
+            return fail<SingleResponse>(status_element.offset, "RevokedInfo must be constructed") unless status_element.constructed;
             let rr = status_element.reader();
             revoked_at = Optional<instant.Instant>.Some(generalized_time(rr.next()?)?);
             match (rr.optional_context(0)?) {
@@ -661,7 +657,7 @@ export let Ocsp = module (
             },
             Optional.None => {},
         }
-        if (nonce.length > 0 && !same(basic.nonce(), nonce)) {
+        if (nonce.length > 0 && not same(basic.nonce(), nonce)) {
             return failure<SingleResponse>("ocsp.nonce", "the response does not echo the request's nonce");
         }
         return Result<SingleResponse>.Ok(single);
@@ -712,15 +708,15 @@ export let Ocsp = module (
             return Result<Certificate>.Ok(issuer);
         }
         for (let candidate in basic.certificates) {
-            if (!names_responder(basic, candidate)) {
+            if (not names_responder(basic, candidate)) {
                 continue;
             }
-            if (!candidate.issuer.equals(issuer.subject)) {
+            if (not candidate.issuer.equals(issuer.subject)) {
                 return failure<Certificate>("ocsp.responder", "the delegated responder was not issued by the CA");
             }
             match (candidate.extended_key_usage) {
                 Optional.Some(eku) => {
-                    if (!eku.has(oids.OcspSigning)) {
+                    if (not eku.has(oids.OcspSigning)) {
                         return failure<Certificate>("ocsp.responder", "the delegated responder lacks id-kp-OCSPSigning");
                     }
                 },
@@ -728,7 +724,7 @@ export let Ocsp = module (
                     return failure<Certificate>("ocsp.responder", "the delegated responder lacks id-kp-OCSPSigning");
                 },
             }
-            if (!candidate.is_valid_at(at)) {
+            if (not candidate.is_valid_at(at)) {
                 return failure<Certificate>("ocsp.responder", "the delegated responder certificate is not valid now");
             }
             last check = verifier.verify_signature(candidate.signature_algorithm, issuer.public_key, candidate.tbs_bytes,

@@ -161,7 +161,7 @@ export let FrostGroup = module (
                 Backend.Ristretto(g) => {
                     match (g.decode(bytes)) {
                         Optional.Some(p) => {
-                            if (!g.is_identity(p)) {
+                            if (not g.is_identity(p)) {
                                 return Optional<Point>.Some(new Point(p));
                             }
                         },
@@ -171,7 +171,7 @@ export let FrostGroup = module (
                 Backend.E25519(g) => {
                     match (g.decode(bytes)) {
                         Optional.Some(p) => {
-                            if (!g.is_identity(p) && g.is_identity(g.multiply(order.m, p))) {
+                            if (not g.is_identity(p) && g.is_identity(g.multiply(order.m, p))) {
                                 return Optional<Point>.Some(new Point(p));
                             }
                         },
@@ -181,7 +181,7 @@ export let FrostGroup = module (
                 Backend.E448(g) => {
                     match (g.decode(bytes)) {
                         Optional.Some(p) => {
-                            if (!g.is_identity(p) && g.is_identity(g.multiply(order.m, p))) {
+                            if (not g.is_identity(p) && g.is_identity(g.multiply(order.m, p))) {
                                 return Optional<Point>.Some(new Point(p));
                             }
                         },
@@ -191,7 +191,7 @@ export let FrostGroup = module (
                 Backend.Weierstrass(g) => {
                     match (g.decode(bytes)) {
                         Optional.Some(p) => {
-                            if (!g.is_identity(p)) {
+                            if (not g.is_identity(p)) {
                                 return Optional<Point>.Some(new Point(p));
                             }
                         },
@@ -231,7 +231,7 @@ export let FrostGroup = module (
             order.from_mont(order.inv(order.to_mont(s)));
 
         export let domain_hash = func(label: string, bytes: uint8[list]) -> uint8[list] {
-            last input = words.concat(words.utf8(context + label), bytes);
+            last input = words.concat(words.utf8(context .. label), bytes);
             last digest = hash(input);
             words.wipe(input);
             return digest;
@@ -240,7 +240,7 @@ export let FrostGroup = module (
         export let hash_scalar = func(label: string, bytes: uint8[list]) -> uint32[list] {
             let digest: uint8[list] = new;
             if (big_endian) {
-                digest = xmd.expand<sha2.Sha256>(bytes, words.utf8(context + label), 48);
+                digest = xmd.expand<sha2.Sha256>(bytes, words.utf8(context .. label), 48);
             } else if (label == "chal" && suite == Suite.Ed25519Sha512) {
                 digest = hash(bytes);
             } else if (label == "chal" && suite == Suite.Ed448Shake256) {
@@ -267,6 +267,6 @@ export let FrostGroup = module (
             return sha2.sha512(bytes);
         };
 
-        export let.override to_string = func -> string => "FrostGroup.Group(" + suite.to_string() + ")";
+        export let.override to_string = func -> string => "FrostGroup.Group(" .. suite.to_string() .. ")";
     );
 );

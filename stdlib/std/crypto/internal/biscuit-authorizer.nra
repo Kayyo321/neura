@@ -14,7 +14,7 @@ let.promote _ = import:Std.Core.Unit;
 /// @brief Text parser for the bounded Biscuit Datalog authorizer. Internal.
 export let BiscuitAuthorizer = module (
     let invalid = func<T>(offset: int, message: string) -> Result<T> =>
-        datalog.fail<T>("biscuit.authorizer", "Datalog byte " + offset.to_string() + ": " + message);
+        datalog.fail<T>("biscuit.authorizer", "Datalog byte " .. offset.to_string() .. ": " .. message);
 
     let space = func(byte: uint8) -> bool => byte == 9 || byte == 10 || byte == 13 || byte == 32;
     let alpha = func(byte: uint8) -> bool => (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
@@ -47,7 +47,7 @@ export let BiscuitAuthorizer = module (
                 } else if (looking_at("/*")) {
                     last start = offset;
                     offset += 2;
-                    while (offset < source.byte_length && !looking_at("*/")) {
+                    while (offset < source.byte_length && not looking_at("*/")) {
                         offset++;
                     }
                     if (offset == source.byte_length) {
@@ -75,7 +75,7 @@ export let BiscuitAuthorizer = module (
 
         export let accept = func(text: string) -> bool {
             skip_space();
-            if (!looking_at(text)) {
+            if (not looking_at(text)) {
                 return false;
             }
             offset += text.byte_length;
@@ -84,7 +84,7 @@ export let BiscuitAuthorizer = module (
 
         export let keyword = func(text: string) -> bool {
             skip_space();
-            if (!looking_at(text)) {
+            if (not looking_at(text)) {
                 return false;
             }
             last end = offset + text.byte_length;
@@ -96,15 +96,15 @@ export let BiscuitAuthorizer = module (
         };
 
         export let expect = func(text: string) -> Result<Unit> {
-            if (!accept(text)) {
-                return invalid<Unit>(offset, "expected " + text);
+            if (not accept(text)) {
+                return invalid<Unit>(offset, "expected " .. text);
             }
             return Result<Unit>.Ok(Unit.Value);
         };
 
         export let expect_keyword = func(text: string) -> Result<Unit> {
-            if (!keyword(text)) {
-                return invalid<Unit>(offset, "expected keyword " + text);
+            if (not keyword(text)) {
+                return invalid<Unit>(offset, "expected keyword " .. text);
             }
             return Result<Unit>.Ok(Unit.Value);
         };
@@ -129,9 +129,9 @@ export let BiscuitAuthorizer = module (
         };
 
         let name = func(variable: bool) -> Result<string> {
-            if (!variable) {
+            if (not variable) {
                 skip_space();
-                if (offset == source.byte_length || !letter(offset)) {
+                if (offset == source.byte_length || not letter(offset)) {
                     return invalid<string>(offset, "expected a Datalog identifier");
                 }
             }
@@ -145,7 +145,7 @@ export let BiscuitAuthorizer = module (
 
         let predicate_ahead = func -> bool {
             skip_space();
-            if (offset == source.byte_length || !letter(offset)) {
+            if (offset == source.byte_length || not letter(offset)) {
                 return false;
             }
             last start = offset;
@@ -219,9 +219,9 @@ export let BiscuitAuthorizer = module (
         let date_term = func -> Result<expr.Term> {
             last start = offset;
             // The fraction and UTC-offset sign are part of the date token.
-            for (let i = 0; i < 19; i++) {
+            for (let i in 0 .. 19) {
                 last byte = source.byte_at(start + i);
-                if (!(digit(byte) || byte == 45 || byte == 58 || byte == 84)) {
+                if (not (digit(byte) || byte == 45 || byte == 58 || byte == 84)) {
                     return invalid<expr.Term>(start, "invalid Datalog date");
                 }
             }
@@ -235,7 +235,7 @@ export let BiscuitAuthorizer = module (
             }
             last adjustment = date_offset()?;
             // Wire dates keep whole Unix seconds. Parse the wall clock before subtracting its UTC offset.
-            match (instant.parse(wall_clock + "Z")) {
+            match (instant.parse(wall_clock .. "Z")) {
                 Result.Ok(value) => {
                     last seconds = value.epoch_seconds - adjustment;
                     if (seconds >= 0) {
@@ -256,10 +256,10 @@ export let BiscuitAuthorizer = module (
                 return Result<int64>.Ok(0);
             }
             last positive = looking_at("+");
-            if (!(positive || looking_at("-")) || source.byte_length - offset < 6
-                || !digit(source.byte_at(offset + 1)) || !digit(source.byte_at(offset + 2))
-                || source.byte_at(offset + 3) != 58 || !digit(source.byte_at(offset + 4))
-                || !digit(source.byte_at(offset + 5))) {
+            if (not (positive || looking_at("-")) || source.byte_length - offset < 6
+                || not digit(source.byte_at(offset + 1)) || not digit(source.byte_at(offset + 2))
+                || source.byte_at(offset + 3) != 58 || not digit(source.byte_at(offset + 4))
+                || not digit(source.byte_at(offset + 5))) {
                 return invalid<int64>(offset, "expected a Datalog date's UTC offset");
             }
             last hours = decimal_pair(offset + 1);
@@ -311,7 +311,7 @@ export let BiscuitAuthorizer = module (
 
         let array_term = func(depth: int) -> Result<expr.Term> {
             let items: expr.Term[list] = new;
-            if (!accept("]")) {
+            if (not accept("]")) {
                 items.append(term(depth, false)?);
                 while (accept(",")) {
                     if (items.length >= expr.MaxCollection) {
@@ -339,7 +339,7 @@ export let BiscuitAuthorizer = module (
                 }
                 keys.append(key);
                 values.append(term(depth, false)?);
-                if (!accept(",")) {
+                if (not accept(",")) {
                     break;
                 }
                 if (keys.length >= expr.MaxCollection) {
@@ -361,11 +361,11 @@ export let BiscuitAuthorizer = module (
                 if (member.kind != first.kind || member.kind == expr.Kind.Set || member.kind == expr.Kind.Array) {
                     return invalid<expr.Term>(offset, "a Datalog set requires homogeneous members");
                 }
-                if (!set.contains(member)) {
+                if (not set.contains(member)) {
                     items.append(member);
                 }
                 count++;
-                if (!accept(",")) {
+                if (not accept(",")) {
                     break;
                 }
                 if (count >= expr.MaxCollection) {
@@ -565,7 +565,7 @@ export let BiscuitAuthorizer = module (
                 expect("(")?;
                 if (strings.starts_with(method, "extern::")) {
                     last identifier = method.slice(8, method.byte_length);
-                    if (!externals.valid_name(identifier)) {
+                    if (not externals.valid_name(identifier)) {
                         return invalid<expr.Operation[list]>(offset, "invalid Biscuit external function name");
                     }
                     if (accept(")")) {
@@ -586,7 +586,7 @@ export let BiscuitAuthorizer = module (
 
                 last code = method_code(method);
                 if (code < 0) {
-                    return invalid<expr.Operation[list]>(offset, "unsupported Datalog method " + method);
+                    return invalid<expr.Operation[list]>(offset, "unsupported Datalog method " .. method);
                 }
                 if (code == 25 || code == 26) {
                     expect("$")?;
@@ -669,14 +669,14 @@ export let BiscuitAuthorizer = module (
                     result.expressions.append(expression(1, 0)?);
                 }
                 count++;
-                if (!accept(",")) {
+                if (not accept(",")) {
                     break;
                 }
             }
             if (keyword("trusting")) {
                 scope_list(result.scopes)?;
             }
-            if (!datalog.safe_query(result)) {
+            if (not datalog.safe_query(result)) {
                 return invalid<datalog.Query>(offset, "unbound variable or invalid Datalog expression");
             }
             return Result<datalog.Query>.Ok(result);
@@ -725,12 +725,12 @@ export let BiscuitAuthorizer = module (
                     if (accept("<-")) {
                         last body = query()?;
                         last rule = new datalog.Rule(head, body);
-                        if (!datalog.safe_rule(rule)) {
+                        if (not datalog.safe_rule(rule)) {
                             return invalid<Unit>(offset, "unbound variable in the Datalog rule head");
                         }
                         authorizer.logic.rules.append(rule);
                     } else {
-                        if (!datalog.ground(head)) {
+                        if (not datalog.ground(head)) {
                             return invalid<Unit>(offset, "a Datalog fact contains a variable");
                         }
                         authorizer.logic.facts.append(head);
@@ -750,7 +750,7 @@ export let BiscuitAuthorizer = module (
         let parser: Parser = new(code);
         let authorizer: datalog.Authorizer = new;
         let count = 0;
-        while (!parser.done()) {
+        while (not parser.done()) {
             if (count == datalog.MaxItems) {
                 return datalog.fail<datalog.Authorizer>("biscuit.limit", "too many authorizer statements");
             }

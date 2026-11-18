@@ -43,7 +43,7 @@ export let Csr = module (
         export let encode = func -> uint8[list] => writer.sequence(new([writer.oid(type), writer.set(values)]));
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Attribute)) {
+            if (other is not Attribute) {
                 return false;
             }
             last a = encode();
@@ -142,7 +142,7 @@ export let Csr = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(bytes: uint8[list]) -> Result<CertificationRequest> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<CertificationRequest>(0, "CertificationRequest must be a SEQUENCE");
         }
         let r = top.reader();
@@ -161,7 +161,7 @@ export let Csr = module (
         last subject = names.parse(ir.next_universal(der.TagSequence, "subject")?)?;
         last key = public_keys.parse(ir.next_universal(der.TagSequence, "subjectPKInfo")?)?;
         last attrs_element = ir.next()?;
-        if (!attrs_element.is_context(0) || !attrs_element.constructed) {
+        if (not attrs_element.is_context(0) || not attrs_element.constructed) {
             return fail<CertificationRequest>(attrs_element.offset, "attributes must be [0] IMPLICIT SET");
         }
         ir.finish()?;
@@ -169,7 +169,7 @@ export let Csr = module (
         let requested: Extension[list] = new;
         let password = Optional<string>.None;
         for (let a in attrs_element.children()?) {
-            if (!a.is_universal(der.TagSequence)) {
+            if (not a.is_universal(der.TagSequence)) {
                 return fail<CertificationRequest>(a.offset, "Attribute must be a SEQUENCE");
             }
             let ar = a.reader();
@@ -180,7 +180,7 @@ export let Csr = module (
             for (let v in set.children()?) {
                 values.append(v.encoded());
                 if (type.matches(oids.ExtensionRequest)) {
-                    if (!v.is_universal(der.TagSequence)) {
+                    if (not v.is_universal(der.TagSequence)) {
                         return fail<CertificationRequest>(v.offset, "extensionRequest must hold Extensions");
                     }
                     for (let item in v.children()?) {
@@ -230,7 +230,7 @@ export let Csr = module (
         let printable = true;
         for (let i = 0; i < password.byte_length; i++) {
             last c = password.byte_at(i);
-            if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
+            if (not ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
                 || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
                 || c == 61 || c == 63)) {
                 printable = false;

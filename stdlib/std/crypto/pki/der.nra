@@ -152,9 +152,7 @@ export let Der = module (
         /// @brief The elements inside a constructed element.
         #NoDiscard
         export let children = func -> Result<Element[list]> {
-            if (!constructed) {
-                return fail<Element[list]>(offset, "expected a constructed element");
-            }
+            return fail<Element[list]>(offset, "expected a constructed element") unless constructed;
             let r = reader();
             let out: Element[list] = new;
             while (r.has_more()) {
@@ -166,9 +164,7 @@ export let Der = module (
         /// @brief The single element inside an explicitly tagged element.
         #NoDiscard
         export let explicit_inner = func -> Result<Element> {
-            if (!constructed) {
-                return fail<Element>(offset, "explicit tag must be constructed");
-            }
+            return fail<Element>(offset, "explicit tag must be constructed") unless constructed;
             let r = reader();
             last inner = r.next()?;
             r.finish()?;
@@ -222,7 +218,7 @@ export let Der = module (
         /// above `max` is an `OutOfRange` error.
         #NoDiscard
         export let small_integer = func(max: int64) -> Result<int64> {
-            if (!(is_universal(TagInteger) || is_universal(TagEnumerated))) {
+            if (not (is_universal(TagInteger) || is_universal(TagEnumerated))) {
                 return fail<int64>(offset, "expected an INTEGER");
             }
             let _ = integer_content()?;
@@ -309,9 +305,7 @@ export let Der = module (
         /// software does), BMPString (UCS-2, no surrogates) or UniversalString (UCS-4).
         #NoDiscard
         export let text = func -> Result<string> {
-            if (!is_string()) {
-                return fail<string>(offset, "expected a string type");
-            }
+            return fail<string>(offset, "expected a string type") unless is_string();
             return string_content(tag_number);
         };
 
@@ -351,7 +345,7 @@ export let Der = module (
             } else {
                 for (let i = at; i < end(); i++) {
                     last c = data[i];
-                    if (!allowed_byte(kind, c)) {
+                    if (not allowed_byte(kind, c)) {
                         return fail<string>(i, "invalid character in string");
                     }
                     append_utf8(bytes, c as uint32);
@@ -429,20 +423,19 @@ export let Der = module (
 
         let expect_tag = func(number: int, name: string) -> Result<Unit> {
             if (tag_class != Universal || tag_number != number) {
-                return fail<Unit>(offset, "expected " + name);
+                return fail<Unit>(offset, "expected " .. name);
             }
             if (constructed) {
-                return fail<Unit>(offset, name + " must be primitive");
+                return fail<Unit>(offset, name .. " must be primitive");
             }
             return Result<Unit>.Ok(Unit.Value);
         };
 
         /// @brief Equal when the encodings are equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Element)) {
+            if (other is not that: Element) {
                 return false;
             }
-            last that = other as Element;
             if (that.end() - that.offset != end() - offset) {
                 return false;
             }
@@ -521,7 +514,7 @@ export let Der = module (
         /// @brief The next element, fully checked.
         #NoDiscard
         export let next = func -> Result<Element> {
-            last e = read_header(data, position, limit, depth, max_depth, !checked)?;
+            last e = read_header(data, position, limit, depth, max_depth, not checked)?;
             position = e.end();
             return Result<Element>.Ok(e);
         };
@@ -529,11 +522,11 @@ export let Der = module (
         /// @brief The next element, which must have the universal tag `number`.
         #NoDiscard
         export let next_universal = func(number: int, name: string) -> Result<Element> {
-            if (!peek_is(Universal, number)) {
+            if (not peek_is(Universal, number)) {
                 if (position >= limit) {
-                    return truncated<Element>(position, "missing " + name);
+                    return truncated<Element>(position, "missing " .. name);
                 }
-                return fail<Element>(position, "expected " + name);
+                return fail<Element>(position, "expected " .. name);
             }
             return next();
         };
@@ -541,7 +534,7 @@ export let Der = module (
         /// @brief The next element if it has the context tag [number], else None.
         #NoDiscard
         export let optional_context = func(number: int) -> Result<Optional<Element>> {
-            if (!peek_is(ContextSpecific, number)) {
+            if (not peek_is(ContextSpecific, number)) {
                 return Result<Optional<Element>>.Ok(Optional<Element>.None);
             }
             last e = next()?;
@@ -551,7 +544,7 @@ export let Der = module (
         /// @brief The next element if it has the universal tag, else None.
         #NoDiscard
         export let optional_universal = func(number: int) -> Result<Optional<Element>> {
-            if (!peek_is(Universal, number)) {
+            if (not peek_is(Universal, number)) {
                 return Result<Optional<Element>>.Ok(Optional<Element>.None);
             }
             last e = next()?;
@@ -579,9 +572,7 @@ export let Der = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_with_depth = func(input: uint8[list], max_depth: int) -> Result<Element> {
         let r = new Reader(input, 0, input.length, 0, max_depth, false);
-        if (!r.has_more()) {
-            return truncated<Element>(0, "empty input");
-        }
+        return truncated<Element>(0, "empty input") unless r.has_more();
         last e = r.next()?;
         r.finish()?;
         return Result<Element>.Ok(e);
@@ -666,7 +657,7 @@ export let Der = module (
             return truncated<Element>(p, "content runs past the end of the input");
         }
         if (class_bits == Universal) {
-            if ((number == TagSequence || number == TagSet) && !is_constructed) {
+            if ((number == TagSequence || number == TagSet) && not is_constructed) {
                 return fail<Element>(at, "SEQUENCE and SET must be constructed");
             }
             if (number != TagSequence && number != TagSet && number != 8 && number != 11 && is_constructed) {

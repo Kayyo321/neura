@@ -14,7 +14,7 @@ export let AesCmac = module (
     #[Internal, Since("0.3.0")]
     export let double = func(block: uint8[list]) -> uint8[list] {
         let out: uint8[list] = new;
-        for (let i = 0; i < 15; i++) {
+        for (let i in 0 .. 15) {
             out.append((((block[i] as uint32) << 1) & 255) as uint8 | (block[i + 1] >> 7));
         }
         out.append((((block[15] as uint32) << 1) & 255) as uint8 ^ ((block[0] >> 7) * 135));

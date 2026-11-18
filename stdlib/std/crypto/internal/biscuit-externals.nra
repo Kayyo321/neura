@@ -56,12 +56,12 @@ export let BiscuitExternals = module (
     let letter = func(byte: uint8) -> bool => (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
 
     export let valid_name = func(name: string) -> bool {
-        if (name.byte_length == 0 || name.byte_length > MaxNameBytes || !letter(name.byte_at(0))) {
+        if (name.byte_length == 0 || name.byte_length > MaxNameBytes || not letter(name.byte_at(0))) {
             return false;
         }
         for (let i = 1; i < name.byte_length; i++) {
             last byte = name.byte_at(i);
-            if (!letter(byte) && (byte < 48 || byte > 57) && byte != 95) {
+            if (not letter(byte) && (byte < 48 || byte > 57) && byte != 95) {
                 return false;
             }
         }
@@ -75,7 +75,7 @@ export let BiscuitExternals = module (
         export let init = func {};
 
         export let add = func(value: ExternalFunction) -> Result<Unit> {
-            if (value == nil || !valid_name(value.name) || functions.length == MaxFunctions || has(value.name)) {
+            if (value == nil || not valid_name(value.name) || functions.length == MaxFunctions || has(value.name)) {
                 return fail<Unit>("invalid, repeated, or excessive Biscuit external function registration");
             }
             functions.append(value);

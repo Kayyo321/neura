@@ -30,15 +30,14 @@ export let BiscuitDatalog = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Predicate)) {
+            if (other is not predicate: Predicate) {
                 return false;
             }
-            last predicate = other as Predicate;
             if (name != predicate.name || terms.length != predicate.terms.length) {
                 return false;
             }
             for (let i = 0; i < terms.length; i++) {
-                if (!terms[i].equals(predicate.terms[i])) {
+                if (not terms[i].equals(predicate.terms[i])) {
                     return false;
                 }
             }
@@ -161,7 +160,7 @@ export let BiscuitDatalog = module (
             }
         }
         for (let code in query.expressions) {
-            if (!expr.valid(code, variables)) {
+            if (not expr.valid(code, variables)) {
                 return false;
             }
         }
@@ -170,7 +169,7 @@ export let BiscuitDatalog = module (
 
     export let safe_rule = func(rule: Rule) -> bool {
         for (let term in rule.head.terms) {
-            if (term.kind == expr.Kind.Variable && !contains_variable(rule.query, term.text)) {
+            if (term.kind == expr.Kind.Variable && not contains_variable(rule.query, term.text)) {
                 return false;
             }
         }
@@ -196,7 +195,7 @@ export let BiscuitDatalog = module (
             if (term.kind == expr.Kind.Variable) {
                 match (bound(bindings, term.text, budget)?) {
                     Optional.Some(value) => {
-                        if (!value.equals(actual)) {
+                        if (not value.equals(actual)) {
                             return Result<bool>.Ok(false);
                         }
                     },
@@ -204,7 +203,7 @@ export let BiscuitDatalog = module (
                         bindings.append([term.text, actual]);
                     },
                 }
-            } else if (!term.equals(actual)) {
+            } else if (not term.equals(actual)) {
                 return Result<bool>.Ok(false);
             }
         }
@@ -298,7 +297,7 @@ export let BiscuitDatalog = module (
         registry: externals.Registry) -> Result<bool> {
         for (let code in query.expressions) {
             last result = expr.evaluate(code, bindings, func -> Result<Unit> => budget.step(), registry)?;
-            if (!(expr.as_bool(result)?)) {
+            if (not (expr.as_bool(result)?)) {
                 return Result<bool>.Ok(false);
             }
         }
@@ -339,7 +338,7 @@ export let BiscuitDatalog = module (
     };
 
     let close = func(facts: Fact[list], rules: ScopedRule[list], budget: Budget, registry: externals.Registry) -> Result<Unit> {
-        for (let round = 0; round < MaxRounds; round++) {
+        for (let round in 0 .. MaxRounds) {
             let generated: Fact[list] = new;
             for (let entry in rules) {
                 let _ = visit(entry.rule.query, 0, facts, entry.trust, entry.origin, new,
@@ -393,12 +392,12 @@ export let BiscuitDatalog = module (
             func(bindings: [string, expr.Term][list], origins: uint32) -> Result<bool> {
                 found[0] = true;
                 last condition = evaluate(query, bindings, budget, registry)?;
-                return Result<bool>.Ok(kind == CheckKind.All ? !condition : condition);
+                return Result<bool>.Ok(kind == CheckKind.All ? not condition : condition);
             }, budget)?;
         if (kind == CheckKind.All) {
-            return Result<bool>.Ok(found[0] && !stopped);
+            return Result<bool>.Ok(found[0] && not stopped);
         }
-        return Result<bool>.Ok(kind == CheckKind.Reject ? !stopped : stopped);
+        return Result<bool>.Ok(kind == CheckKind.Reject ? not stopped : stopped);
     };
 
     let matches = func(queries: Query[list], kind: CheckKind, facts: Fact[list], index: int, inherited: uint32,
@@ -406,7 +405,7 @@ export let BiscuitDatalog = module (
         for (let query in queries) {
             last visible = trust(query.scopes, inherited, index, blocks);
             last success = query_matches(query, kind, facts, visible, budget, registry)?;
-            if (kind == CheckKind.Reject && !success) {
+            if (kind == CheckKind.Reject && not success) {
                 return Result<bool>.Ok(false);
             }
             if (kind != CheckKind.Reject && success) {
@@ -420,7 +419,7 @@ export let BiscuitDatalog = module (
         registry: externals.Registry) -> Result<Unit> {
         last inherited = block_trust(block, index, blocks);
         for (let check in block.checks) {
-            if (!(matches(check.queries, check.kind, facts, index, inherited, blocks, budget, registry)?)) {
+            if (not (matches(check.queries, check.kind, facts, index, inherited, blocks, budget, registry)?)) {
                 return fail<Unit>("biscuit.check", "a Datalog check did not match");
             }
         }

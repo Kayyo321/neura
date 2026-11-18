@@ -74,7 +74,7 @@ export let Kmac = module (
 
         /// @brief The next `count` bytes of KMACXOF128 output after `finish_xof`.
         export let squeeze = func(count: int) -> uint8[list] {
-            if (!sponge.is_squeezing()) {
+            if (not sponge.is_squeezing()) {
                 trap_with_message("invalid state: call finish_xof first");
             }
             return sponge.squeeze(count);
@@ -156,7 +156,7 @@ export let Kmac = module (
 
         /// @brief The next `count` bytes of KMACXOF256 output after `finish_xof`.
         export let squeeze = func(count: int) -> uint8[list] {
-            if (!sponge.is_squeezing()) {
+            if (not sponge.is_squeezing()) {
                 trap_with_message("invalid state: call finish_xof first");
             }
             return sponge.squeeze(count);

@@ -29,7 +29,7 @@ export let Scrypt = module (
         let v: uint32[list] = new;
         let y: uint32[list] = new;
         let scratch: uint32[list] = new;
-        for (let i = 0; i < 16; i++) {
+        for (let i in 0 .. 16) {
             scratch.append(0);
         }
         for (let i = 0; i < words_per_block; i++) {
@@ -77,17 +77,17 @@ export let Scrypt = module (
     /// @brief scryptBlockMix: X becomes (Y0, Y2, ..., Y1, Y3, ...), where Yi = Salsa20/8(Y(i-1) xor Xi).
     let block_mix = func(x: uint32[list], y: uint32[list], scratch: uint32[list], r: int) {
         let t: uint32[list] = new;
-        for (let k = 0; k < 16; k++) {
+        for (let k in 0 .. 16) {
             t.append(x[(2 * r - 1) * 16 + k]);
         }
         for (let i = 0; i < 2 * r; i++) {
-            for (let k = 0; k < 16; k++) {
+            for (let k in 0 .. 16) {
                 t[k] = t[k] ^ x[16 * i + k];
             }
             salsa20.core8(t, 0, scratch);
             // Even blocks go to the first half, odd blocks to the second.
             last target = (i % 2 == 0 ? i / 2 : r + i / 2) * 16;
-            for (let k = 0; k < 16; k++) {
+            for (let k in 0 .. 16) {
                 y[target + k] = t[k];
             }
         }

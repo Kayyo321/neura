@@ -47,7 +47,7 @@ export let Name = module (
 
         /// @brief RFC 5280 section 7.1 comparison.
         export let matches = func(other: AttributeTypeAndValue) -> bool {
-            if (!type.equals(other.type) || is_text != other.is_text) {
+            if (not type.equals(other.type) || is_text != other.is_text) {
                 return false;
             }
             if (is_text) {
@@ -66,10 +66,8 @@ export let Name = module (
         /// @brief `<type>=<value>` in RFC 4514 form.
         export let.override to_string = func -> string {
             last label = short_name(type.dotted);
-            if (!is_text) {
-                return label + "=#" + hex.encode(value_der);
-            }
-            return label + "=" + escape(text);
+            return label .. "=#" .. hex.encode(value_der) unless is_text;
+            return label .. "=" .. escape(text);
         };
     );
 
@@ -116,7 +114,7 @@ export let Name = module (
                 return false;
             }
             for (let i = 0; i < prefix.rdns.length; i++) {
-                if (!rdn_matches(rdns[i], prefix.rdns[i])) {
+                if (not rdn_matches(rdns[i], prefix.rdns[i])) {
                     return false;
                 }
             }
@@ -124,10 +122,9 @@ export let Name = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Name)) {
+            if (other is not that: Name) {
                 return false;
             }
-            last that = other as Name;
             return that.rdns.length == rdns.length && starts_with(that);
         };
 
@@ -176,15 +173,13 @@ export let Name = module (
         for (let pair in a) {
             let found = false;
             for (let i = 0; i < b.length; i++) {
-                if (!matched[i] && pair.matches(b[i])) {
+                if (not matched[i] && pair.matches(b[i])) {
                     matched[i] = true;
                     found = true;
                     break;
                 }
             }
-            if (!found) {
-                return false;
-            }
+            return false unless found;
         }
         return true;
     };
@@ -252,17 +247,17 @@ export let Name = module (
     /// SEQUENCE { OBJECT IDENTIFIER, value } is a `Parse` error; a string value must be valid for its type.
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(element: der.Element) -> Result<Name> {
-        if (!element.is_universal(der.TagSequence)) {
+        if (not element.is_universal(der.TagSequence)) {
             return fail<Name>(element.offset, "Name must be a SEQUENCE");
         }
         let rdns: AttributeTypeAndValue[list][list] = new;
         for (let rdn in element.children()?) {
-            if (!rdn.is_universal(der.TagSet)) {
+            if (not rdn.is_universal(der.TagSet)) {
                 return fail<Name>(rdn.offset, "RDN must be a SET");
             }
             let pairs: AttributeTypeAndValue[list] = new;
             for (let pair in rdn.children()?) {
-                if (!pair.is_universal(der.TagSequence)) {
+                if (not pair.is_universal(der.TagSequence)) {
                     return fail<Name>(pair.offset, "attribute must be a SEQUENCE");
                 }
                 let r = pair.reader();
@@ -352,9 +347,9 @@ export let Name = module (
                 return value.dotted;
             },
             Result.Err(e) => {
-                trap_with_message("invalid argument: unknown attribute type " + short);
+                trap_with_message("invalid argument: unknown attribute type " .. short);
             },
         }
-        trap_with_message("invalid argument: unknown attribute type " + short);
+        trap_with_message("invalid argument: unknown attribute type " .. short);
     };
 );

@@ -47,7 +47,7 @@ export let PqcPrehash = module (
             out.append(12);
             words.append_all(out, sha3.shake256(message, 64));
         } else {
-            trap_with_message("invalid argument: " + hash.to_string() + " is not a pre-hash function of HashML-DSA or HashSLH-DSA");
+            trap_with_message("invalid argument: " .. hash.to_string() .. " is not a pre-hash function of HashML-DSA or HashSLH-DSA");
         }
         return out;
     };

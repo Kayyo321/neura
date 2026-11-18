@@ -96,12 +96,12 @@ The following public declarations are taken from the module source; each links t
 - **Certificate.Certificate** · [`export let serial_hex = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L179)
   The serial number as lowercase hexadecimal of its content bytes.
 - **Certificate.Certificate** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L181)
-- **Certificate.Certificate** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L197)
-- **Certificate.Certificate** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L200)
+- **Certificate.Certificate** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L196)
+- **Certificate.Certificate** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L199)
   "Certificate(<subject>, serial <hex>)".
-- **Certificate** · [`export let parse = func(bytes: uint8[list]) -> Result<Certificate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L220)
+- **Certificate** · [`export let parse = func(bytes: uint8[list]) -> Result<Certificate>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L219)
   Parses a DER certificate. Tagged `#NoDiscard`. Since 0.3.0.
-- **Certificate** · [`export let parse_pem = func(text: string) -> Result<Certificate[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L265)
+- **Certificate** · [`export let parse_pem = func(text: string) -> Result<Certificate[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/certificate.nra#L264)
   Every CERTIFICATE block of PEM text, parsed. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

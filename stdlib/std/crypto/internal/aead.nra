@@ -12,14 +12,14 @@ export let Aead = module (
     /// @brief Traps with "invalid argument: <name> nonce must be <length> bytes" unless the nonce has the length.
     export let check_nonce = func(nonce: uint8[list], length: int, name: string) {
         if (nonce.length != length) {
-            trap_with_message("invalid argument: " + name + " nonce must be " + length.to_string() + " bytes");
+            trap_with_message("invalid argument: " .. name .. " nonce must be " .. length.to_string() .. " bytes");
         }
     };
 
     /// @brief Traps with "invalid argument: <name> key must be <lengths> bytes" unless `ok`.
     export let check_key = func(ok: bool, name: string, lengths: string) {
-        if (!ok) {
-            trap_with_message("invalid argument: " + name + " key must be " + lengths + " bytes");
+        if (not ok) {
+            trap_with_message("invalid argument: " .. name .. " key must be " .. lengths .. " bytes");
         }
     };
 

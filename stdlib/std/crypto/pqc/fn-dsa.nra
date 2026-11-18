@@ -22,7 +22,7 @@ export let FnDsa = module (
     #[NoDiscard, Since("0.3.0")]
     export let generate_key_pair = func(set: ParameterSet) -> Result<uint8[list]> {
         trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.generate_key_pair is not implemented in Neura 0.3.0 "
-            + "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
+            .. "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
     };
 
     /// @brief The FN-DSA signature of the message under the encoded private key.
@@ -31,7 +31,7 @@ export let FnDsa = module (
     #[NoDiscard, Since("0.3.0")]
     export let sign = func(set: ParameterSet, private_key: uint8[list], message: uint8[list]) -> uint8[list] {
         trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.sign is not implemented in Neura 0.3.0 "
-            + "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
+            .. "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
     };
 
     /// @brief Whether the signature is valid for the message under the encoded public key.
@@ -41,6 +41,6 @@ export let FnDsa = module (
     export let verify = func(set: ParameterSet, public_key: uint8[list], message: uint8[list], signature: uint8[list])
         -> bool {
         trap_with_message("unsupported: Std.Crypto.Pqc.FnDsa.verify is not implemented in Neura 0.3.0 "
-            + "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
+            .. "(NIST had no final or initial public draft of FIPS 206 and no FN-DSA reference vectors on 2026-11-18)");
     };
 );

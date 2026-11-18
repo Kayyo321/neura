@@ -36,21 +36,21 @@ The following public declarations are taken from the module source; each links t
   Binds a discharge to this root token. Bind only after adding every caveat; bind all discharges, including nested ones, to the same final root. Tagged `#NoDiscard`. Since 0.3.0.
 - **Macaroon.Macaroon** · [`export let verify = func(root_key: uint8[list], discharges: Macaroon[list], check: func(uint8[list]) -> bool) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L145)
   Verifies the root signature and every bound discharge, then requires the supplied checker to accept every authenticated first-party predicate. A missing discharge, multiple discharges for one identifier or a cyclic discharge chain fails closed. The bounds are 256 supplied discharges, depth 32 and 4096 visited caveats. Tagged `#NoDiscard`. Since 0.3.0.
-- **Macaroon.Macaroon** · [`export let serialize = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L169)
+- **Macaroon.Macaroon** · [`export let serialize = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L167)
   The compact v2 binary wire format as unpadded base64url. Pass a format explicitly to serialize as libmacaroons v1. Tagged `#NoDiscard`. Since 0.3.0.
-- **Macaroon.Macaroon** · [`export let serialize_binary = func(format: WireFormat) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L175)
+- **Macaroon.Macaroon** · [`export let serialize_binary = func(format: WireFormat) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L173)
   The binary v1 or v2 wire bytes before base64url encoding. Tagged `#NoDiscard`. Since 0.3.0.
-- **Macaroon.Macaroon** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L185)
+- **Macaroon.Macaroon** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L183)
   Whether the tokens have the same wire fields and signature. Since 0.3.0.
-- **Macaroon.Macaroon** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L196)
+- **Macaroon.Macaroon** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L194)
   The hash of the canonical v2 encoding. Since 0.3.0.
-- **Macaroon.Macaroon** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L201)
+- **Macaroon.Macaroon** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L199)
   A fixed placeholder for the bearer credential. Since 0.3.0.
-- **Macaroon** · [`export let create = func(location: uint8[list], root_key: uint8[list], identifier: uint8[list]) -> Macaroon`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L302)
+- **Macaroon** · [`export let create = func(location: uint8[list], root_key: uint8[list], identifier: uint8[list]) -> Macaroon`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L300)
   Issues a root macaroon or a discharge with the given identifier and root key. The root key and identifier must be nonempty and each wire field must be at most 32767 bytes. Tagged `#NoDiscard`. Since 0.3.0.
-- **Macaroon** · [`export let parse = func(token: string) -> Result<Macaroon>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L318)
+- **Macaroon** · [`export let parse = func(token: string) -> Result<Macaroon>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L316)
   Parses base64url binary v1 or v2. Decode does not authorize the token. Invalid or noncanonical framing returns crypto.token. Tagged `#NoDiscard`. Since 0.3.0.
-- **Macaroon** · [`export let parse_binary = func(bytes: uint8[list]) -> Result<Macaroon>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L324)
+- **Macaroon** · [`export let parse_binary = func(bytes: uint8[list]) -> Result<Macaroon>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/macaroon.nra#L322)
   Parses binary v1 or v2 wire bytes. Malformed input returns crypto.token. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

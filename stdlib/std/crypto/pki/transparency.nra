@@ -75,8 +75,8 @@ export let Transparency = module (
 
         export let.override hash_code = func -> uint32 => der.hash_range(encoded, 0, encoded.length);
 
-        export let.override to_string = func -> string => "SignedCertificateTimestamp(log " + hex_prefix(log_id) + ", "
-            + timestamp.to_string() + ")";
+        export let.override to_string = func -> string => "SignedCertificateTimestamp(log " .. hex_prefix(log_id) .. ", "
+            .. timestamp.to_string() .. ")";
     );
 
     /// @brief A signed tree head (the get-sth response of RFC 6962, section 4.3).
@@ -108,10 +108,9 @@ export let Transparency = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SignedTreeHead)) {
+            if (other is not that: SignedTreeHead) {
                 return false;
             }
-            last that = other as SignedTreeHead;
             return that.tree_size == tree_size && that.timestamp == timestamp && same(that.root_hash, root_hash)
                 && same(that.signature, signature);
         };
@@ -237,14 +236,14 @@ export let Transparency = module (
         last tbs = der.parse(certificate.tbs_bytes)?;
         let fields: uint8[list][list] = new;
         for (let field in tbs.children()?) {
-            if (!field.is_context(3)) {
+            if (not field.is_context(3)) {
                 fields.append(field.encoded());
                 continue;
             }
             let kept: uint8[list][list] = new;
             for (let ext in (field.explicit_inner()?).children()?) {
                 last id = ((ext.reader()).next()?).oid()?;
-                if (!id.matches(oids.SctList)) {
+                if (not id.matches(oids.SctList)) {
                     kept.append(ext.encoded());
                 }
             }
@@ -314,7 +313,7 @@ export let Transparency = module (
         return verify_sct(sct, entry, certificate, issuer, log_key, new algorithm_verifier.AlgorithmVerifier());
     } or func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
         issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier) -> Result<Unit> {
-        if (!same(sha2.sha256(log_key.der_bytes), sct.log_id)) {
+        if (not same(sha2.sha256(log_key.der_bytes), sct.log_id)) {
             return failure<Unit>("ct.log_id", "the SCT's log ID is not this log's key");
         }
         last data = signed_data(sct, entry, certificate, issuer)?;
@@ -378,7 +377,7 @@ export let Transparency = module (
         if (index < 0 || index > 2147483647 || tree_size < 0 || tree_size > 2147483647) {
             return failure<Unit>("ct.range", "tree sizes and indexes above 2^31 - 1 are not supported");
         }
-        if (!merkle.verify_inclusion<sha2.Sha256>(leaf_hash_bytes, index as int, tree_size as int, proof, root)) {
+        if (not merkle.verify_inclusion<sha2.Sha256>(leaf_hash_bytes, index as int, tree_size as int, proof, root)) {
             return failure<Unit>("ct.proof", "the audit path does not lead to the root");
         }
         return Result<Unit>.Ok(Unit.Value);
@@ -392,7 +391,7 @@ export let Transparency = module (
         if (old_size < 0 || old_size > 2147483647 || new_size < 0 || new_size > 2147483647) {
             return failure<Unit>("ct.range", "tree sizes above 2^31 - 1 are not supported");
         }
-        if (!merkle.verify_consistency<sha2.Sha256>(old_size as int, new_size as int, old_root, new_root, proof)) {
+        if (not merkle.verify_consistency<sha2.Sha256>(old_size as int, new_size as int, old_root, new_root, proof)) {
             return failure<Unit>("ct.proof", "the consistency proof does not hold");
         }
         return Result<Unit>.Ok(Unit.Value);
@@ -432,7 +431,7 @@ export let Transparency = module (
                     json.JsonValue.Number(digits) => {
                         last n = int64s.parse(digits)?;
                         if (n < 0) {
-                            return fail<int64>(0, name + " must not be negative");
+                            return fail<int64>(0, name .. " must not be negative");
                         }
                         return Result<int64>.Ok(n);
                     },
@@ -441,7 +440,7 @@ export let Transparency = module (
             },
             Optional.None => {},
         }
-        return fail<int64>(0, "STH needs the number " + name);
+        return fail<int64>(0, "STH needs the number " .. name);
     };
 
     let base64_member = func(members: [string, json.JsonValue][list], name: string) -> Result<uint8[list]> {
@@ -456,6 +455,6 @@ export let Transparency = module (
             },
             Optional.None => {},
         }
-        return fail<uint8[list]>(0, "STH needs the Base64 text " + name);
+        return fail<uint8[list]>(0, "STH needs the Base64 text " .. name);
     };
 );

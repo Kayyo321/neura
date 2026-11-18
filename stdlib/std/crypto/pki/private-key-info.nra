@@ -148,10 +148,9 @@ export let PrivateKeyInfo = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is EncryptedPrivateKeyInfo)) {
+            if (other is not that: EncryptedPrivateKeyInfo) {
                 return false;
             }
-            last that = other as EncryptedPrivateKeyInfo;
             if (that.der_bytes.length != der_bytes.length) {
                 return false;
             }
@@ -184,10 +183,7 @@ export let PrivateKeyInfo = module (
         if (dotted == oids.Aes128Cbc || dotted == oids.Aes128Gcm) {
             return 16;
         }
-        if (dotted == oids.Aes192Cbc || dotted == oids.Aes192Gcm) {
-            return 24;
-        }
-        return 32;
+        return if (dotted == oids.Aes192Cbc || dotted == oids.Aes192Gcm) -> 24 else -> 32;
     };
 
     let derive = func(prf: string, password: uint8[list], salt: uint8[list], iterations: int, length: int)
@@ -204,14 +200,14 @@ export let PrivateKeyInfo = module (
         if (prf == oids.HmacWithSha224) {
             return Result<uint8[list]>.Ok(pbkdf2.derive<sha2.Sha224>(password, salt, iterations, length));
         }
-        return unsupported<uint8[list]>("PBKDF2 PRF " + prf + " is not supported (HMAC-SHA-1 is not offered)");
+        return unsupported<uint8[list]>("PBKDF2 PRF " .. prf .. " is not supported (HMAC-SHA-1 is not offered)");
     };
 
     /// @brief Parses a OneAsymmetricKey. A v1 key with a public key, or a version other than 0 or 1, fails.
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(bytes: uint8[list]) -> Result<PrivateKeyInfo> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<PrivateKeyInfo>(0, "OneAsymmetricKey must be a SEQUENCE");
         }
         let r = top.reader();
@@ -221,9 +217,7 @@ export let PrivateKeyInfo = module (
         let attributes: uint8[list] = new;
         match (r.optional_context(0)?) {
             Optional.Some(a) => {
-                if (!a.constructed) {
-                    return fail<PrivateKeyInfo>(a.offset, "attributes must be constructed");
-                }
+                return fail<PrivateKeyInfo>(a.offset, "attributes must be constructed") unless a.constructed;
                 attributes = a.encoded();
             },
             Optional.None => {},
@@ -256,29 +250,29 @@ export let PrivateKeyInfo = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_encrypted = func(bytes: uint8[list]) -> Result<EncryptedPrivateKeyInfo> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<EncryptedPrivateKeyInfo>(0, "EncryptedPrivateKeyInfo must be a SEQUENCE");
         }
         let r = top.reader();
         last scheme = identifiers.parse(r.next_universal(der.TagSequence, "encryptionAlgorithm")?)?;
         last data = (r.next_universal(der.TagOctetString, "encryptedData")?).octet_string()?;
         r.finish()?;
-        if (!scheme.oid.matches(oids.Pbes2)) {
+        if (not scheme.oid.matches(oids.Pbes2)) {
             return unsupported<EncryptedPrivateKeyInfo>("only PBES2 is supported");
         }
         last params = der.parse(scheme.parameters)?;
-        if (!params.is_universal(der.TagSequence)) {
+        if (not params.is_universal(der.TagSequence)) {
             return fail<EncryptedPrivateKeyInfo>(0, "PBES2-params must be a SEQUENCE");
         }
         let pr = params.reader();
         last kdf = identifiers.parse(pr.next_universal(der.TagSequence, "keyDerivationFunc")?)?;
         last enc = identifiers.parse(pr.next_universal(der.TagSequence, "encryptionScheme")?)?;
         pr.finish()?;
-        if (!kdf.oid.matches(oids.Pbkdf2)) {
+        if (not kdf.oid.matches(oids.Pbkdf2)) {
             return unsupported<EncryptedPrivateKeyInfo>("only PBKDF2 is supported");
         }
         last kp = der.parse(kdf.parameters)?;
-        if (!kp.is_universal(der.TagSequence)) {
+        if (not kp.is_universal(der.TagSequence)) {
             return fail<EncryptedPrivateKeyInfo>(0, "PBKDF2-params must be a SEQUENCE");
         }
         let kr = kp.reader();
@@ -298,7 +292,7 @@ export let PrivateKeyInfo = module (
         match (kr.optional_universal(der.TagSequence)?) {
             Optional.Some(p) => {
                 last id = identifiers.parse(p)?;
-                if (id.has_parameters() && !id.has_null_parameters()) {
+                if (id.has_parameters() && not id.has_null_parameters()) {
                     return fail<EncryptedPrivateKeyInfo>(p.offset, "PRF parameters must be NULL or absent");
                 }
                 prf = id.oid;
@@ -316,7 +310,7 @@ export let PrivateKeyInfo = module (
             }
         } else if (is_gcm(cipher)) {
             last gp = der.parse(enc.parameters)?;
-            if (!gp.is_universal(der.TagSequence)) {
+            if (not gp.is_universal(der.TagSequence)) {
                 return fail<EncryptedPrivateKeyInfo>(0, "GCMParameters must be a SEQUENCE");
             }
             let gr = gp.reader();
@@ -333,7 +327,7 @@ export let PrivateKeyInfo = module (
                 return unsupported<EncryptedPrivateKeyInfo>("AES-GCM needs a 12-byte nonce and a 16-byte tag");
             }
         } else {
-            return unsupported<EncryptedPrivateKeyInfo>("encryption scheme " + cipher + " is not supported");
+            return unsupported<EncryptedPrivateKeyInfo>("encryption scheme " .. cipher .. " is not supported");
         }
         return Result<EncryptedPrivateKeyInfo>.Ok(new EncryptedPrivateKeyInfo(top.encoded(), salt, iterations, key_length,
             prf, enc.oid, iv, tag_length, data));
@@ -348,12 +342,12 @@ export let PrivateKeyInfo = module (
         if (iterations < 1 || salt.length == 0) {
             trap_with_message("invalid argument: PBES2 needs a salt and at least one iteration");
         }
-        if (!(prf == oids.HmacWithSha224 || prf == oids.HmacWithSha256 || prf == oids.HmacWithSha384
+        if (not (prf == oids.HmacWithSha224 || prf == oids.HmacWithSha256 || prf == oids.HmacWithSha384
             || prf == oids.HmacWithSha512)) {
             trap_with_message("invalid argument: unsupported PBKDF2 PRF");
         }
         last gcm_mode = is_gcm(cipher);
-        if (!gcm_mode && !(cipher == oids.Aes128Cbc || cipher == oids.Aes192Cbc || cipher == oids.Aes256Cbc)) {
+        if (not gcm_mode && not (cipher == oids.Aes128Cbc || cipher == oids.Aes192Cbc || cipher == oids.Aes256Cbc)) {
             trap_with_message("invalid argument: unsupported PBES2 cipher");
         }
         if (iv.length != (gcm_mode ? 12 : 16)) {

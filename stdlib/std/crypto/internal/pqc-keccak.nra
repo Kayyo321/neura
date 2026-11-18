@@ -26,14 +26,14 @@ export let PqcKeccak = module (
         export let init = func(rate_bytes: int, domain_byte: uint8) {
             rate = rate_bytes;
             domain = domain_byte as uint64;
-            for (let i = 0; i < 25; i++) {
+            for (let i in 0 .. 25) {
                 lanes.append(0);
             }
         };
 
         /// @brief Starts a new message.
         export let reset = func {
-            for (let i = 0; i < 25; i++) {
+            for (let i in 0 .. 25) {
                 lanes[i] = 0;
             }
             at = 0;
@@ -57,7 +57,7 @@ export let PqcKeccak = module (
 
         /// @brief Appends the next `count` output bytes to `out`.
         export let squeeze_into = func(out: uint8[list], count: int) {
-            if (!squeezing) {
+            if (not squeezing) {
                 squeezing = true;
                 lanes[at >> 3] = lanes[at >> 3] ^ (domain << ((at & 7) * 8));
                 last end = rate - 1;
@@ -109,7 +109,7 @@ export let PqcKeccak = module (
             let a22 = s[22];
             let a23 = s[23];
             let a24 = s[24];
-            for (let round = 0; round < 24; round++) {
+            for (let round in 0 .. 24) {
                 last c0 = a0 ^ a5 ^ a10 ^ a15 ^ a20;
                 last c1 = a1 ^ a6 ^ a11 ^ a16 ^ a21;
                 last c2 = a2 ^ a7 ^ a12 ^ a17 ^ a22;

@@ -68,6 +68,6 @@ export let RsaPkcs1v15 = module (
             return constant_time.ct_eq(rsa_core.i2osp(core, core.apply(s)), expected);
         };
 
-        export let.override to_string = func -> string => "RsaPkcs1v15Verifier(" + key.bits().to_string() + " bits)";
+        export let.override to_string = func -> string => "RsaPkcs1v15Verifier(" .. key.bits().to_string() .. " bits)";
     );
 );

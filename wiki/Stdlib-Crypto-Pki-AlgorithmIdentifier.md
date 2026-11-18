@@ -26,31 +26,31 @@ The following public declarations are taken from the module source; each links t
 - **AlgorithmIdentifier.AlgorithmIdentifier** · [`export let pss_parameters = func -> Result<RsaPssParameters>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L44)
   The RSASSA-PSS parameters, when this is id-RSASSA-PSS. Tagged `#NoDiscard`.
 - **AlgorithmIdentifier.AlgorithmIdentifier** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L54)
-- **AlgorithmIdentifier.AlgorithmIdentifier** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L62)
-- **AlgorithmIdentifier.AlgorithmIdentifier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L65)
+- **AlgorithmIdentifier.AlgorithmIdentifier** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L61)
+- **AlgorithmIdentifier.AlgorithmIdentifier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L64)
   "AlgorithmIdentifier(<name>)".
-- **AlgorithmIdentifier** · [`export let RsaPssParameters = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L70)
+- **AlgorithmIdentifier** · [`export let RsaPssParameters = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L69)
   RSASSA-PSS-params (RFC 4055, section 3.1), with the defaults filled in. Tagged `#Final`. Since 0.3.0.
-- **AlgorithmIdentifier.RsaPssParameters** · [`export last hash: Oid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L72)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export last hash: Oid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L71)
   The message digest (default SHA-1).
-- **AlgorithmIdentifier.RsaPssParameters** · [`export last mask_generation: Oid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L74)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export last mask_generation: Oid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L73)
   The mask generation function (MGF1).
-- **AlgorithmIdentifier.RsaPssParameters** · [`export last mask_hash: Oid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L76)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export last mask_hash: Oid`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L75)
   The digest of MGF1 (default SHA-1).
-- **AlgorithmIdentifier.RsaPssParameters** · [`export last salt_length: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L78)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export last salt_length: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L77)
   The salt length in bytes (default 20).
-- **AlgorithmIdentifier.RsaPssParameters** · [`export last trailer_field: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L80)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export last trailer_field: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L79)
   The trailer field (must be 1).
-- **AlgorithmIdentifier.RsaPssParameters** · [`export let init = func(digest: Oid, mgf: Oid, mgf_digest: Oid, salt: int, trailer: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L82)
-- **AlgorithmIdentifier.RsaPssParameters** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L90)
-- **AlgorithmIdentifier.RsaPssParameters** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L100)
-- **AlgorithmIdentifier.RsaPssParameters** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L105)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export let init = func(digest: Oid, mgf: Oid, mgf_digest: Oid, salt: int, trailer: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L81)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L89)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L98)
+- **AlgorithmIdentifier.RsaPssParameters** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L103)
   "RsaPssParameters(<hash>, MGF1 <hash>, salt <n>)".
-- **AlgorithmIdentifier** · [`export let parse = func(e: der.Element) -> Result<AlgorithmIdentifier>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L126)
+- **AlgorithmIdentifier** · [`export let parse = func(e: der.Element) -> Result<AlgorithmIdentifier>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L124)
   Reads an AlgorithmIdentifier: SEQUENCE { OBJECT IDENTIFIER, parameters ANY OPTIONAL }. Tagged `#NoDiscard`. Since 0.3.0.
-- **AlgorithmIdentifier** · [`export let without_parameters = func(dotted: string) -> AlgorithmIdentifier`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L142)
+- **AlgorithmIdentifier** · [`export let without_parameters = func(dotted: string) -> AlgorithmIdentifier`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L140)
   The identifier with no parameters (EdDSA, ML-DSA, SLH-DSA, ECDSA signatures). Tagged `#NoDiscard`. Since 0.3.0.
-- **AlgorithmIdentifier** · [`export let with_null = func(dotted: string) -> AlgorithmIdentifier`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L147)
+- **AlgorithmIdentifier** · [`export let with_null = func(dotted: string) -> AlgorithmIdentifier`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/algorithm-identifier.nra#L145)
   The identifier with NULL parameters (the RSA PKCS #1 v1.5 signatures and rsaEncryption). Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

@@ -142,7 +142,7 @@ export let Dcap = module (
         /// @brief The platform name.
         /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
         #Since("0.3.0")
-        export let.override to_string = func -> string => "Dcap.Quote(" + platform.to_string() + ")";
+        export let.override to_string = func -> string => "Dcap.Quote(" .. platform.to_string() .. ")";
     );
 
     let Evidence = class (
@@ -184,7 +184,7 @@ export let Dcap = module (
             return fail<Evidence>("crypto.unsupported_dcap", "DCAP requires an ECDSA P-256 attestation key");
         }
         let vendor_id: uint8[list] = new([147, 154, 114, 51, 247, 156, 76, 169, 148, 10, 13, 179, 149, 127, 6, 7]);
-        if (!constant_time.ct_eq(words.slice(bytes, 12, 28), vendor_id)) {
+        if (not constant_time.ct_eq(words.slice(bytes, 12, 28), vendor_id)) {
             return malformed<Evidence>("DCAP quote has a non-Intel QE vendor identifier");
         }
         last signed_end = HeaderLength + body_size(platform);
@@ -270,7 +270,7 @@ export let Dcap = module (
         }
         let reader = new der.Reader(bytes, 0, bytes.length, 0, 8, false);
         let chain: uint8[list][list] = new;
-        for (let i = 0; i < 3; i++) {
+        for (let i in 0 .. 3) {
             chain.append((reader.next_universal(der.TagSequence, "DCAP certificate")?).encoded());
         }
         reader.finish()?;
@@ -289,7 +289,7 @@ export let Dcap = module (
     };
 
     let is_pck = func(pck: certificate.Certificate) -> bool {
-        if (pck.version != 3 || pck.is_ca() || !has_usage(pck, extensions.DigitalSignature)
+        if (pck.version != 3 || pck.is_ca() || not has_usage(pck, extensions.DigitalSignature)
             || pck.public_key.key_algorithm != public_keys.KeyAlgorithm.Ec
             || pck.public_key.parameter_set != "P-256") {
             return false;
@@ -313,21 +313,21 @@ export let Dcap = module (
         if (at.nanos < 0 || at.nanos >= 1000000000) {
             trap_with_message("invalid argument: DCAP verification needs a normalized instant");
         }
-        if (!crypto_policy.allows(Algorithm.P256) || !crypto_policy.allows(Algorithm.Sha256)) {
+        if (not crypto_policy.allows(Algorithm.P256) || not crypto_policy.allows(Algorithm.Sha256)) {
             return fail<uint8[list]>("crypto.attestation_policy", "DCAP P-256 and SHA-256 are denied by the crypto policy");
         }
         last chain = read_chain(evidence.quote)?;
-        if (!constant_time.ct_eq(chain[2], trusted_root_der)) {
+        if (not constant_time.ct_eq(chain[2], trusted_root_der)) {
             return fail<uint8[list]>("crypto.attestation_certificate", "DCAP embedded root differs from the configured root");
         }
         last pck = certificate.parse(chain[0])?;
         last issuer = certificate.parse(chain[1])?;
         last root = certificate.parse(trusted_root_der)?;
-        if (!is_pck(pck)) {
+        if (not is_pck(pck)) {
             return fail<uint8[list]>("crypto.attestation_certificate", "invalid Intel PCK signing certificate");
         }
-        if (!valid_serial(pck) || !valid_serial(issuer) || !valid_serial(root)
-            || !has_usage(issuer, extensions.KeyCertSign) || !has_usage(root, extensions.KeyCertSign)) {
+        if (not valid_serial(pck) || not valid_serial(issuer) || not valid_serial(root)
+            || not has_usage(issuer, extensions.KeyCertSign) || not has_usage(root, extensions.KeyCertSign)) {
             return fail<uint8[list]>("crypto.attestation_certificate", "invalid Intel DCAP certificate serial or CA key usage");
         }
         let options = new path.ValidationOptions(at);
@@ -337,13 +337,13 @@ export let Dcap = module (
         last pck_key = ecdsa.parse_public_key(ecdsa.Curve.P256, pck.public_key.key)?;
         last pck_verifier = new ecdsa.EcdsaVerifier(pck_key, Algorithm.Sha256);
         last qe_report = evidence.quote.qe_report();
-        if (!pck_verifier.verify_raw(qe_report, evidence.qe_signature)) {
+        if (not pck_verifier.verify_raw(qe_report, evidence.qe_signature)) {
             return fail<uint8[list]>("crypto.attestation_signature", "invalid DCAP QE report signature");
         }
 
         let qe_binding = sha2.sha256(words.concat(evidence.attestation_key, evidence.qe_authentication));
         words.append_all(qe_binding, words.zeros(32));
-        if (!constant_time.ct_eq(qe_binding, words.slice(qe_report, 320, 384))) {
+        if (not constant_time.ct_eq(qe_binding, words.slice(qe_report, 320, 384))) {
             return fail<uint8[list]>("crypto.attestation_signature", "DCAP QE report does not bind the quote attestation key");
         }
 
@@ -351,7 +351,7 @@ export let Dcap = module (
         words.append_all(sec1, evidence.attestation_key);
         last quote_key = ecdsa.parse_public_key(ecdsa.Curve.P256, sec1)?;
         last quote_verifier = new ecdsa.EcdsaVerifier(quote_key, Algorithm.Sha256);
-        if (!quote_verifier.verify_raw(evidence.signed_bytes, evidence.signature)) {
+        if (not quote_verifier.verify_raw(evidence.signed_bytes, evidence.signature)) {
             return fail<uint8[list]>("crypto.attestation_signature", "invalid DCAP quote signature");
         }
         return Result<uint8[list]>.Ok(chain[0]);
@@ -396,10 +396,10 @@ export let Dcap = module (
         last pck = authenticate(evidence, trusted_root_der, at)?;
         last claims = evidence.quote;
         if (claims.platform != expected_platform || claims.debug()
-            || !constant_time.ct_eq(claims.measurement(), expected_measurement)) {
+            || not constant_time.ct_eq(claims.measurement(), expected_measurement)) {
             return fail<Quote>("crypto.attestation_measurement", "DCAP platform, debug mode or measurement fails policy");
         }
-        if (!constant_time.ct_eq(claims.report_data(), expected_report_data)) {
+        if (not constant_time.ct_eq(claims.report_data(), expected_report_data)) {
             return fail<Quote>("crypto.attestation_nonce", "DCAP REPORTDATA differs from the expected challenge");
         }
         collateral.verify(claims, pck, words.copy(trusted_root_der), at)?;
@@ -412,6 +412,6 @@ export let Dcap = module (
     #[NoDiscard, Since("0.3.0")]
     export let request_quote = func(platform: Platform, report_data: uint8[list]) -> Result<uint8[list]> {
         trap_with_message("unsupported: Std.Crypto.Enclave.Dcap.request_quote is not implemented in Neura 0.3.0 "
-            + "(the runtime has no SGX or TDX quote-generation host operation)");
+            .. "(the runtime has no SGX or TDX quote-generation host operation)");
     };
 );

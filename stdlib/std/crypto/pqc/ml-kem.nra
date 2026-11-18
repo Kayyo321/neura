@@ -88,11 +88,11 @@ export let MlKem = module (
         export let init = func(set: ParameterSet, bytes: uint8[list]) {
             crypto_policy.require(algorithm_of(set));
             if (bytes.length != public_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " encapsulation key must be "
-                    + public_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " encapsulation key must be "
+                    .. public_key_length(set).to_string() .. " bytes");
             }
-            if (!new core.Engine(rank(set)).check_ek(bytes)) {
-                trap_with_message("invalid argument: " + name(set) + " encapsulation key fails the modulus check");
+            if (not new core.Engine(rank(set)).check_ek(bytes)) {
+                trap_with_message("invalid argument: " .. name(set) .. " encapsulation key fails the modulus check");
             }
             parameter_set = set;
             encoded = words.copy(bytes);
@@ -103,10 +103,9 @@ export let MlKem = module (
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MlKemPublicKey)) {
+            if (other is not key: MlKemPublicKey) {
                 return false;
             }
-            last key = other as MlKemPublicKey;
             if (key.parameter_set != parameter_set) {
                 return false;
             }
@@ -128,7 +127,7 @@ export let MlKem = module (
         };
 
         export let.override to_string = func -> string =>
-            "MlKemPublicKey(" + name(parameter_set) + ", " + encoded.length.to_string() + " bytes)";
+            "MlKemPublicKey(" .. name(parameter_set) .. ", " .. encoded.length.to_string() .. " bytes)";
     );
 
     /// @brief An ML-KEM decapsulation key (dk_PKE || ek || H(ek) || z) in secret memory. Every instance has
@@ -144,11 +143,11 @@ export let MlKem = module (
         export let init = func(set: ParameterSet, bytes: uint8[list]) {
             crypto_policy.require(algorithm_of(set));
             if (bytes.length != private_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " decapsulation key must be "
-                    + private_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " decapsulation key must be "
+                    .. private_key_length(set).to_string() .. " bytes");
             }
-            if (!new core.Engine(rank(set)).check_dk(bytes)) {
-                trap_with_message("invalid argument: " + name(set) + " decapsulation key fails the hash check");
+            if (not new core.Engine(rank(set)).check_dk(bytes)) {
+                trap_with_message("invalid argument: " .. name(set) .. " decapsulation key fails the hash check");
             }
             parameter_set = set;
             material = new(bytes);
@@ -237,7 +236,7 @@ export let MlKem = module (
 
         let check_set = func(set: ParameterSet) {
             if (set != parameter_set) {
-                trap_with_message("invalid argument: an " + name(set) + " key given to " + name(parameter_set));
+                trap_with_message("invalid argument: an " .. name(set) .. " key given to " .. name(parameter_set));
             }
         };
 
@@ -280,7 +279,7 @@ export let MlKem = module (
                     return result;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: ML-KEM encapsulation needs entropy: " + e.to_string());
+                    trap_with_message("unavailable: ML-KEM encapsulation needs entropy: " .. e.to_string());
                 },
             }
         };
@@ -292,7 +291,7 @@ export let MlKem = module (
             check_set(private_key.parameter_set);
             if (ciphertext.length != ciphertext_length(parameter_set)) {
                 return Result<SecretBytes>.Err(error.custom("crypto.invalid_ciphertext",
-                    name(parameter_set) + " ciphertext must be " + ciphertext_length(parameter_set).to_string() + " bytes"));
+                    name(parameter_set) .. " ciphertext must be " .. ciphertext_length(parameter_set).to_string() .. " bytes"));
             }
             let key = engine.decaps(private_key.expose(), ciphertext);
             let secret: SecretBytes = new(key);
@@ -305,11 +304,11 @@ export let MlKem = module (
         #NoDiscard
         export let parse_public_key = func(bytes: uint8[list]) -> Result<MlKemPublicKey> {
             if (bytes.length != public_key_length(parameter_set)) {
-                return invalid_key<MlKemPublicKey>(name(parameter_set) + " encapsulation key must be "
-                    + public_key_length(parameter_set).to_string() + " bytes");
+                return invalid_key<MlKemPublicKey>(name(parameter_set) .. " encapsulation key must be "
+                    .. public_key_length(parameter_set).to_string() .. " bytes");
             }
-            if (!engine.check_ek(bytes)) {
-                return invalid_key<MlKemPublicKey>(name(parameter_set) + " encapsulation key fails the modulus check");
+            if (not engine.check_ek(bytes)) {
+                return invalid_key<MlKemPublicKey>(name(parameter_set) .. " encapsulation key fails the modulus check");
             }
             return Result<MlKemPublicKey>.Ok(new(parameter_set, bytes));
         };
@@ -319,11 +318,11 @@ export let MlKem = module (
         #NoDiscard
         export let parse_private_key = func(bytes: uint8[list]) -> Result<MlKemPrivateKey> {
             if (bytes.length != private_key_length(parameter_set)) {
-                return invalid_key<MlKemPrivateKey>(name(parameter_set) + " decapsulation key must be "
-                    + private_key_length(parameter_set).to_string() + " bytes");
+                return invalid_key<MlKemPrivateKey>(name(parameter_set) .. " decapsulation key must be "
+                    .. private_key_length(parameter_set).to_string() .. " bytes");
             }
-            if (!engine.check_dk(bytes)) {
-                return invalid_key<MlKemPrivateKey>(name(parameter_set) + " decapsulation key fails the hash check");
+            if (not engine.check_dk(bytes)) {
+                return invalid_key<MlKemPrivateKey>(name(parameter_set) .. " decapsulation key fails the hash check");
             }
             return Result<MlKemPrivateKey>.Ok(new(parameter_set, bytes));
         };

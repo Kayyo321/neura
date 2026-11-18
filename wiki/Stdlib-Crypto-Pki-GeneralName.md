@@ -24,24 +24,24 @@ The following public declarations are taken from the module source; each links t
   Records a checked name; `parse` and the `dns`, `ip`, `email`, `uri` and `directory_name` functions build names.
 - **GeneralName.GeneralName** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L48)
   Equal when the encodings are equal.
-- **GeneralName.GeneralName** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L64)
-- **GeneralName.GeneralName** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L68)
+- **GeneralName.GeneralName** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L63)
+- **GeneralName.GeneralName** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L67)
   "DNS:<name>", "email:<address>", "URI:<uri>", "IP:<address>[/<mask>]", "DirName:<name>", "RID:<oid>", "othername:<oid>", or "<kind>:<hex>" for the rest.
-- **GeneralName** · [`export let ip_text = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L120)
+- **GeneralName** · [`export let ip_text = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L119)
   Dotted IPv4, RFC 5952 IPv6 text, or either followed by "/" and the mask for 8 or 32 bytes. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let parse = func(e: der.Element) -> Result<GeneralName>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L193)
+- **GeneralName** · [`export let parse = func(e: der.Element) -> Result<GeneralName>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L192)
   Reads one GeneralName. The IA5String alternatives must hold only ASCII; an iPAddress must have 4, 8, 16 or 32 bytes; otherName and directoryName must be well formed. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let parse_names = func(e: der.Element) -> Result<GeneralName[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L254)
+- **GeneralName** · [`export let parse_names = func(e: der.Element) -> Result<GeneralName[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L251)
   Reads GeneralNames: a non-empty SEQUENCE of GeneralName. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let dns = func(name: string) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L289)
+- **GeneralName** · [`export let dns = func(name: string) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L286)
   dNSName; a non-ASCII name traps. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let email = func(address: string) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L293)
+- **GeneralName** · [`export let email = func(address: string) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L290)
   rfc822Name; a non-ASCII address traps. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let uri = func(text: string) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L297)
+- **GeneralName** · [`export let uri = func(text: string) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L294)
   uniformResourceIdentifier; a non-ASCII URI traps. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let ip = func(address: uint8[list]) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L301)
+- **GeneralName** · [`export let ip = func(address: uint8[list]) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L298)
   iPAddress of 4 or 16 bytes (8 or 32 with a mask); another length traps. Tagged `#NoDiscard`. Since 0.3.0.
-- **GeneralName** · [`export let directory_name = func(name: names.Name) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L305)
+- **GeneralName** · [`export let directory_name = func(name: names.Name) -> GeneralName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/general-name.nra#L302)
   directoryName. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

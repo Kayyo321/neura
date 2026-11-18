@@ -1,5 +1,6 @@
 let.promote _ = import:Std.Core.Error;
 let.promote _ = import:Std.Core.Result;
+let builders = import:Std.Core.StringBuilder;
 
 /// @brief ASN.1 object identifiers (Stdlib.md section 21.10).
 ///
@@ -30,10 +31,10 @@ export let Oid = module (
         export let matches = func(text: string) -> bool => dotted == text;
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Oid)) {
+            if (other is not that: Oid) {
                 return false;
             }
-            return dotted == (other as Oid).dotted;
+            return dotted == that.dotted;
         };
 
         export let.override hash_code = func -> uint32 => dotted.hash_code();
@@ -56,7 +57,7 @@ export let Oid = module (
         if (bytes.length > MaxContentLength) {
             return fail(offset, "OBJECT IDENTIFIER too long");
         }
-        let text = "";
+        last text = builders.create();
         let digits: int[list] = new;
         let first = true;
         let group_start = true;
@@ -69,23 +70,21 @@ export let Oid = module (
             decimal_multiply_add(digits, 128, (b & 127) as int);
             if ((b & 128) == 0) {
                 if (first) {
-                    text = first_arcs(digits);
+                    text.append(first_arcs(digits));
                     first = false;
                 } else {
-                    text += "." + decimal_text(digits);
+                    text.append("." .. decimal_text(digits));
                 }
                 digits = new;
                 group_start = true;
             }
         }
-        if (!group_start) {
-            return fail(offset + bytes.length - 1, "truncated OBJECT IDENTIFIER subidentifier");
-        }
+        return fail(offset + bytes.length - 1, "truncated OBJECT IDENTIFIER subidentifier") unless group_start;
         let copy: uint8[list] = new;
         for (let b in bytes) {
             copy.append(b);
         }
-        return Result<Oid>.Ok(new Oid(copy, text));
+        return Result<Oid>.Ok(new Oid(copy, text.to_string()));
     };
 
     /// @brief Parses dotted-decimal text: at least two arcs, the first 0, 1 or 2, the second at most 39 under
@@ -149,10 +148,10 @@ export let Oid = module (
                 return value;
             },
             Result.Err(e) => {
-                trap_with_message("invalid argument: OID " + text);
+                trap_with_message("invalid argument: OID " .. text);
             },
         }
-        trap_with_message("invalid argument: OID " + text);
+        trap_with_message("invalid argument: OID " .. text);
     };
 
     // Decimal numbers as little-endian lists of digits 0..9, so that arcs of any size are exact.
@@ -199,10 +198,10 @@ export let Oid = module (
     let first_arcs = func(digits: int[list]) -> string {
         last v = small_value(digits);
         if (v < 40) {
-            return "0." + v.to_string();
+            return "0." .. v.to_string();
         }
         if (v < 80) {
-            return "1." + (v - 40).to_string();
+            return "1." .. (v - 40).to_string();
         }
         // 2.(v - 80): subtract 80 in decimal.
         let rest: int[list] = new;
@@ -222,7 +221,7 @@ export let Oid = module (
         while (rest.length > 0 && rest[rest.length - 1] == 0) {
             rest.remove_at(rest.length - 1);
         }
-        return "2." + decimal_text(rest);
+        return "2." .. decimal_text(rest);
     };
 
     let decimal_of = func(text: string) -> int[list] {

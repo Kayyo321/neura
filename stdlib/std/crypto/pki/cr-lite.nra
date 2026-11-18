@@ -50,10 +50,9 @@ export let CrLite = module (
         /// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-CrLite)
         #[NoDiscard, Since("0.3.0")]
         export let.override equals = func(other: class) -> bool {
-            if (!(other is BloomLayer)) {
+            if (other is not that: BloomLayer) {
                 return false;
             }
-            last that = other as BloomLayer;
             return size == that.size && hash_count == that.hash_count && constant_time.ct_eq(bits, that.bits);
         };
 
@@ -99,20 +98,19 @@ export let CrLite = module (
                         break;
                     }
                 }
-                if (!present) {
+                if (not present) {
                     break;
                 }
-                result = !result;
+                result = not result;
                 state.next_layer();
             }
-            return inverted ? !result : result;
+            return inverted ? not result : result;
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FilterCascade)) {
+            if (other is not that: FilterCascade) {
                 return false;
             }
-            last that = other as FilterCascade;
             if (that.encoded.length != encoded.length) {
                 return false;
             }
@@ -346,9 +344,7 @@ export let CrLite = module (
                     }
                 }
             }
-            if (!covered) {
-                return Decision.NotCovered;
-            }
+            return Decision.NotCovered unless covered;
         }
         return cascade.has(key_of(certificate, issuer)) ? Decision.Revoked : Decision.NotRevoked;
     };

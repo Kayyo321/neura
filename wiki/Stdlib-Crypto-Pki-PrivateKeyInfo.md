@@ -47,18 +47,18 @@ The following public declarations are taken from the module source; each links t
 - **PrivateKeyInfo.EncryptedPrivateKeyInfo** · [`export let decrypt = func(password: uint8[list]) -> Result<PrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L113)
   Decrypts with the password (its UTF-8 bytes, as RFC 8018 recommends). Tagged `#NoDiscard`.
 - **PrivateKeyInfo.EncryptedPrivateKeyInfo** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L150)
-- **PrivateKeyInfo.EncryptedPrivateKeyInfo** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L166)
-- **PrivateKeyInfo.EncryptedPrivateKeyInfo** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L169)
+- **PrivateKeyInfo.EncryptedPrivateKeyInfo** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L165)
+- **PrivateKeyInfo.EncryptedPrivateKeyInfo** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L168)
   "EncryptedPrivateKeyInfo(<cipher>, <iterations> iterations)".
-- **PrivateKeyInfo** · [`export let parse = func(bytes: uint8[list]) -> Result<PrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L212)
+- **PrivateKeyInfo** · [`export let parse = func(bytes: uint8[list]) -> Result<PrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L208)
   Parses a OneAsymmetricKey. A v1 key with a public key, or a version other than 0 or 1, fails. Tagged `#NoDiscard`. Since 0.3.0.
-- **PrivateKeyInfo** · [`export let parse_pem = func(text: string) -> Result<PrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L252)
+- **PrivateKeyInfo** · [`export let parse_pem = func(text: string) -> Result<PrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L246)
   The only PRIVATE KEY block of PEM text, parsed. Tagged `#NoDiscard`. Since 0.3.0.
-- **PrivateKeyInfo** · [`export let parse_encrypted = func(bytes: uint8[list]) -> Result<EncryptedPrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L257)
+- **PrivateKeyInfo** · [`export let parse_encrypted = func(bytes: uint8[list]) -> Result<EncryptedPrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L251)
   Parses an EncryptedPrivateKeyInfo. Only PBES2 is accepted (`crypto.unsupported` otherwise), with PBKDF2 and an AES-CBC or AES-GCM scheme; malformed parameters are a `Parse` error. Tagged `#NoDiscard`. Since 0.3.0.
-- **PrivateKeyInfo** · [`export let encrypt = func(info: PrivateKeyInfo, password: uint8[list], salt: uint8[list], iterations: int, prf: string, cipher: string, iv: uint8[list]) -> EncryptedPrivateKeyInfo`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L346)
+- **PrivateKeyInfo** · [`export let encrypt = func(info: PrivateKeyInfo, password: uint8[list], salt: uint8[list], iterations: int, prf: string, cipher: string, iv: uint8[list]) -> EncryptedPrivateKeyInfo`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L340)
   Encrypts with PBES2: PBKDF2 under the PRF (hmacWithSHA224/256/384/512, dotted) with the salt and iteration count, then the cipher (AES-128/192/256-CBC with a 16-byte IV, or AES-128/192/256-GCM with a 12-byte nonce in `iv`). The keyLength field is omitted. A bad argument traps with "invalid argument: ...". Tagged `#NoDiscard`. Since 0.3.0.
-- **PrivateKeyInfo** · [`export let encrypt_random = func(info: PrivateKeyInfo, password: uint8[list], iterations: int) -> Result<EncryptedPrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L388)
+- **PrivateKeyInfo** · [`export let encrypt_random = func(info: PrivateKeyInfo, password: uint8[list], iterations: int) -> Result<EncryptedPrivateKeyInfo>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/private-key-info.nra#L382)
   `encrypt` with a 16-byte salt and the IV or nonce drawn from the operating system's generator, PBKDF2-HMAC-SHA-256 and AES-256-GCM. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

@@ -34,8 +34,7 @@ export let OnlineCipher = module (
             trap_with_message("invalid argument: STREAM needs an AEAD with a nonce of at least 12 bytes");
         }
         if (prefix.length != nonce_length - 5) {
-            trap_with_message("invalid argument: STREAM nonce prefix must be " + (nonce_length - 5).to_string()
-                + " bytes");
+            trap_with_message("invalid argument: STREAM nonce prefix must be " .. (nonce_length - 5).to_string() .. " bytes");
         }
     };
 
@@ -127,7 +126,7 @@ export let OnlineCipher = module (
         /// cut short or failed.
         #NoDiscard
         export let finish = func -> Result<Unit> {
-            if (ended && !failed) {
+            if (ended && not failed) {
                 return Result<Unit>.Ok(Unit.Value);
             }
             return Result<Unit>.Err(error.custom("crypto.authentication", "stream truncated or not authentic"));

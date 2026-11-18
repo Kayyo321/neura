@@ -36,7 +36,7 @@ export let Biscuit = module (
         algorithm == KeyAlgorithm.Ed25519 ? keys.SignatureAlgorithm.Ed25519 : keys.SignatureAlgorithm.P256;
 
     let require_algorithm = func(algorithm: keys.SignatureAlgorithm) -> Result<Unit> {
-        if (!keys.allowed(algorithm)) {
+        if (not keys.allowed(algorithm)) {
             return datalog.fail<Unit>("biscuit.unsupported", "the crypto policy denies the Biscuit key algorithm");
         }
         return Result<Unit>.Ok(Unit.Value);

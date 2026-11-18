@@ -78,7 +78,7 @@ export let RsaPss = module (
             last core = key.core;
             core.require_live();
             if (salt.length != salt_length) {
-                trap_with_message("invalid argument: RSA-PSS salt must be " + salt_length.to_string() + " bytes");
+                trap_with_message("invalid argument: RSA-PSS salt must be " .. salt_length.to_string() .. " bytes");
             }
             last em = rsa_core.pss_encode(hash, asym_hash.digest(hash, message), salt, core.public_core.bits - 1);
             last y = core.apply(rsa_core.os2ip_below(core.public_core, em));
@@ -112,7 +112,7 @@ export let RsaPss = module (
                     return signature;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: RSA-PSS signing failed: " + e.to_string());
+                    trap_with_message("unavailable: RSA-PSS signing failed: " .. e.to_string());
                 },
             }
         };
@@ -198,7 +198,7 @@ export let RsaPss = module (
             return rsa_core.pss_verify(hash, mask_hash, digest, em, em_bits, salt_length);
         };
 
-        export let.override to_string = func -> string => "RsaPssVerifier(" + key.bits().to_string() + " bits)";
+        export let.override to_string = func -> string => "RsaPssVerifier(" .. key.bits().to_string() .. " bits)";
     );
 
     /// @brief I2OSP(value, length) of RFC 8017, section 4.1, for a value of k bytes, or an empty list when the

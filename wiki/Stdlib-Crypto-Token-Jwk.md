@@ -37,47 +37,47 @@ The following public declarations are taken from the module source; each links t
   Checks an RSA signature with the configured algorithm. Tagged `#NoDiscard`. Since 0.3.0.
 - **Jwk.RsaKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L200)
   Equality by public key and JOSE algorithm. Since 0.3.0.
-- **Jwk.RsaKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L211)
+- **Jwk.RsaKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L210)
   Hash of the public key and JOSE algorithm. Since 0.3.0.
-- **Jwk.RsaKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L216)
+- **Jwk.RsaKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L215)
   Displays the JOSE algorithm and modulus size. Since 0.3.0.
-- **Jwk** · [`export let EcKey = class implements VerifierKey<EcKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L223)
+- **Jwk** · [`export let EcKey = class implements VerifierKey<EcKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L222)
   An EC verification key bound to the JWS algorithm of its curve. Tagged `#Final`. Since 0.3.0.
-- **Jwk.EcKey** · [`export let init = func(key: ecdsa.EcPublicKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L229)
+- **Jwk.EcKey** · [`export let init = func(key: ecdsa.EcPublicKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L228)
   Binds a checked EC public key to ES256, ES384, ES512, or ES256K. Since 0.3.0.
-- **Jwk.EcKey** · [`export let jose_algorithm = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L238)
+- **Jwk.EcKey** · [`export let jose_algorithm = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L237)
   The JOSE algorithm name for this key's curve. Since 0.3.0.
-- **Jwk.EcKey** · [`export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L243)
+- **Jwk.EcKey** · [`export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L242)
   Checks the JWS fixed-width ECDSA signature r || s. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwk.EcKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L249)
+- **Jwk.EcKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L248)
   Equality by curve and public key. Since 0.3.0.
-- **Jwk.EcKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L255)
+- **Jwk.EcKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L254)
   Hash of the public key. Since 0.3.0.
-- **Jwk.EcKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L260)
+- **Jwk.EcKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L259)
   Displays the JOSE algorithm name. Since 0.3.0.
-- **Jwk** · [`export let Ed25519Key = class implements VerifierKey<Ed25519Key>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L266)
+- **Jwk** · [`export let Ed25519Key = class implements VerifierKey<Ed25519Key>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L265)
   An Ed25519 verification key for EdDSA in JWS (RFC 8037). Tagged `#Final`. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let init = func(key: ed25519.Ed25519PublicKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L272)
+- **Jwk.Ed25519Key** · [`export let init = func(key: ed25519.Ed25519PublicKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L271)
   Binds a checked Ed25519 public key to the EdDSA header identifier. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let jose_algorithm = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L280)
+- **Jwk.Ed25519Key** · [`export let jose_algorithm = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L279)
   The EdDSA header identifier of RFC 8037. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L285)
+- **Jwk.Ed25519Key** · [`export let verify_signature = func(input: uint8[list], signature: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L284)
   Checks the Ed25519 signature over the JWS signing input. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let thumbprint = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L291)
+- **Jwk.Ed25519Key** · [`export let thumbprint = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L290)
   RFC 7638 SHA-256 thumbprint of the public members. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L299)
+- **Jwk.Ed25519Key** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L298)
   Equality by public key. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L305)
+- **Jwk.Ed25519Key** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L304)
   Hash of the public key. Since 0.3.0.
-- **Jwk.Ed25519Key** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L310)
+- **Jwk.Ed25519Key** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L309)
   The key type's name. Since 0.3.0.
-- **Jwk** · [`export let parse_hmac = func(text: string, alg: HmacAlgorithm) -> Result<HmacKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L367)
+- **Jwk** · [`export let parse_hmac = func(text: string, alg: HmacAlgorithm) -> Result<HmacKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L366)
   Imports an oct JWK of sufficient length for the caller-selected HMAC algorithm. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwk** · [`export let parse_rsa = func(text: string, alg: RsaAlgorithm) -> Result<RsaKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L386)
+- **Jwk** · [`export let parse_rsa = func(text: string, alg: RsaAlgorithm) -> Result<RsaKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L385)
   Imports an RSA JWK with a modulus of at least 2048 bits and binds it to the given JOSE algorithm. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwk** · [`export let parse_ec = func(text: string, curve: ecdsa.Curve) -> Result<EcKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L408)
+- **Jwk** · [`export let parse_ec = func(text: string, curve: ecdsa.Curve) -> Result<EcKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L407)
   Imports a checked EC JWK for the given curve and its JOSE signature algorithm. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwk** · [`export let parse_ed25519 = func(text: string) -> Result<Ed25519Key>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L431)
+- **Jwk** · [`export let parse_ed25519 = func(text: string) -> Result<Ed25519Key>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwk.nra#L430)
   Imports an OKP JWK whose curve is Ed25519 and whose algorithm is EdDSA. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

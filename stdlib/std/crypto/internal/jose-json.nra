@@ -106,7 +106,7 @@ export let JoseJson = module (
                         return Result<Optional<string>>.Ok(Optional<string>.Some(text));
                     },
                     _ => {
-                        return fail<Optional<string>>(code, "member \"" + name + "\" must be a string");
+                        return fail<Optional<string>>(code, "member \"" .. name .. "\" must be a string");
                     },
                 }
             },
@@ -131,8 +131,8 @@ export let JoseJson = module (
     /// @brief The required string member; absent or another type fails with the code.
     export let required_text = func(members: [string, json.JsonValue][list], name: string, code: string)
         -> Result<string> {
-        if (!has(members, name)) {
-            return fail<string>(code, "member \"" + name + "\" is missing");
+        if (not has(members, name)) {
+            return fail<string>(code, "member \"" .. name .. "\" is missing");
         }
         return text_member(members, name, code);
     };
@@ -146,7 +146,7 @@ export let JoseJson = module (
                 return Result<uint8[list]>.Err(e);
             },
             Result.Ok(text) => {
-                return decode(text, code, "member \"" + name + "\" is not base64url");
+                return decode(text, code, "member \"" .. name .. "\" is not base64url");
             },
         }
     };

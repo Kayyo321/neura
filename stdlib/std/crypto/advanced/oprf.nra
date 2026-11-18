@@ -37,9 +37,9 @@ export let Oprf = module (
     let fail = func<T>(reason: string) -> Result<T> => Result<T>.Err(error.custom("crypto.oprf", reason));
 
     let context = func(group: groups.Group, purpose: string, mode: Mode) -> uint8[list] {
-        let out = words.utf8(purpose + "OPRFV1-");
+        let out = words.utf8(purpose .. "OPRFV1-");
         out.append((mode as int) as uint8);
-        words.append_all(out, words.utf8("-" + group.name()));
+        words.append_all(out, words.utf8("-" .. group.name()));
         return out;
     };
 
@@ -90,7 +90,7 @@ export let Oprf = module (
     let read_element = func(group: groups.Group, bytes: uint8[list]) -> Result<class> {
         match (group.decode(bytes)) {
             Optional.Some(point) => {
-                if (!group.is_identity(point)) {
+                if (not group.is_identity(point)) {
                     return Result<class>.Ok(point);
                 }
             },
@@ -107,7 +107,7 @@ export let Oprf = module (
     };
 
     let random_scalar = func(group: groups.Group, source: func(int) -> Result<uint8[list]>) -> Result<uint8[list]> {
-        for (let attempt = 0; attempt < 128; attempt++) {
+        for (let attempt in 0 .. 128) {
             let bytes = source(group.scalar_length())?;
             group.mask_candidate(bytes);
             match (group.scalar_canonical(bytes)) {
@@ -261,15 +261,14 @@ export let Oprf = module (
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Evaluation)) {
+            if (other is not that: Evaluation) {
                 return false;
             }
-            last that = other as Evaluation;
-            if (elements.length != that.elements.length || !constant_time.ct_eq(proof, that.proof)) {
+            if (elements.length != that.elements.length || not constant_time.ct_eq(proof, that.proof)) {
                 return false;
             }
             for (let i = 0; i < elements.length; i++) {
-                if (!constant_time.ct_eq(elements[i], that.elements[i])) {
+                if (not constant_time.ct_eq(elements[i], that.elements[i])) {
                     return false;
                 }
             }
@@ -394,9 +393,7 @@ export let Oprf = module (
                 }
             } else {
                 last valid = mode == Mode.Verifiable ? (proof_valid(group, mode, proof_key, elements, evaluated, proof)?) : (proof_valid(group, mode, proof_key, evaluated, elements, proof)?);
-                if (!valid) {
-                    return fail<uint8[list][list]>("the OPRF proof is invalid");
-                }
+                return fail<uint8[list][list]>("the OPRF proof is invalid") unless valid;
             }
             let outputs: uint8[list][list] = new;
             for (let i = 0; i < inputs.length; i++) {
@@ -455,11 +452,11 @@ export let Oprf = module (
         export let blind_with = func(input, info, nonce: uint8[list]) -> Result<BlindState> => blind_batch_with(new([input]), info, new([nonce]));
 
         let valid_inputs = func(inputs: uint8[list][list], info: uint8[list]) -> bool {
-            if (!valid_batch(inputs.length) || !valid_info(mode, info)) {
+            if (not valid_batch(inputs.length) || not valid_info(mode, info)) {
                 return false;
             }
             for (let input in inputs) {
-                if (!valid_input(input)) {
+                if (not valid_input(input)) {
                     return false;
                 }
             }
@@ -494,14 +491,14 @@ export let Oprf = module (
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let blind_batch_with = func(inputs: uint8[list][list], info: uint8[list], nonces: uint8[list][list]) -> Result<BlindState> {
-            if (!valid_inputs(inputs, info) || inputs.length != nonces.length) {
+            if (not valid_inputs(inputs, info) || inputs.length != nonces.length) {
                 return fail<BlindState>("the inputs, info, or blind count does not fit the selected mode");
             }
             return blind_items(make_group(suite), inputs, info, nonces);
         };
 
         let randomized_blind = func(inputs: uint8[list][list], info: uint8[list], source: func(int) -> Result<uint8[list]>) -> Result<BlindState> {
-            if (!valid_inputs(inputs, info)) {
+            if (not valid_inputs(inputs, info)) {
                 return fail<BlindState>("the inputs or info do not fit the selected mode");
             }
             last group = make_group(suite);
@@ -617,7 +614,7 @@ export let Oprf = module (
         };
 
         let read_batch = func(group: groups.Group, encoded: uint8[list][list], info: uint8[list]) -> Result<class [list]> {
-            if (!valid_batch(encoded.length) || !valid_info(mode, info)) {
+            if (not valid_batch(encoded.length) || not valid_info(mode, info)) {
                 return fail<class [list]>("the request or info does not fit the selected mode");
             }
             let points: class [list] = new;
@@ -697,7 +694,7 @@ export let Oprf = module (
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let full_evaluate = func(input, info: uint8[list]) -> Result<uint8[list]> {
-            if (!valid_input(input) || !valid_info(mode, info)) {
+            if (not valid_input(input) || not valid_info(mode, info)) {
                 return fail<uint8[list]>("the input or info does not fit the selected mode");
             }
             last group = make_group(suite);
@@ -735,7 +732,7 @@ export let Oprf = module (
         add_frame(input, info);
         input.append(0);
         last dst = context(group, "DeriveKeyPair", mode);
-        for (let counter = 0; counter < 256; counter++) {
+        for (let counter in 0 .. 256) {
             input[input.length - 1] = counter as uint8;
             last scalar = group.hash_to_scalar(input, dst);
             defer wipe_scalar(scalar);

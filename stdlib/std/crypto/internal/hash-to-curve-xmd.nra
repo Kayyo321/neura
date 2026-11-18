@@ -34,7 +34,7 @@ export let HashToCurveXmd = module (
         let previous = b0;
         let out: uint8[list] = new;
         last count = (length + width - 1) / width;
-        for (let i = 1; i <= count; i++) {
+        for (let i in 1 ..= count) {
             let prefix = words.copy(b0);
             if (i > 1) {
                 for (let j = 0; j < width; j++) {

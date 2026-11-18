@@ -179,10 +179,9 @@ export let Certificate = module (
         export let serial_hex = func -> string => hex.encode(serial);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Certificate)) {
+            if (other is not that: Certificate) {
                 return false;
             }
-            last that = other as Certificate;
             if (that.der_bytes.length != der_bytes.length) {
                 return false;
             }
@@ -197,7 +196,7 @@ export let Certificate = module (
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
 
         /// @brief "Certificate(<subject>, serial <hex>)".
-        export let.override to_string = func -> string => "Certificate(" + subject.to_string() + ", serial " + serial_hex() + ")";
+        export let.override to_string = func -> string => "Certificate(" .. subject.to_string() .. ", serial " .. serial_hex() .. ")";
     );
 
     let must = func<T>(value: Optional<T>) -> T {
@@ -224,7 +223,7 @@ export let Certificate = module (
     export let parse_amd_milan_ca = func(bytes: uint8[list]) -> Result<Certificate> {
         last cert = parse_certificate(bytes, true)?;
         last names = cert.subject.common_names();
-        if (!cert.is_ca() || names.length != 1 || (names[0] != "SEV-Milan" && names[0] != "ARK-Milan")) {
+        if (not cert.is_ca() || names.length != 1 || (names[0] != "SEV-Milan" && names[0] != "ARK-Milan")) {
             return fail<Certificate>(0, "expected an AMD Milan ASK or ARK certificate");
         }
         return Result<Certificate>.Ok(cert);
@@ -232,7 +231,7 @@ export let Certificate = module (
 
     let parse_certificate = func(bytes: uint8[list], amd_milan: bool) -> Result<Certificate> {
         last top = der.parse(bytes)?;
-        if (!top.is_universal(der.TagSequence)) {
+        if (not top.is_universal(der.TagSequence)) {
             return fail<Certificate>(0, "Certificate must be a SEQUENCE");
         }
         let p: CertificateParts = new;
@@ -251,7 +250,7 @@ export let Certificate = module (
         read_tbs(tbs, p, amd_milan)?;
         match (p.tbs_signature_algorithm) {
             Optional.Some(inner) => {
-                if (!inner.equals(outer_algorithm)) {
+                if (not inner.equals(outer_algorithm)) {
                     return fail<Certificate>(tbs.offset, "signature algorithms inside and outside the TBSCertificate differ");
                 }
             },
@@ -321,14 +320,14 @@ export let Certificate = module (
                     return fail<Unit>(x.offset, "extensions need v3");
                 }
                 last list = x.explicit_inner()?;
-                if (!list.is_universal(der.TagSequence)) {
+                if (not list.is_universal(der.TagSequence)) {
                     return fail<Unit>(list.offset, "Extensions must be a SEQUENCE");
                 }
                 for (let item in list.children()?) {
                     last ext = extensions.parse_extension(item)?;
                     for (let seen in p.extensions) {
                         if (seen.oid.equals(ext.oid)) {
-                            return fail<Unit>(item.offset, "extension " + ext.oid.dotted + " appears twice");
+                            return fail<Unit>(item.offset, "extension " .. ext.oid.dotted .. " appears twice");
                         }
                     }
                     p.extensions.append(ext);
@@ -351,7 +350,7 @@ export let Certificate = module (
                 return Result<Unit>.Ok(u);
             },
             Result.Err(e) => {
-                return fail<Unit>(at, "malformed " + oids.name_of(ext.oid.dotted) + " extension");
+                return fail<Unit>(at, "malformed " .. oids.name_of(ext.oid.dotted) .. " extension");
             },
         }
         return Result<Unit>.Ok(Unit.Value);

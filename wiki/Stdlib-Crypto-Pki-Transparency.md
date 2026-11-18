@@ -44,31 +44,31 @@ The following public declarations are taken from the module source; each links t
 - **Transparency.SignedTreeHead** · [`export let signed_data = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L102)
   The TreeHeadSignature input: version v1, tree_hash, timestamp, tree_size and the root.
 - **Transparency.SignedTreeHead** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L110)
-- **Transparency.SignedTreeHead** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L119)
-- **Transparency.SignedTreeHead** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L121)
-- **Transparency** · [`export let parse_list = func(bytes: uint8[list]) -> Result<SignedCertificateTimestamp[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L166)
+- **Transparency.SignedTreeHead** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L118)
+- **Transparency.SignedTreeHead** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L120)
+- **Transparency** · [`export let parse_list = func(bytes: uint8[list]) -> Result<SignedCertificateTimestamp[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L165)
   Reads a TLS SignedCertificateTimestampList: a 2-byte length, then SCTs each with a 2-byte length. The list and each SCT must be non-empty, and every length must fit. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let parse_sct = func(bytes: uint8[list], offset: int) -> Result<SignedCertificateTimestamp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L192)
+- **Transparency** · [`export let parse_sct = func(bytes: uint8[list], offset: int) -> Result<SignedCertificateTimestamp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L191)
   Reads one serialized SCT; `offset` places error offsets in the enclosing input. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let scts_of = func(certificate: Certificate) -> Result<SignedCertificateTimestamp[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L221)
+- **Transparency** · [`export let scts_of = func(certificate: Certificate) -> Result<SignedCertificateTimestamp[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L220)
   The SCTs of a certificate's SCT list extension (RFC 6962, section 3.3); empty when it has none. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let precert_tbs = func(certificate: Certificate) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L236)
+- **Transparency** · [`export let precert_tbs = func(certificate: Certificate) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L235)
   The certificate's TBSCertificate with the SCT list extension removed (and the extensions field removed if that leaves it empty), re-encoded in DER: the precertificate's TBSCertificate. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let signed_data = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate, issuer: Optional<Certificate>) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L298)
+- **Transparency** · [`export let signed_data = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate, issuer: Optional<Certificate>) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L297)
   The bytes the log signed for the SCT (RFC 6962, section 3.2): version, certificate_timestamp, timestamp, entry type and signed entry, and the SCT's extensions. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let verify_sct = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate, issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L312)
+- **Transparency** · [`export let verify_sct = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate, issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L311)
   Verifies the SCT under the log's key: the log ID must be the SHA-256 of the key's SubjectPublicKeyInfo, and the signature must verify over `signed_data`. Unless supplied, the verifier is the library's AlgorithmVerifier. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let verify_sth = func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L350)
+- **Transparency** · [`export let verify_sth = func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L349)
   Verifies a signed tree head under the log's key using the library verifier or a supplied verifier. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let leaf_input = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate, issuer: Optional<Certificate>) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L361)
+- **Transparency** · [`export let leaf_input = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate, issuer: Optional<Certificate>) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L360)
   The MerkleTreeLeaf (RFC 6962, section 3.4) of an SCT's entry: version v1, timestamped_entry, and the TimestampedEntry. Its leaf hash is `merkle.leaf_hash<Sha256>(leaf)`. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let leaf_hash = func(leaf: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L372)
+- **Transparency** · [`export let leaf_hash = func(leaf: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L371)
   The leaf hash of a MerkleTreeLeaf: SHA-256(0x00 || leaf). Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let verify_inclusion = func(leaf_hash_bytes: uint8[list], index: int64, tree_size: int64, proof: uint8[list][list], root: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L376)
+- **Transparency** · [`export let verify_inclusion = func(leaf_hash_bytes: uint8[list], index: int64, tree_size: int64, proof: uint8[list][list], root: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L375)
   Whether the audit path proves the leaf hash at `index` in the tree of `tree_size` with the root. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let verify_consistency = func(old_size: int64, new_size: int64, old_root: uint8[list], new_root: uint8[list], proof: uint8[list][list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L390)
+- **Transparency** · [`export let verify_consistency = func(old_size: int64, new_size: int64, old_root: uint8[list], new_root: uint8[list], proof: uint8[list][list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L389)
   Whether the consistency proof shows that the tree of `old_size` with `old_root` is a prefix of the tree of `new_size` with `new_root`. Tagged `#NoDiscard`. Since 0.3.0.
-- **Transparency** · [`export let parse_sth_json = func(text: string) -> Result<SignedTreeHead>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L404)
+- **Transparency** · [`export let parse_sth_json = func(text: string) -> Result<SignedTreeHead>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/transparency.nra#L403)
   Parses a get-sth JSON response: tree_size, timestamp, sha256_root_hash (Base64, 32 bytes) and tree_head_signature (Base64 of a TLS DigitallySigned). Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

@@ -62,10 +62,10 @@ export let X25519 = module (
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is X25519PublicKey)) {
+            if (other is not that: X25519PublicKey) {
                 return false;
             }
-            return constant_time.ct_eq(encoded, (other as X25519PublicKey).to_bytes());
+            return constant_time.ct_eq(encoded, that.to_bytes());
         };
 
         export let.override hash_code = func -> uint32 {

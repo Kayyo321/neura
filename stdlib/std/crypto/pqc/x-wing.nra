@@ -57,7 +57,7 @@ export let XWing = module (
             crypto_policy.require(Algorithm.XWing);
             match (hybrid.validate_public_key(bytes, true)) {
                 Result.Err(e) => {
-                    trap_with_message("invalid argument: " + e.to_string());
+                    trap_with_message("invalid argument: " .. e.to_string());
                 },
                 Result.Ok(_) => {},
             }
@@ -73,10 +73,10 @@ export let XWing = module (
         /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is XWingPublicKey)) {
+            if (other is not that: XWingPublicKey) {
                 return false;
             }
-            return constant_time.ct_eq(encoded, (other as XWingPublicKey).to_bytes());
+            return constant_time.ct_eq(encoded, that.to_bytes());
         };
 
         /// @brief A hash of the encoded key bytes.
@@ -231,7 +231,7 @@ export let XWing = module (
                     return value;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: X-Wing encapsulation needs entropy: " + e.to_string());
+                    trap_with_message("unavailable: X-Wing encapsulation needs entropy: " .. e.to_string());
                 },
             }
         };
@@ -251,7 +251,7 @@ export let XWing = module (
             return shared;
         };
 
-        /// @brief The scheme name.
+        /// @brief A fixed placeholder for the encapsulation state.
         /// @see [Std.Crypto.Pqc.XWing](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-XWing)
         #Since("0.3.0")
         export let.override to_string = func -> string => "XWing(<redacted>)";

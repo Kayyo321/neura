@@ -97,72 +97,72 @@ The following public declarations are taken from the module source; each links t
   A reader over the contents of a constructed element.
 - **Der.Element** · [`export let children = func -> Result<Element[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L154)
   The elements inside a constructed element. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let explicit_inner = func -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L168)
+- **Der.Element** · [`export let explicit_inner = func -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L166)
   The single element inside an explicitly tagged element. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let boolean = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L180)
+- **Der.Element** · [`export let boolean = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L176)
   The value of a BOOLEAN: one content byte, 0x00 or 0xFF. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let integer = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L197)
+- **Der.Element** · [`export let integer = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L193)
   The two's-complement content of an INTEGER, checked to be minimal. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let integer_content = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L204)
+- **Der.Element** · [`export let integer_content = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L200)
   The two's-complement content of an implicitly tagged INTEGER, checked to be minimal. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let is_negative = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L219)
+- **Der.Element** · [`export let is_negative = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L215)
   Whether an INTEGER (already checked) is negative.
-- **Der.Element** · [`export let small_integer = func(max: int64) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L224)
+- **Der.Element** · [`export let small_integer = func(max: int64) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L220)
   The value of an INTEGER or ENUMERATED that must be from 0 to `max`; a negative value or one above `max` is an `OutOfRange` error. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let null = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L252)
+- **Der.Element** · [`export let null = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L248)
   Checks a NULL: no content. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let oid = func -> Result<Oid>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L262)
+- **Der.Element** · [`export let oid = func -> Result<Oid>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L258)
   The value of an OBJECT IDENTIFIER. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let bit_string = func -> Result<BitString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L269)
+- **Der.Element** · [`export let bit_string = func -> Result<BitString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L265)
   The value of a BIT STRING (or of an implicitly tagged one when `implicit` is true). Tagged `#NoDiscard`.
-- **Der.Element** · [`export let bit_string_content = func -> Result<BitString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L276)
+- **Der.Element** · [`export let bit_string_content = func -> Result<BitString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L272)
   The value of an implicitly tagged BIT STRING. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let octet_string = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L296)
+- **Der.Element** · [`export let octet_string = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L292)
   The content of an OCTET STRING. Tagged `#NoDiscard`.
-- **Der.Element** · [`export let is_string = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L302)
+- **Der.Element** · [`export let is_string = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L298)
   Whether the tag is one of the string types `text` reads.
-- **Der.Element** · [`export let text = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L311)
+- **Der.Element** · [`export let text = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L307)
   The text of a string type: UTF8String (valid UTF-8), PrintableString, NumericString, IA5String (bytes below 128), VisibleString (32 to 126), TeletexString (read as Latin-1, as most software does), BMPString (UCS-2, no surrogates) or UniversalString (UCS-4). Tagged `#NoDiscard`.
-- **Der.Element** · [`export let string_content = func(kind: int) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L320)
+- **Der.Element** · [`export let string_content = func(kind: int) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L314)
   The content read as the universal string type `kind` (for implicit tags such as dNSName). Tagged `#NoDiscard`.
-- **Der.Element** · [`export let time = func -> Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L374)
+- **Der.Element** · [`export let time = func -> Result<instant.Instant>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L368)
   The instant of a UTCTime (`YYMMDDHHMMSSZ`, years 1950 to 2049) or a GeneralizedTime (`YYYYMMDDHHMMSSZ`, no fraction). Tagged `#NoDiscard`.
-- **Der.Element** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L441)
+- **Der.Element** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L435)
   Equal when the encodings are equal.
-- **Der.Element** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L457)
-- **Der.Element** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L460)
+- **Der.Element** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L450)
+- **Der.Element** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L453)
   "Element(class <c>, tag <n>, <length> bytes at <offset>)".
-- **Der** · [`export let Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L468)
+- **Der** · [`export let Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L461)
   Reads consecutive DER elements from a range of an input list. Tagged `#Final`. Since 0.3.0.
-- **Der.Reader** · [`export let position: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L471)
+- **Der.Reader** · [`export let position: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L464)
   The position of the next element.
-- **Der.Reader** · [`export last limit: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L475)
+- **Der.Reader** · [`export last limit: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L468)
   The end of the range.
-- **Der.Reader** · [`export let init = func(input: uint8[list], start: int, stop: int, level: int, limit_depth: int, inside_checked: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L484)
+- **Der.Reader** · [`export let init = func(input: uint8[list], start: int, stop: int, level: int, limit_depth: int, inside_checked: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L477)
   A reader over input[start, end) at the nesting depth, with the nesting limit. `checked` says that the range was already checked in full (as inside a parsed element), so constructed elements are not checked again; pass false for any other input.
-- **Der.Reader** · [`export let has_more = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L495)
+- **Der.Reader** · [`export let has_more = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L488)
   Whether bytes remain.
-- **Der.Reader** · [`export let peek_is = func(class_bits: int, number: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L498)
+- **Der.Reader** · [`export let peek_is = func(class_bits: int, number: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L491)
   Whether the next element has the tag class and number (false at the end).
-- **Der.Reader** · [`export let next = func -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L523)
+- **Der.Reader** · [`export let next = func -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L516)
   The next element, fully checked. Tagged `#NoDiscard`.
-- **Der.Reader** · [`export let next_universal = func(number: int, name: string) -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L531)
+- **Der.Reader** · [`export let next_universal = func(number: int, name: string) -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L524)
   The next element, which must have the universal tag `number`. Tagged `#NoDiscard`.
-- **Der.Reader** · [`export let optional_context = func(number: int) -> Result<Optional<Element>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L543)
+- **Der.Reader** · [`export let optional_context = func(number: int) -> Result<Optional<Element>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L536)
   The next element if it has the context tag [number], else None. Tagged `#NoDiscard`.
-- **Der.Reader** · [`export let optional_universal = func(number: int) -> Result<Optional<Element>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L553)
+- **Der.Reader** · [`export let optional_universal = func(number: int) -> Result<Optional<Element>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L546)
   The next element if it has the universal tag, else None. Tagged `#NoDiscard`.
-- **Der.Reader** · [`export let finish = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L563)
+- **Der.Reader** · [`export let finish = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L556)
   Fails when bytes remain. Tagged `#NoDiscard`.
-- **Der.Reader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L571)
+- **Der.Reader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L564)
   "Reader(<position>..<limit>)".
-- **Der** · [`export let parse = func(input: uint8[list]) -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L576)
+- **Der** · [`export let parse = func(input: uint8[list]) -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L569)
   Parses an input that holds exactly one DER element, with the default nesting limit. Tagged `#NoDiscard`. Since 0.3.0.
-- **Der** · [`export let parse_with_depth = func(input: uint8[list], max_depth: int) -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L580)
+- **Der** · [`export let parse_with_depth = func(input: uint8[list], max_depth: int) -> Result<Element>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L573)
   Parses an input that holds exactly one DER element; nesting deeper than `max_depth` is an error. Tagged `#NoDiscard`. Since 0.3.0.
-- **Der** · [`export let copy_range = func(input: uint8[list], start: int, stop: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L755)
+- **Der** · [`export let copy_range = func(input: uint8[list], start: int, stop: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L746)
   A copy of input[start, end). Tagged `#NoDiscard`. Since 0.3.0.
-- **Der** · [`export let hash_range = func(input: uint8[list], start: int, stop: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L765)
+- **Der** · [`export let hash_range = func(input: uint8[list], start: int, stop: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/der.nra#L756)
   A hash of input[start, end). Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

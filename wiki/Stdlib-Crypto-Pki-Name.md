@@ -29,33 +29,33 @@ The following public declarations are taken from the module source; each links t
 - **Name.AttributeTypeAndValue** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L62)
 - **Name.AttributeTypeAndValue** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L67)
   `<type>=<value>` in RFC 4514 form.
-- **Name** · [`export let Name = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L78)
+- **Name** · [`export let Name = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L76)
   A distinguished name: RDNs from the most general (such as C) to the most specific (such as CN). Tagged `#Final`. Since 0.3.0.
-- **Name.Name** · [`export last rdns: AttributeTypeAndValue[list][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L80)
+- **Name.Name** · [`export last rdns: AttributeTypeAndValue[list][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L78)
   The RDNs in encoding order; each holds one or more pairs.
-- **Name.Name** · [`export last der_bytes: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L82)
+- **Name.Name** · [`export last der_bytes: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L80)
   The DER encoding of the whole Name.
-- **Name.Name** · [`export let init = func(parts: AttributeTypeAndValue[list][list], encoded: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L85)
+- **Name.Name** · [`export let init = func(parts: AttributeTypeAndValue[list][list], encoded: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L83)
   Records a checked name; `parse` and `of` build names.
-- **Name.Name** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L91)
+- **Name.Name** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L89)
   Whether the name has no RDNs.
-- **Name.Name** · [`export let values_of = func(dotted: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L94)
+- **Name.Name** · [`export let values_of = func(dotted: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L92)
   The text values of every pair with the attribute type, in order.
-- **Name.Name** · [`export let common_names = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L107)
+- **Name.Name** · [`export let common_names = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L105)
   The commonName values.
-- **Name.Name** · [`export let email_addresses = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L110)
+- **Name.Name** · [`export let email_addresses = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L108)
   The PKCS #9 emailAddress values (legacy e-mail in the subject).
-- **Name.Name** · [`export let starts_with = func(prefix: Name) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L114)
+- **Name.Name** · [`export let starts_with = func(prefix: Name) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L112)
   Whether this name's RDNs begin with all of `prefix`'s RDNs (directoryName subtree match, RFC 5280 section 7.1).
-- **Name.Name** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L126)
-- **Name.Name** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L134)
-- **Name.Name** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L148)
+- **Name.Name** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L124)
+- **Name.Name** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L131)
+- **Name.Name** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L145)
   RFC 4514 text: the most specific RDN first, RDNs joined by ',' and the pairs of one RDN by '+'.
-- **Name** · [`export let parse = func(element: der.Element) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L254)
+- **Name** · [`export let parse = func(element: der.Element) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L249)
   Reads a Name (an RDNSequence) from its element. An empty RDN, a non-SET RDN or a pair that is not SEQUENCE { OBJECT IDENTIFIER, value } is a `Parse` error; a string value must be valid for its type. Tagged `#NoDiscard`. Since 0.3.0.
-- **Name** · [`export let parse_der = func(bytes: uint8[list]) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L288)
+- **Name** · [`export let parse_der = func(bytes: uint8[list]) -> Result<Name>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L283)
   Parses the DER encoding of a Name. Tagged `#NoDiscard`. Since 0.3.0.
-- **Name** · [`export let of = func(types: string[], values: string[]) -> Name`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L295)
+- **Name** · [`export let of = func(types: string[], values: string[]) -> Name`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pki/name.nra#L290)
   A name of single-valued RDNs in the order given, such as `of(["C", "O", "CN"], ["US", "Example", "host"])` with attribute types given by short name (C, O, OU, L, ST, CN, DC, UID, serialNumber, emailAddress) or dotted OID. Country and serialNumber are PrintableString, emailAddress and DC are IA5String, the others UTF8String. An unknown short name traps. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

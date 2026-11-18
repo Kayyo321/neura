@@ -32,10 +32,10 @@ export let Keccak = module (
         let round_constants: uint64[list] = round_constants_table();
 
         export let init = func {
-            for (let i = 0; i < 25; i++) {
+            for (let i in 0 .. 25) {
                 moved.append(0);
             }
-            for (let i = 0; i < 5; i++) {
+            for (let i in 0 .. 5) {
                 columns.append(0);
             }
         };
@@ -77,13 +77,13 @@ export let Keccak = module (
                 trap_with_message("invalid argument: Keccak permutation state must be 200 bytes");
             }
             let lanes: uint64[list] = new;
-            for (let i = 0; i < 25; i++) {
+            for (let i in 0 .. 25) {
                 lanes.append(words.load64_le(state, 8 * i));
             }
             apply(lanes, 0);
-            for (let i = 0; i < 25; i++) {
+            for (let i in 0 .. 25) {
                 last lane = lanes[i];
-                for (let j = 0; j < 8; j++) {
+                for (let j in 0 .. 8) {
                     state[8 * i + j] = ((lane >> (8 * j)) & 255) as uint8;
                 }
             }
@@ -110,7 +110,7 @@ export let Keccak = module (
             rate = rate_bytes;
             domain = domain_byte;
             first_round = 24 - rounds;
-            for (let i = 0; i < 25; i++) {
+            for (let i in 0 .. 25) {
                 lanes.append(0);
             }
         };
@@ -153,7 +153,7 @@ export let Keccak = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative length");
             }
-            if (!squeezing) {
+            if (not squeezing) {
                 squeezing = true;
                 let block = pending;
                 pending = new;

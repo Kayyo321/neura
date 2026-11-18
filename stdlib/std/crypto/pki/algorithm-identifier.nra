@@ -42,7 +42,7 @@ export let AlgorithmIdentifier = module (
         /// @brief The RSASSA-PSS parameters, when this is id-RSASSA-PSS.
         #NoDiscard
         export let pss_parameters = func -> Result<RsaPssParameters> {
-            if (!oid.matches(oids.RsaSsaPss)) {
+            if (not oid.matches(oids.RsaSsaPss)) {
                 return fail<RsaPssParameters>(0, "not an RSASSA-PSS identifier");
             }
             if (parameters.length == 0) {
@@ -52,17 +52,16 @@ export let AlgorithmIdentifier = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is AlgorithmIdentifier)) {
+            if (other is not that: AlgorithmIdentifier) {
                 return false;
             }
-            last that = other as AlgorithmIdentifier;
             return same_bytes(der_bytes, that.der_bytes);
         };
 
         export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
 
         /// @brief "AlgorithmIdentifier(<name>)".
-        export let.override to_string = func -> string => "AlgorithmIdentifier(" + oids.name_of(oid.dotted) + ")";
+        export let.override to_string = func -> string => "AlgorithmIdentifier(" .. oids.name_of(oid.dotted) .. ")";
     );
 
     /// @brief RSASSA-PSS-params (RFC 4055, section 3.1), with the defaults filled in.
@@ -88,10 +87,9 @@ export let AlgorithmIdentifier = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RsaPssParameters)) {
+            if (other is not that: RsaPssParameters) {
                 return false;
             }
-            last that = other as RsaPssParameters;
             return hash.equals(that.hash) && mask_generation.equals(that.mask_generation)
                 && mask_hash.equals(that.mask_hash) && salt_length == that.salt_length
                 && trailer_field == that.trailer_field;
@@ -124,7 +122,7 @@ export let AlgorithmIdentifier = module (
     /// @brief Reads an AlgorithmIdentifier: SEQUENCE { OBJECT IDENTIFIER, parameters ANY OPTIONAL }.
     #[NoDiscard, Since("0.3.0")]
     export let parse = func(e: der.Element) -> Result<AlgorithmIdentifier> {
-        if (!e.is_universal(der.TagSequence)) {
+        if (not e.is_universal(der.TagSequence)) {
             return fail<AlgorithmIdentifier>(e.offset, "AlgorithmIdentifier must be a SEQUENCE");
         }
         let r = e.reader();
@@ -150,14 +148,14 @@ export let AlgorithmIdentifier = module (
     let hash_of = func(e: der.Element) -> Result<Oid> {
         // HashAlgorithm: AlgorithmIdentifier whose parameters are NULL or absent.
         last id = parse(e)?;
-        if (id.has_parameters() && !id.has_null_parameters()) {
+        if (id.has_parameters() && not id.has_null_parameters()) {
             return fail<Oid>(e.offset, "hash parameters must be NULL or absent");
         }
         return Result<Oid>.Ok(id.oid);
     };
 
     let parse_pss = func(e: der.Element) -> Result<RsaPssParameters> {
-        if (!e.is_universal(der.TagSequence)) {
+        if (not e.is_universal(der.TagSequence)) {
             return fail<RsaPssParameters>(e.offset, "RSASSA-PSS-params must be a SEQUENCE");
         }
         let hash = oid_module.of(oids.Sha1);
@@ -176,7 +174,7 @@ export let AlgorithmIdentifier = module (
             Optional.Some(m) => {
                 last mgf_id = parse(m.explicit_inner()?)?;
                 mgf = mgf_id.oid;
-                if (!mgf.matches(oids.Mgf1) || mgf_id.parameters.length == 0) {
+                if (not mgf.matches(oids.Mgf1) || mgf_id.parameters.length == 0) {
                     return fail<RsaPssParameters>(m.offset, "mask generation must be MGF1 with a hash");
                 }
                 mgf_hash = hash_of(der.parse(mgf_id.parameters)?)?;

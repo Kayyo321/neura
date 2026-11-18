@@ -93,7 +93,7 @@ export let ChaCha20Drbg = module (
                         Result.Ok(_) => {
                         },
                         Result.Err(e) => {
-                            trap_with_message("invalid state: reseed after fork failed: " + error.message(e));
+                            trap_with_message("invalid state: reseed after fork failed: " .. error.message(e));
                         },
                     }
                 }

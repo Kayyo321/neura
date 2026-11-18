@@ -20,31 +20,31 @@ The following public declarations are taken from the module source; each links t
 - **MemoryKeyStore.MemoryKeyHandle** · [`export let init = func(store: Owner, name: string, generation: uint32, use: Algorithm)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L53)
 - **MemoryKeyStore.MemoryKeyHandle** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L63)
   Whether the handles identify the same key in the same store. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyHandle** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L74)
+- **MemoryKeyStore.MemoryKeyHandle** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L73)
   The hash of the store identity, label and version. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyHandle** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L80)
+- **MemoryKeyStore.MemoryKeyHandle** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L79)
   A fixed placeholder that hides key handles and labels. Since 0.3.0.
-- **MemoryKeyStore** · [`export let MemoryKeyStore = class implements VersionedKeyStore<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L113)
+- **MemoryKeyStore** · [`export let MemoryKeyStore = class implements VersionedKeyStore<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L112)
   An isolated in-memory store. An instance belongs to one task at a time. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let provider_name = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L121)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let provider_name = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L120)
   The provider name `memory`. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let generate_key = func(algorithm: Algorithm, label: string) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L126)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let generate_key = func(algorithm: Algorithm, label: string) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L125)
   Generates a fresh key using the operating system. Returns entropy or unsupported-algorithm errors. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let generate_key_with_drbg = func(algorithm: Algorithm, label: string, generator: drbg.ChaCha20Drbg) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L135)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let generate_key_with_drbg = func(algorithm: Algorithm, label: string, generator: drbg.ChaCha20Drbg) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L134)
   Generates a fresh key with a caller-supplied generator. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let import_key = func(algorithm: Algorithm, label: string, material: uint8[list]) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L145)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let import_key = func(algorithm: Algorithm, label: string, material: uint8[list]) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L144)
   Imports a private copy and issues the next version. AES-SIV expects a 64-byte key and the other supported algorithms expect 32 bytes. A wrong length or malformed label traps. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let resolve = func(label: string, version: uint32) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L201)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let resolve = func(label: string, version: uint32) -> Result<MemoryKeyHandle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L200)
   Resolves one live version under an exact label. Deleted or unknown keys return crypto.key; policy denial returns crypto.policy. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let sign = func(key: MemoryKeyHandle, message: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L216)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let sign = func(key: MemoryKeyHandle, message: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L215)
   Ed25519 signature or HMAC-SHA-256 under a live signing key. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let wrap_key = func(key: MemoryKeyHandle, data_key: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L233)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let wrap_key = func(key: MemoryKeyHandle, data_key: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L232)
   AES-SIV wrapping with the supplied associated data under a live wrapping key. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let unwrap_key = func(key: MemoryKeyHandle, wrapped: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L242)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let unwrap_key = func(key: MemoryKeyHandle, wrapped: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L241)
   Authenticates and unwraps a data key under a live wrapping key. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let delete_key = func(key: MemoryKeyHandle) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L251)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let delete_key = func(key: MemoryKeyHandle) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L250)
   Wipes the stored copy, removes the live key and retires that version. Tagged `#NoDiscard`. Since 0.3.0.
-- **MemoryKeyStore.MemoryKeyStore** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L265)
+- **MemoryKeyStore.MemoryKeyStore** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/enclave/memory-key-store.nra#L264)
   A fixed placeholder for the store contents. Since 0.3.0.
 <!-- END SOURCE API -->
 

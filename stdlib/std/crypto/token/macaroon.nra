@@ -151,11 +151,9 @@ export let Macaroon = module (
             last derived = derive(root_key);
             last verified = verify_inner(derived, context, false);
             words.wipe(derived);
-            if (!verified) {
-                return false;
-            }
+            return false unless verified;
             for (let predicate in context.predicates) {
-                if (!check(words.copy(predicate))) {
+                if (not check(words.copy(predicate))) {
                     return false;
                 }
             }
@@ -183,7 +181,7 @@ export let Macaroon = module (
         /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Macaroon)) {
+            if (other is not Macaroon) {
                 return false;
             }
             return constant_time.ct_eq(serialize_binary(WireFormat.V2),
@@ -252,7 +250,7 @@ export let Macaroon = module (
                 if (caveat.vid.length == 0) {
                     context.predicates.append(caveat.id);
                 } else {
-                    if (!check_discharge(caveat, prefixes[prefix_at], context)) {
+                    if (not check_discharge(caveat, prefixes[prefix_at], context)) {
                         return false;
                     }
                     prefix_at++;
@@ -466,7 +464,7 @@ export let Macaroon = module (
         export let peek = func(value: uint8) -> bool => at < bytes.length && bytes[at] == value;
 
         export let end_section = func -> Result<bool> {
-            if (!peek(0)) {
+            if (not peek(0)) {
                 return invalid<bool>("missing macaroon v2 section terminator");
             }
             at++;
@@ -474,7 +472,7 @@ export let Macaroon = module (
         };
 
         export let v2 = func(tag: uint8, optional: bool) -> Result<uint8[list]> {
-            if (!peek(tag)) {
+            if (not peek(tag)) {
                 if (optional) {
                     return Result<uint8[list]>.Ok(new);
                 }
@@ -523,14 +521,14 @@ export let Macaroon = module (
         };
 
         export let v1 = func(name: string, optional: bool) -> Result<uint8[list]> {
-            if (!has_v1(name)) {
+            if (not has_v1(name)) {
                 if (optional) {
                     return Result<uint8[list]>.Ok(new);
                 }
                 return invalid<uint8[list]>("missing macaroon v1 field");
             }
             let length = 0;
-            for (let i = 0; i < 4; i++) {
+            for (let i in 0 .. 4) {
                 last byte = bytes[at + i] as int;
                 if (byte >= 48 && byte <= 57) {
                     length = (length << 4) | (byte - 48);
@@ -564,7 +562,7 @@ export let Macaroon = module (
 
     let checked_token = func(location: uint8[list], id: uint8[list], caveats: CaveatRecord[list],
         signature: uint8[list], reader: Reader) -> Result<Macaroon> {
-        if (id.length == 0 || signature.length != 32 || !reader.done()) {
+        if (id.length == 0 || signature.length != 32 || not reader.done()) {
             return invalid<Macaroon>("invalid macaroon identifier, signature or trailing data");
         }
         return Result<Macaroon>.Ok(new Macaroon(location, id, caveats, signature));
@@ -576,7 +574,7 @@ export let Macaroon = module (
         last id = reader.v2(2, false)?;
         let _ = reader.end_section()?;
         let caveats: CaveatRecord[list] = new;
-        while (!reader.peek(0)) {
+        while (not reader.peek(0)) {
             if (caveats.length >= MaxCaveats) {
                 return invalid<Macaroon>("too many macaroon caveats");
             }

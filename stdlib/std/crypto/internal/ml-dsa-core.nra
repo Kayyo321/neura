@@ -61,7 +61,7 @@ export let MlDsaCore = module (
     let pack = func(out: uint8[list], values: int64[list], bits: int) {
         let acc: int64 = 0;
         let filled = 0;
-        for (let i = 0; i < 256; i++) {
+        for (let i in 0 .. 256) {
             acc = acc | (values[i] << filled);
             filled += bits;
             while (filled >= 8) {
@@ -152,13 +152,13 @@ export let MlDsaCore = module (
             beta = (tau as int64) * eta;
             let powers: int64[list] = new;
             let p: int64 = 1;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 powers.append(p);
                 p = (p * 1753) % Q;
             }
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 let r = 0;
-                for (let b = 0; b < 8; b++) {
+                for (let b in 0 .. 8) {
                     r = r | (((i >> b) & 1) << (7 - b));
                 }
                 zetas.append(powers[r]);
@@ -204,14 +204,14 @@ export let MlDsaCore = module (
                     }
                 }
             }
-            for (let j = 0; j < 256; j++) {
+            for (let j in 0 .. 256) {
                 w[j] = (w[j] * 8347681) % Q;
             }
         };
 
         let zero = func -> int64[list] {
             let f: int64[list] = new;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 f.append(0);
             }
             return f;
@@ -219,7 +219,7 @@ export let MlDsaCore = module (
 
         let copy = func(f: int64[list]) -> int64[list] {
             let g: int64[list] = new;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 g.append(f[i]);
             }
             return g;
@@ -227,7 +227,7 @@ export let MlDsaCore = module (
 
         /// @brief acc += a * b, pointwise in the NTT domain.
         let multiply_add = func(acc: int64[list], a: int64[list], b: int64[list]) {
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 acc[i] = (acc[i] + a[i] * b[i]) % Q;
             }
         };
@@ -235,7 +235,7 @@ export let MlDsaCore = module (
         /// @brief a * b, pointwise in the NTT domain, then the inverse NTT.
         let product = func(a: int64[list], b: int64[list]) -> int64[list] {
             let out: int64[list] = new;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 out.append((a[i] * b[i]) % Q);
             }
             inverse_ntt(out);
@@ -303,7 +303,7 @@ export let MlDsaCore = module (
         let sample_in_ball = func(c_tilde: uint8[list]) -> int64[list] {
             let stream = new Stream(136, c_tilde);
             let signs: int[list] = new;
-            for (let i = 0; i < 8; i++) {
+            for (let i in 0 .. 8) {
                 signs.append(stream.next());
             }
             let c = zero();
@@ -333,7 +333,7 @@ export let MlDsaCore = module (
                 seed.append(((kappa + r) >> 8) as uint8);
                 last v = shake256(seed, 32 * (gamma1_bits + 1));
                 let poly = unpack(v, 0, gamma1_bits + 1);
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     poly[i] = reduce(gamma1 - poly[i]);
                 }
                 y.append(poly);
@@ -378,9 +378,7 @@ export let MlDsaCore = module (
             } else {
                 r1 = (r - r0) / (2 * gamma2);
             }
-            if (!hint) {
-                return r1;
-            }
+            return r1 unless hint;
             if (r0 > 0) {
                 return (r1 + 1) % m;
             }
@@ -389,7 +387,7 @@ export let MlDsaCore = module (
 
         /// @brief The infinity norm of a centered polynomial is below `bound`.
         let norm_below = func(f: int64[list], bound: int64) -> bool {
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 last c = center(f[i]);
                 if (c >= bound || c <= 0 - bound) {
                     return false;
@@ -436,7 +434,7 @@ export let MlDsaCore = module (
                 last e = s2[r];
                 let t1: int64[list] = new;
                 let t0: int64[list] = new;
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     last value = (t[i] + e[i]) % Q;
                     // Power2Round: r0 = value mod+- 2^13.
                     let r0 = value & 8191;
@@ -466,7 +464,7 @@ export let MlDsaCore = module (
         /// @brief BitPack(w, eta, eta) for w modulo q.
         let pack_eta = func(out: uint8[list], f: int64[list]) {
             let values: int64[list] = new;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 values.append(eta - center(f[i]));
             }
             pack(out, values, eta_bits);
@@ -475,7 +473,7 @@ export let MlDsaCore = module (
         /// @brief The polynomial at `at` packed by BitPack(w, a, b), modulo q.
         let unpack_signed = func(bytes: uint8[list], at: int, bits: int, b: int64) -> int64[list] {
             let f = unpack(bytes, at, bits);
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 f[i] = reduce(b - f[i]);
             }
             return f;
@@ -498,7 +496,7 @@ export let MlDsaCore = module (
             let s2: int64[list][list] = new;
             for (let r = 0; r < k + l; r++) {
                 let poly = unpack(sk, at, eta_bits);
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     if (poly[i] > 2 * eta) {
                         return new;
                     }
@@ -524,7 +522,7 @@ export let MlDsaCore = module (
                 last e = s2[r];
                 let t1: int64[list] = new;
                 let t0: int64[list] = new;
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     last value = (t[i] + e[i]) % Q;
                     let r0 = value & 8191;
                     if (r0 > 4096) {
@@ -538,16 +536,13 @@ export let MlDsaCore = module (
             }
             last tr = shake256(pk, 64);
             let diff: uint8 = 0;
-            for (let i = 0; i < 64; i++) {
+            for (let i in 0 .. 64) {
                 diff = diff | (tr[i] ^ sk[64 + i]);
             }
             for (let i = 0; i < t0_packed.length; i++) {
                 diff = diff | (t0_packed[i] ^ sk[at + i]);
             }
-            if (diff != 0) {
-                return new;
-            }
-            return pk;
+            return if (diff != 0) -> new else -> pk;
         };
 
         // ---- Signing (Algorithm 7) ----
@@ -616,7 +611,7 @@ export let MlDsaCore = module (
                     }
                     inverse_ntt(poly);
                     let high: int64[list] = new;
-                    for (let i = 0; i < 256; i++) {
+                    for (let i in 0 .. 256) {
                         high.append(high_bits(poly[i]));
                     }
                     w.append(poly);
@@ -633,13 +628,13 @@ export let MlDsaCore = module (
                 for (let s = 0; s < l && ok; s++) {
                     let poly = product(c_hat, s1_hat[s]);
                     last ys = y[s];
-                    for (let i = 0; i < 256; i++) {
+                    for (let i in 0 .. 256) {
                         poly[i] = (poly[i] + ys[i]) % Q;
                     }
                     ok = norm_below(poly, gamma1 - beta);
                     z.append(poly);
                 }
-                if (!ok) {
+                if (not ok) {
                     continue;
                 }
                 // r0 = LowBits(w - c s2), checked against gamma2 - beta; then the hint.
@@ -650,7 +645,7 @@ export let MlDsaCore = module (
                     last ct0 = product(c_hat, t0_hat[r]);
                     last wr = w[r];
                     let row: bool[list] = new;
-                    for (let i = 0; i < 256; i++) {
+                    for (let i in 0 .. 256) {
                         last diff = reduce(wr[i] - cs2[i]);
                         last r0 = low_bits(diff);
                         if (r0 >= gamma2 - beta || r0 <= beta - gamma2) {
@@ -671,14 +666,14 @@ export let MlDsaCore = module (
                     }
                     hints.append(row);
                 }
-                if (!ok || count > omega) {
+                if (not ok || count > omega) {
                     continue;
                 }
                 let sig = words.copy(c_tilde);
                 for (let s = 0; s < l; s++) {
                     let values: int64[list] = new;
                     last zs = z[s];
-                    for (let i = 0; i < 256; i++) {
+                    for (let i in 0 .. 256) {
                         values.append(gamma1 - center(zs[i]));
                     }
                     pack(sig, values, gamma1_bits + 1);
@@ -687,7 +682,7 @@ export let MlDsaCore = module (
                 let ends: uint8[list] = new;
                 for (let r = 0; r < k; r++) {
                     last row = hints[r];
-                    for (let i = 0; i < 256; i++) {
+                    for (let i in 0 .. 256) {
                         if (row[i]) {
                             positions.append(i as uint8);
                         }
@@ -714,7 +709,7 @@ export let MlDsaCore = module (
             let z_hat: int64[list][list] = new;
             for (let s = 0; s < l; s++) {
                 let poly = unpack_signed(sig, at, gamma1_bits + 1, gamma1);
-                if (!norm_below(poly, gamma1 - beta)) {
+                if (not norm_below(poly, gamma1 - beta)) {
                     return false;
                 }
                 ntt(poly);
@@ -726,7 +721,7 @@ export let MlDsaCore = module (
             let index = 0;
             for (let r = 0; r < k; r++) {
                 let row: bool[list] = new;
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     row.append(false);
                 }
                 last end = sig[hint_at + omega + r] as int;
@@ -757,7 +752,7 @@ export let MlDsaCore = module (
             let w1: int64[list][list] = new;
             for (let r = 0; r < k; r++) {
                 let t1 = unpack(pk, 32 + 320 * r, 10);
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     t1[i] = t1[i] << 13;
                 }
                 ntt(t1);
@@ -765,13 +760,13 @@ export let MlDsaCore = module (
                 for (let s = 0; s < l; s++) {
                     multiply_add(w, a[r * l + s], z_hat[s]);
                 }
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     w[i] = reduce(w[i] - (c_hat[i] * t1[i]) % Q);
                 }
                 inverse_ntt(w);
                 last row = hints[r];
                 let high: int64[list] = new;
-                for (let i = 0; i < 256; i++) {
+                for (let i in 0 .. 256) {
                     high.append(use_hint(row[i], w[i]));
                 }
                 w1.append(high);
@@ -785,6 +780,6 @@ export let MlDsaCore = module (
             return diff == 0;
         };
 
-        export let.override to_string = func -> string => "MlDsaCore.Engine(k = " + k.to_string() + ")";
+        export let.override to_string = func -> string => "MlDsaCore.Engine(k = " .. k.to_string() .. ")";
     );
 );

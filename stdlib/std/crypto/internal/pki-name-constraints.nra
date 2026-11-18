@@ -37,7 +37,7 @@ export let PkiNameConstraints = module (
                     }
                 }
             }
-            if (constrained && !permitted) {
+            if (constrained && not permitted) {
                 return false;
             }
         }
@@ -99,17 +99,17 @@ export let PkiNameConstraints = module (
     /// @brief DNS: a constraint "c" covers "c" and every name ending in ".c"; the empty constraint covers every
     /// name. A leading period is malformed for DNS (RFC 5280 allows it only for URI and e-mail constraints).
     let dns = func(name: string, constraint: string, excluding: bool) -> int {
-        if (!host_name.is_dns_name(name, true)) {
+        if (not host_name.is_dns_name(name, true)) {
             return -1;
         }
         if (constraint.byte_length == 0) {
             return 1;
         }
         last bare = constraint;
-        if (!host_name.is_dns_name(bare, false)) {
+        if (not host_name.is_dns_name(bare, false)) {
             return -1;
         }
-        if (name == bare || ends_with(name, "." + bare)) {
+        if (name == bare || ends_with(name, "." .. bare)) {
             return 1;
         }
         // A wildcard name "*.s" stands for every one-label name under s: for exclusion it matches a constraint
@@ -134,19 +134,19 @@ export let PkiNameConstraints = module (
 
     /// @brief IP: the constraint is an address followed by a contiguous mask of the same family.
     let ip = func(address: uint8[list], constraint: uint8[list]) -> int {
-        if (!(address.length == 4 || address.length == 16) || !(constraint.length == 8 || constraint.length == 32)) {
+        if (not (address.length == 4 || address.length == 16) || not (constraint.length == 8 || constraint.length == 32)) {
             return -1;
         }
         last half = constraint.length / 2;
         // The mask must be ones followed by zeros.
         let zero_seen = false;
         for (let i = half; i < constraint.length; i++) {
-            for (let bit = 7; bit >= 0; bit--) {
+            for (let bit in 7 ..= 0 : -1) {
                 last set = ((constraint[i] >> bit) & 1) == 1;
                 if (set && zero_seen) {
                     return -1;
                 }
-                if (!set) {
+                if (not set) {
                     zero_seen = true;
                 }
             }
@@ -190,7 +190,7 @@ export let PkiNameConstraints = module (
         }
         last local = address.slice(0, at);
         last host = lower(address.slice(at + 1, address.byte_length));
-        if (!host_name.is_dns_name(host, false)) {
+        if (not host_name.is_dns_name(host, false)) {
             return -1;
         }
         last c_at = last_at(constraint);
@@ -238,7 +238,7 @@ export let PkiNameConstraints = module (
             }
         }
         last host = lower(authority);
-        if (!host_name.is_dns_name(host, false)) {
+        if (not host_name.is_dns_name(host, false)) {
             return -1;
         }
         if (constraint.byte_length > 0 && constraint.byte_at(0) == 46) {

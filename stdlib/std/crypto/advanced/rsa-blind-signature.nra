@@ -176,7 +176,7 @@ export let RsaBlindSignature = module (
         let blind_using = func(prepared: uint8[list], random: func(int) -> Result<uint8[list]>)
             -> Result<BlindRequest> {
             crypto_policy.require(Algorithm.RsaBlindSignature);
-            if (!prepared_ok(prepared)) {
+            if (not prepared_ok(prepared)) {
                 return failure<BlindRequest>("crypto.invalid_input", "prepared message is too short");
             }
             let salt: uint8[list] = new;
@@ -199,7 +199,7 @@ export let RsaBlindSignature = module (
 
         let blind_core = func(prepared: uint8[list], salt: uint8[list], factor: uint32[list]) -> Result<BlindRequest> {
             crypto_policy.require(Algorithm.RsaBlindSignature);
-            if (!prepared_ok(prepared)) {
+            if (not prepared_ok(prepared)) {
                 wipe_limbs(factor);
                 return failure<BlindRequest>("crypto.invalid_input", "prepared message is too short");
             }
@@ -212,7 +212,7 @@ export let RsaBlindSignature = module (
             last encoded = rsa_core.pss_encode(Algorithm.Sha384, sha2.sha384(prepared), salt, core.bits - 1);
             last representative = rsa_core.os2ip_below(core, encoded);
             words.wipe(encoded);
-            if (representative.length == 0 || !coprime(representative, core)) {
+            if (representative.length == 0 || not coprime(representative, core)) {
                 wipe_limbs(factor);
                 wipe_limbs(representative);
                 return failure<BlindRequest>("crypto.invalid_input", "RSA PSS representative is not coprime to the modulus");
@@ -246,7 +246,7 @@ export let RsaBlindSignature = module (
             if (request.is_wiped()) {
                 trap_with_message("invalid state: secret wiped");
             }
-            if (!request.matches(key, suite) || response.length != key.core.k) {
+            if (not request.matches(key, suite) || response.length != key.core.k) {
                 request.wipe();
                 return signature_failure();
             }
@@ -259,7 +259,7 @@ export let RsaBlindSignature = module (
             last inverse = request.consume(core.n.length);
             last signature = rsa_core.i2osp(core, multiply(core.modulus, signed, inverse));
             wipe_limbs(inverse);
-            if (!verify(prepared, signature)) {
+            if (not verify(prepared, signature)) {
                 words.wipe(signature);
                 return signature_failure();
             }
@@ -272,7 +272,7 @@ export let RsaBlindSignature = module (
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
             prepared_ok(message) && verifier.verify(message, signature);
 
-        let prepared_ok = func(message: uint8[list]) -> bool => !modifies_message(suite) || message.length >= 32;
+        let prepared_ok = func(message: uint8[list]) -> bool => not modifies_message(suite) || message.length >= 32;
 
         /// @brief The verifier's type.
         /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
@@ -406,7 +406,7 @@ export let RsaBlindSignature = module (
     let sample_factor = func(key: rsa_core.PublicCore, random: func(int) -> Result<uint8[list]>)
         -> Result<uint32[list]> {
         last mask = (255 >> (key.k * 8 - key.bits)) as uint8;
-        for (let attempts = 0; attempts < 128; attempts++) {
+        for (let attempts in 0 .. 128) {
             last candidate = random(key.k)?;
             candidate[0] &= mask;
             last value = rsa_core.os2ip_below(key, candidate);
@@ -483,7 +483,7 @@ export let RsaBlindSignature = module (
         wipe_limbs(b);
         wipe_limbs(difference);
         wipe_limbs(x);
-        if (!valid) {
+        if (not valid) {
             wipe_limbs(y);
             return new;
         }

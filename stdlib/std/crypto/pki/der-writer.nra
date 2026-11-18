@@ -2,6 +2,7 @@ let.promote _ = import:Std.Crypto.Pki.BitString;
 let.promote _ = import:Std.Crypto.Pki.Oid;
 let der_time = import:Std.Crypto.Internal.DerTime;
 let instant = import:Std.Time.Instant;
+let strings = import:Std.Text.Strings;
 let utf8 = import:Std.Encoding.Utf8;
 
 /// @brief A DER writer: each function returns one complete encoding (Stdlib.md section 21.10).
@@ -206,7 +207,7 @@ export let DerWriter = module (
     export let printable_string = func(text: string) -> uint8[list] {
         last bytes = utf8.encode(text);
         for (let c in bytes) {
-            if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
+            if (not ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
                 || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
                 || c == 61 || c == 63)) {
                 trap_with_message("invalid argument: PrintableString character");
@@ -235,13 +236,13 @@ export let DerWriter = module (
         if (year < 1950 || year > 2049) {
             trap_with_message("invalid argument: UTCTime year out of range");
         }
-        return tlv(0, false, 23, utf8.encode(text.slice(2, text.byte_length) + "Z"));
+        return tlv(0, false, 23, utf8.encode(text.slice(2, text.byte_length) .. "Z"));
     };
 
     /// @brief GeneralizedTime `YYYYMMDDHHMMSSZ` for an instant in years 0 to 9999.
     #[NoDiscard, Since("0.3.0")]
     export let generalized_time = func(at: instant.Instant) -> uint8[list] =>
-        tlv(0, false, 24, utf8.encode(time_digits(at) + "Z"));
+        tlv(0, false, 24, utf8.encode(time_digits(at) .. "Z"));
 
     /// @brief The RFC 5280 choice: UTCTime through 2049, GeneralizedTime from 2050.
     #[NoDiscard, Since("0.3.0")]
@@ -252,7 +253,7 @@ export let DerWriter = module (
 
     let parse_year = func(text: string) -> int {
         let y = 0;
-        for (let i = 0; i < 4; i++) {
+        for (let i in 0 .. 4) {
             y = y * 10 + (text.byte_at(i) - 48) as int;
         }
         return y;
@@ -271,15 +272,13 @@ export let DerWriter = module (
         if (civil[0] < 0 || civil[0] > 9999) {
             trap_with_message("invalid argument: year out of range for DER time");
         }
-        return pad(civil[0], 4) + pad(civil[1], 2) + pad(civil[2], 2) + pad(rest / 3600, 2)
-            + pad(rest % 3600 / 60, 2) + pad(rest % 60, 2);
+        return pad(civil[0], 4) .. pad(civil[1], 2) .. pad(civil[2], 2) .. pad(rest / 3600, 2)
+            .. pad(rest % 3600 / 60, 2) .. pad(rest % 60, 2);
     };
 
     let pad = func(value: int64, width: int) -> string {
-        let text = value.to_string();
-        while (text.byte_length < width) {
-            text = "0" + text;
-        }
-        return text;
+        last text = value.to_string();
+        return text unless text.byte_length < width;
+        return strings.repeat("0", width - text.byte_length) .. text;
     };
 );

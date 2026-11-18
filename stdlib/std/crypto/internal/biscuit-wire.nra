@@ -46,7 +46,7 @@ export let BiscuitWire = module (
 
         export let varint = func -> Result<uint64> {
             let value: uint64 = 0;
-            for (let i = 0; i < 10; i++) {
+            for (let i in 0 .. 10) {
                 if (done()) {
                     return invalid<uint64>("truncated protobuf varint");
                 }
@@ -117,7 +117,7 @@ export let BiscuitWire = module (
     let read_message = func(bytes: uint8[list], once: int[], repeat: int[]) -> Result<Message> {
         let reader: Reader = new(bytes);
         let message: Message = new;
-        while (!reader.done()) {
+        while (not reader.done()) {
             if (message.fields.length == datalog.MaxItems) {
                 return limited<Message>("too many protobuf fields");
             }
@@ -126,8 +126,8 @@ export let BiscuitWire = module (
                 return unsupported<Message>("unsupported Biscuit protobuf field");
             }
             last tag = encoded as int;
-            if (!contains_tag(repeat, tag)) {
-                if (!contains_tag(once, tag)) {
+            if (not contains_tag(repeat, tag)) {
+                if (not contains_tag(once, tag)) {
                     return unsupported<Message>("unsupported Biscuit protobuf field");
                 }
                 if (message.has(tag)) {
@@ -280,7 +280,7 @@ export let BiscuitWire = module (
 
     let verify_signature = func(block: SignatureBlock, key: keys.PublicKey, previous: uint8[list]) -> bool {
         last payload = block.version == 0 ? legacy_payload(block) : tagged_payload(block, previous);
-        if (!key.verify(payload, block.signature)) {
+        if (not key.verify(payload, block.signature)) {
             return false;
         }
         match (block.external) {
@@ -516,7 +516,7 @@ export let BiscuitWire = module (
             }
             last id = descriptor.require(16)?;
             last name = symbol(id.scalar, custom, defaults)?;
-            if (!externals.valid_name(name)) {
+            if (not externals.valid_name(name)) {
                 return invalid<expr.Operation>("invalid Biscuit external function name");
             }
             last operation = field.tag == 18 ? expr.OperationKind.Unary : expr.OperationKind.Binary;
@@ -589,7 +589,7 @@ export let BiscuitWire = module (
                 query.expressions.append(decode_ops(code, 10, custom, defaults, version, 0)?);
             }
         }
-        if (!datalog.safe_query(query)) {
+        if (not datalog.safe_query(query)) {
             return invalid<datalog.Rule>("invalid Biscuit expression or unbound variable");
         }
         return Result<datalog.Rule>.Ok(new datalog.Rule(head, query));
@@ -658,7 +658,7 @@ export let BiscuitWire = module (
                 if (parsed.name == "revocation_id") {
                     return invalid<datalog.Block>("revocation_id is reserved for verified signature facts");
                 }
-                if (!datalog.ground(parsed)) {
+                if (not datalog.ground(parsed)) {
                     return invalid<datalog.Block>("a Biscuit fact contains a variable");
                 }
                 block.facts.append(parsed);
@@ -667,7 +667,7 @@ export let BiscuitWire = module (
                 if (parsed.head.name == "revocation_id") {
                     return invalid<datalog.Block>("revocation_id is reserved for verified signature facts");
                 }
-                if (!datalog.safe_rule(parsed)) {
+                if (not datalog.safe_rule(parsed)) {
                     return invalid<datalog.Block>("unbound variable in a Biscuit rule");
                 }
                 block.rules.append(parsed);
@@ -775,7 +775,7 @@ export let BiscuitWire = module (
         let last_block: SignatureBlock = nil;
         for (let bytes in wire_blocks) {
             last block = parse_signature_block(bytes)?;
-            if (!verify_signature(block, current, previous)) {
+            if (not verify_signature(block, current, previous)) {
                 return datalog.fail<Verified>("biscuit.signature", "Biscuit block signature does not verify");
             }
             last signer_algorithm = current.algorithm;
@@ -797,7 +797,7 @@ export let BiscuitWire = module (
             blocks.append(decoded);
             last_block = block;
         }
-        if (!verify_proof(proof, last_block)) {
+        if (not verify_proof(proof, last_block)) {
             return datalog.fail<Verified>("biscuit.proof", "Biscuit proof does not match the last block");
         }
         return Result<Verified>.Ok(new Verified(blocks, wire_blocks, custom, scope_keys, used, last_block, key_id, proof));
@@ -950,9 +950,9 @@ export let BiscuitWire = module (
                 },
                 _ => {
                     last unary = op.kind == expr.OperationKind.Unary;
-                    if ((unary && op.code >= 3) || (!unary && op.code >= 21)) {
+                    if ((unary && op.code >= 3) || (not unary && op.code >= 21)) {
                         require_version(version, 6);
-                    } else if (!unary && op.code >= 17) {
+                    } else if (not unary && op.code >= 17) {
                         require_version(version, 4);
                     }
                     let descriptor: uint8[list] = new;
@@ -1220,13 +1220,13 @@ export let BiscuitWire = module (
         last payload = parsed.require(10)?;
         last signature = parsed.require(18)?;
         last external = read_external(signature.bytes)?;
-        if (!external.key.equals(expected_signer)) {
+        if (not external.key.equals(expected_signer)) {
             return invalid<uint8[list]>("unexpected signer in the Biscuit third-party response");
         }
         let _ = block_data(payload.bytes, new, default_symbols(), new, true)?;
         last token = read_verified(encoded, root)?;
         let _ = can_append(token)?;
-        if (!external.key.verify(external_payload(payload.bytes, token.final_block.signature), external.signature)) {
+        if (not external.key.verify(external_payload(payload.bytes, token.final_block.signature), external.signature)) {
             words.wipe(token.proof.bytes);
             return datalog.fail<uint8[list]>("biscuit.signature", "Biscuit third-party signature does not verify");
         }

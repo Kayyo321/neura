@@ -177,7 +177,7 @@ export let Sss = module (
     /// @brief Traps unless 2 <= threshold <= parts <= limit.
     let check_counts = func(parts: int, threshold: int, limit: int) {
         if (threshold < 2 || threshold > parts || parts > limit) {
-            trap_with_message("invalid argument: Shamir sharing needs 2 <= threshold <= parts <= " + limit.to_string());
+            trap_with_message("invalid argument: Shamir sharing needs 2 <= threshold <= parts <= " .. limit.to_string());
         }
     };
 

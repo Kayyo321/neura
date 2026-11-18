@@ -91,7 +91,7 @@ export let Blake3 = module (
             padded.append(0);
         }
         let out: uint32[list] = new;
-        for (let i = 0; i < 16; i++) {
+        for (let i in 0 .. 16) {
             out.append(words.load32_le(padded, 4 * i));
         }
         return out;
@@ -108,7 +108,7 @@ export let Blake3 = module (
 
     let first8 = func(state: uint32[list]) -> uint32[list] {
         let out: uint32[list] = new;
-        for (let i = 0; i < 8; i++) {
+        for (let i in 0 .. 8) {
             out.append(state[i]);
         }
         return out;
@@ -117,7 +117,7 @@ export let Blake3 = module (
     /// @brief The 8 words of a 32-byte key.
     let key_words = func(key: uint8[list]) -> uint32[list] {
         let out: uint32[list] = new;
-        for (let i = 0; i < 8; i++) {
+        for (let i in 0 .. 8) {
             out.append(words.load32_le(key, 4 * i));
         }
         return out;
@@ -259,10 +259,10 @@ export let Blake3 = module (
 
         /// @brief The next `count` bytes of output.
         export let squeeze = func(count: int) -> uint8[list] {
-            if (!squeezing) {
+            if (not squeezing) {
                 squeezing = true;
                 let node = chunk_node();
-                for (let i = stack.length - 1; i >= 0; i--) {
+                for (let i in stack.length - 1 ..= 0 : -1) {
                     node = parent(stack[i], node.chaining_value());
                 }
                 output = node;

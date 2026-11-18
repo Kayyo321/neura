@@ -40,10 +40,9 @@ export let BitString = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is BitString)) {
+            if (other is not that: BitString) {
                 return false;
             }
-            last that = other as BitString;
             if (that.unused_bits != unused_bits || that.bytes.length != bytes.length) {
                 return false;
             }
@@ -64,6 +63,6 @@ export let BitString = module (
         };
 
         /// @brief "BitString(<bits> bits)".
-        export let.override to_string = func -> string => "BitString(" + bit_length().to_string() + " bits)";
+        export let.override to_string = func -> string => "BitString(" .. bit_length().to_string() .. " bits)";
     );
 );

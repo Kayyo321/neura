@@ -55,7 +55,7 @@ export let HybridKem768 = module (
         }
         last kem = new_kem();
         let _ = kem.parse_public_key(words.slice(bytes, 0, MlKeyLength))?;
-        if (!x_wing) {
+        if (not x_wing) {
             last x = words.slice(bytes, MlKeyLength, PublicKeyLength);
             // With the clamped 2^254 scalar, this tests for low-order points without introducing a blocklist.
             if (constant_time.ct_eq(x25519.x25519(words.zeros(ScalarLength), x), words.zeros(ScalarLength))) {
@@ -80,7 +80,7 @@ export let HybridKem768 = module (
         let combined = words.copy(shared_ml.expose());
         words.append_all(combined, shared_x);
         shared_ml.wipe();
-        if (!x_wing) {
+        if (not x_wing) {
             last secret = new SecretBytes(combined);
             words.wipe(combined);
             return secret;
@@ -123,7 +123,7 @@ export let HybridKem768 = module (
         let private_x = words.slice(expanded, 64, ExpandedSeedLength);
         let shared_x = x25519.x25519(private_x, ciphertext_x);
         words.wipe(private_x);
-        if (!x_wing && constant_time.ct_eq(shared_x, words.zeros(ScalarLength))) {
+        if (not x_wing && constant_time.ct_eq(shared_x, words.zeros(ScalarLength))) {
             words.wipe(shared_x);
             return invalid<SecretBytes>("crypto.invalid_ciphertext", "X25519 share is a low-order point");
         }

@@ -181,10 +181,9 @@ export let Frost = module (
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SignatureShare)) {
+            if (other is not that: SignatureShare) {
                 return false;
             }
-            last that = other as SignatureShare;
             return suite == that.suite && same(tag, that.tag) && same(encoding, that.encoding);
         };
 
@@ -279,16 +278,15 @@ export let Frost = module (
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SigningGroup)) {
+            if (other is not that: SigningGroup) {
                 return false;
             }
-            last that = other as SigningGroup;
             if (suite != that.suite || threshold != that.threshold || roster.length != that.roster.length
-                || !same(key_bytes, that.key_bytes)) {
+                || not same(key_bytes, that.key_bytes)) {
                 return false;
             }
             for (let i = 0; i < roster.length; i++) {
-                if (!roster[i].equals(that.roster[i])) {
+                if (not roster[i].equals(that.roster[i])) {
                     return false;
                 }
             }
@@ -491,15 +489,15 @@ export let Frost = module (
 
         let sign_attempt = func(nonce: NonceState, round: SigningRound, approved_message: uint8[list],
             scalars: uint8[list]) -> Result<SignatureShare> {
-            if (!round.matches_message(approved_message)) {
+            if (not round.matches_message(approved_message)) {
                 return fail<SignatureShare>("crypto.frost_message", "FROST transcript does not match the approved message");
             }
-            if (!nonce.owned_by(owner) || !round.matches_group(group)) {
+            if (not nonce.owned_by(owner) || not round.matches_group(group)) {
                 return fail<SignatureShare>("crypto.frost_nonce", "nonce or signing group belongs to another signer");
             }
             last id = member.identifier();
             last index = round.index_of(id);
-            if (index < 0 || !nonce.commitment().equals(round.party_at(index).commitment)) {
+            if (index < 0 || not nonce.commitment().equals(round.party_at(index).commitment)) {
                 return fail<SignatureShare>("crypto.frost_commitment", "signer's commitment does not match the transcript");
             }
             last g = engine(group.suite);
@@ -635,13 +633,13 @@ export let Frost = module (
                     return fail<uint8[list]>("crypto.frost_share", "unknown or duplicate signing share");
                 }
                 last scalar = g.scalar_unchecked(share.scalar());
-                if (!check_share(g, scalar, parties[index])) {
+                if (not check_share(g, scalar, parties[index])) {
                     return fail<uint8[list]>("crypto.frost_share", $"invalid signature share at roster index {index}");
                 }
                 visited[index] = true;
                 sum = g.scalar_add(sum, scalar);
             }
-            if (!g.signature_equation(sum, commitment, challenge, group.point())) {
+            if (not g.signature_equation(sum, commitment, challenge, group.point())) {
                 return fail<uint8[list]>("crypto.frost_share", "aggregate failed the final signature check");
             }
             return Result<uint8[list]>.Ok(words.concat(commitment_bytes, g.scalar_bytes(sum)));
@@ -656,15 +654,14 @@ export let Frost = module (
         /// @see [Std.Crypto.Advanced.Frost](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Frost)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SigningRound)) {
+            if (other is not that: SigningRound) {
                 return false;
             }
-            last that = other as SigningRound;
-            if (!group.equals(that.group) || !same(message_bytes, that.message_bytes) || parties.length != that.parties.length) {
+            if (not group.equals(that.group) || not same(message_bytes, that.message_bytes) || parties.length != that.parties.length) {
                 return false;
             }
             for (let i = 0; i < parties.length; i++) {
-                if (!parties[i].commitment.equals(that.parties[i].commitment)) {
+                if (not parties[i].commitment.equals(that.parties[i].commitment)) {
                     return false;
                 }
             }
@@ -775,7 +772,7 @@ export let Frost = module (
             signing_group(Suite.Ristretto255Sha512, public_key, threshold, members)
         or func(suite: Suite, public_key: uint8[list], threshold: int, members: Member[list])
         -> Result<SigningGroup> {
-            if (!valid_sizes(threshold, members.length)) {
+            if (not valid_sizes(threshold, members.length)) {
                 return fail<SigningGroup>("crypto.frost_group", "invalid FROST threshold or roster size");
             }
             last g = engine(suite);
@@ -784,7 +781,7 @@ export let Frost = module (
                 if (members[i].suite != suite) {
                     return fail<SigningGroup>("crypto.frost_group", "FROST roster member belongs to a different suite");
                 }
-                if (i > 0 && !in_order(g, members[i - 1].identifier(), members[i].identifier())) {
+                if (i > 0 && not in_order(g, members[i - 1].identifier(), members[i].identifier())) {
                     return fail<SigningGroup>("crypto.frost_group", "FROST roster identifiers must be strictly increasing");
                 }
             }
@@ -805,9 +802,7 @@ export let Frost = module (
         last participant = group.member_at(index);
         last fits = mp.is_zero(value) != 1 && g.equal(g.multiply_base(value), participant.element());
         wipe_scalar(value);
-        if (!fits) {
-            return fail<SigningShare>("crypto.frost_share", "signing scalar does not match its verification share");
-        }
+        return fail<SigningShare>("crypto.frost_share", "signing scalar does not match its verification share") unless fits;
         return Result<SigningShare>.Ok(new SigningShare(scalar, group, participant));
     };
 
@@ -858,7 +853,7 @@ export let Frost = module (
                 return fail<SigningRound>("crypto.frost_commitment", "FROST commitment belongs to a different suite");
             }
             last id = entry.identifier();
-            if (ids.length != 0 && !in_order(g, ids[ids.length - 1], id)) {
+            if (ids.length != 0 && not in_order(g, ids[ids.length - 1], id)) {
                 return fail<SigningRound>("crypto.frost_commitment", "FROST commitments must be strictly increasing");
             }
             last index = group.member_index(id);
@@ -944,7 +939,7 @@ export let Frost = module (
     export let deal = func(threshold: int, participants: int) -> Result<DealerPackage> =>
         deal(Suite.Ristretto255Sha512, threshold, participants)
         or func(suite: Suite, threshold: int, participants: int) -> Result<DealerPackage> {
-            if (!valid_sizes(threshold, participants)) {
+            if (not valid_sizes(threshold, participants)) {
                 return fail<DealerPackage>("crypto.frost_group", "invalid FROST dealer threshold or member count");
             }
             last g = engine(suite);
@@ -961,7 +956,7 @@ export let Frost = module (
             deal_with_drbg(Suite.Ristretto255Sha512, threshold, participants, generator)
         or func(suite: Suite, threshold: int, participants: int, generator: drbg.ChaCha20Drbg)
         -> Result<DealerPackage> {
-            if (!valid_sizes(threshold, participants)) {
+            if (not valid_sizes(threshold, participants)) {
                 return fail<DealerPackage>("crypto.frost_group", "invalid FROST dealer threshold or member count");
             }
             last g = engine(suite);
@@ -994,7 +989,7 @@ export let Frost = module (
             deal_with_coefficients(Suite.Ristretto255Sha512, coefficients, participants)
         or func(suite: Suite, coefficients: uint8[list][list], participants: int)
         -> Result<DealerPackage> {
-            if (!valid_sizes(coefficients.length, participants)) {
+            if (not valid_sizes(coefficients.length, participants)) {
                 return fail<DealerPackage>("crypto.frost_group", "invalid FROST coefficient or member count");
             }
             last g = engine(suite);

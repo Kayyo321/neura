@@ -58,7 +58,7 @@ export let PkiPolicyTree = module (
 
         let has_child_with = func(index: int, policy: string) -> bool {
             for (let n in nodes) {
-                if (!n.deleted && n.parent == index && n.valid_policy == policy) {
+                if (not n.deleted && n.parent == index && n.valid_policy == policy) {
                     return true;
                 }
             }
@@ -67,7 +67,7 @@ export let PkiPolicyTree = module (
 
         let has_child = func(index: int) -> bool {
             for (let n in nodes) {
-                if (!n.deleted && n.parent == index) {
+                if (not n.deleted && n.parent == index) {
                     return true;
                 }
             }
@@ -78,7 +78,7 @@ export let PkiPolicyTree = module (
         let delete_node = func(index: int) {
             nodes[index].deleted = true;
             for (let i = index + 1; i < nodes.length; i++) {
-                if (!nodes[i].deleted && nodes[i].parent >= 0 && nodes[nodes[i].parent].deleted) {
+                if (not nodes[i].deleted && nodes[i].parent >= 0 && nodes[nodes[i].parent].deleted) {
                     nodes[i].deleted = true;
                 }
             }
@@ -91,7 +91,7 @@ export let PkiPolicyTree = module (
             while (changed) {
                 changed = false;
                 for (let i = nodes.length - 1; i >= 0; i--) {
-                    if (!nodes[i].deleted && nodes[i].depth <= max_depth && !has_child(i)) {
+                    if (not nodes[i].deleted && nodes[i].depth <= max_depth && not has_child(i)) {
                         nodes[i].deleted = true;
                         changed = true;
                     }
@@ -118,15 +118,15 @@ export let PkiPolicyTree = module (
                 let matched = false;
                 for (let k = 0; k < count; k++) {
                     last node = nodes[k];
-                    if (!node.deleted && node.depth == i - 1 && contains(node.expected, p)) {
+                    if (not node.deleted && node.depth == i - 1 && contains(node.expected, p)) {
                         add(p, info.qualifiers, new([p]), i, k);
                         matched = true;
                     }
                 }
-                if (!matched) {
+                if (not matched) {
                     for (let k = 0; k < count; k++) {
                         last node = nodes[k];
-                        if (!node.deleted && node.depth == i - 1 && node.valid_policy == oids.AnyPolicy) {
+                        if (not node.deleted && node.depth == i - 1 && node.valid_policy == oids.AnyPolicy) {
                             add(p, info.qualifiers, new([p]), i, k);
                         }
                     }
@@ -138,7 +138,7 @@ export let PkiPolicyTree = module (
                         continue;
                     }
                     for (let value in nodes[k].expected) {
-                        if (!has_child_with(k, value)) {
+                        if (not has_child_with(k, value)) {
                             add(value, any_qualifiers, new([value]), i, k);
                         }
                     }
@@ -152,7 +152,7 @@ export let PkiPolicyTree = module (
         export let apply_mappings = func(i: int, mappings: PolicyMapping[list], mapping_allowed: bool) {
             let issuers: string[list] = new;
             for (let m in mappings) {
-                if (!contains(issuers, m.issuer_domain.dotted)) {
+                if (not contains(issuers, m.issuer_domain.dotted)) {
                     issuers.append(m.issuer_domain.dotted);
                 }
             }
@@ -160,22 +160,22 @@ export let PkiPolicyTree = module (
                 if (mapping_allowed) {
                     let mapped: string[list] = new;
                     for (let m in mappings) {
-                        if (m.issuer_domain.dotted == id && !contains(mapped, m.subject_domain.dotted)) {
+                        if (m.issuer_domain.dotted == id && not contains(mapped, m.subject_domain.dotted)) {
                             mapped.append(m.subject_domain.dotted);
                         }
                     }
                     let found = false;
                     for (let n in nodes) {
-                        if (!n.deleted && n.depth == i && n.valid_policy == id) {
+                        if (not n.deleted && n.depth == i && n.valid_policy == id) {
                             n.expected = copy(mapped);
                             found = true;
                         }
                     }
-                    if (!found) {
+                    if (not found) {
                         last count = nodes.length;
                         for (let k = 0; k < count; k++) {
                             last n = nodes[k];
-                            if (!n.deleted && n.depth == i && n.valid_policy == oids.AnyPolicy) {
+                            if (not n.deleted && n.depth == i && n.valid_policy == oids.AnyPolicy) {
                                 add(id, n.qualifiers, copy(mapped), i, n.parent);
                                 break;
                             }
@@ -183,13 +183,13 @@ export let PkiPolicyTree = module (
                     }
                 } else {
                     for (let k = 0; k < nodes.length; k++) {
-                        if (!nodes[k].deleted && nodes[k].depth == i && nodes[k].valid_policy == id) {
+                        if (not nodes[k].deleted && nodes[k].depth == i && nodes[k].valid_policy == id) {
                             delete_node(k);
                         }
                     }
                 }
             }
-            if (!mapping_allowed) {
+            if (not mapping_allowed) {
                 prune(i - 1);
             }
         };
@@ -202,7 +202,7 @@ export let PkiPolicyTree = module (
             // valid_policy_node_set: nodes whose parent is an anyPolicy node.
             let in_set: int[list] = new;
             for (let k = 1; k < nodes.length; k++) {
-                if (!nodes[k].deleted && nodes[nodes[k].parent].valid_policy == oids.AnyPolicy) {
+                if (not nodes[k].deleted && nodes[nodes[k].parent].valid_policy == oids.AnyPolicy) {
                     in_set.append(k);
                 }
             }
@@ -212,16 +212,16 @@ export let PkiPolicyTree = module (
             }
             for (let k in in_set) {
                 last p = nodes[k].valid_policy;
-                if (!nodes[k].deleted && p != oids.AnyPolicy && !contains(user_set, p)) {
+                if (not nodes[k].deleted && p != oids.AnyPolicy && not contains(user_set, p)) {
                     delete_node(k);
                 }
             }
             last count = nodes.length;
             for (let k = 0; k < count; k++) {
                 last node = nodes[k];
-                if (!node.deleted && node.depth == n && node.valid_policy == oids.AnyPolicy) {
+                if (not node.deleted && node.depth == n && node.valid_policy == oids.AnyPolicy) {
                     for (let p in user_set) {
-                        if (!contains(set_policies, p)) {
+                        if (not contains(set_policies, p)) {
                             add(p, node.qualifiers, new([p]), n, node.parent);
                         }
                     }
@@ -238,7 +238,7 @@ export let PkiPolicyTree = module (
                 return out;
             }
             for (let node in nodes) {
-                if (!node.deleted && node.depth == n && !contains(out, node.valid_policy)) {
+                if (not node.deleted && node.depth == n && not contains(out, node.valid_policy)) {
                     out.append(node.valid_policy);
                 }
             }

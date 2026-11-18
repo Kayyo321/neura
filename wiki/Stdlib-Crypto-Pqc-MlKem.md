@@ -30,49 +30,49 @@ The following public declarations are taken from the module source; each links t
 - **MlKem.MlKemPublicKey** · [`export let to_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L103)
   A copy of the encoded key. Tagged `#NoDiscard`.
 - **MlKem.MlKemPublicKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L105)
-- **MlKem.MlKemPublicKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L122)
-- **MlKem.MlKemPublicKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L130)
-- **MlKem** · [`export let MlKemPrivateKey = class implements PrivateKey<MlKem>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L137)
+- **MlKem.MlKemPublicKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L121)
+- **MlKem.MlKemPublicKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L129)
+- **MlKem** · [`export let MlKemPrivateKey = class implements PrivateKey<MlKem>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L136)
   An ML-KEM decapsulation key (dk_PKE || ek || H(ek) || z) in secret memory. Every instance has passed the length and hash checks of FIPS 203, section 7.3. `to_string` never prints it. Tagged `#Final`. Since 0.3.0.
-- **MlKem.MlKemPrivateKey** · [`export last parameter_set: ParameterSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L139)
+- **MlKem.MlKemPrivateKey** · [`export last parameter_set: ParameterSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L138)
   The parameter set.
-- **MlKem.MlKemPrivateKey** · [`export let init = func(set: ParameterSet, bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L144)
+- **MlKem.MlKemPrivateKey** · [`export let init = func(set: ParameterSet, bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L143)
   Copies the encoded key. A wrong length, or a key whose stored H(ek) does not match, traps with `invalid argument`; use `MlKem.parse_private_key` for keys from outside the program.
-- **MlKem.MlKemPrivateKey** · [`export let expose = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L157)
-- **MlKem.MlKemPrivateKey** · [`export let wipe = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L158)
-- **MlKem.MlKemPrivateKey** · [`export let is_wiped = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L159)
-- **MlKem.MlKemPrivateKey** · [`export let lock = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L160)
-- **MlKem.MlKemPrivateKey** · [`export let public_key_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L163)
+- **MlKem.MlKemPrivateKey** · [`export let expose = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L156)
+- **MlKem.MlKemPrivateKey** · [`export let wipe = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L157)
+- **MlKem.MlKemPrivateKey** · [`export let is_wiped = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L158)
+- **MlKem.MlKemPrivateKey** · [`export let lock = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L159)
+- **MlKem.MlKemPrivateKey** · [`export let public_key_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L162)
   The encapsulation key stored inside the decapsulation key.
-- **MlKem.MlKemPrivateKey** · [`export let public_key = func -> MlKemPublicKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L170)
+- **MlKem.MlKemPrivateKey** · [`export let public_key = func -> MlKemPublicKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L169)
   The matching public key. Tagged `#NoDiscard`.
-- **MlKem.MlKemPrivateKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L173)
+- **MlKem.MlKemPrivateKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L172)
   A fixed placeholder, never the key.
-- **MlKem** · [`export let MlKem = class implements KeyEncapsulation<MlKemPublicKey, MlKemPrivateKey, SecretBytes, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L179)
+- **MlKem** · [`export let MlKem = class implements KeyEncapsulation<MlKemPublicKey, MlKemPrivateKey, SecretBytes, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L178)
   An ML-KEM parameter set as a `KeyEncapsulation`. The shared secret is a 32-byte `SecretBytes` and the ciphertext a byte list. Tagged `#Final`. Since 0.3.0.
-- **MlKem.MlKem** · [`export last parameter_set: ParameterSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L181)
+- **MlKem.MlKem** · [`export last parameter_set: ParameterSet`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L180)
   The parameter set.
-- **MlKem.MlKem** · [`export let init = func(set: ParameterSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L187)
+- **MlKem.MlKem** · [`export let init = func(set: ParameterSet)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L186)
   The parameter set, with randomness from `Entropy.os_bytes`, or from the given generator.
-- **MlKem.MlKem** · [`export let algorithm = func -> Algorithm`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L200)
+- **MlKem.MlKem** · [`export let algorithm = func -> Algorithm`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L199)
   `MlKem512`, `MlKem768` or `MlKem1024`.
-- **MlKem.MlKem** · [`export let key_pair_from_seed = func(d: uint8[list], z: uint8[list]) -> MlKemPrivateKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L212)
+- **MlKem.MlKem** · [`export let key_pair_from_seed = func(d: uint8[list], z: uint8[list]) -> MlKemPrivateKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L211)
   ML-KEM.KeyGen_internal (FIPS 203, Algorithm 16) from the 32-byte seeds d and z. Another length traps. Tagged `#NoDiscard`.
-- **MlKem.MlKem** · [`export let generate_key_pair = func -> Result<MlKemPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L225)
+- **MlKem.MlKem** · [`export let generate_key_pair = func -> Result<MlKemPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L224)
   ML-KEM.KeyGen (FIPS 203, Algorithm 19) with 64 random bytes. Fails when the entropy source fails. Tagged `#NoDiscard`.
-- **MlKem.MlKem** · [`export let encapsulate_with = func(public_key: MlKemPublicKey, m: uint8[list]) -> Encapsulation<SecretBytes, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L247)
+- **MlKem.MlKem** · [`export let encapsulate_with = func(public_key: MlKemPublicKey, m: uint8[list]) -> Encapsulation<SecretBytes, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L246)
   ML-KEM.Encaps_internal (FIPS 203, Algorithm 17) with the given 32-byte m. Another length, or a key of another parameter set, traps. Tagged `#NoDiscard`.
-- **MlKem.MlKem** · [`export let try_encapsulate = func(public_key: MlKemPublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L262)
+- **MlKem.MlKem** · [`export let try_encapsulate = func(public_key: MlKemPublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L261)
   ML-KEM.Encaps (FIPS 203, Algorithm 20) with 32 random bytes. Fails when the entropy source fails. Tagged `#NoDiscard`.
-- **MlKem.MlKem** · [`export let encapsulate = func(public_key: MlKemPublicKey) -> Encapsulation<SecretBytes, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L277)
+- **MlKem.MlKem** · [`export let encapsulate = func(public_key: MlKemPublicKey) -> Encapsulation<SecretBytes, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L276)
   ML-KEM.Encaps with 32 random bytes. Traps with `unavailable: ...` when the entropy source fails; `try_encapsulate` returns that failure instead.
-- **MlKem.MlKem** · [`export let decapsulate = func(private_key: MlKemPrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L291)
+- **MlKem.MlKem** · [`export let decapsulate = func(private_key: MlKemPrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L290)
   ML-KEM.Decaps (FIPS 203, Algorithm 21). A ciphertext of the wrong length fails with `Custom` code `crypto.invalid_ciphertext`; any ciphertext of the right length gives a key, the implicit rejection key when it was altered. A key of another parameter set traps.
-- **MlKem.MlKem** · [`export let parse_public_key = func(bytes: uint8[list]) -> Result<MlKemPublicKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L306)
+- **MlKem.MlKem** · [`export let parse_public_key = func(bytes: uint8[list]) -> Result<MlKemPublicKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L305)
   An encapsulation key from outside the program, after the length and modulus checks of FIPS 203, section 7.2. A failure is `Custom` code `crypto.invalid_key`. Tagged `#NoDiscard`.
-- **MlKem.MlKem** · [`export let parse_private_key = func(bytes: uint8[list]) -> Result<MlKemPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L320)
+- **MlKem.MlKem** · [`export let parse_private_key = func(bytes: uint8[list]) -> Result<MlKemPrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L319)
   A decapsulation key from outside the program, after the length and hash checks of FIPS 203, section 7.3. A failure is `Custom` code `crypto.invalid_key`. Tagged `#NoDiscard`.
-- **MlKem.MlKem** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L331)
+- **MlKem.MlKem** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/pqc/ml-kem.nra#L330)
 <!-- END SOURCE API -->
 
 ## Shared contracts

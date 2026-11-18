@@ -44,13 +44,13 @@ export let MlKemCore = module (
             }
             let powers: int32[list] = new;
             let p = 1;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 powers.append(p);
                 p = (p * 17) % Q;
             }
-            for (let i = 0; i < 128; i++) {
+            for (let i in 0 .. 128) {
                 let r = 0;
-                for (let b = 0; b < 7; b++) {
+                for (let b in 0 .. 7) {
                     r = r | (((i >> b) & 1) << (6 - b));
                 }
                 zetas.append(powers[r]);
@@ -92,7 +92,7 @@ export let MlKemCore = module (
         let encode = func(out: uint8[list], f: int32[list], d: int) {
             let acc = 0;
             let bits = 0;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 acc = acc | (f[i] << bits);
                 bits += d;
                 while (bits >= 8) {
@@ -130,7 +130,7 @@ export let MlKemCore = module (
         let compress = func(f: int32[list], d: int) -> int32[list] {
             let out: int32[list] = new;
             last mask = (1 << d) - 1;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 out.append((((f[i] << (d + 1)) + Q) / (2 * Q)) & mask);
             }
             return out;
@@ -140,7 +140,7 @@ export let MlKemCore = module (
         let decompress = func(f: int32[list], d: int) -> int32[list] {
             let out: int32[list] = new;
             last half = 1 << (d - 1);
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 out.append((f[i] * Q + half) >> d);
             }
             return out;
@@ -186,7 +186,7 @@ export let MlKemCore = module (
             let bits = 0;
             let at = 0;
             last width = 2 * eta;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 while (bits < width) {
                     acc = acc | ((bytes[at] as int32) << bits);
                     at++;
@@ -244,14 +244,14 @@ export let MlKemCore = module (
                     }
                 }
             }
-            for (let j = 0; j < 256; j++) {
+            for (let j in 0 .. 256) {
                 f[j] = (f[j] * 3303) % Q;
             }
         };
 
         /// @brief acc += a * b in the NTT domain (MultiplyNTTs with BaseCaseMultiply), in place.
         let multiply_add = func(acc: int32[list], a: int32[list], b: int32[list]) {
-            for (let i = 0; i < 128; i++) {
+            for (let i in 0 .. 128) {
                 last a0 = a[2 * i];
                 last a1 = a[2 * i + 1];
                 last b0 = b[2 * i];
@@ -263,7 +263,7 @@ export let MlKemCore = module (
 
         let zero = func -> int32[list] {
             let f: int32[list] = new;
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 f.append(0);
             }
             return f;
@@ -271,7 +271,7 @@ export let MlKemCore = module (
 
         /// @brief f + g, coefficient-wise, in place in f.
         let add_into = func(f: int32[list], g: int32[list]) {
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 f[i] = (f[i] + g[i]) % Q;
             }
         };
@@ -379,7 +379,7 @@ export let MlKemCore = module (
             }
             inverse_ntt(w);
             last v = decompress(decode(c, 32 * du * k, dv), dv);
-            for (let i = 0; i < 256; i++) {
+            for (let i in 0 .. 256) {
                 w[i] = (v[i] - w[i] + Q) % Q;
             }
             let m: uint8[list] = new;
@@ -430,7 +430,7 @@ export let MlKemCore = module (
             // mask is 0xFF when diff != 0, else 0.
             last wide = diff as int32;
             last mask = (((0 - wide) >> 8) & 255) as uint8;
-            for (let i = 0; i < 32; i++) {
+            for (let i in 0 .. 32) {
                 key[i] = (key[i] & ~mask) | (rejected[i] & mask);
             }
             words.wipe(g);
@@ -445,7 +445,7 @@ export let MlKemCore = module (
             for (let i = 0; i < k; i++) {
                 let again: uint8[list] = new;
                 encode(again, decode(ek, 384 * i, 12), 12);
-                for (let j = 0; j < 384; j++) {
+                for (let j in 0 .. 384) {
                     if (again[j] != ek[384 * i + j]) {
                         return false;
                     }
@@ -458,7 +458,7 @@ export let MlKemCore = module (
         /// caller): H(ek) equals the stored hash.
         export let check_dk = func(dk: uint8[list]) -> bool {
             last hash = sha3_256(words.slice(dk, 384 * k, 768 * k + 32));
-            for (let i = 0; i < 32; i++) {
+            for (let i in 0 .. 32) {
                 if (hash[i] != dk[768 * k + 32 + i]) {
                     return false;
                 }
@@ -466,6 +466,6 @@ export let MlKemCore = module (
             return true;
         };
 
-        export let.override to_string = func -> string => "MlKemCore.Engine(k = " + k.to_string() + ")";
+        export let.override to_string = func -> string => "MlKemCore.Engine(k = " .. k.to_string() .. ")";
     );
 );

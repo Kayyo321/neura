@@ -57,25 +57,25 @@ The following public declarations are taken from the module source; each links t
   Binds the public key. A modulus shorter than 2048 bits traps. Since 0.3.0.
 - **Jwe.RsaWrappingKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L252)
   Whether the key and the content encryption algorithm are equal. Since 0.3.0.
-- **Jwe.RsaWrappingKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L263)
+- **Jwe.RsaWrappingKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L262)
   A hash of the public key and the content algorithm. Since 0.3.0.
-- **Jwe.RsaWrappingKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L268)
+- **Jwe.RsaWrappingKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L267)
   The key management and content encryption names. Since 0.3.0.
-- **Jwe** · [`export let RsaUnwrappingKey = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L274)
+- **Jwe** · [`export let RsaUnwrappingKey = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L273)
   An RSA private key bound to RSA-OAEP-256 and one content encryption algorithm. Tagged `#Final`. Since 0.3.0.
-- **Jwe.RsaUnwrappingKey** · [`export last encryption: ContentEncryption`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L278)
+- **Jwe.RsaUnwrappingKey** · [`export last encryption: ContentEncryption`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L277)
   The expected content encryption algorithm. Since 0.3.0.
-- **Jwe.RsaUnwrappingKey** · [`export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPrivateKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L284)
+- **Jwe.RsaUnwrappingKey** · [`export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPrivateKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L283)
   Retains the private key. A modulus shorter than 2048 bits traps. Since 0.3.0.
-- **Jwe.RsaUnwrappingKey** · [`export let open = func(compact: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L296)
+- **Jwe.RsaUnwrappingKey** · [`export let open = func(compact: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L295)
   Authenticates and decrypts an RSA-OAEP-256 compact JWE. Traps after the underlying key is wiped. On failure to recover the expected CEK, it still checks content authentication using a pseudorandom substitute derived under the private key, and returns the same authentication error. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwe.RsaUnwrappingKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L329)
+- **Jwe.RsaUnwrappingKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L328)
   A fixed placeholder for the key. Since 0.3.0.
-- **Jwe** · [`export let seal_with = func(key: DirectKey, plaintext: uint8[list], iv: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L538)
+- **Jwe** · [`export let seal_with = func(key: DirectKey, plaintext: uint8[list], iv: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L537)
   Deterministic compact encryption with a caller-supplied IV, and a CEK when using a wrapping key. The RSA-OAEP-256 overload also takes a 32-byte seed. Never reuse an IV under the same CEK. With a caller-supplied protected JSON header, its exact UTF-8 bytes are authenticated, and a malformed or mismatching header returns an error. An incorrect IV or CEK length traps. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwe** · [`export let seal = func(key: DirectKey, plaintext: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L607)
+- **Jwe** · [`export let seal = func(key: DirectKey, plaintext: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L606)
   Compact encryption with fresh IV and, for a wrapping key, a fresh CEK. An OS entropy failure is returned to the caller. A direct AES-GCM key using random IVs is limited to 2^32 seal operations across all users of that key. Overloads accept a caller's DRBG. Tagged `#NoDiscard`. Since 0.3.0.
-- **Jwe** · [`export let open = func(key: DirectKey, compact: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L625)
+- **Jwe** · [`export let open = func(key: DirectKey, compact: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/token/jwe.nra#L624)
   Authenticates and decrypts a compact JWE using the caller's expected algorithms. Malformed input and an algorithm mismatch return crypto.invalid_jwe. Integrity and decryption failures return crypto.authentication_failed, with no unauthenticated plaintext. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

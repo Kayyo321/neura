@@ -22,14 +22,14 @@ export let PkiSha1 = module (
         }
         words.append64_be(padded, (message.length as uint64) * 8);
         let w: uint32[list] = new;
-        for (let i = 0; i < 80; i++) {
+        for (let i in 0 .. 80) {
             w.append(0);
         }
         for (let block = 0; block < padded.length; block += 64) {
-            for (let t = 0; t < 16; t++) {
+            for (let t in 0 .. 16) {
                 w[t] = words.load32_be(padded, block + 4 * t);
             }
-            for (let t = 16; t < 80; t++) {
+            for (let t in 16 .. 80) {
                 w[t] = rotl(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1);
             }
             let a = h0;
@@ -37,7 +37,7 @@ export let PkiSha1 = module (
             let c = h2;
             let d = h3;
             let e = h4;
-            for (let t = 0; t < 80; t++) {
+            for (let t in 0 .. 80) {
                 let f: uint32 = 0;
                 let k: uint32 = 0;
                 if (t < 20) {

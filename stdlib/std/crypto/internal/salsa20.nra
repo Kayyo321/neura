@@ -10,11 +10,11 @@ export let Salsa20 = module (
 
     /// @brief Replaces the 16 words at `offset` of `block` with Salsa20/8 of them; `x` is 16 words of scratch.
     export let core8 = func(block: uint32[list], offset: int, x: uint32[list]) {
-        for (let i = 0; i < 16; i++) {
+        for (let i in 0 .. 16) {
             x[i] = block[offset + i];
         }
         rounds(x, 8);
-        for (let i = 0; i < 16; i++) {
+        for (let i in 0 .. 16) {
             block[offset + i] = words.add32(block[offset + i], x[i]);
         }
     };

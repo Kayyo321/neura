@@ -61,10 +61,9 @@ export let MemoryKeyStore = module (
         /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-MemoryKeyStore)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MemoryKeyHandle)) {
+            if (other is not that: MemoryKeyHandle) {
                 return false;
             }
-            last that = other as MemoryKeyHandle;
             return owner.equals(that.owner) && label == that.label && version == that.version;
         };
 
@@ -201,7 +200,7 @@ export let MemoryKeyStore = module (
         export let resolve = func(label: string, version: uint32) -> Result<MemoryKeyHandle> {
             for (let entry in keys) {
                 if (entry.handle.label == label && entry.handle.version == version) {
-                    if (!crypto_policy.allows(entry.handle.algorithm)) {
+                    if (not crypto_policy.allows(entry.handle.algorithm)) {
                         return failure<MemoryKeyHandle>("crypto.policy", "the key algorithm is denied by the active policy");
                     }
                     return Result<MemoryKeyHandle>.Ok(entry.handle);

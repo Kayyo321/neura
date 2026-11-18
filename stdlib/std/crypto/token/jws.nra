@@ -42,7 +42,7 @@ export let Jws = module (
         }
         check_header(parts[0], key.jose_algorithm())?;
         last signature = jose.decode(parts[2], InvalidFormat, "the signature must be base64url")?;
-        if (!key.verify_signature(words.utf8(parts[0] + "." + parts[1]), signature)) {
+        if (not key.verify_signature(words.utf8(parts[0] .. "." .. parts[1]), signature)) {
             return jose.fail<uint8[list]>("jws.signature", "signature verification failed");
         }
         return jose.decode(parts[1], InvalidFormat, "the payload must be base64url");
@@ -54,7 +54,7 @@ export let Jws = module (
     export let sign_ed25519 = func(payload: uint8[list], key: ed25519.Ed25519PrivateKey) -> string {
         last signer = new ed25519.Ed25519Signer(key);
         last header = jose.encode(words.utf8("{\"alg\":\"EdDSA\"}"));
-        last input = header + "." + jose.encode(payload);
-        return input + "." + jose.encode(signer.sign(words.utf8(input)));
+        last input = header .. "." .. jose.encode(payload);
+        return input .. "." .. jose.encode(signer.sign(words.utf8(input)));
     };
 );

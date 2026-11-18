@@ -46,7 +46,7 @@ export let MlDsa = module (
 
     /// @brief The standard's name of the parameter set, such as "ML-DSA-65".
     #[NoDiscard, Since("0.3.0")]
-    export let name = func(set: ParameterSet) -> string => "ML-DSA-" + level(set).to_string();
+    export let name = func(set: ParameterSet) -> string => "ML-DSA-" .. level(set).to_string();
 
     /// @brief The public-key length in bytes: 1312, 1952 or 2592.
     #[NoDiscard, Since("0.3.0")]
@@ -86,8 +86,8 @@ export let MlDsa = module (
         export let init = func(set: ParameterSet, bytes: uint8[list]) {
             crypto_policy.require(algorithm_of(set));
             if (bytes.length != public_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " public key must be "
-                    + public_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " public key must be "
+                    .. public_key_length(set).to_string() .. " bytes");
             }
             parameter_set = set;
             encoded = words.copy(bytes);
@@ -98,10 +98,9 @@ export let MlDsa = module (
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MlDsaPublicKey)) {
+            if (other is not key: MlDsaPublicKey) {
                 return false;
             }
-            last key = other as MlDsaPublicKey;
             if (key.parameter_set != parameter_set) {
                 return false;
             }
@@ -123,7 +122,7 @@ export let MlDsa = module (
         };
 
         export let.override to_string = func -> string =>
-            "MlDsaPublicKey(" + name(parameter_set) + ", " + encoded.length.to_string() + " bytes)";
+            "MlDsaPublicKey(" .. name(parameter_set) .. ", " .. encoded.length.to_string() .. " bytes)";
     );
 
     /// @brief An ML-DSA private key (FIPS 204 skEncode) in secret memory, with its public key. `to_string`
@@ -141,12 +140,12 @@ export let MlDsa = module (
         export let init = func(set: ParameterSet, bytes: uint8[list]) {
             crypto_policy.require(algorithm_of(set));
             if (bytes.length != private_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " private key must be "
-                    + private_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " private key must be "
+                    .. private_key_length(set).to_string() .. " bytes");
             }
             last pk = new core.Engine(level(set)).derive_public(bytes);
             if (pk.length == 0) {
-                trap_with_message("invalid argument: " + name(set) + " private key is malformed");
+                trap_with_message("invalid argument: " .. name(set) .. " private key is malformed");
             }
             parameter_set = set;
             material = new(bytes);
@@ -155,8 +154,8 @@ export let MlDsa = module (
             // From key generation or a parse, which computed the public key. The lengths are still checked.
             crypto_policy.require(algorithm_of(set));
             if (bytes.length != private_key_length(set) || public_bytes.length != public_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " keys must be " + private_key_length(set).to_string()
-                    + " and " + public_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " keys must be " .. private_key_length(set).to_string()
+                    .. " and " .. public_key_length(set).to_string() .. " bytes");
             }
             parameter_set = set;
             material = new(bytes);
@@ -215,7 +214,7 @@ export let MlDsa = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<MlDsaPublicKey> {
         if (bytes.length != public_key_length(set)) {
-            return invalid_key<MlDsaPublicKey>(name(set) + " public key must be " + public_key_length(set).to_string() + " bytes");
+            return invalid_key<MlDsaPublicKey>(name(set) .. " public key must be " .. public_key_length(set).to_string() .. " bytes");
         }
         return Result<MlDsaPublicKey>.Ok(new(set, bytes));
     };
@@ -226,11 +225,11 @@ export let MlDsa = module (
     export let parse_private_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<MlDsaPrivateKey> {
         crypto_policy.require(algorithm_of(set));
         if (bytes.length != private_key_length(set)) {
-            return invalid_key<MlDsaPrivateKey>(name(set) + " private key must be " + private_key_length(set).to_string() + " bytes");
+            return invalid_key<MlDsaPrivateKey>(name(set) .. " private key must be " .. private_key_length(set).to_string() .. " bytes");
         }
         last pk = new core.Engine(level(set)).derive_public(bytes);
         if (pk.length == 0) {
-            return invalid_key<MlDsaPrivateKey>(name(set) + " private key is malformed");
+            return invalid_key<MlDsaPrivateKey>(name(set) .. " private key is malformed");
         }
         return Result<MlDsaPrivateKey>.Ok(new(set, bytes, pk));
     };
@@ -351,7 +350,7 @@ export let MlDsa = module (
                     return signature;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: ML-DSA signing needs entropy: " + e.to_string());
+                    trap_with_message("unavailable: ML-DSA signing needs entropy: " .. e.to_string());
                 },
             }
         };
@@ -420,6 +419,6 @@ export let MlDsa = module (
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
             verify_with_context(message, signature, new);
 
-        export let.override to_string = func -> string => "MlDsaVerifier(" + name(key.parameter_set) + ")";
+        export let.override to_string = func -> string => "MlDsaVerifier(" .. name(key.parameter_set) .. ")";
     );
 );

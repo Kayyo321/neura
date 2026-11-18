@@ -77,10 +77,9 @@ export let Nitro = module (
         /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Measurement)) {
+            if (other is not right: Measurement) {
                 return false;
             }
-            last right = other as Measurement;
             return index == right.index && constant_time.ct_eq(digest, right.to_bytes());
         };
 
@@ -92,7 +91,7 @@ export let Nitro = module (
         /// @brief The PCR index.
         /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
-        export let.override to_string = func -> string => "Nitro.Measurement(" + index.to_string() + ")";
+        export let.override to_string = func -> string => "Nitro.Measurement(" .. index.to_string() .. ")";
     );
 
     /// @brief The decoded, signed claims. Use verify to authenticate and check the caller's policy.
@@ -185,10 +184,10 @@ export let Nitro = module (
         /// @see [Std.Crypto.Enclave.Nitro](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Nitro)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Document)) {
+            if (other is not that: Document) {
                 return false;
             }
-            return constant_time.ct_eq(encoded, (other as Document).to_bytes());
+            return constant_time.ct_eq(encoded, that.to_bytes());
         };
 
         /// @brief A hash of the original encoding.
@@ -396,7 +395,7 @@ export let Nitro = module (
                 return malformed<Payload>("unknown Nitro claim");
             }
         }
-        if (indefinite && !reader.take_marker(255)) {
+        if (indefinite && not reader.take_marker(255)) {
             return malformed<Payload>("Nitro break-terminated claim map exceeds nine entries or is truncated");
         }
         reader.finish()?;
@@ -406,8 +405,8 @@ export let Nitro = module (
                 bundle_present = true;
             }
         }
-        if (payload.module_id == "" || !payload.sha384 || payload.timestamp == 0 || payload.pcrs.length == 0
-            || payload.cert.length == 0 || !bundle_present) {
+        if (payload.module_id == "" || not payload.sha384 || payload.timestamp == 0 || payload.pcrs.length == 0
+            || payload.cert.length == 0 || not bundle_present) {
             return malformed<Payload>("missing or unsupported required Nitro claim");
         }
         return Result<Payload>.Ok(payload);
@@ -426,7 +425,7 @@ export let Nitro = module (
         }
         last protected = reader.blob(2, 4)?;
         let es384: uint8[list] = new([161, 1, 56, 34]);
-        if (!constant_time.ct_eq(protected, es384)) {
+        if (not constant_time.ct_eq(protected, es384)) {
             return malformed<SignedReport>("Nitro protected header must specify ES384");
         }
         let _ = reader.count(5, 0)?;
@@ -500,7 +499,7 @@ export let Nitro = module (
         require_key_usage(leaf, extensions.DigitalSignature)?;
         let intermediates: certificate.Certificate[list] = new;
         for (let bytes in signed.bundle) {
-            if (!constant_time.ct_eq(trusted_root_der, bytes)) {
+            if (not constant_time.ct_eq(trusted_root_der, bytes)) {
                 intermediates.append(certificate.parse(bytes)?);
             }
         }
@@ -512,7 +511,7 @@ export let Nitro = module (
         for (let i = 1; i < chain.length; i++) {
             require_key_usage(chain[i], extensions.KeyCertSign)?;
         }
-        if (!crypto_policy.allows(Algorithm.P384) || !crypto_policy.allows(Algorithm.Sha384)) {
+        if (not crypto_policy.allows(Algorithm.P384) || not crypto_policy.allows(Algorithm.Sha384)) {
             return failure<Document>("crypto.attestation_policy", "Nitro ES384 is denied by the crypto policy");
         }
         if (leaf.public_key.key_algorithm != public_keys.KeyAlgorithm.Ec || leaf.public_key.parameter_set != "P-384") {
@@ -520,7 +519,7 @@ export let Nitro = module (
         }
         last key = ecdsa.parse_public_key(ecdsa.Curve.P384, leaf.public_key.key)?;
         last verifier = new ecdsa.EcdsaVerifier(key, Algorithm.Sha384);
-        if (!verifier.verify_raw(signature_structure(signed), signed.signature)) {
+        if (not verifier.verify_raw(signature_structure(signed), signed.signature)) {
             return failure<Document>("crypto.attestation_signature", "invalid Nitro COSE signature");
         }
         return Result<Document>.Ok(signed.document);
@@ -556,15 +555,15 @@ export let Nitro = module (
                 trap_with_message("invalid argument: duplicate expected Nitro PCR");
             }
             seen = seen | mask;
-            present = present || !zero(measurement.to_bytes());
+            present = present || not zero(measurement.to_bytes());
         }
-        if (!present) {
+        if (not present) {
             trap_with_message("invalid argument: expected Nitro PCR policy must include a nonzero measurement");
         }
     };
 
     let valid_boot = func(document: Document) -> bool {
-        for (let index = 0; index < 3; index++) {
+        for (let index in 0 .. 3) {
             match (document.pcr(index)) {
                 Optional.None => {
                     return false;
@@ -591,15 +590,15 @@ export let Nitro = module (
         expected_nonce: uint8[list], expected_pcrs: Measurement[list], max_age_millis: int64) -> Result<Document> {
         check_policy_arguments(expected_nonce, expected_pcrs, max_age_millis);
         last document = verify_signed(report, trusted_root_der, at)?;
-        if (!fresh(document.timestamp_millis, at, max_age_millis)) {
+        if (not fresh(document.timestamp_millis, at, max_age_millis)) {
             return failure<Document>("crypto.attestation_time", "Nitro report has a future or stale timestamp");
         }
-        if (!valid_boot(document)) {
+        if (not valid_boot(document)) {
             return failure<Document>("crypto.attestation_measurement", "Nitro report is missing boot measurements or is debug evidence");
         }
         match (document.nonce()) {
             Optional.Some(bytes) => {
-                if (!constant_time.ct_eq(bytes, expected_nonce)) {
+                if (not constant_time.ct_eq(bytes, expected_nonce)) {
                     return failure<Document>("crypto.attestation_nonce", "Nitro nonce does not match");
                 }
             },
@@ -610,7 +609,7 @@ export let Nitro = module (
         for (let expected in expected_pcrs) {
             match (document.pcr(expected.index)) {
                 Optional.Some(actual) => {
-                    if (!actual.equals(expected)) {
+                    if (not actual.equals(expected)) {
                         return failure<Document>("crypto.attestation_measurement", "Nitro PCR does not match");
                     }
                 },
@@ -628,6 +627,6 @@ export let Nitro = module (
     #[NoDiscard, Since("0.3.0")]
     export let request_attestation = func(nonce, user_data, public_key: uint8[list]) -> Result<uint8[list]> {
         trap_with_message("unsupported: Std.Crypto.Enclave.Nitro.request_attestation is not implemented in Neura 0.3.0 "
-            + "(the runtime has no Nitro Secure Module attestation host operation)");
+            .. "(the runtime has no Nitro Secure Module attestation host operation)");
     };
 );

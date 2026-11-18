@@ -58,7 +58,7 @@ export let X25519MlKem768 = module (
             crypto_policy.require(Algorithm.X25519MlKem768);
             match (hybrid.validate_public_key(bytes, false)) {
                 Result.Err(e) => {
-                    trap_with_message("invalid argument: " + e.to_string());
+                    trap_with_message("invalid argument: " .. e.to_string());
                 },
                 Result.Ok(_) => {},
             }
@@ -74,10 +74,10 @@ export let X25519MlKem768 = module (
         /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-X25519MlKem768)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is X25519MlKem768PublicKey)) {
+            if (other is not that: X25519MlKem768PublicKey) {
                 return false;
             }
-            return constant_time.ct_eq(encoded, (other as X25519MlKem768PublicKey).to_bytes());
+            return constant_time.ct_eq(encoded, that.to_bytes());
         };
 
         /// @brief A hash of the encoded key bytes.
@@ -232,7 +232,7 @@ export let X25519MlKem768 = module (
                     return value;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: X25519MLKEM768 encapsulation needs entropy: " + e.to_string());
+                    trap_with_message("unavailable: X25519MLKEM768 encapsulation needs entropy: " .. e.to_string());
                 },
             }
         };
@@ -253,7 +253,7 @@ export let X25519MlKem768 = module (
             return shared;
         };
 
-        /// @brief The scheme name.
+        /// @brief A fixed placeholder for the encapsulation state.
         /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pqc-X25519MlKem768)
         #Since("0.3.0")
         export let.override to_string = func -> string => "X25519MlKem768(<redacted>)";

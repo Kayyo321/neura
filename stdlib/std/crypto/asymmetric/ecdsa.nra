@@ -93,7 +93,7 @@ export let Ecdsa = module (
             last g = group(key_curve);
             match (g.decode(sec1)) {
                 Optional.None => {
-                    trap_with_message("invalid argument: not a " + name(key_curve) + " public key");
+                    trap_with_message("invalid argument: not a " .. name(key_curve) .. " public key");
                 },
                 Optional.Some(point) => {
                     curve = key_curve;
@@ -105,9 +105,7 @@ export let Ecdsa = module (
         /// @brief The SEC1 encoding: 0x04 || x || y, or 0x02 / 0x03 || x when compressed.
         #NoDiscard
         export let to_sec1 = func(compressed: bool) -> uint8[list] {
-            if (!compressed) {
-                return words.copy(encoded);
-            }
+            return words.copy(encoded) unless compressed;
             last size = scalar_length(curve);
             let out: uint8[list] = new([(2 + (encoded[2 * size] & 1)) as uint8]);
             words.append_all(out, words.slice(encoded, 1, 1 + size));
@@ -115,10 +113,9 @@ export let Ecdsa = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is EcPublicKey)) {
+            if (other is not key: EcPublicKey) {
                 return false;
             }
-            last key = other as EcPublicKey;
             return key.curve == curve && constant_time.ct_eq(encoded, key.to_sec1(false));
         };
 
@@ -130,7 +127,7 @@ export let Ecdsa = module (
             return h;
         };
 
-        export let.override to_string = func -> string => "EcPublicKey(" + name(curve) + ")";
+        export let.override to_string = func -> string => "EcPublicKey(" .. name(curve) .. ")";
     );
 
     /// @brief An elliptic-curve private key: the scalar d (1 <= d < n) as big-endian bytes of the curve's
@@ -147,13 +144,13 @@ export let Ecdsa = module (
         export let init = func(key_curve: Curve, bytes: uint8[list]) {
             crypto_policy.require(algorithm_of(key_curve));
             if (bytes.length != scalar_length(key_curve)) {
-                trap_with_message("invalid argument: " + name(key_curve) + " private key must be "
-                    + scalar_length(key_curve).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(key_curve) .. " private key must be "
+                    .. scalar_length(key_curve).to_string() .. " bytes");
             }
             last g = group(key_curve);
             match (g.scalar_in_range(bytes)) {
                 Optional.None => {
-                    trap_with_message("invalid argument: " + name(key_curve) + " private key is not from 1 to n - 1");
+                    trap_with_message("invalid argument: " .. name(key_curve) .. " private key is not from 1 to n - 1");
                 },
                 Optional.Some(d) => {
                     curve = key_curve;
@@ -298,7 +295,7 @@ export let Ecdsa = module (
             return parts.length == 2 && verify_core(g, key, digest, parts[0], parts[1], require_low_s);
         };
 
-        export let.override to_string = func -> string => "EcdsaVerifier(" + name(key.curve) + ")";
+        export let.override to_string = func -> string => "EcdsaVerifier(" .. name(key.curve) .. ")";
     );
 
     /// @brief bits2int of RFC 6979, section 2.3.2: the leftmost qlen bits of the bytes as an integer of the
@@ -476,7 +473,7 @@ export let Ecdsa = module (
         }
         let at = sequence[1];
         let out: uint32[list][list] = new;
-        for (let index = 0; index < 2; index++) {
+        for (let index in 0 .. 2) {
             if (at >= der.length || der[at] != 2) {
                 return fail;
             }
@@ -500,10 +497,7 @@ export let Ecdsa = module (
             }
             at = end;
         }
-        if (at != der.length) {
-            return fail;
-        }
-        return out;
+        return if (at != der.length) -> fail else -> out;
     };
 
     /// @brief [r, s] of r || s with both from 1 to n - 1, or an empty list.
@@ -514,7 +508,7 @@ export let Ecdsa = module (
             return fail;
         }
         let out: uint32[list][list] = new;
-        for (let index = 0; index < 2; index++) {
+        for (let index in 0 .. 2) {
             match (g.scalar_in_range(words.slice(raw, index * size, (index + 1) * size))) {
                 Optional.None => {
                     return fail;
@@ -555,7 +549,7 @@ export let Ecdsa = module (
     export let parse_public_key = func(curve: Curve, sec1: uint8[list]) -> Result<EcPublicKey> {
         crypto_policy.require(algorithm_of(curve));
         if (optional_is_none(group(curve).decode(sec1))) {
-            return Result<EcPublicKey>.Err(error.custom("crypto.invalid_key", "not a " + name(curve) + " public key"));
+            return Result<EcPublicKey>.Err(error.custom("crypto.invalid_key", "not a " .. name(curve) .. " public key"));
         }
         return Result<EcPublicKey>.Ok(new EcPublicKey(curve, sec1));
     };
@@ -566,7 +560,7 @@ export let Ecdsa = module (
     export let parse_private_key = func(curve: Curve, bytes: uint8[list]) -> Result<EcPrivateKey> {
         crypto_policy.require(algorithm_of(curve));
         if (bytes.length != scalar_length(curve) || optional_is_none(group(curve).scalar_in_range(bytes))) {
-            return Result<EcPrivateKey>.Err(error.custom("crypto.invalid_key", "not a " + name(curve) + " private key"));
+            return Result<EcPrivateKey>.Err(error.custom("crypto.invalid_key", "not a " .. name(curve) .. " private key"));
         }
         return Result<EcPrivateKey>.Ok(new EcPrivateKey(curve, bytes));
     };
@@ -587,7 +581,7 @@ export let Ecdsa = module (
             match (entropy.os_bytes(g.size)) {
                 Result.Ok(bytes) => {
                     clear_high_bits(g, bytes);
-                    if (!optional_is_none(g.scalar_in_range(bytes))) {
+                    if (not optional_is_none(g.scalar_in_range(bytes))) {
                         last key = new EcPrivateKey(curve, bytes);
                         words.wipe(bytes);
                         return Result<EcPrivateKey>.Ok(key);
@@ -605,7 +599,7 @@ export let Ecdsa = module (
         while (true) {
             let bytes = random.fill(g.size);
             clear_high_bits(g, bytes);
-            if (!optional_is_none(g.scalar_in_range(bytes))) {
+            if (not optional_is_none(g.scalar_in_range(bytes))) {
                 last key = new EcPrivateKey(curve, bytes);
                 words.wipe(bytes);
                 return Result<EcPrivateKey>.Ok(key);

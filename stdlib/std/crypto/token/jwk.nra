@@ -198,10 +198,9 @@ export let Jwk = module (
         /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RsaKey)) {
+            if (other is not key: RsaKey) {
                 return false;
             }
-            last key = other as RsaKey;
             return variant == key.variant && public_key.equals(key.public_key);
         };
 
@@ -214,7 +213,7 @@ export let Jwk = module (
         /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
         export let.override to_string = func -> string =>
-            "RsaKey(" + jose_algorithm() + ", " + public_key.bits().to_string() + " bits)";
+            "RsaKey(" .. jose_algorithm() .. ", " .. public_key.bits().to_string() .. " bits)";
     );
 
     /// @brief An EC verification key bound to the JWS algorithm of its curve.
@@ -257,7 +256,7 @@ export let Jwk = module (
         /// @brief Displays the JOSE algorithm name.
         /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #Since("0.3.0")
-        export let.override to_string = func -> string => "EcKey(" + jose_algorithm() + ")";
+        export let.override to_string = func -> string => "EcKey(" .. jose_algorithm() .. ")";
     );
 
     /// @brief An Ed25519 verification key for EdDSA in JWS (RFC 8037).
@@ -289,7 +288,7 @@ export let Jwk = module (
         /// @see [Std.Crypto.Token.Jwk](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwk)
         #[NoDiscard, Since("0.3.0")]
         export let thumbprint = func -> uint8[list] {
-            last canonical = "{\"crv\":\"Ed25519\",\"kty\":\"OKP\",\"x\":" + jose.quote(jose.encode(public_key.to_bytes())) + "}";
+            last canonical = "{\"crv\":\"Ed25519\",\"kty\":\"OKP\",\"x\":" .. jose.quote(jose.encode(public_key.to_bytes())) .. "}";
             return sha2.sha256(words.utf8(canonical));
         };
 
@@ -367,7 +366,7 @@ export let Jwk = module (
     export let parse_hmac = func(text: string, alg: HmacAlgorithm) -> Result<HmacKey> {
         last object = jose.parse_object(text, InvalidKey)?;
         metadata(object, "oct", hmac_name(alg))?;
-        if (!crypto_policy.allows(Algorithm.Hmac) || !crypto_policy.allows(hmac_hash(alg))) {
+        if (not crypto_policy.allows(Algorithm.Hmac) || not crypto_policy.allows(hmac_hash(alg))) {
             return jose.fail<HmacKey>(InvalidKey, "the crypto policy denies this algorithm");
         }
         let key = jose.required_bytes(object, "k", InvalidKey)?;
@@ -386,8 +385,8 @@ export let Jwk = module (
     export let parse_rsa = func(text: string, alg: RsaAlgorithm) -> Result<RsaKey> {
         last object = jose.parse_object(text, InvalidKey)?;
         metadata(object, "RSA", rsa_name(alg))?;
-        if (!crypto_policy.allows(is_pss(alg) ? Algorithm.RsaPss : Algorithm.RsaPkcs1v15)
-            || !crypto_policy.allows(rsa_hash(alg))) {
+        if (not crypto_policy.allows(is_pss(alg) ? Algorithm.RsaPss : Algorithm.RsaPkcs1v15)
+            || not crypto_policy.allows(rsa_hash(alg))) {
             return jose.fail<RsaKey>(InvalidKey, "the crypto policy denies this algorithm");
         }
         last modulus = jose.required_bytes(object, "n", InvalidKey)?;
@@ -411,7 +410,7 @@ export let Jwk = module (
         if ((jose.required_text(object, "crv", InvalidKey)?) != ec_curve_name(curve)) {
             return jose.fail<EcKey>(InvalidKey, "the key's curve does not match the configured algorithm");
         }
-        if (!crypto_policy.allows(ecdsa.algorithm_of(curve)) || !crypto_policy.allows(ec_hash(curve))) {
+        if (not crypto_policy.allows(ecdsa.algorithm_of(curve)) || not crypto_policy.allows(ec_hash(curve))) {
             return jose.fail<EcKey>(InvalidKey, "the crypto policy denies this algorithm");
         }
         last x = jose.required_bytes(object, "x", InvalidKey)?;
@@ -431,7 +430,7 @@ export let Jwk = module (
     export let parse_ed25519 = func(text: string) -> Result<Ed25519Key> {
         last object = jose.parse_object(text, InvalidKey)?;
         metadata(object, "OKP", "EdDSA")?;
-        if ((jose.required_text(object, "crv", InvalidKey)?) != "Ed25519" || !crypto_policy.allows(Algorithm.Ed25519)) {
+        if ((jose.required_text(object, "crv", InvalidKey)?) != "Ed25519" || not crypto_policy.allows(Algorithm.Ed25519)) {
             return jose.fail<Ed25519Key>(InvalidKey, "the Ed25519 curve is required and must be allowed by policy");
         }
         last bytes = jose.required_bytes(object, "x", InvalidKey)?;

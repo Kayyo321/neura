@@ -45,7 +45,7 @@ export let CompositeMlDsa65 = module (
         last pq_key = new ml_dsa.MlDsaPublicKey(ml_dsa.ParameterSet.MlDsa65,
             words.slice(public_key, 0, key_split));
         last pq_verifier = new ml_dsa.MlDsaVerifier(pq_key);
-        if (!pq_verifier.verify_with_context(formatted, words.slice(signature, 0, signature_split), label_bytes())) {
+        if (not pq_verifier.verify_with_context(formatted, words.slice(signature, 0, signature_split), label_bytes())) {
             return false;
         }
         last classical_key = new ed25519.Ed25519PublicKey(words.slice(public_key, key_split, public_key.length));

@@ -254,7 +254,7 @@ export let Weierstrass = module (
             let table: Point[list] = new;
             table.append(identity());
             table.append(p);
-            for (let i = 2; i < 16; i++) {
+            for (let i in 2 .. 16) {
                 table.append(i % 2 == 0 ? double(table[i / 2]) : add(table[i - 1], p));
             }
             return table;
@@ -352,6 +352,6 @@ export let Weierstrass = module (
             return Optional<uint32[list]>.Some(s);
         };
 
-        export let.override to_string = func -> string => "Weierstrass.Curve(" + id.to_string() + ")";
+        export let.override to_string = func -> string => "Weierstrass.Curve(" .. id.to_string() .. ")";
     );
 );

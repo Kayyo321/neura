@@ -55,10 +55,9 @@ export let Paseto = module (
         /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
-            if (!(other is OpenedToken)) {
+            if (other is not that: OpenedToken) {
                 return false;
             }
-            last that = other as OpenedToken;
             return constant_time.ct_eq(payload_bytes, that.payload_bytes)
                 && constant_time.ct_eq(footer_bytes, that.footer_bytes);
         };
@@ -141,7 +140,7 @@ export let Paseto = module (
             last tag = words.slice(body, body.length - 32, body.length);
             last key_bytes = material();
             last expected = authenticate(key_bytes, nonce, ciphertext, footer, implicit_assertion);
-            if (!constant_time.ct_eq(tag, expected)) {
+            if (not constant_time.ct_eq(tag, expected)) {
                 return jose.fail<OpenedToken>("crypto.authentication", "authentication failed");
             }
             return Result<OpenedToken>.Ok(new OpenedToken(crypt(key_bytes, nonce, ciphertext), footer));
@@ -246,7 +245,7 @@ export let Paseto = module (
             last message = words.slice(body, 0, body.length - 64);
             last signature = words.slice(body, body.length - 64, body.length);
             last input = pae(new([words.utf8(PublicHeader), message, footer, implicit_assertion]));
-            if (!verifier.verify(input, signature)) {
+            if (not verifier.verify(input, signature)) {
                 return jose.fail<OpenedToken>("crypto.authentication", "authentication failed");
             }
             return Result<OpenedToken>.Ok(new OpenedToken(message, footer));
@@ -294,8 +293,8 @@ export let Paseto = module (
     };
 
     let encode = func(header: string, body: uint8[list], footer: uint8[list]) -> string {
-        last token = header + jose.encode(body);
-        return footer.length == 0 ? token : token + "." + jose.encode(footer);
+        last token = header .. jose.encode(body);
+        return footer.length == 0 ? token : (token .. "." .. jose.encode(footer));
     };
 
     let decode = func(token: string, purpose: string) -> Result<[uint8[list], uint8[list]]> {

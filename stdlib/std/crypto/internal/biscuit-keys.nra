@@ -47,7 +47,7 @@ export let BiscuitKeys = module (
         let reduced = mp.small(0, order.n);
         let _ = mp.sub_into(reduced, order.m, magnitude);
         last bytes = mp.to_bytes_be(reduced, 32);
-        for (let i = 0; i < 32; i++) {
+        for (let i in 0 .. 32) {
             raw[32 + i] = bytes[i];
         }
         return ecdsa.raw_to_der(ecdsa.Curve.P256, raw);
@@ -78,10 +78,10 @@ export let BiscuitKeys = module (
             return ec_key.to_sec1(true);
         };
 
-        export let signer_id = func -> string => name(algorithm) + "/" + hex.encode(to_bytes());
+        export let signer_id = func -> string => name(algorithm) .. "/" .. hex.encode(to_bytes());
 
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool {
-            if (!allowed(algorithm)) {
+            if (not allowed(algorithm)) {
                 return false;
             }
             if (algorithm == SignatureAlgorithm.Ed25519) {
@@ -91,15 +91,14 @@ export let BiscuitKeys = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is PublicKey)) {
+            if (other is not key: PublicKey) {
                 return false;
             }
-            last key = other as PublicKey;
             return algorithm == key.algorithm && constant_time.ct_eq(to_bytes(), key.to_bytes());
         };
 
         export let.override hash_code = func -> uint32 => signer_id().hash_code();
-        export let.override to_string = func -> string => "Biscuit PublicKey(" + name(algorithm) + ")";
+        export let.override to_string = func -> string => "Biscuit PublicKey(" .. name(algorithm) .. ")";
     );
 
     export let PrivateKey = class (
@@ -153,7 +152,7 @@ export let BiscuitKeys = module (
     );
 
     export let parse_public = func(kind: SignatureAlgorithm, bytes: uint8[list]) -> Result<PublicKey> {
-        if (!allowed(kind)) {
+        if (not allowed(kind)) {
             return unsupported<PublicKey>("Biscuit key algorithm is denied by crypto policy");
         }
         if (kind == SignatureAlgorithm.Ed25519) {
@@ -178,7 +177,7 @@ export let BiscuitKeys = module (
     };
 
     export let parse_private = func(kind: SignatureAlgorithm, bytes: uint8[list]) -> Result<PrivateKey> {
-        if (!allowed(kind)) {
+        if (not allowed(kind)) {
             return unsupported<PrivateKey>("Biscuit key algorithm is denied by crypto policy");
         }
         if (bytes.length != 32) {
@@ -193,7 +192,7 @@ export let BiscuitKeys = module (
     };
 
     export let generate = func(kind: SignatureAlgorithm) -> Result<PrivateKey> {
-        if (!allowed(kind)) {
+        if (not allowed(kind)) {
             return unsupported<PrivateKey>("Biscuit key algorithm is denied by crypto policy");
         }
         if (kind == SignatureAlgorithm.Ed25519) {

@@ -72,7 +72,7 @@ export let SlhDsa = module (
     export let name = func(set: ParameterSet) -> string {
         last family = uses_shake(set) ? "SHAKE" : "SHA2";
         last variant = is_small(set) ? "s" : "f";
-        return "SLH-DSA-" + family + "-" + (security_bytes(set) * 8).to_string() + variant;
+        return "SLH-DSA-" .. family .. "-" .. (security_bytes(set) * 8).to_string() .. variant;
     };
 
     /// @brief The public-key length in bytes, 2n.
@@ -103,8 +103,8 @@ export let SlhDsa = module (
         export let init = func(set: ParameterSet, bytes: uint8[list]) {
             crypto_policy.require(Algorithm.SlhDsa);
             if (bytes.length != public_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " public key must be "
-                    + public_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " public key must be "
+                    .. public_key_length(set).to_string() .. " bytes");
             }
             parameter_set = set;
             encoded = words.copy(bytes);
@@ -115,10 +115,9 @@ export let SlhDsa = module (
         export let to_bytes = func -> uint8[list] => words.copy(encoded);
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SlhDsaPublicKey)) {
+            if (other is not key: SlhDsaPublicKey) {
                 return false;
             }
-            last key = other as SlhDsaPublicKey;
             if (key.parameter_set != parameter_set) {
                 return false;
             }
@@ -140,7 +139,7 @@ export let SlhDsa = module (
         };
 
         export let.override to_string = func -> string =>
-            "SlhDsaPublicKey(" + name(parameter_set) + ", " + encoded.length.to_string() + " bytes)";
+            "SlhDsaPublicKey(" .. name(parameter_set) .. ", " .. encoded.length.to_string() .. " bytes)";
     );
 
     /// @brief An SLH-DSA private key (SK.seed || SK.prf || PK.seed || PK.root) in secret memory. `to_string`
@@ -156,8 +155,8 @@ export let SlhDsa = module (
         export let init = func(set: ParameterSet, bytes: uint8[list]) {
             crypto_policy.require(Algorithm.SlhDsa);
             if (bytes.length != private_key_length(set)) {
-                trap_with_message("invalid argument: " + name(set) + " private key must be "
-                    + private_key_length(set).to_string() + " bytes");
+                trap_with_message("invalid argument: " .. name(set) .. " private key must be "
+                    .. private_key_length(set).to_string() .. " bytes");
             }
             parameter_set = set;
             material = new(bytes);
@@ -189,7 +188,7 @@ export let SlhDsa = module (
         crypto_policy.require(Algorithm.SlhDsa);
         last n = security_bytes(set);
         if (sk_seed.length != n || sk_prf.length != n || pk_seed.length != n) {
-            trap_with_message("invalid argument: " + name(set) + " seeds must be " + n.to_string() + " bytes each");
+            trap_with_message("invalid argument: " .. name(set) .. " seeds must be " .. n.to_string() .. " bytes each");
         }
         let sk = words.concat(sk_seed, sk_prf);
         words.append_all(sk, pk_seed);
@@ -228,7 +227,7 @@ export let SlhDsa = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_public_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<SlhDsaPublicKey> {
         if (bytes.length != public_key_length(set)) {
-            return invalid_key<SlhDsaPublicKey>(name(set) + " public key must be " + public_key_length(set).to_string() + " bytes");
+            return invalid_key<SlhDsaPublicKey>(name(set) .. " public key must be " .. public_key_length(set).to_string() .. " bytes");
         }
         return Result<SlhDsaPublicKey>.Ok(new(set, bytes));
     };
@@ -237,7 +236,7 @@ export let SlhDsa = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_private_key = func(set: ParameterSet, bytes: uint8[list]) -> Result<SlhDsaPrivateKey> {
         if (bytes.length != private_key_length(set)) {
-            return invalid_key<SlhDsaPrivateKey>(name(set) + " private key must be " + private_key_length(set).to_string() + " bytes");
+            return invalid_key<SlhDsaPrivateKey>(name(set) .. " private key must be " .. private_key_length(set).to_string() .. " bytes");
         }
         return Result<SlhDsaPrivateKey>.Ok(new(set, bytes));
     };
@@ -271,7 +270,7 @@ export let SlhDsa = module (
                 trap_with_message("invalid argument: an SLH-DSA context string is at most 255 bytes");
             }
             if (addrnd.length != engine.n) {
-                trap_with_message("invalid argument: SLH-DSA addrnd must be " + engine.n.to_string() + " bytes");
+                trap_with_message("invalid argument: SLH-DSA addrnd must be " .. engine.n.to_string() .. " bytes");
             }
         };
 
@@ -355,7 +354,7 @@ export let SlhDsa = module (
                     return signature;
                 },
                 Result.Err(e) => {
-                    trap_with_message("unavailable: SLH-DSA signing needs entropy: " + e.to_string());
+                    trap_with_message("unavailable: SLH-DSA signing needs entropy: " .. e.to_string());
                 },
             }
         };
@@ -413,6 +412,6 @@ export let SlhDsa = module (
         export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
             verify_with_context(message, signature, new);
 
-        export let.override to_string = func -> string => "SlhDsaVerifier(" + name(key.parameter_set) + ")";
+        export let.override to_string = func -> string => "SlhDsaVerifier(" .. name(key.parameter_set) .. ")";
     );
 );

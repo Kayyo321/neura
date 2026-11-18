@@ -41,7 +41,7 @@ export let Entropy = module (
                     if (bytes.length != want) {
                         return Result<uint8[list]>.Err(Error.Io {
                             kind: IoErrorKind.InvalidData,
-                            message: "entropy source returned " + bytes.length.to_string() + " bytes", path: ""
+                            message: "entropy source returned " .. bytes.length.to_string() .. " bytes", path: ""
                         });
                     }
                     words.append_all(out, bytes);

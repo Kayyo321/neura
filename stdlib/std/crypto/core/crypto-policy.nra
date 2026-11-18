@@ -37,10 +37,7 @@ export let CryptoPolicy = module (
         if (code == 1) {
             return Policy.Fips140_3;
         }
-        if (code == 2) {
-            return Policy.Cnsa2_0;
-        }
-        return Policy.Modern;
+        return if (code == 2) -> Policy.Cnsa2_0 else -> Policy.Modern;
     };
 
     /// @brief Whether the policy allows the algorithm.
@@ -60,9 +57,9 @@ export let CryptoPolicy = module (
     #Since("0.3.0")
     export let require = func(algorithm: Algorithm) {
         last active = policy();
-        if (!allowed_by(active, algorithm)) {
-            trap_with_message("denied: " + algorithm.to_string() + " is not allowed under the " + active.to_string()
-                + " policy");
+        if (not allowed_by(active, algorithm)) {
+            trap_with_message("denied: " .. algorithm.to_string() .. " is not allowed under the " .. active.to_string()
+                .. " policy");
         }
     };
 
