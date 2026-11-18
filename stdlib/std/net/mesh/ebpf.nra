@@ -70,10 +70,9 @@ export let Ebpf = module (
 
         /// @brief Equal when the name, attach point, license and bytecode are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is EbpfProgram)) {
+            if (other is not that: EbpfProgram) {
                 return false;
             }
-            last that = other as EbpfProgram;
             if (name != that.name || attach_point != that.attach_point || license != that.license
                 || instructions.length != that.instructions.length) {
                 return false;
@@ -96,8 +95,8 @@ export let Ebpf = module (
         };
 
         /// @brief Text such as "EbpfProgram(redirect, SkMsg, 12 instructions)".
-        export let.override to_string = func -> string => "EbpfProgram(" + name + ", " + attach_point.to_string()
-            + ", " + instruction_count().to_string() + " instructions)";
+        export let.override to_string = func -> string => "EbpfProgram(" .. name .. ", " .. attach_point.to_string()
+            .. ", " .. instruction_count().to_string() .. " instructions)";
     );
 
     /// @brief A socket redirect map description.
@@ -122,10 +121,9 @@ export let Ebpf = module (
 
         /// @brief Equal when every field is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RedirectMap)) {
+            if (other is not that: RedirectMap) {
                 return false;
             }
-            last that = other as RedirectMap;
             return name == that.name && kind == that.kind && key_size == that.key_size
                 && max_entries == that.max_entries;
         };
@@ -134,8 +132,8 @@ export let Ebpf = module (
         export let.override hash_code = func -> uint32 => strings.hash(to_string());
 
         /// @brief Text such as "RedirectMap(socks, SockHash, key 12 bytes, 1024 entries)".
-        export let.override to_string = func -> string => "RedirectMap(" + name + ", " + kind.to_string() + ", key "
-            + key_size.to_string() + " bytes, " + max_entries.to_string() + " entries)";
+        export let.override to_string = func -> string => "RedirectMap(" .. name .. ", " .. kind.to_string() .. ", key "
+            .. key_size.to_string() .. " bytes, " .. max_entries.to_string() .. " entries)";
     );
 
     /// @brief A program loaded into the kernel, by its host handle.
@@ -161,7 +159,7 @@ export let Ebpf = module (
 
         /// @brief Text such as "LoadedProgram(7, SkMsg)".
         export let.override to_string = func -> string =>
-            "LoadedProgram(" + handle.to_string() + ", " + attach_point.to_string() + ")";
+            "LoadedProgram(" .. handle.to_string() .. ", " .. attach_point.to_string() .. ")";
     );
 
     /// @brief A redirect map created in the kernel, by its host handle.
@@ -186,16 +184,14 @@ export let Ebpf = module (
         export let.override hash_code = func -> uint32 => (handle & 4294967295) as uint32;
 
         /// @brief Text such as "LoadedMap(8, socks)".
-        export let.override to_string = func -> string => "LoadedMap(" + handle.to_string() + ", " + map.name + ")";
+        export let.override to_string = func -> string => "LoadedMap(" .. handle.to_string() .. ", " .. map.name .. ")";
     );
 
     /// @brief Checks a program: a name of 1 to 15 bytes of letters, digits, `_` and `.`; a non-empty license
     /// without NUL; 1 to 1000000 whole 8-byte instructions.
     #NoDiscard
     export let validate = func(program: EbpfProgram) -> Result<Unit> {
-        if (!is_valid_name(program.name)) {
-            return invalid("program name must be 1 to 15 letters, digits, '_' or '.'");
-        }
+        return invalid("program name must be 1 to 15 letters, digits, '_' or '.'") unless is_valid_name(program.name);
         if (program.license.byte_length == 0 || has_nul(program.license)) {
             return invalid("license must be non-empty text");
         }
@@ -212,9 +208,7 @@ export let Ebpf = module (
     /// for a SockHash.
     #NoDiscard
     export let validate_map = func(map: RedirectMap) -> Result<Unit> {
-        if (!is_valid_name(map.name)) {
-            return invalid("map name must be 1 to 15 letters, digits, '_' or '.'");
-        }
+        return invalid("map name must be 1 to 15 letters, digits, '_' or '.'") unless is_valid_name(map.name);
         if (map.max_entries < 1) {
             return invalid("a map needs at least one entry");
         }
@@ -222,9 +216,7 @@ export let Ebpf = module (
             MapKind.SockMap => map.key_size == 4,
             MapKind.SockHash => map.key_size >= 1 && map.key_size <= 512,
         };
-        if (!key_ok) {
-            return invalid("key size " + map.key_size.to_string() + " does not suit a " + map.kind.to_string());
-        }
+        return invalid("key size " .. map.key_size.to_string() .. " does not suit a " .. map.kind.to_string()) unless key_ok;
         return Result<Unit>.Ok(Unit.Value);
     };
 
@@ -274,8 +266,8 @@ export let Ebpf = module (
     #NoDiscard
     export let map_update = func(map: LoadedMap, key: uint8[list], socket_handle: int64) -> Result<Unit> {
         if (key.length != map.map.key_size) {
-            return invalid("key is " + key.length.to_string() + " bytes; the map's keys are "
-                + map.map.key_size.to_string());
+            return invalid("key is " .. key.length.to_string() .. " bytes; the map's keys are "
+                .. map.map.key_size.to_string());
         }
         host_map_update(map.handle, key, socket_handle);
         return Result<Unit>.Ok(Unit.Value);
@@ -296,9 +288,7 @@ export let Ebpf = module (
         }
         for (let i = 0; i < name.byte_length; i++) {
             last b = name.byte_at(i);
-            if (!((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 or 46)) {
-                return false;
-            }
+            return false unless(b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 or 46;
         }
         return true;
     };
@@ -320,17 +310,15 @@ export let Ebpf = module (
     /// @brief Ok when the program attaches at `point`.
     let expect_point = func(program: LoadedProgram, point: AttachPoint) -> Result<Unit> {
         if (program.attach_point != point) {
-            return invalid("a " + program.attach_point.to_string() + " program cannot attach as "
-                + point.to_string());
+            return invalid("a " .. program.attach_point.to_string() .. " program cannot attach as "
+                .. point.to_string());
         }
         return Result<Unit>.Ok(Unit.Value);
     };
 
     /// @brief Ok when `path` is absolute.
     let expect_path = func(path: string) -> Result<Unit> {
-        if (!strings.starts_with(path, "/")) {
-            return invalid("the target path must be absolute");
-        }
+        return invalid("the target path must be absolute") unless strings.starts_with(path, "/");
         return Result<Unit>.Ok(Unit.Value);
     };
 

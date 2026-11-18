@@ -61,7 +61,7 @@ export let ProxyProtocolListener = module (
 
         /// @brief Text such as "ProxiedConnection(ProxyHeader(...), 0 prefix bytes)".
         export let.override to_string = func -> string =>
-            "ProxiedConnection(" + header.to_string() + ", " + prefix.length.to_string() + " prefix bytes)";
+            "ProxiedConnection(" .. header.to_string() .. ", " .. prefix.length.to_string() .. " prefix bytes)";
     );
 
     /// @brief A listener whose connections start with a PROXY header (version 1 or 2).
@@ -102,14 +102,14 @@ export let ProxyProtocolListener = module (
                         }
                     },
                     Result.Err(e) => {
-                        return reject(conn, "invalid PROXY header: " + message(e));
+                        return reject(conn, "invalid PROXY header: " .. message(e));
                     },
                 }
                 match (read(conn, decoder.needed())) {
                     Result.Ok(chunk) => {
                         if (chunk.length == 0) {
                             return reject(conn, "the stream ended inside the PROXY header after "
-                                + decoder.buffered().to_string() + " bytes");
+                                .. decoder.buffered().to_string() .. " bytes");
                         }
                         decoder.push(chunk);
                     },

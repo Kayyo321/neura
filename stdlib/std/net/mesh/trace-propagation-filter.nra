@@ -73,8 +73,8 @@ export let TracePropagationFilter = module (
         export let started = func -> int64 => started_count;
 
         /// @brief Text such as "TracePropagationFilter(3 continued, 1 started)".
-        export let.override to_string = func -> string => "TracePropagationFilter(" + continued_count.to_string()
-            + " continued, " + started_count.to_string() + " started)";
+        export let.override to_string = func -> string => "TracePropagationFilter(" .. continued_count.to_string()
+            .. " continued, " .. started_count.to_string() .. " started)";
     );
 
     /// @brief A filter reading headers with `get_header`, writing them with `with_header`, drawing ids from
