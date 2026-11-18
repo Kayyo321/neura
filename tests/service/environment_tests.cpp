@@ -35,8 +35,11 @@ int in_child(const std::function<int()>& body) {
     std::fflush(stdout);
     const pid_t child = ::fork();
     if (child == 0) {
-        // The abort message is expected; keep the test output readable.
-        std::freopen("/dev/null", "w", stderr);
+        // The abort message is expected; keep the test output readable. If
+        // /dev/null cannot be opened the message is shown, which is harmless.
+        if (std::freopen("/dev/null", "w", stderr) == nullptr) {
+            std::fputs("environment_tests: cannot silence stderr\n", stdout);
+        }
         std::_Exit(body());
     }
     int status = 0;
