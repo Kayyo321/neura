@@ -76,8 +76,7 @@ NEURA_ATTRIBUTE(HookSet, 16, "hook.set", on_class, false, "s")
 // getter or 1 for a setter].
 NEURA_ATTRIBUTE(HookOf, 17, "hook.of", on_function, false, "[s u1]")
 // Records, property contracts, static requirements and derivation
-// (docs/design/Records030.md). The milestone's identifiers start at 18 and
-// are renumbered when it merges.
+// (docs/design/Records030.md), identifiers 18 to 22.
 //
 // A record class: its generated constructor.
 NEURA_ATTRIBUTE(ClassRecord, 18, "class.record", on_class, false, "s")
