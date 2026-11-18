@@ -24,8 +24,10 @@
 #   --require-bridge   fail when a bridge check does not run
 #   --size-reference   the archive the size budget is measured against
 #                      (rc.3's of this target): the SDK and legacy archives may
-#                      be at most 160% larger, and the runtime archive must be
-#                      smaller than the SDK archive
+#                      be at most the target's growth larger (165% on x86_64
+#                      Linux, 200% on aarch64 Linux, 295% on aarch64 macOS,
+#                      265% on x86_64 macOS; another triple fails), and the
+#                      runtime archive must be smaller than the SDK archive
 #   --server-components the archives are built with the server components
 #                      (TLS, HTTP/2, PostgreSQL): their licence texts must be
 #                      in share/doc/neura/third-party, and the installed
@@ -452,12 +454,24 @@ legacy_size=$(size_of "$archive")
 echo "size: $(basename "$sdk_archive") $sdk_size bytes; $(basename "$runtime_archive") $runtime_size bytes; $(basename "$archive") $legacy_size bytes"
 reason=""
 [ "$runtime_size" -lt "$sdk_size" ] || reason="the runtime archive is not smaller than the SDK archive;"
-if [ -n "$size_reference" ]; then
+# The growth each target's SDK and legacy archives may have over the
+# reference, in percent (docs/ReleaseProcess.md, check 14; the 0.3.0 budget
+# in docs/design/Release030.md). A target without a budget fails.
+case "$triple" in
+    x86_64-linux-gnu) growth=165 ;;
+    aarch64-linux-gnu) growth=200 ;;
+    aarch64-apple-darwin) growth=295 ;;
+    x86_64-apple-darwin) growth=265 ;;
+    *) growth="" ;;
+esac
+if [ -n "$size_reference" ] && [ -z "$growth" ]; then
+    reason="$reason no size budget is set for $triple;"
+elif [ -n "$size_reference" ]; then
     reference=$(size_of "$size_reference")
-    limit=$((reference + reference * 160 / 100))
-    echo "size: the reference $(basename "$size_reference") is $reference bytes; the limit is $limit"
-    [ "$sdk_size" -le "$limit" ] || reason="$reason the SDK archive is more than 160% larger than the reference;"
-    [ "$legacy_size" -le "$limit" ] || reason="$reason the legacy archive is more than 160% larger than the reference;"
+    limit=$((reference + reference * growth / 100))
+    echo "size: the reference $(basename "$size_reference") is $reference bytes; $triple may grow $growth%; the limit is $limit"
+    [ "$sdk_size" -le "$limit" ] || reason="$reason the SDK archive is more than $growth% larger than the reference;"
+    [ "$legacy_size" -le "$limit" ] || reason="$reason the legacy archive is more than $growth% larger than the reference;"
 fi
 if [ -z "$reason" ]; then
     pass 14 "archive sizes"

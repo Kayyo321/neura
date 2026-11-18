@@ -376,9 +376,10 @@ jobs:
           done
           exit "$status"
 
-      # The archive sizes against qualification check 14's budget (160% over
-      # rc.3's archive), before the tests: on the slower targets the packing
-      # below comes hours later. Only a report; check 14 is the gate.
+      # The archive sizes against rc.3's archive, before the tests: on the
+      # slower targets the packing below comes hours later. Only a report;
+      # check 14 of packaging/qualify.sh, with its per-target budget, is the
+      # gate.
       - name: Report the archive sizes before the tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
@@ -397,15 +398,10 @@ jobs:
           reference="neura-0.2.1-rc.3-$TRIPLE.tar.gz"
           if gh release download v0.2.1-rc.3 --repo "$GITHUB_REPOSITORY" --dir early/reference --pattern "$reference"; then
             size=$(wc -c < "early/reference/$reference" | tr -d ' ')
-            limit=$((size + size * 160 / 100))
-            echo "reference $reference: $size bytes; limit $limit"
+            echo "reference $reference: $size bytes"
             for file in early/dist/*.tar.gz; do
               actual=$(wc -c < "$file" | tr -d ' ')
               echo "$(basename "$file"): $actual bytes ($((actual * 100 / size))% of the reference)"
-              case "$(basename "$file")" in
-                neura-runtime-*) ;;
-                *) [ "$actual" -le "$limit" ] || echo "::warning::$(basename "$file") is $actual bytes, over check 14's limit of $limit" ;;
-              esac
             done
           fi
 
