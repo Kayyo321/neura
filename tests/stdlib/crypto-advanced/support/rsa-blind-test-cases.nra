@@ -1,0 +1,38 @@
+let blind = import:Std.Crypto.Advanced.RsaBlindSignature;
+let hex = import:Std.Encoding.Hex;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let test = import:Std.Test;
+let vectors = import:RsaBlindVectors;
+
+export let RsaBlindTestCases = module (
+    export let bytes = func(value: string) -> uint8[list] => test.assert_ok(hex.decode(value));
+
+    export let public_key = func -> rsa.RsaPublicKey =>
+        test.assert_ok(rsa.parse_public_key(bytes(vectors.key[0]), bytes(vectors.key[1])));
+
+    export let signing_key = func -> rsa.RsaPrivateKey {
+        last key = vectors.key;
+        return test.assert_ok(rsa.parse_private_key(bytes(key[0]), bytes(key[1]), bytes(key[2]), bytes(key[3]),
+            bytes(key[4]), bytes(key[5]), bytes(key[6]), bytes(key[7])));
+    };
+
+    export let verify_case = func(index: int, variant: blind.Variant) {
+        last key = signing_key();
+        last signer = new blind.BlindSigner(key, variant);
+        last client = new blind.Client(key.public_key, variant);
+        last rows = vectors.cases;
+        last i = 10 * index;
+        last prepared = client.prepare_with_prefix(bytes(rows[i + 1]), bytes(rows[i + 2]));
+        test.assert_equal_string(rows[i + 3], hex.encode(prepared));
+        last request = test.assert_ok(client.blind_with_factor(prepared, bytes(rows[i + 4]), bytes(rows[i + 5])));
+        test.assert_equal_string(rows[i + 7], hex.encode(request.message()));
+        test.assert(!request.is_wiped());
+        last response = test.assert_ok(signer.sign_with_factor(request.message(), bytes(rows[i + 6])));
+        test.assert_equal_string(rows[i + 8], hex.encode(response));
+        last signature = test.assert_ok(client.finalize(prepared, response, request));
+        test.assert_equal_string(rows[i + 9], hex.encode(signature));
+        test.assert(request.is_wiped());
+        test.assert(client.verify(prepared, signature));
+        key.wipe();
+    };
+);

@@ -1,0 +1,17 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy --max-steps 1500000000
+// stderr: explicit program failure \(trap reason 3\): invalid argument: FROST nonce randomness must be 64 bytes
+let frost = import:Std.Crypto.Advanced.Frost;
+let cases = import:FrostTestCases;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let vectors = import:FrostVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last share = cases.signer(cases.trusted_group(), 0);
+        let _ = share.commit_with_randomness(new);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,145 @@
+// test-options: --gpu=off --deny-entropy --max-steps 2000000000
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let int32 = import:Std.Core.Int32;
+let sss = import:Std.Crypto.Advanced.Sss;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let vectors = import:SssVectors;
+
+// Shamir secret sharing over GF(2^8) against HashiCorp Vault's shamir package, and over the prime field
+// 2^521 - 1 against a Python reference (support/sss-vectors.nra, scripts/crypto-vectors/gen-advanced-sss.py).
+let SssTests = module (
+    export let test_large_coefficient_requests_propagate_entropy_error = func {
+        let key: uint8[list] = new;
+        for (let i = 0; i < 5000; i++) {
+            key.append(1);
+        }
+        let _ = test.assert_err(sss.split(key, 255, 255));
+        let _ = test.assert_err(sss.split_prime(new([1]), 13000, 13000));
+    };
+
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let number = func(text: string) -> int => test.assert_ok(int32.parse(text));
+
+    let gf_shares = func(row: string) -> sss.Gf256Share[list] {
+        let shares: sss.Gf256Share[list] = new;
+        for (let cell in strings.split(row, ",")) {
+            shares.append(test.assert_ok(sss.parse_share(decode(cell))));
+        }
+        return shares;
+    };
+
+    let prime_shares = func(row: string) -> sss.PrimeShare[list] {
+        let shares: sss.PrimeShare[list] = new;
+        for (let cell in strings.split(row, ",")) {
+            last parts = strings.split(cell, ":");
+            shares.append(new(number(parts[0]), decode(parts[1])));
+        }
+        return shares;
+    };
+
+    export let test_gf256_vault_vectors = func {
+        last rows = vectors.gf256;
+        for (let i = 0; i < rows.length; i += 6) {
+            last threshold = number(rows[i]);
+            last secret = rows[i + 2];
+            last shares = gf_shares(rows[i + 4]);
+            if (strings.starts_with(rows[i + 1], "1,2")) {
+                // x = 1..n: our split with the same coefficients gives Vault's shares byte for byte.
+                last mine = sss.split_with_coefficients(decode(secret), shares.length, threshold, decode(rows[i + 3]));
+                for (let k = 0; k < shares.length; k++) {
+                    test.assert_equal_string(hex.encode(shares[k].to_bytes()), hex.encode(mine[k].to_bytes()));
+                }
+            }
+            for (let subset in strings.split(rows[i + 5], ";")) {
+                let chosen: sss.Gf256Share[list] = new;
+                for (let index in strings.split(subset, ",")) {
+                    chosen.append(shares[number(index)]);
+                }
+                last rebuilt = test.assert_ok(sss.combine(chosen, threshold));
+                test.assert_equal_string(secret, hex.encode(rebuilt.expose()));
+            }
+            // One share too few is refused when the threshold is given.
+            let few: sss.Gf256Share[list] = new;
+            for (let k = 0; k < threshold - 1; k++) {
+                few.append(shares[k]);
+            }
+            test.assert_err(sss.combine(few, threshold));
+        }
+        test.assert_equal_int32(6 * 6, rows.length);
+    };
+
+    export let test_gf256_rejections = func {
+        last shares = sss.split_with_coefficients(new([7, 8, 9]), 3, 2, new([1, 2, 3]));
+        test.assert_err(sss.combine(new([shares[0]])));
+        test.assert_err(sss.combine(new([shares[0], shares[0]])));
+        test.assert_err(sss.combine(new([shares[0], new sss.Gf256Share(9, new([1, 2]))])));
+        test.assert_err(sss.parse_share(new([5])));
+        test.assert_err(sss.parse_share(new([5, 0])));
+        // Fewer shares than the threshold without the threshold given: a wrong secret, not an error.
+        last wrong = test.assert_ok(sss.combine(new([shares[0], shares[1]])));
+        test.assert_equal_string("070809", hex.encode(wrong.expose()));
+        test.assert_equal_string("Gf256Share(<redacted>)", shares[0].to_string());
+    };
+
+    export let test_gf256_drbg_round_trip = func {
+        last random = new drbg.ChaCha20Drbg(decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"));
+        last secret = decode("5eb1e7a9f00dbabe");
+        last shares = sss.split(secret, 5, 3, random);
+        test.assert_equal_int32(5, shares.length);
+        last rebuilt = test.assert_ok(sss.combine(new([shares[4], shares[1], shares[2]]), 3));
+        test.assert_equal_string("5eb1e7a9f00dbabe", hex.encode(rebuilt.expose()));
+        last two = test.assert_ok(sss.combine(new([shares[4], shares[1]])));
+        test.assert(hex.encode(two.expose()) != "5eb1e7a9f00dbabe");
+    };
+
+    export let test_prime_vectors = func {
+        last rows = vectors.prime;
+        for (let i = 0; i < rows.length; i += 4) {
+            last threshold = number(rows[i]);
+            last secret = decode(rows[i + 1]);
+            last expected = prime_shares(rows[i + 3]);
+            last mine = sss.split_prime_with_coefficients(secret, expected.length, threshold, decode(rows[i + 2]));
+            for (let k = 0; k < expected.length; k++) {
+                test.assert_equal_int32(expected[k].x, mine[k].x);
+                test.assert_equal_string(hex.encode(expected[k].expose()), hex.encode(mine[k].expose()));
+                last parsed = test.assert_ok(sss.parse_prime_share(mine[k].to_bytes()));
+                test.assert_equal_int32(mine[k].x, parsed.x);
+            }
+            let first: sss.PrimeShare[list] = new;
+            let last_ones: sss.PrimeShare[list] = new;
+            for (let k = 0; k < threshold; k++) {
+                first.append(expected[k]);
+                last_ones.append(expected[expected.length - 1 - k]);
+            }
+            test.assert_equal_string(rows[i + 1], hex.encode(test.assert_ok(sss.combine_prime(first, secret.length, threshold)).expose()));
+            test.assert_equal_string(rows[i + 1], hex.encode(test.assert_ok(sss.combine_prime(last_ones, secret.length)).expose()));
+            test.assert_equal_string(rows[i + 1], hex.encode(test.assert_ok(sss.combine_prime(expected, secret.length, threshold)).expose()));
+            if (threshold > 2) {
+                let few: sss.PrimeShare[list] = new;
+                for (let k = 0; k < threshold - 1; k++) {
+                    few.append(expected[k]);
+                }
+                test.assert_err(sss.combine_prime(few, secret.length, threshold));
+            }
+        }
+        test.assert_equal_int32(4 * 4, rows.length);
+    };
+
+    export let test_prime_rejections = func {
+        last random = new drbg.ChaCha20Drbg(decode("1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100"));
+        last shares = sss.split_prime(decode("00ff"), 4, 3, random);
+        last rebuilt = test.assert_ok(sss.combine_prime(new([shares[3], shares[0], shares[2]]), 2, 3));
+        test.assert_equal_string("00ff", hex.encode(rebuilt.expose()));
+        test.assert_err(sss.combine_prime(new([shares[0], shares[0], shares[1]]), 2));
+        test.assert_err(sss.combine_prime(new([shares[0]]), 2));
+        // Two shares of a threshold-3 split give some other value, almost surely too long for 2 bytes.
+        test.assert_err(sss.combine_prime(new([shares[0], shares[1]]), 2));
+        let bad = shares[0].to_bytes();
+        bad[3] = 0;
+        test.assert_err(sss.parse_prime_share(bad));
+        test.assert_err(sss.parse_prime_share(new([1, 2, 3])));
+        test.assert_equal_string("PrimeShare(<redacted>)", shares[0].to_string());
+    };
+);

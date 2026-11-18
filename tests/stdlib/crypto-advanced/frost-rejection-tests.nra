@@ -1,0 +1,131 @@
+// test-options: --gpu=off --max-steps 1500000000 --deny-entropy
+let frost = import:Std.Crypto.Advanced.Frost;
+let cases = import:FrostTestCases;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:FrostVectors;
+
+let FrostRejectionTests = module (
+    let bytes = func(text: string) -> uint8[list] => cases.bytes(text);
+
+    export let test_invalid_encoding_and_enrollment = func {
+        last rows = vectors.bad_commitment;
+        for (let i = 0; i < rows.length; i += 2) {
+            let _ = test.assert_err(frost.parse_commitment(bytes(rows[i + 1])));
+        }
+        last group = cases.trusted_group();
+        last key = group.public_key();
+        last first = group.member_at(0);
+        last third = group.member_at(2);
+        let _ = test.assert_err(frost.signing_group(key, 0, new([first, third])));
+        let _ = test.assert_err(frost.signing_group(key, 3, new([first, third])));
+        let _ = test.assert_err(frost.signing_group(key, 2, new([first, first])));
+        let _ = test.assert_err(frost.signing_group(key, 2, new([third, first])));
+        let _ = test.assert_err(frost.signing_group(bytes(vectors.mutation[5]), 2, new([first, third])));
+        let _ = test.assert_err(frost.parse_member(new));
+        let _ = test.assert_err(frost.parse_member(bytes(hex.encode(first.identifier()) + vectors.mutation[5])));
+        let _ = test.assert_err(frost.signing_share(group, frost.identifier(4), bytes(vectors.members[1])));
+        let _ = test.assert_err(frost.signing_share(group, first.identifier(), bytes(vectors.members[4])));
+        let _ = test.assert_err(frost.signing_share(group, first.identifier(), bytes(vectors.mutation[4])));
+        let _ = test.assert_err(frost.signing_share(group, first.identifier(), bytes(vectors.mutation[5])));
+        let _ = test.assert_err(frost.deal_with_coefficients(new([bytes(vectors.group[0]), bytes(vectors.mutation[5])]), 3));
+        let _ = test.assert_err(frost.deal_with_coefficients(new([bytes(vectors.group[0]), bytes(vectors.mutation[4])]), 3));
+
+        // Import accepts the full nonzero canonical scalar identifier range, beyond uint32.
+        last large = test.assert_ok(frost.parse_member(bytes(vectors.mutation[6] + vectors.members[8])));
+        let _ = test.assert_ok(frost.signing_group(key, 2, new([first, large])));
+    };
+
+    export let test_rejects_invalid_commitment_sets_and_consumes_nonce = func {
+        last group = cases.trusted_group();
+        last message = bytes(vectors.group[3]);
+        last one = cases.transcript(0);
+        last three = cases.transcript(1);
+        let _ = test.assert_err(frost.start_round(group, message, new([one])));
+        let _ = test.assert_err(frost.start_round(group, message, new([one, one])));
+        let _ = test.assert_err(frost.start_round(group, message, new([three, one])));
+        last unknown = test.assert_ok(frost.parse_commitment(bytes(vectors.mutation[0])));
+        let _ = test.assert_err(frost.start_round(group, message, new([one, unknown])));
+
+        last signer = cases.signer(group, 0);
+        last state = test.assert_ok(signer.commit_with_randomness(bytes(vectors.transcript[1])));
+        let _ = test.assert_err(signer.commit_with_randomness(bytes(vectors.transcript[1])));
+        // Reusing only one half is also prohibited.
+        last one_seed = vectors.transcript[1].slice(0, 64);
+        last another_seed = vectors.transcript[5].slice(64, 128);
+        let _ = test.assert_err(signer.commit_with_randomness(bytes(one_seed + another_seed)));
+
+        last substituted = test.assert_ok(frost.parse_commitment(bytes(vectors.mutation[2])));
+        last changed = test.assert_ok(frost.start_round(group, message, new([substituted, three])));
+        let _ = test.assert_err(signer.sign_share(state, changed, message));
+        test.assert(state.is_used());
+        let _ = test.assert_err(signer.sign_share(state, cases.round(group), message));
+    };
+
+    export let test_missing_or_wrong_signer_and_abandoned_nonce = func {
+        last group = cases.trusted_group();
+        last one = cases.signer(group, 0);
+        last unrelated = cases.signer(group, 0);
+        last state = test.assert_ok(one.commit_with_randomness(bytes(vectors.transcript[1])));
+        let _ = test.assert_err(unrelated.sign_share(state, cases.round(group), bytes(vectors.group[3])));
+        test.assert(state.is_used());
+        last second = test.assert_ok(unrelated.commit_with_randomness(bytes(vectors.transcript[1])));
+        last two = test.assert_ok(frost.parse_commitment(bytes(vectors.mutation[1])));
+        last three = cases.transcript(1);
+        last absent = test.assert_ok(frost.start_round(group, bytes(vectors.group[3]), new([two, three])));
+        let _ = test.assert_err(unrelated.sign_share(second, absent, bytes(vectors.group[3])));
+        test.assert(second.is_used());
+
+        last signer3 = cases.signer(group, 2);
+        last abandoned = test.assert_ok(signer3.commit_with_randomness(bytes(vectors.transcript[5])));
+        abandoned.wipe();
+        let _ = test.assert_err(signer3.sign_share(abandoned, cases.round(group), bytes(vectors.group[3])));
+        test.assert(abandoned.is_used());
+    };
+
+    export let test_unapproved_message_and_inconsistent_group_key_fail_closed = func {
+        last row = vectors.members;
+        last group = cases.trusted_group();
+        last signer = cases.signer(group, 0);
+        last state = test.assert_ok(signer.commit_with_randomness(bytes(vectors.transcript[1])));
+        let _ = test.assert_err(signer.sign_share(state, cases.round(group), new));
+        test.assert(state.is_used());
+
+        last inconsistent = test.assert_ok(frost.signing_group(bytes(row[2]), 2,
+            new([group.member_at(0), group.member_at(1), group.member_at(2)])));
+        last first = cases.signer(inconsistent, 0);
+        last third = cases.signer(inconsistent, 2);
+        last nonce1 = test.assert_ok(first.commit_with_randomness(bytes(vectors.transcript[1])));
+        last nonce3 = test.assert_ok(third.commit_with_randomness(bytes(vectors.transcript[5])));
+        last message = bytes(vectors.group[3]);
+        last round = test.assert_ok(frost.start_round(inconsistent, message, new([nonce1.commitment(), nonce3.commitment()])));
+        last share1 = test.assert_ok(first.sign_share(nonce1, round, message));
+        last share3 = test.assert_ok(third.sign_share(nonce3, round, message));
+        test.assert(round.verify_share(share1) && round.verify_share(share3));
+        let _ = test.assert_err(round.aggregate(new([share1, share3])));
+    };
+
+    export let test_invalid_signature_shares_and_schnorr_encoding = func {
+        last group = cases.trusted_group();
+        last round = cases.round(group);
+        last first = cases.signature_share(0);
+        last third = cases.signature_share(1);
+        let _ = test.assert_err(round.aggregate(new([first])));
+        let _ = test.assert_err(round.aggregate(new([first, first])));
+        last wrong_value = test.assert_ok(frost.parse_signature_share(first.identifier(), bytes(vectors.mutation[3])));
+        test.assert(!round.verify_share(wrong_value));
+        let _ = test.assert_err(round.aggregate(new([wrong_value, third])));
+        last unknown = test.assert_ok(frost.parse_signature_share(frost.identifier(4), first.scalar()));
+        test.assert(!round.verify_share(unknown));
+        let _ = test.assert_err(round.aggregate(new([unknown, third])));
+        let _ = test.assert_err(frost.parse_signature_share(first.identifier(), bytes(vectors.mutation[4])));
+
+        last values = vectors.bad_signature;
+        last message = bytes(vectors.group[3]);
+        for (let i = 0; i < values.length; i += 2) {
+            test.assert(!group.verify(message, bytes(values[i + 1])));
+        }
+        test.assert(!group.verify(new, bytes(vectors.group[5])));
+        test.assert(!frost.verify_signature(new, message, bytes(vectors.group[5])));
+    };
+);

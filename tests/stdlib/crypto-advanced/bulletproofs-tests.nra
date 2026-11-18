@@ -1,0 +1,70 @@
+// test-options: --gpu=off --deny-entropy --max-steps 20000000000
+let bulletproofs = import:Std.Crypto.Advanced.Bulletproofs;
+let hex = import:Std.Encoding.Hex;
+let merlin = import:Std.Crypto.Advanced.Merlin;
+let test = import:Std.Test;
+let uint64s = import:Std.Core.UInt64;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:BulletproofsVectors;
+let.promote _ = import:Std.Core.Error;
+
+let BulletproofsTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_rust_8_bit_proofs = func {
+        last rows = vectors.range_cases;
+        for (let i = 0; i < 20; i += 10) {
+            last value = test.assert_ok(uint64s.parse(rows[i + 1]));
+            let transcript: merlin.Transcript = new(decode(rows[i + 3]));
+            let [commitment, proof] = test.assert_ok(bulletproofs.prove_with(transcript, 8, value,
+                decode(rows[i + 2]), decode(rows[i + 4])));
+            test.assert_equal_string(rows[i + 5], hex.encode(commitment));
+            test.assert_equal_string(rows[i + 6], hex.encode(proof));
+            test.assert(bulletproofs.verify(transcript, 8, decode(rows[i + 5]), decode(rows[i + 6])));
+        }
+    };
+
+    export let test_bulletproofs_rejections = func {
+        last row = vectors.range_cases;
+        last public_commitment = decode(row[5]);
+        last valid_proof = decode(row[6]);
+        let transcript: merlin.Transcript = new(decode(row[3]));
+        test.assert(!bulletproofs.verify(transcript, 8, decode(row[7]), valid_proof));
+        test.assert(!bulletproofs.verify(transcript, 8, public_commitment, decode(row[8])));
+        test.assert(!bulletproofs.verify(transcript, 8, public_commitment, decode(row[9])));
+        test.assert(!bulletproofs.verify(transcript, 16, public_commitment, valid_proof));
+        test.assert(!bulletproofs.verify(new merlin.Transcript(utf8.encode("wrong transcript")), 8, public_commitment,
+            valid_proof));
+
+        let invalid_point = decode(row[6]);
+        for (let i = 0; i < 32; i++) {
+            invalid_point[i] = 0;
+        }
+        test.assert(!bulletproofs.verify(transcript, 8, public_commitment, invalid_point));
+        let invalid_scalar = decode(row[6]);
+        for (let i = 128; i < 160; i++) {
+            invalid_scalar[i] = 255;
+        }
+        test.assert(!bulletproofs.verify(transcript, 8, public_commitment, invalid_scalar));
+        valid_proof.append(0);
+        test.assert(!bulletproofs.verify(transcript, 8, public_commitment, valid_proof));
+        let _ = test.assert_err(bulletproofs.prove_with(transcript, 8, 256, decode(row[2]), decode(row[4])));
+        let zeros: uint8[list] = new;
+        for (let i = 0; i < 1280; i++) {
+            zeros.append(0);
+        }
+        let _ = test.assert_err(bulletproofs.prove_with(transcript, 8, 1, decode(row[2]), zeros));
+    };
+
+    export let test_entropy_transport_error = func {
+        last row = vectors.range_cases;
+        let transcript: merlin.Transcript = new(decode(row[3]));
+        last error = test.assert_err(bulletproofs.prove(transcript, 8, 12, decode(row[2])));
+        match (error) {
+            Error.Io { kind, message: _, path: _ } => {
+                test.assert(kind == IoErrorKind.CapabilityDenied);
+            },
+            _ => { test.fail("expected entropy capability error"); },
+        }
+    };
+);

@@ -1,0 +1,103 @@
+// test-options: --gpu=off --max-steps 1500000000 --deny-entropy
+let.promote _ = import:Std.Crypto.Algorithm;
+let frost = import:Std.Crypto.Advanced.Frost;
+let cases = import:FrostTestCases;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:FrostVectors;
+
+let FrostTests = module (
+    let bytes = func(text: string) -> uint8[list] => cases.bytes(text);
+
+    export let test_appendix_e3_rounds_and_aggregation = func {
+        last group = cases.trusted_group();
+        last one = cases.signer(group, 0);
+        last three = cases.signer(group, 2);
+        last record = vectors.transcript;
+        last key = vectors.group;
+        last first = test.assert_ok(one.commit_with_randomness(bytes(record[1])));
+        last third = test.assert_ok(three.commit_with_randomness(bytes(record[5])));
+        test.assert_equal_string(record[2], hex.encode(first.commitment().to_bytes()));
+        test.assert_equal_string(record[6], hex.encode(third.commitment().to_bytes()));
+        test.assert(!first.is_used() && !third.is_used());
+        last commitment = cases.transcript(0);
+        test.assert(commitment.equals(first.commitment()) && commitment.hash_code() == first.commitment().hash_code());
+        test.assert_equal_string(record[0], hex.encode(commitment.identifier()));
+        test.assert_equal_string("Frost.Commitment", commitment.to_string());
+        test.assert_equal_string("Frost.NonceState(<redacted>)", first.to_string());
+
+        last round = test.assert_ok(frost.start_round(group, bytes(key[3]), new([first.commitment(), third.commitment()])));
+        test.assert_equal_int32(2, round.signer_count());
+        test.assert_equal_string(key[4], hex.encode(round.group_commitment()));
+        test.assert_equal_string("Frost.SigningRound(2 signers)", round.to_string());
+        last recorded_round = cases.round(group);
+        test.assert(round.equals(recorded_round) && round.hash_code() == recorded_round.hash_code());
+        test.assert_equal_string(key[3], hex.encode(round.message()));
+        last first_share = test.assert_ok(one.sign_share(first, round, bytes(key[3])));
+        last third_share = test.assert_ok(three.sign_share(third, round, bytes(key[3])));
+        test.assert(first.is_used() && third.is_used());
+        test.assert_equal_string(record[3], hex.encode(first_share.scalar()));
+        test.assert_equal_string(record[7], hex.encode(third_share.scalar()));
+        test.assert(round.verify_share(first_share) && round.verify_share(third_share));
+        last expected = cases.signature_share(0);
+        test.assert(expected.equals(first_share) && expected.hash_code() == first_share.hash_code());
+        test.assert_equal_string("Frost.SignatureShare", first_share.to_string());
+        test.assert_equal_string(record[0], hex.encode(first_share.identifier()));
+        last signature = test.assert_ok(round.aggregate(new([third_share, first_share])));
+        test.assert_equal_string(key[5], hex.encode(signature));
+        test.assert(group.verify(bytes(key[3]), signature));
+        test.assert(frost.verify_signature(bytes(key[2]), bytes(key[3]), signature));
+        one.wipe();
+        three.wipe();
+        test.assert(one.is_wiped() && three.is_wiped());
+    };
+
+    export let test_trusted_dealer_polynomial_and_public_values = func {
+        last rows = vectors.members;
+        last vector = vectors.group;
+        last package = test.assert_ok(frost.deal_with_coefficients(new([bytes(vector[0]), bytes(vector[1])]), 3));
+        last reference = cases.trusted_group();
+        last group = package.signing_group();
+        test.assert_equal_int32(2, group.threshold);
+        test.assert_equal_int32(3, group.member_count());
+        test.assert_equal_string(vector[2], hex.encode(group.public_key()));
+        test.assert(group.algorithm() == Algorithm.Frost);
+        test.assert(group.equals(reference) && group.hash_code() == reference.hash_code());
+        test.assert_equal_string("Frost.SigningGroup(2 of 3)", group.to_string());
+        test.assert_equal_string("Frost.DealerPackage(<redacted>)", package.to_string());
+        for (let i = 0; i < 3; i++) {
+            last member = group.member_at(i);
+            last val = package.share_at(i);
+            last expect = reference.member_at(i);
+            test.assert(member.equals(expect) && member.hash_code() == expect.hash_code());
+            test.assert_equal_string("Frost.Member", member.to_string());
+            test.assert_equal_string("Frost.SigningShare(<redacted>)", val.to_string());
+            test.assert_equal_string(rows[3 * i], hex.encode(frost.identifier((i + 1) as uint32)));
+            test.assert_equal_string(rows[3 * i + 2], hex.encode(member.public_key()));
+            test.assert_equal_string(rows[3 * i + 1], hex.encode(val.export_share()));
+            test.assert(val.verification_share().equals(member));
+        }
+        last held = package.share_at(0);
+        package.wipe();
+        test.assert(held.is_wiped() && package.share_at(2).is_wiped());
+    };
+
+    export let test_seeded_dealer_and_entropy_errors = func {
+        let _ = test.assert_err(frost.deal(2, 3));
+        last generator = new drbg.ChaCha20Drbg(bytes(vectors.group[0]));
+        last package = test.assert_ok(frost.deal_with_drbg(2, 3, generator));
+        last group = package.signing_group();
+        last first = package.share_at(0);
+        let _ = test.assert_err(first.commit());
+        last one = test.assert_ok(first.commit_with_drbg(generator));
+        last three = test.assert_ok(package.share_at(2).commit_with_drbg(generator));
+        last message = bytes(vectors.group[3]);
+        last round = test.assert_ok(frost.start_round(group, message, new([one.commitment(), three.commitment()])));
+        last share1 = test.assert_ok(first.sign_share(one, round, message));
+        last share3 = test.assert_ok(package.share_at(2).sign_share(three, round, message));
+        last full = test.assert_ok(round.aggregate(new([share1, share3])));
+        test.assert(group.verify(message, full));
+        package.wipe();
+    };
+);

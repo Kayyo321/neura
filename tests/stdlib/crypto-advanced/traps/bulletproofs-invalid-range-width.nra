@@ -1,0 +1,14 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: Bulletproofs range width must be 8, 16, 32 or 64
+// run-options: --gpu=off
+let bulletproofs = import:Std.Crypto.Advanced.Bulletproofs;
+let merlin = import:Std.Crypto.Advanced.Merlin;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let transcript: merlin.Transcript = new(new);
+        let _ = bulletproofs.verify(transcript, 7, new, new);
+        return program.ExitCode.Ok;
+    };
+);

@@ -134,6 +134,21 @@ JOSE verification keys bind the caller's choice of algorithm and key family. The
 
 The envelope checks that its KEK version remains live and allowed by policy even when a DEK is cached. It clears the cache on a missing or denied key and on successful KEK rotation. A failed unwrap returns an authentication error. Deterministic inputs must be unique for each fresh cache epoch. The software AES-SIV wrap is available under `Modern`. Nitro and Milan compatibility relax only known certificate profile constraints while retaining signature, validity, critical-extension and path checks. The Milan ASK parser also permits one exact historical padding pattern in the signed key-usage field. The default certificate parser continues to reject it.
 
+### Advanced
+
+| Item (spec section) | Tier | Vectors and notes | Status |
+| --- | --- | --- | --- |
+| Shamir GF(2^8) and prime field (2.12) | KAT + logic | HashiCorp Vault reference and an independent integer implementation for 2^521 − 1. Duplicate, short, and mixed-size shares are rejected. | implemented |
+| Ristretto255 and SHA-512 hash-to-curve expansion (2.12) | KAT | All RFC 9496 generator, invalid encoding, and uniform map examples, plus RFC 9380 SHA-512 XMD and RFC 9497 hash-to-group checks. | implemented |
+| FROST ristretto255 and SHA-512 (2.12) | KAT | RFC 9591 E.3 exact key shares, commitments, signature shares, and aggregate signature. Nonce reuse, bad quorum, wrong messages and signers, and invalid shares are rejected. | implemented for this ciphersuite |
+| RSA blind signatures (2.12) | KAT | All four RFC 9474 Appendix A transcripts, independently checked with Python modular arithmetic and RSA-PSS verification. | implemented |
+| Single-element OPRF, VOPRF and POPRF (2.12) | KAT | All six applicable RFC 9497 ristretto255-SHA512 vectors. Negative cases cover altered proofs, changed public info and malformed elements. | implemented for this ciphersuite and one element per evaluation |
+| P-256 hash to curve (2.12) | KAT | RFC 9380 J.1.1, independent affine map checks, and SEC1 boundary vectors for oversized DSTs. | implemented |
+| Merlin STROBE transcripts (2.12) | KAT | Rust merlin 3.0.0 checked on forked transcripts, empty and multi-block frames, and variable challenge lengths. SHA-3 family regressions exercise the shared permutation. | implemented |
+| Single-value Bulletproofs (2.12) | KAT | Rust bulletproofs 5.0.0 exact commitments and proofs at 8, 16, 32 and 64 bits, with tampered commitments and proof equations. | implemented for this profile |
+
+Shamir's prime-field encoding is fixed to big-endian integers and 82 coefficient bytes reduced modulo 2^521 − 1. The OS entropy path requests coefficients in chunks within the host limit. Shamir shares do not authenticate a share set. FROST currently uses a trusted dealer and a caller-authenticated roster. One-use client state burns a nonce or blind on a failed protocol attempt as well as a successful one. The RSA blind signer applies its own independent blinding and checks the RSA private operation with the public exponent. The OPRF and FROST ciphersuites are fixed. Bulletproofs uses the standard Dalek generators and a fork of the caller’s Merlin transcript. Secret scalar multiplication is branch-free in source. The runtime does not guarantee constant time.
+
 ## Runtime needs
 
 Each stub below waits on a host operation that the runtime does not yet offer. A runtime lane is to add it. The library keeps the full API and logic, so only the body of the host call changes.

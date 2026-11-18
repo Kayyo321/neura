@@ -1,0 +1,68 @@
+// test-options: --gpu=off --max-steps 4000000000
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let ristretto = import:Std.Crypto.Advanced.Ristretto255;
+let test = import:Std.Test;
+let vectors = import:Ristretto255Vectors;
+
+let Ristretto255Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_basepoint_multiples_and_addition = func {
+        last rows = vectors.multiples;
+        last generator = ristretto.generator();
+        last identity = ristretto.identity();
+        test.assert_equal_string(rows[1], hex.encode(identity));
+        test.assert_equal_string(rows[3], hex.encode(generator));
+        test.assert(test.assert_ok(ristretto.is_identity(identity)));
+        test.assert(!test.assert_ok(ristretto.is_identity(generator)));
+        let point = identity;
+        for (let i = 0; i < rows.length; i += 2) {
+            test.assert_equal_string(rows[i + 1], hex.encode(point));
+            test.assert_equal_string(rows[i + 1], hex.encode(test.assert_ok(ristretto.parse_element(point))));
+            let scalar = decode(rows[1]);
+            scalar[0] = test.assert_ok(int64s.parse(rows[i])) as uint8;
+            test.assert_equal_string(rows[i + 1], hex.encode(test.assert_ok(ristretto.multiply_base(scalar))));
+            point = test.assert_ok(ristretto.add(point, generator));
+        }
+        test.assert_equal_string(rows[3], hex.encode(test.assert_ok(ristretto.subtract(decode(rows[5]), generator))));
+        test.assert_equal_string(rows[1], hex.encode(test.assert_ok(ristretto.subtract(generator, generator))));
+        let three = decode(rows[1]);
+        three[0] = 3;
+        test.assert_equal_string(rows[13], hex.encode(test.assert_ok(ristretto.multiply(three, decode(rows[5])))));
+    };
+
+    export let test_reject_every_rfc_9496_invalid_encoding = func {
+        last rows = vectors.invalid;
+        for (let i = 0; i < rows.length; i += 2) {
+            let _ = test.assert_err(ristretto.parse_element(decode(rows[i + 1])));
+        }
+        let _ = test.assert_err(ristretto.parse_element(new([0])));
+        let _ = test.assert_err(ristretto.multiply_base(new([0])));
+        let _ = test.assert_err(ristretto.multiply_base(decode(vectors.order[0])));
+        let _ = test.assert_err(ristretto.scalar_invert(ristretto.identity()));
+    };
+
+    export let test_uniform_map_including_field_reduction = func {
+        last rows = vectors.uniform;
+        for (let i = 0; i < rows.length; i += 2) {
+            test.assert_equal_string(rows[i + 1], hex.encode(ristretto.from_uniform(decode(rows[i]))));
+        }
+    };
+
+    export let test_scalar_arithmetic_against_libsodium = func {
+        last rows = vectors.scalar_arithmetic;
+        for (let i = 0; i < rows.length; i += 6) {
+            last a = decode(rows[i]);
+            last b = decode(rows[i + 1]);
+            test.assert_equal_string(rows[i + 2], hex.encode(test.assert_ok(ristretto.scalar_add(a, b))));
+            test.assert_equal_string(rows[i + 3], hex.encode(test.assert_ok(ristretto.scalar_subtract(a, b))));
+            test.assert_equal_string(rows[i + 4], hex.encode(test.assert_ok(ristretto.scalar_multiply(a, b))));
+            test.assert_equal_string(rows[i + 5], hex.encode(test.assert_ok(ristretto.scalar_invert(b))));
+        }
+        last wide = vectors.scalar_reduction;
+        for (let i = 0; i < wide.length; i += 2) {
+            test.assert_equal_string(wide[i + 1], hex.encode(ristretto.scalar_reduce(decode(wide[i]))));
+        }
+    };
+);

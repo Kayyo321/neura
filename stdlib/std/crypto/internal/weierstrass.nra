@@ -103,12 +103,15 @@ export let Weierstrass = module (
         };
 
         /// @brief a x: -3 x by additions on the NIST curves, 0 on secp256k1. Which one is public.
-        let mul_a = func(value: uint32[list]) -> uint32[list] {
+        export let mul_a = func(value: uint32[list]) -> uint32[list] {
             if (a_is_zero) {
                 return mp.zeros(field.n);
             }
             return field.neg(field.add(field.add(value, value), value));
         };
+
+        /// @brief A copy of B in y^2 = x^3 + A*x + B, in Montgomery form.
+        export let coefficient_b = func -> uint32[list] => mp.copy(b);
 
         /// @brief The limb count of field elements and scalars.
         export let limbs = func -> int => field.n;

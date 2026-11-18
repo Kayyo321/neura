@@ -1,0 +1,107 @@
+// test-options: --gpu=off --max-steps 15000000000 --deny-entropy
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Crypto.Algorithm;
+let blind = import:Std.Crypto.Advanced.RsaBlindSignature;
+let cases = import:RsaBlindTestCases;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let test = import:Std.Test;
+let vectors = import:RsaBlindVectors;
+
+let RsaBlindRejectionTests = module (
+    let code = func(cause: Error) -> string => match (cause) {
+        Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_rejects_noninvertible_zero_and_out_of_range_factors = func {
+        last client = new blind.Client(cases.public_key(), blind.Variant.PssRandomized);
+        last rows = vectors.cases;
+        last prepared = cases.bytes(rows[3]);
+        last salt = cases.bytes(rows[4]);
+        last bad = vectors.reject;
+        for (let i = 1; i <= 3; i++) {
+            test.assert_equal_string("crypto.blinding", code(test.assert_err(
+                client.blind_with_factor(prepared, salt, cases.bytes(bad[i])))));
+        }
+    };
+
+    export let test_rejects_non_coprime_encoded_message = func {
+        last broken = vectors.bad_encoding;
+        last key = test.assert_ok(rsa.parse_public_key(cases.bytes(broken[0]), cases.bytes(vectors.key[1])));
+        last client = new blind.Client(key, blind.Variant.PssZeroDeterministic);
+        test.assert_equal_string("crypto.invalid_input", code(test.assert_err(
+            client.blind_with_factor(cases.bytes(broken[1]), new, cases.bytes(broken[2])))));
+    };
+
+    export let test_response_failure_consumes_request = func {
+        last client = new blind.Client(cases.public_key(), blind.Variant.PssRandomized);
+        last rows = vectors.cases;
+        last prepared = cases.bytes(rows[3]);
+        last request = test.assert_ok(client.blind_with_factor(prepared, cases.bytes(rows[4]), cases.bytes(rows[5])));
+        test.assert_equal_string("BlindRequest(<redacted>)", request.to_string());
+        test.assert_equal_string("crypto.invalid_signature", code(test.assert_err(
+            client.finalize(prepared, cases.bytes(vectors.reject[0]), request))));
+        test.assert(request.is_wiped());
+        last signature = cases.bytes(rows[9]);
+        prepared[0] ^= 1;
+        test.assert(!client.verify(prepared, signature));
+        prepared[0] ^= 1;
+        last wrong = new blind.Client(cases.public_key(), blind.Variant.PssZeroRandomized);
+        test.assert(!wrong.verify(prepared, signature));
+    };
+
+    export let test_wrong_variant_and_response_length = func {
+        last key = cases.public_key();
+        last client = new blind.Client(key, blind.Variant.PssRandomized);
+        last other = new blind.Client(key, blind.Variant.PssZeroRandomized);
+        last rows = vectors.cases;
+        last prepared = cases.bytes(rows[3]);
+        last salt = cases.bytes(rows[4]);
+        last factor = cases.bytes(rows[5]);
+        last request = test.assert_ok(client.blind_with_factor(prepared, salt, factor));
+        test.assert_equal_string("crypto.invalid_signature", code(test.assert_err(
+            other.finalize(prepared, cases.bytes(rows[8]), request))));
+        test.assert(request.is_wiped());
+        last short_response = test.assert_ok(client.blind_with_factor(prepared, salt, factor));
+        test.assert_equal_string("crypto.invalid_signature", code(test.assert_err(
+            client.finalize(prepared, new([1]), short_response))));
+        test.assert(short_response.is_wiped());
+    };
+
+    export let test_entropy_denial_and_seeded_protocol = func {
+        last key = cases.signing_key();
+        last client = new blind.Client(key.public_key, blind.Variant.PssRandomized);
+        last identity = new blind.Client(key.public_key, blind.Variant.PssDeterministic);
+        last signer = new blind.BlindSigner(key, blind.Variant.PssRandomized);
+        last rows = vectors.cases;
+        last message = cases.bytes(rows[1]);
+        test.assert_equal_string(rows[1], hex.encode(test.assert_ok(identity.prepare(message))));
+        let _ = test.assert_err(client.prepare(message));
+        let _ = test.assert_err(client.blind(cases.bytes(rows[3])));
+        let _ = test.assert_err(signer.sign(cases.bytes(rows[7])));
+        test.assert_equal_string("crypto.invalid_input", code(test.assert_err(signer.sign(new))));
+        test.assert_equal_string("crypto.invalid_input", code(test.assert_err(signer.sign(cases.bytes(vectors.key[0])))));
+        test.assert_equal_string("crypto.blinding", code(test.assert_err(
+            signer.sign_with_factor(cases.bytes(rows[7]), cases.bytes(vectors.reject[2])))));
+        test.assert(client.algorithm() == Algorithm.RsaBlindSignature);
+        test.assert(client.public_key().equals(key.public_key));
+        test.assert(signer.algorithm() == Algorithm.RsaBlindSignature);
+        test.assert(signer.variant == blind.Variant.PssRandomized);
+        test.assert_equal_string("RsaBlindSignature.Client", client.to_string());
+        test.assert_equal_string("RsaBlindSignature.BlindSigner(<redacted>)", signer.to_string());
+
+        last client_rng = new drbg.ChaCha20Drbg(cases.bytes(rows[4]));
+        last server_rng = new drbg.ChaCha20Drbg(cases.bytes(rows[6]));
+        last prepared = client.prepare_with_drbg(message, client_rng);
+        test.assert_equal_int32(message.length + 32, prepared.length);
+        last request = test.assert_ok(client.blind_with_drbg(prepared, client_rng));
+        last response = test.assert_ok(signer.sign_with_drbg(request.message(), server_rng));
+        last signature = test.assert_ok(client.finalize(prepared, response, request));
+        test.assert(client.verify(prepared, signature));
+        request.wipe();
+        test.assert(request.is_wiped());
+        key.wipe();
+    };
+);
