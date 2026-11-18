@@ -35,6 +35,19 @@ endif()
 
 project(Neura VERSION ${NEURA_VERSION_CORE} LANGUAGES CXX C)
 
+option(NEURA_WASM_RUNTIME "Build only the browser's wasm32 runtime" OFF)
+if(NEURA_WASM_RUNTIME)
+    if(NOT EMSCRIPTEN OR NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+        message(FATAL_ERROR "NEURA_WASM_RUNTIME requires the pinned wasm32 Emscripten toolchain")
+    endif()
+    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    get_filename_component(neura_emscripten_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+    get_filename_component(neura_emsdk_dir "${neura_emscripten_dir}/../.." ABSOLUTE)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-emsdk.py" "${neura_emsdk_dir}"
+        COMMAND_ERROR_IS_FATAL ANY)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fwasm-exceptions> -ffp-contract=off)
+endif()
+
 # The host target triple names launchers and release archives.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" neura_host_arch)
 if(neura_host_arch MATCHES "^(x86_64|amd64)$")
@@ -87,6 +100,117 @@ add_library(neura_nvr STATIC
 )
 target_include_directories(neura_nvr PUBLIC src)
 neura_target_defaults(neura_nvr)
+
+# --- Kernels (docs/runtime/Kernels.md) ---------------------------------------
+# Deterministic, pure C functions that the runtime will call in place of
+# standard library code. They call no libm function (scripts/check-kernels.sh
+# checks the archive), so they add nothing to the release binaries' libc,
+# libm, and loader dependencies. Floating point keeps strict binary64
+# semantics: no contraction into fused multiply-add, no fast-math, and no
+# host-specific instruction selection. The image format links it, so the
+# loader checks an image's KERN table against the kernel table and the NVM
+# (neura_nvm and neura_nvm_static, hence every launcher) runs kernel exits;
+# the compiler checks kernel bindings against the same table.
+add_library(neura_kernels STATIC
+    src/kernels/neura_digest.c
+    src/kernels/neura_encoding.c
+    src/kernels/neura_hash.c
+    src/kernels/neura_integer_text.c
+    src/kernels/neura_kernel.c
+    src/kernels/neura_math.c
+    src/kernels/neura_sort.c
+    src/kernels/neura_text.c
+)
+target_include_directories(neura_kernels PUBLIC src/kernels)
+set_target_properties(neura_kernels PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(neura_kernels PRIVATE /W4 /WX /fp:strict)
+else()
+    target_compile_options(neura_kernels PRIVATE
+        -ffp-contract=off -fno-math-errno
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
+endif()
+target_link_libraries(neura_nvr PUBLIC neura_kernels)
+
+# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
+# and block assembly. The converter emits graphs with it and the lift
+# library regenerates them with it, so it depends only on the image format.
+add_library(neura_circuit STATIC
+    src/circuit/block_synth.cpp
+    src/circuit/circuit.cpp
+    src/circuit/float_circuit.cpp
+)
+target_link_libraries(neura_circuit PUBLIC neura_nvr)
+neura_target_defaults(neura_circuit)
+
+# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
+# expressions behind a block's graph, the structural and overflow proofs that
+# make them trustworthy, and their lowering to native 64-bit operations. It
+# depends on the circuit library and the image format only, so the runtime
+# can use it without compiler code. Float operations are lowered only where
+# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
+add_library(neura_lift STATIC
+    src/lift/expression.cpp
+    src/lift/hints.cpp
+    src/lift/lift.cpp
+    src/lift/lowered_block.cpp
+    src/lift/overflow.cpp
+    src/lift/proof.cpp
+    src/lift/recognize.cpp
+)
+target_link_libraries(neura_lift PUBLIC neura_circuit)
+if(NOT MSVC)
+    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
+endif()
+neura_target_defaults(neura_lift)
+
+if(NEURA_WASM_RUNTIME)
+    add_library(neura_nvm STATIC
+        src/nvm/host.cpp
+        src/nvm/layered.cpp
+        src/nvm/machine.cpp
+        src/nvm/scalar_text.cpp
+        src/nvm/tier1.cpp
+        src/nvm/tier2.cpp)
+    target_compile_definitions(neura_nvm PUBLIC NEURA_WASM_RUNTIME)
+    target_link_libraries(neura_nvm PUBLIC neura_nvr neura_lift)
+    target_link_options(neura_nvm INTERFACE -fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=0)
+    neura_target_defaults(neura_nvm)
+
+    option(NEURA_WASM_HOST "Link the portable browser NVM and its ES module loader" OFF)
+    if(NEURA_WASM_HOST)
+        add_executable(neura_wasm src/wasm/entry.cpp)
+        set_target_properties(neura_wasm PROPERTIES OUTPUT_NAME nvm SUFFIX .mjs)
+        target_link_libraries(neura_wasm PRIVATE neura_nvm)
+        set(neura_wasm_exports
+            _malloc _free _neura_wasm_interface _neura_wasm_open _neura_wasm_close _neura_wasm_error
+            _neura_wasm_advance _neura_wasm_respond _neura_wasm_deliver _neura_wasm_clock
+            _neura_wasm_has_proof _neura_wasm_prove_idle)
+        list(JOIN neura_wasm_exports "','" neura_wasm_exports)
+        target_link_options(neura_wasm PRIVATE
+            --no-entry -sENVIRONMENT=web,node -sSTACK_SIZE=1048576 -sDYNAMIC_EXECUTION=0
+            -sMODULARIZE=1 -sEXPORT_ES6=1
+            "-sEXPORTED_FUNCTIONS=['${neura_wasm_exports}']"
+            "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','UTF8ToString']")
+        neura_target_defaults(neura_wasm)
+    endif()
+
+    option(NEURA_WASM_SMOKE "Link the portable runtime into a Node smoke fixture" OFF)
+    if(NEURA_WASM_SMOKE)
+        add_executable(neura_wasm_smoke tests/wasm/smoke.cpp)
+        target_link_libraries(neura_wasm_smoke PRIVATE neura_nvm)
+        target_link_options(neura_wasm_smoke PRIVATE
+            --no-entry -sENVIRONMENT=node -sSTACK_SIZE=1048576 -sMODULARIZE=1
+            "-sEXPORTED_FUNCTIONS=['_malloc','_free','_neura_smoke']"
+            "-sEXPORTED_RUNTIME_METHODS=['HEAPU8']")
+        neura_target_defaults(neura_wasm_smoke)
+    endif()
+    return()
+endif()
 
 # The Neura Virtual Machine. It depends only on the image format, so a
 # runtime-only distribution needs no compiler code.
@@ -272,38 +396,6 @@ target_link_libraries(neura_lifecycle PUBLIC neura_hash)
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
-# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
-# and block assembly. The converter emits graphs with it and the lift
-# library regenerates them with it, so it depends only on the image format.
-add_library(neura_circuit STATIC
-    src/circuit/block_synth.cpp
-    src/circuit/circuit.cpp
-    src/circuit/float_circuit.cpp
-)
-target_link_libraries(neura_circuit PUBLIC neura_nvr)
-neura_target_defaults(neura_circuit)
-
-# Lifted blocks (docs/runtime/NVM.md, "Execution tiers"): the typed
-# expressions behind a block's graph, the structural and overflow proofs that
-# make them trustworthy, and their lowering to native 64-bit operations. It
-# depends on the circuit library and the image format only, so the runtime
-# can use it without compiler code. Float operations are lowered only where
-# hardware arithmetic is bit-exact, which rules out contracted multiply-adds.
-add_library(neura_lift STATIC
-    src/lift/expression.cpp
-    src/lift/hints.cpp
-    src/lift/lift.cpp
-    src/lift/lowered_block.cpp
-    src/lift/overflow.cpp
-    src/lift/proof.cpp
-    src/lift/recognize.cpp
-)
-target_link_libraries(neura_lift PUBLIC neura_circuit)
-if(NOT MSVC)
-    target_compile_options(neura_lift PRIVATE -ffp-contract=off)
-endif()
-neura_target_defaults(neura_lift)
-
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
     src/cli/diagnostic_render.cpp
@@ -434,40 +526,6 @@ endif()
 set(NEURA_LIBCLANG_TESTS ${BUILD_TESTING})
 add_subdirectory(third_party/neura-libclang)
 
-# --- Kernels (docs/runtime/Kernels.md) ---------------------------------------
-# Deterministic, pure C functions that the runtime will call in place of
-# standard library code. They call no libm function (scripts/check-kernels.sh
-# checks the archive), so they add nothing to the release binaries' libc,
-# libm, and loader dependencies. Floating point keeps strict binary64
-# semantics: no contraction into fused multiply-add, no fast-math, and no
-# host-specific instruction selection. The image format links it, so the
-# loader checks an image's KERN table against the kernel table and the NVM
-# (neura_nvm and neura_nvm_static, hence every launcher) runs kernel exits;
-# the compiler checks kernel bindings against the same table.
-add_library(neura_kernels STATIC
-    src/kernels/neura_digest.c
-    src/kernels/neura_encoding.c
-    src/kernels/neura_hash.c
-    src/kernels/neura_integer_text.c
-    src/kernels/neura_kernel.c
-    src/kernels/neura_math.c
-    src/kernels/neura_sort.c
-    src/kernels/neura_text.c
-)
-target_include_directories(neura_kernels PUBLIC src/kernels)
-set_target_properties(neura_kernels PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED ON
-    C_EXTENSIONS OFF
-    POSITION_INDEPENDENT_CODE ON)
-if(MSVC)
-    target_compile_options(neura_kernels PRIVATE /W4 /WX /fp:strict)
-else()
-    target_compile_options(neura_kernels PRIVATE
-        -ffp-contract=off -fno-math-errno
-        -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
-endif()
-target_link_libraries(neura_nvr PUBLIC neura_kernels)
 if(BUILD_TESTING)
     # Published vectors and boundary cases for each kernel family, plus the
     # math vectors of tests/stdlib/math/support/math-vectors.nra.
@@ -479,7 +537,6 @@ if(BUILD_TESTING)
             COMMAND neura_kernel_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 endif()
-# --- End of kernels -----------------------------------------------------------
 
 if(BUILD_TESTING)
     if(TARGET neura_launcher)

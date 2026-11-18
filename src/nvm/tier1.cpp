@@ -1,8 +1,9 @@
 #include "tier1.hpp"
 
+#ifndef NEURA_WASM_RUNTIME
 #include "tier3.hpp"
-
 #include "jit/tier3_native.hpp"
+#endif
 
 #include "lift/lift.hpp"
 
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 namespace neura::nvm {
 namespace {
@@ -32,6 +34,7 @@ std::string reason_class(const std::string& rejection) {
 
 } // namespace
 
+#ifndef NEURA_WASM_RUNTIME
 std::uint8_t tier_ceiling() {
     static const std::uint8_t ceiling = [] {
         const char* text = std::getenv("NEURA_TIER");
@@ -68,6 +71,12 @@ bool tier_shadow_heap_always() {
     }();
     return enabled;
 }
+#else
+std::uint8_t tier_ceiling() { return 2; }
+bool tier_check_enabled() { return false; }
+bool tier_shadow_enabled() { return false; }
+bool tier_shadow_heap_always() { return false; }
+#endif
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
@@ -220,6 +229,7 @@ std::string TierTimes::describe(Clock::time_point end) const {
            ", host " + milliseconds(of(Category::Host)) + ", other " + milliseconds(other) + "\n";
 }
 
+#ifndef NEURA_WASM_RUNTIME
 bool tier_eager() {
     static const bool enabled = [] {
         const char* text = std::getenv("NEURA_TIER_EAGER");
@@ -267,9 +277,18 @@ std::uint32_t tier3_after() {
     }();
     return value;
 }
+#endif
 
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
+#ifdef NEURA_WASM_RUNTIME
+    if (options_.tier3 != TierOptions::Tier3::Environment && options_.tier3 != TierOptions::Tier3::Off) {
+        throw std::invalid_argument("the browser runtime has no tier 3");
+    }
+    options_.tier3 = TierOptions::Tier3::Off;
+    if (options_.programs == TierOptions::Programs::Environment) options_.programs = TierOptions::Programs::On;
+    programs_apart_from_tier3_ = programs();
+#else
     if (options_.tier3 == TierOptions::Tier3::Environment) {
         options_.tier3 = tier3_environment();
         tier3_implicit_ = tier3_environment_implicit();
@@ -312,6 +331,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         options_.region_after = 1;
         options_.native_after = tier3_after() != 0 ? tier3_after() : 1;
     }
+#endif
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
     for (const auto& function : image.functions) {
@@ -322,12 +342,14 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     regions_ = std::vector<RegionEntry>(total);
     programs_ = std::vector<RegionEntry>(image.functions.size());
+#ifndef NEURA_WASM_RUNTIME
     // A function has at most five programs over its life: the first and four
     // refreshes (TierCache::program).
     native_capacity_ = 5 * image.functions.size() + 8;
     native_arrivals_ = std::make_unique<std::atomic<std::uint64_t>[]>(native_capacity_);
     native_programs_ = std::make_unique<std::atomic<const tier3::Program*>[]>(native_capacity_ * tier3::variant_count);
     dispatch_records_ = std::make_unique<std::atomic<tier3::DispatchRecord*>[]>(native_capacity_);
+#endif
     region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();
@@ -361,6 +383,40 @@ TierCache::Resolution TierCache::lookup(std::uint32_t function, std::uint32_t bl
 }
 
 TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
+    if (!options_.defer_proofs) return resolve_now(function, block, runs);
+    const std::lock_guard lock(mutex_);
+    auto& found = entry(function, block);
+    if (found.state == Entry::State::Settled) return {found.lowered.get(), true};
+    if (runs < found.next_attempt) return {nullptr, false, found.next_attempt};
+    if (!found.queued && found.state != Entry::State::Lifting) {
+        proof_queue_.push_back({function, block, runs});
+        found.queued = true;
+    }
+    // The next visit can see the result published by the idle callback.
+    return {nullptr, false, runs};
+}
+
+bool TierCache::proofs_pending() const {
+    const std::lock_guard lock(mutex_);
+    return !proof_queue_.empty();
+}
+
+std::optional<std::chrono::steady_clock::duration> TierCache::prove_one_idle() {
+    QueuedProof proof;
+    {
+        const std::lock_guard lock(mutex_);
+        if (proof_queue_.empty()) return std::nullopt;
+        proof = proof_queue_.front();
+        proof_queue_.pop_front();
+        entry(proof.function, proof.block).queued = false;
+    }
+    const auto runs = counts_[first_entry_[proof.function] + proof.block].load(std::memory_order_relaxed);
+    const auto start = std::chrono::steady_clock::now();
+    resolve_now(proof.function, proof.block, std::max(runs, proof.runs));
+    return std::chrono::steady_clock::now() - start;
+}
+
+TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
     const auto& decoded = image_.functions.at(function).blocks.at(block);
     const auto& graph = image_.graphs.at(decoded.graph);
     const auto budget = std::chrono::steady_clock::duration(options_.search_budget);

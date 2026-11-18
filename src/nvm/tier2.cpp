@@ -742,7 +742,11 @@ public:
         }
         // NEURA_TIER2_NO_OPTIMIZE=1 keeps the program as compiled, to
         // compare against the optimized one when debugging.
+#ifdef NEURA_WASM_RUNTIME
+        Optimizer(image_, region_, std::move(widths)).run();
+#else
         if (!std::getenv("NEURA_TIER2_NO_OPTIMIZE")) Optimizer(image_, region_, std::move(widths)).run();
+#endif
         return std::make_shared<const Region>(std::move(region_));
     }
 
@@ -1923,7 +1927,9 @@ TierCache::RegionResolution TierCache::region(std::uint32_t function, std::uint3
         retired_regions_.push_back(std::move(found.region));
         found.region = std::move(formation.region);
         ++statistics_.refreshed;
+#ifndef NEURA_WASM_RUNTIME
         if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
         return {found.region.get(), true, found.refresh_at};
     }
     if (formation.pending && arrivals < patience) {
@@ -1936,7 +1942,9 @@ TierCache::RegionResolution TierCache::region(std::uint32_t function, std::uint3
     found.state = RegionEntry::State::Settled;
     found.refresh_at = formation.pending ? arrivals * 4 : 0;
     found.region = std::move(formation.region);
+#ifndef NEURA_WASM_RUNTIME
     if (found.region && std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
     if (found.region) {
         ++statistics_.regions;
         statistics_.region_blocks += found.region->blocks.size();
@@ -2044,11 +2052,15 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         if (!formation.region) return {found.region.get(), true, found.refresh_at};
         auto region = std::const_pointer_cast<tier2::Region>(formation.region);
         region->program_id = next_program_id_++;
+#ifndef NEURA_WASM_RUNTIME
         make_dispatch_records(*region);
+#endif
         retired_regions_.push_back(std::move(found.region));
         found.region = std::move(region);
         ++statistics_.refreshed;
+#ifndef NEURA_WASM_RUNTIME
         if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
         return {found.region.get(), true, found.refresh_at};
     }
     if (!formation.region && formation.pending && arrivals < patience) {
@@ -2066,17 +2078,22 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
     // number (tier2_steps.inc).
     auto region = std::const_pointer_cast<tier2::Region>(formation.region);
     region->program_id = next_program_id_++;
+#ifndef NEURA_WASM_RUNTIME
     make_dispatch_records(*region);
+#endif
     found.region = std::move(region);
     ++statistics_.programs;
     statistics_.program_blocks += found.region->blocks.size();
     statistics_.program_stubs += found.region->stubs;
     statistics_.program_entries += found.region->entries.size();
     statistics_.checks_eliminated += found.region->eliminated_checks;
+#ifndef NEURA_WASM_RUNTIME
     if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+#endif
     return {found.region.get(), true, found.refresh_at};
 }
 
+#ifndef NEURA_WASM_RUNTIME
 const jit::Program* TierCache::native(const tier2::Region& region) {
     const std::lock_guard lock(mutex_);
     const auto [it, inserted] = native_.try_emplace(&region);
@@ -2100,5 +2117,6 @@ void TierCache::note_jit(jit::Mode mode, const jit::Availability& availability) 
     statistics_.jit_mode = jit::mode_name(mode);
     if (!availability.enabled) statistics_.jit_off = availability.reason;
 }
+#endif
 
 } // namespace neura::nvm

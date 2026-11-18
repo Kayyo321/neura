@@ -129,9 +129,11 @@
     // loaded once, and its temporaries).
     void use_program(std::uint32_t function, const tier2::Region& program) {
         if (function_programs_.size() != image_.functions.size()) function_programs_.resize(image_.functions.size());
+#ifndef NEURA_WASM_RUNTIME
         // A native call of the function enters the program the cell holds
         // only while it is the run's program.
         if (function_programs_[function] != &program && function < tier3_cells_.size()) tier3_cells_[function] = {};
+#endif
         function_programs_[function] = &program;
         program_image(program);
     }
@@ -162,13 +164,24 @@
     // the allowance is spent: the next block runs at tier 1.
     std::uint64_t run_regions(std::uint64_t allowance) {
         std::uint64_t total = 0;
-        while (total < allowance) {
+#ifdef NEURA_WASM_RUNTIME
+        const auto initial_steps = steps_;
+        const auto charged = [&] { return steps_ - initial_steps; };
+#else
+        const auto charged = [&] { return total; };
+#endif
+        while (charged() < allowance) {
             if (finished_ || pending_ || active_block_ || !started_ || frames_.empty()) break;
             if (scheduler_ && scheduler_->deciding) break;
             auto frame = frames_.back();
             auto& plan = block_plan(frame.function, frame.block);
             const auto* region = region_for(frame.function, frame.block, plan);
             if (!region) break;
+#ifdef NEURA_WASM_RUNTIME
+            time_as(TierTimes::Category::Regions);
+            const auto outcome = region->program ? run_program(*region, plan.program_entry, allowance - charged())
+                                                : run_region(*region, allowance - charged());
+#else
             // Function programs run as native programs (tier 3) when they
             // have one, else on the interpreter.
             const auto* native = jit_ && !region->program ? native_code(plan) : nullptr;
@@ -178,12 +191,14 @@
                                  : code      ? run_native_program(*code, plan.program_entry, allowance - total)
                                  : region->program ? run_program(*region, plan.program_entry, allowance - total)
                                                    : run_region(*region, allowance - total, native);
+#endif
             total += outcome.blocks;
             if (outcome.deoptimized) break;
         }
         return total;
     }
 
+#ifndef NEURA_WASM_RUNTIME
     // The native code of the plan's region, compiled by the cache the first
     // time any run asks (src/jit), or null: the region interpreter runs it.
     const jit::Program* native_code(BlockPlan& plan) {
@@ -292,6 +307,8 @@
         case jit::Outcome::Exception: std::rethrow_exception(std::exchange(region_exception_, nullptr));
         }
     }
+
+#endif
 
     // The region interpreter: the region program, op by op.
     void interpret_region(const tier2::Region& region, std::uint64_t allowance, std::uint64_t& done,
@@ -421,7 +438,11 @@
         }
     }
 
-    RegionOutcome run_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native) {
+    RegionOutcome run_region(const tier2::Region& region, std::uint64_t allowance
+#ifndef NEURA_WASM_RUNTIME
+                             , const jit::Program* native
+#endif
+    ) {
         auto frame = frames_.back();
         auto* regs = region_registers_.data();
         auto* init = region_initialized_.data();
@@ -454,11 +475,12 @@
         std::uint64_t done = 0;
         std::uint32_t next_block = 0;
         bool deoptimized = false;
+#ifndef NEURA_WASM_RUNTIME
         if (native) {
             run_native(*native, region, allowance, done, next_block, deoptimized);
-        } else {
+        } else
+#endif
             interpret_region(region, allowance, done, next_block, deoptimized);
-        }
         for (const auto r : region.written) {
             frame.slots[region.slots[r]] = regs[r];
             frame.initialized[region.slots[r]] = init[r];
@@ -509,6 +531,9 @@
         std::uint32_t pc = entered.entries[entry_index].label;
         std::uint64_t done = 0;
         std::uint64_t blocks = 0;
+#ifdef NEURA_WASM_RUNTIME
+        const auto initial_steps = steps_;
+#endif
         std::uint64_t* slots = nullptr;
         std::uint8_t* init = nullptr;
         std::uint64_t* temps = nullptr;
@@ -556,15 +581,24 @@
             const auto& op = code[pc++];
             switch (op.code) {
             case tier2::Code::Budget: {
+#ifndef NEURA_WASM_RUNTIME
                 // A checkpoint of a program that has native code (or has
                 // just reached the threshold for it): the frame is canonical
                 // here, so the activation ends as a Leave at this block, and
                 // the dispatcher enters the native program there.
                 if (tier3_ && tier3_code(*program, true)) return end(op.block, false, region_counts_.leaves);
+#endif
                 const auto& checkpoint = program->checkpoints[op.a];
                 const auto used = steps_ + done;
                 const bool steps_fit = used <= limits_.max_steps && limits_.max_steps - used >= checkpoint.steps;
+#ifdef NEURA_WASM_RUNTIME
+                // A kernel can charge additional steps in a helper. Its
+                // resume is a checkpoint, so stop here if it used the slice.
+                const auto charged = used - initial_steps;
+                const bool allowed = charged <= allowance && allowance - charged >= checkpoint.steps;
+#else
                 const bool allowed = allowance - blocks >= checkpoint.steps;
+#endif
                 const bool polls_fit = !scheduler_ || checkpoint.polls == 0 ||
                                        scheduler_->polls + checkpoint.polls < limits_.task_quantum;
                 if (!steps_fit || !allowed || !polls_fit) return end(op.block, true, region_counts_.budget);
@@ -610,7 +644,9 @@
                 const auto found = std::lower_bound(table.exits.begin(), table.exits.end(), tag,
                                                     [](const auto& entry, std::uint64_t key) { return entry.first < key; });
                 const auto exit = found != table.exits.end() && found->first == tag ? found->second : table.fallback;
+#ifndef NEURA_WASM_RUNTIME
                 if (tier3_) tier3_record(*program, op.index, tag);
+#endif
                 pc = program->operands[op.other + exit];
                 break;
             }
@@ -689,8 +725,10 @@
                 // A callee with native code runs there: the dispatcher enters
                 // it at its first block.
                 bool enters = callee != nullptr && (!callee->uses_float || float_default) &&
-                              !callee->entries.empty() && callee->entries.front().block == 0 &&
-                              !(tier3_ && tier3_code(*callee, false));
+                              !callee->entries.empty() && callee->entries.front().block == 0;
+#ifndef NEURA_WASM_RUNTIME
+                enters = enters && !(tier3_ && tier3_code(*callee, false));
+#endif
                 if (enters) {
                     // Entry 0's checks: its early reads are parameters, which
                     // the push initialized, and the parameters fit their
@@ -773,7 +811,11 @@
                 ++region_counts_.returns;
                 load_frame();
                 const auto* resumed = static_cast<const tier2::Region*>(header.called_from);
-                if (!resumed || (resumed->uses_float && !float_default) || (tier3_ && tier3_code(*resumed, false))) {
+                bool resume = resumed && (!resumed->uses_float || float_default);
+#ifndef NEURA_WASM_RUNTIME
+                resume = resume && !(tier3_ && tier3_code(*resumed, false));
+#endif
+                if (!resume) {
                     return end(header.return_block, false, region_counts_.leaves);
                 }
                 enter(*resumed);
@@ -786,7 +828,9 @@
     }
 
     void flush_region_events() {
+#ifndef NEURA_WASM_RUNTIME
         flush_native_events();
+#endif
         if (region_counts_.entries == 0 && region_counts_.refused == 0 && region_counts_.budget == 0) return;
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> steps;
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> deopts;
@@ -804,6 +848,7 @@
         region_counts_ = {};
     }
 
+#ifndef NEURA_WASM_RUNTIME
     // NEURA_TIER_CHECK=1 for regions: the region runs, then everything it
     // changed is put back (slots, initialized flags, the block, steps,
     // per-function and task steps, polls, and every heap and global write,
@@ -907,3 +952,4 @@
         if (write.field) heap_.restore_field(item, write.index, write.old_value, write.old_initialized != 0);
         else heap_.set_element(item, write.index, write.old_value);
     }
+#endif

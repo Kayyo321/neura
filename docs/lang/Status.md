@@ -29,6 +29,8 @@ Arrays use [activation and static regions](Collections.md#array-lifetime). An ow
 
 [HTML factories](../apps/Html.md) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. [Stylesheets](../apps/Css.md) are module-level constants, inline or from files, with CSS-module names, bundled imports and assets, and a fixed link order that the build writes beside the image. [State and components](../apps/Components.md) are library code in `Std.Ui`: `ui.State<T>` of deeply immutable values, subscriptions, components with slots, and roots whose turns render and commit over a `ui.Host`, tested on the in-memory `Std.Ui.ModelHost`. A root's commit is validated and reconciled by library code that issues the host operations in their fixed order. The browser and desktop hosts, commands, controls, routing, contracts, application packaging and full render effect checks are not implemented.
 
+The browser runtime runs an image in a page under Node, headless Chromium and headless Firefox: `nvm.wasm` at tiers 0 to 2, waits and timers without polling, and the [UI and history host services](../runtime/Providers.md#ui-services) with their commit and event encodings. Library state and components (`Std.Ui`, `Std.Web`), `neura.http.fetch`, web bundles, recording and replay in the browser, and Safari are not implemented yet.
+
 ## Outside this release
 
 | Area | Status |

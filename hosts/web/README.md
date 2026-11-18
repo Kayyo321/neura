@@ -1,10 +1,14 @@
-# Browser DOM adapter
+# Browser host
+
+This directory holds the browser host of Neura web applications: the NVM adapter `nvm.js`, the UI and history services `ui.mjs` and their encodings `ui-wire.mjs`, and the DOM adapter `dom.mjs`. [Application host providers](../../docs/runtime/Providers.md) owns their contracts.
+
+## DOM adapter
 
 `dom.mjs` applies a decoded commit to a browser element owned by a `DomRoot`. The caller supplies operation order and identity decisions. The root keeps its managed elements, text nodes, and installed listeners between commits.
 
 `new DomRoot(element, queueEvent)` opens a root. `queueEvent` receives an immutable event snapshot with the decoded node and handler IDs. Modifier handling occurs during native dispatch, before event delivery. Call `close()` to release the root and detach its listeners.
 
-## Decoded operations
+### Decoded operations
 
 Use node ID 0 for the container when an operation names its parent. Insertion uses a sibling ID in `before` or `null` to append. A subtree removal releases all its descendant IDs. Each following phase consumes the node IDs that the earlier phases leave.
 
@@ -26,6 +30,36 @@ Property writes skip equal values and clamp the existing selection when a focuse
 
 The provider's binary encoding, service handles, and event queue sit outside this decoded API. The [operation corpus](../../tests/apps/ui-ops/batches.json) can be read by another host independently of browser event fixtures.
 
-## Verification
+### Verification
 
 Run `python3 tests/apps/ui-ops/browser.py` using local Chromium and Firefox. The tests exercise native DOM mutation, user-facing selection state, event modifiers, listener identity, rejected batches, fault and reset behavior, and injected composition events. Physical IME behavior requires a manual platform run.
+
+## NVM execution
+
+Configure the `wasm-runtime` preset with `-DNEURA_WASM_HOST=ON`. The `neura_wasm` target produces `nvm.mjs` and `nvm.wasm` in the preset's build directory. Instantiate the generated module, then pass it and the NVR bytes to `new NvmExecution(module, image, { args, host, tier })` from `nvm.js`. The constructor checks the [browser adapter interface](../../docs/runtime/Providers.md#browser-adapter-interface) version, verifies the image, and binds every import before execution starts. Each instance owns its frames, heap, scheduler, and proof queue. Call `close()` when finished.
+
+The members of `host` grant [the browser services](../../docs/runtime/Providers.md#browser-services). A service the host does not grant still binds and answers error 14. `browserHost({ output, ui, history })` returns the defaults of a page: console lines on `console.log`, the page's clocks, timers for sleeps, `crypto.getRandomValues` for entropy, and the UI and history services when given a `UiHost` and a `HistoryHost` from `ui.mjs`.
+
+| Member | Called as | Answer |
+| --- | --- | --- |
+| `console` | `console(line, context)`; the line includes its LF | `false` for a failed write, or `true` or `undefined` |
+| `clockWall` | `clockWall(context)` | `{ seconds, nanos }` with `seconds` a signed 64-bit `BigInt` and `nanos` an integer in `[0, 1000000000)` |
+| `clockMonotonic` | `clockMonotonic(context)` | A signed 64-bit `BigInt` in nanoseconds |
+| `sleep` | `sleep(nanos, context)` | `undefined` when the time has passed |
+| `entropy` | `entropy(count, context)` | A `Uint8Array` of `count` bytes |
+| `ui` | A `UiHost`: `openRoot`, `closeRoot`, `template`, `commit`, `nextEvents`, `stats` | As [UI services](../../docs/runtime/Providers.md#ui-services) |
+| `history` | A `HistoryHost`: `current`, `push`, `replace`, `next` | As [History services](../../docs/runtime/Providers.md#history-services) |
+
+Every answer may instead be `{ error }` with a positive uint32 host error code, or a promise of either. `context.sequence` is the request's `BigInt` sequence number, from zero in each execution. A cancellable request also has `context.signal`, an `AbortSignal`. A service that throws, or whose promise rejects, closes the execution.
+
+`run()` drives the execution until it completes or traps, as [Scheduling](../../docs/runtime/Providers.md#scheduling) describes: it answers requests, delivers overlapping answers at scheduling points, gives the task clock to timers, and waits for an answer or a timer without polling. It checks the browser's work budget after each 4,096-step slice or intervening event. It defaults to 8 ms with a configurable ceiling of 50 ms. A charged kernel or a parallel join runs atomically, so that operation can pass the next step sample. An idle callback may attempt one queued proof after the page has had an event turn, and while the run waits. Pass `hasPendingEvents` when a host has queued events of its own; a `UiHost` reports its count as `queued`. `onProof` receives the duration of an idle attempt in milliseconds. Embedders can also drive the instance through `advanceSlice()`, `serveRequest()`, `cancelRequest()`, `deliverReady()`, `advanceClock()` and `proveOneIdle()`.
+
+## UI services
+
+`ui.mjs` serves the UI and history groups over `DomRoot`, and `ui-wire.mjs` decodes [commits](../../docs/runtime/Providers.md#commit-encoding) and encodes [events](../../docs/runtime/Providers.md#event-encoding). Each root queues its events, coalesces `pointermove` and `scroll`, and reports overflow at the limit U-7. A commit marks `neura:first-commit` once and `neura:commit-end` after each, for the browser budgets.
+
+## Runtime checks
+
+Run `python3 tests/wasm/check-host.py --neura /path/to/neura --browser chromium --browser firefox` after building `neura_wasm`. The check builds the fixtures once, records native tier-0 output and counters, and compares the same images under Node and the selected local browsers.
+
+Run `python3 tests/apps/web/check.py --neura /path/to/neura --browser chromium --browser firefox` for the services. It round-trips the operation corpus and every operation and event kind through the encodings, runs sleeping and cancelled tasks against native output, sends the corpus through `neura.ui.commit`, checks the event queue, and runs a counter image that mounts a button, receives injected clicks and commits a new label for each.

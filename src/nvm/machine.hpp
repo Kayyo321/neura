@@ -439,6 +439,12 @@ public:
     // exit. A host request suspends the run until complete() supplies its
     // response. Advancing a finished run returns its final event again.
     Event advance();
+#ifdef NEURA_WASM_RUNTIME
+    // Stops at the first safe point after `budget` charged steps or at an
+    // event. A kernel or joined parallel item is atomic and may charge more
+    // than the remaining budget. A host-only yield changes no VM state.
+    std::optional<Event> advance_slice(std::uint64_t budget);
+#endif
     // Snapshot of scheduler state between block steps: the task tree with
     // each task's spawn site, state, and stack. Empty for a serial image.
     std::string dump_tasks(TaskDumpFormat format = TaskDumpFormat::Text) const;
@@ -478,12 +484,14 @@ public:
         std::uint32_t next_block = 0;
         std::uint64_t blocks = 0;
     };
+#ifndef NEURA_WASM_RUNTIME
     std::vector<Tier3Frame> tier3_frames() const;
     Tier3Ending tier3_run(const tier3::Program& program, std::uint32_t entry);
     // Tests only (tests/backend/tier3_heap_tests.cpp): the heap's words
     // (Heap::snapshot) and the executor's live and peak cells and collection
     // threshold, comparable between runs word for word.
     std::vector<std::uint64_t> heap_snapshot() const;
+#endif
 
     struct GraphStep {
         std::uint32_t graph = 0;
@@ -634,6 +642,7 @@ public:
     virtual bool virtual_time() const { return false; }
 };
 
+#ifndef NEURA_WASM_RUNTIME
 // The host's steady clock; wait_until sleeps.
 class SteadyTaskClock final : public TaskClock {
 public:
@@ -650,5 +659,6 @@ public:
 // request is answered before the run continues.
 RunResult run(const nvr::Image& image, const Bindings& bindings, std::span<const std::string> arguments,
               RunLimits limits = {}, TaskClock* clock = nullptr);
+#endif
 
 } // namespace neura::nvm
