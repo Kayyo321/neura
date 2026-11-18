@@ -51,7 +51,20 @@ async function measure() {
     });
     // A browser without long-task entries (Firefox) ignores the type instead of refusing it.
     const longTaskSupported = PerformanceObserver.supportedEntryTypes?.includes('longtask') ?? false;
-    if (longTaskSupported) observer.observe({ type: 'longtask' });
+    let controlSeen = null;
+    if (longTaskSupported) {
+        observer.observe({ type: 'longtask' });
+        // A positive control: an 80 ms task of the page itself must be reported before the measured clicks.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const busy = performance.now();
+        while (performance.now() - busy < 80) { /* block the main thread */ }
+        const waited = performance.now();
+        while (!longTasks.some(duration => duration >= 70) && performance.now() - waited < 3000) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        controlSeen = longTasks.some(duration => duration >= 70);
+        longTasks.length = 0;
+    }
     const clicks = [];
     for (let i = 0; i < 200; i += 1) {
         const button = buttons()[(i * 37) % 1000];
@@ -73,7 +86,7 @@ async function measure() {
     observer.disconnect();
     return {
         w5: summary(clicks), w6: reversals.length ? summary(reversals) : null,
-        w7: { supported: longTaskSupported, over50: longTasks.filter(d => d > 50).length,
+        w7: { supported: longTaskSupported, control: controlSeen, over50: longTasks.filter(d => d > 50).length,
               longest: longTasks.length ? Math.max(...longTasks) : 0 },
         cores: navigator.hardwareConcurrency, agent: navigator.userAgent,
     };

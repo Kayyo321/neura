@@ -72,7 +72,9 @@ def main():
                         f'max {w5["max"]:.1f} ms ({w5["count"]} clicks)')
                 if w6:
                     line += f'; B-W6 reverse 95th {w6["p95"]:.1f} ms, median {w6["median"]:.1f} ms ({w6["count"]})'
-                line += (f'; B-W7 {"long tasks over 50 ms: " + str(w7["over50"]) + ", longest " + format(w7["longest"], ".0f") + " ms" if w7["supported"] else "no long-task entries in this browser"}'
+                if w7['supported'] and not w7['control']:
+                    raise SystemExit(f'{name}: {version}: the long-task observer missed an 80 ms task of the page')
+                line += (f'; B-W7 {"long tasks over 50 ms: " + str(w7["over50"]) + ", longest " + format(w7["longest"], ".0f") + " ms (an 80 ms control task was reported)" if w7["supported"] else "no long-task entries in this browser"}'
                          f'; load {load[0]:.1f} to {os.getloadavg()[0]:.1f} on {os.cpu_count()} CPUs')
                 print(line, flush=True)
     if args.out:

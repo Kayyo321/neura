@@ -568,6 +568,8 @@ export let Ui = module (
             owner = nil;
             dirty = false;
             view = nil;
+            // The reconciler's memo holds the mounted nodes and views; an unmounted component keeps none of them.
+            reconciled = nil;
             generation_count += 1;
         };
 
