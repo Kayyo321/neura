@@ -97,10 +97,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
 
-def run_browser(browser, work, timeout=45, path='/', fallback=False):
+def run_browser(browser, work, timeout=45, path='/', fallback=False, handler=Handler):
     """Serves `work` and opens `path` in `browser` until the page posts its report. With `fallback`, a path that
-    names no file is answered with index.html, as a host serving a history-routed application must."""
-    with ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=work)) as server:
+    names no file is answered with index.html, as a host serving a history-routed application must. `handler` is a
+    subclass of Handler that serves more, such as a proxy to a backend."""
+    with ThreadingHTTPServer(('127.0.0.1', 0), partial(handler, directory=work)) as server:
         server.fallback = fallback
         server.reports = Queue()
         server.token = secrets.token_hex(20)

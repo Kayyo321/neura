@@ -1,0 +1,158 @@
+// A front end that calls a Neura backend (docs/apps/WebApp.md, "Call a Neura backend"): the page asks the server
+// image examples/server/hello-server.nra for a greeting with GET /api/hello?name=... and sends a message that the
+// server echoes with POST /api/echo. A reverse proxy serves the bundle and passes /api/ to neura-server-host, so
+// the page and the server share one origin. Each call runs as a command, so the page keeps taking input while it
+// waits, and its outcome is shown in the status line.
+let commands = import:Std.Ui.Commands;
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let http = import:Std.Net.Http.Fetch;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+const PageStyles = css {
+    .page { font-family: system-ui, sans-serif; max-width: 30rem; margin: 3rem auto; }
+    .status { min-height: 1.5rem; color: #2a5db0; }
+};
+
+let form_view = html(name: string, on_name: func(ui.InputEvent) -> void, message: string,
+                     on_message: func(ui.InputEvent) -> void, on_greet: func(ui.ClickEvent) -> void,
+                     on_send: func(ui.ClickEvent) -> void) {
+    <p>
+        <label for="name">Name</label>
+        <input type="text" id="name" prop:value={name} on:input={on_name}>
+        <button type="button" id="greet" on:click={on_greet}>Greet</button>
+    </p>
+    <p>
+        <label for="message">Message</label>
+        <input type="text" id="message" prop:value={message} on:input={on_message}>
+        <button type="button" id="send" on:click={on_send}>Send</button>
+    </p>
+};
+
+let status_view = html(text: string) {
+    <p class="status" id="status" role="status">{text}</p>
+};
+
+let page_view = html(form: ui.View, status: ui.View) {
+    <main class="page">
+        <h1>Ask the server</h1>
+        {form}
+        {status}
+    </main>
+};
+
+// One call to the backend: the command's input. A class of its own gives the work a function type no other
+// closure of the program shares (docs/apps/Components.md, "Commands").
+#Immutable
+let Call = class (
+    export last method: string;
+    export last path: string;
+    export last body: string;
+
+    export let init = func(method: string, path: string, body: string) => set;
+
+    export let.override to_string = func -> string => method + " " + path;
+
+    export let.override equals = func(other: class) -> bool =>
+        other is Call && (other as Call).method == method && (other as Call).path == path
+        && (other as Call).body == body;
+
+    export let.override hash_code = func -> uint32 => (method + " " + path + " " + body).hash_code();
+);
+
+// Percent-encodes `text` for a query value: unreserved ASCII stays, every other byte becomes %XX.
+let query_value = func(text: string) -> string {
+    last digits = "0123456789ABCDEF";
+    last out: uint8[list] = new;
+    for (let byte in strings.to_bytes(text)) {
+        last unreserved = (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+            || byte == 45 || byte == 46 || byte == 95 || byte == 126;
+        if (unreserved) {
+            out.append(byte);
+        } else {
+            out.append(37);
+            out.append(digits.byte_at((byte / 16) as int));
+            out.append(digits.byte_at((byte % 16) as int));
+        }
+    }
+    return match (strings.from_bytes(out)) {
+        result.Result.Ok(encoded) => encoded,
+        result.Result.Err(_) => "",
+    };
+};
+
+// Task-safe work: sends the call and answers the response's text. A status that is not 2xx is an error.
+let send_call = func(call: Call) -> result.Result<string> {
+    let request = http.request(call.method, call.path);
+    if (call.body != "") {
+        request = request.with_text("text/plain; charset=utf-8", call.body);
+    }
+    match (request.send()) {
+        result.Result.Ok(response) => {
+            last text = match (response.text()) {
+                result.Result.Ok(body) => strings.trim(body),
+                result.Result.Err(_) => "",
+            };
+            if (!response.ok()) {
+                return result.Result<string>.Err(error.custom("example.status",
+                                                             "the server answered " + response.status.to_string()));
+            }
+            return result.Result<string>.Ok(text);
+        },
+        result.Result.Err(problem) => {
+            return result.Result<string>.Err(problem);
+        },
+    }
+};
+
+let describe = func(state: commands.CommandState<string>) -> string => match (state) {
+    commands.CommandState.Idle => "Ready",
+    commands.CommandState.Running => "Waiting for the server",
+    commands.CommandState.Succeeded(text) => text,
+    commands.CommandState.Failed(problem) => "Failed: " + error.message(error.from_portable(problem)),
+    commands.CommandState.Cancelled => "Cancelled",
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last name = new ui.State<string>("Ada");
+        last message = new ui.State<string>("");
+        last call = new commands.Command<Call, string>(send_call);
+        last status = ui.component<commands.CommandState<string>>(call.state,
+            new func(state: commands.CommandState<string>) -> ui.View => status_view(describe(state)));
+        call.bind(status);
+        last on_name = new func(event: ui.InputEvent) {
+            name.set(event.value);
+        };
+        last on_message = new func(event: ui.InputEvent) {
+            message.set(event.value);
+        };
+        last on_greet = new func(event: ui.ClickEvent) {
+            call.run(new Call("GET", "/api/hello?name=" + query_value(name.get()), ""));
+        };
+        last on_send = new func(event: ui.ClickEvent) {
+            call.run(new Call("POST", "/api/echo", message.get()));
+        };
+        last form = ui.component<string>(name, new func(value: string) -> ui.View =>
+            form_view(value, on_name, message.get(), on_message, on_greet, on_send));
+        last page = ui.component<bool>(new ui.State<bool>(true), new func(unused: bool) -> ui.View =>
+            page_view(ui.slot(form), ui.slot(status)));
+        let exit = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", page, tasks)) {
+                result.Result.Ok(root) => {
+                    commands.run(root);
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    exit = program.ExitCode.Failure;
+                },
+            }
+        }
+        return exit;
+    };
+);

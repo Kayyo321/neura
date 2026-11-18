@@ -701,6 +701,12 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/app-check.py" --neura "$<TARGET_FILE:neura>"
         --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
     set_tests_properties(app-web-browser PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+    # The front end of examples/apps/web-backend calling the server image of examples/server through a proxy; it
+    # also needs neura-server-host beside neura, and is skipped without it.
+    add_test(NAME app-web-backend COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/backend-check.py" --neura "$<TARGET_FILE:neura>"
+        --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
+    set_tests_properties(app-web-backend PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

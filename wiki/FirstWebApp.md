@@ -111,8 +111,38 @@ Open `http://localhost:8000/`. The page shows the heading and `0`; each click on
 
 The bundle uses hash routing by default: a router keeps its path in the fragment (`/#/parts/7`), which every static host serves. For addresses without the fragment, bundle with `--routing history` and, when the application does not live at the site's root, `--base /app/`. The page then references its files from the base, and the server must follow one rule, which the script prints: serve the bundle's files at `<base><file>` and answer every other path below the base with `index.html`, so that a deep link such as `/app/parts/7` loads the application at that route. The script also writes `404.html`, a copy of `index.html`, for hosts that serve that file for unknown paths. The same image runs under either mode: the router asks the page for its links.
 
+## 5. Call a Neura backend
+
+A page asks a server for data with `Std.Net.Http.Fetch` ([HTTP fetch](Providers#http-fetch)). [`examples/apps/web-backend/app.nra`](https://github.com/Kayyo321/neura/blob/main/examples/apps/web-backend/app.nra) is a page that asks the server image `examples/server/hello-server.nra` for a greeting (`GET /api/hello?name=Ada`) and sends it a message to echo (`POST /api/echo`). Each call runs as a command of [`Std.Ui.Commands`](StateAndComponents#commands), so the page keeps taking input while it waits; the status line shows `Waiting for the server`, then the server's answer or the failure. The work of the command is one `send`:
+
+```text
+let request = http.request(call.method, call.path);
+if (call.body != "") {
+    request = request.with_text("text/plain; charset=utf-8", call.body);
+}
+match (request.send()) { ... }
+```
+
+Run the server with `neura-server-host`, built beside `neura`, which runs the image once for each request (its page is `docs/runtime/ServerHost.md`):
+
+```sh
+build/neura build examples/server/hello-server.nra -o hello-server.nvr
+build/neura-server-host --listen 127.0.0.1:8080 --config greeting=hello hello-server.nvr
+```
+
+Bundle the page with `--http-client`, which grants `neura.http.fetch` for the page's own origin; without it every call answers error 14 and the script says so:
+
+```sh
+python3 scripts/build-web-bundle.py --source examples/apps/web-backend/app.nra --neura build/neura \
+    --id org.example.backend --title "Ask the server" --http-client --out dist
+```
+
+Serve both under one origin: a reverse proxy serves `dist/` and passes every path below `/api/` to the server host without the prefix, so `/api/hello` reaches the server as `/hello`. With nginx, for example, that is `location /api/ { proxy_pass http://127.0.0.1:8080/; }` beside `root dist;`. One origin needs no CORS headers and no `--connect`. A backend on another origin is listed with `--connect https://api.example.com` and must answer with CORS headers, which `hello-server.nra` does not send ([HTTP fetch](Providers#http-fetch)).
+
+`tests/apps/web/backend-check.py` (`app-web-backend`, skipped when `neura-server-host` was not built beside `neura`) runs this in headless Chromium and Firefox with a small proxy of that shape: it greets twice, sends `ping é ✓`, and checks the server's answers on the page and the requests the server received; then the proxy answers 502, as it does when the server is down, and the page shows `Failed: the server answered 502`. A native `neura run` of the page does not start: it does not serve `neura.http.fetch` yet, so the image fails to bind.
+
 ## Going further
 
 [`tests/apps/web/app/app.nra`](https://github.com/Kayyo321/neura/blob/main/tests/apps/web/app/app.nra) is a larger page checked in the browsers: a keyed `@for` list that adds, removes and reverses items over a `ui.State<FrozenList<string>>`, a text input bound both ways with `prop:value` and `on:input`, and a button that closes the root from a handler. Its check confirms after each step that only the component that changed renders and commits, that reordered items keep their elements, and that typing keeps the input's focus and selection.
 
-Not in 0.3.0 yet: commands for work that waits, the router, controls and forms with validation, contracts, `neura build` of a `web` target, and the render-effect check `E1010`. [The design note](https://github.com/Kayyo321/neura/blob/main/docs/design/Components030.md) lists what remains.
+Not in 0.3.0 yet: contracts, `neura build` of a `web` target (`scripts/build-web-bundle.py` stands in), and the render-effect check `E1010` for the render function of a `ui.component` (templates have it). [The design note](https://github.com/Kayyo321/neura/blob/main/docs/design/Components030.md) lists what remains.
