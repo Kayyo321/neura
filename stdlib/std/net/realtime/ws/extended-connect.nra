@@ -1,0 +1,191 @@
+let errors = import:Std.Core.Error;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let ws = import:Std.Net.Realtime.Ws.WebSocket;
+
+/// @brief Bootstrapping WebSockets with the extended CONNECT method over HTTP/2 (RFC 8441) and HTTP/3
+/// (RFC 9220).
+///
+/// The request is `:method CONNECT` with `:protocol websocket`, `:scheme` (`https` for wss, `http` for ws),
+/// `:path` and `:authority`, plus `sec-websocket-version: 13` and the optional `sec-websocket-protocol`,
+/// `sec-websocket-extensions` and `origin`; Connection, Upgrade, Host, Sec-WebSocket-Key and
+/// Sec-WebSocket-Accept are not used (RFC 8441 section 5). A client may send it only after the server's
+/// SETTINGS_ENABLE_CONNECT_PROTOCOL (0x08 in both HTTP/2 and HTTP/3) was 1. Field names are lowercase. The
+/// builders and validators here are real; opening the HTTP/2 or HTTP/3 stream is not, because the standard
+/// library has no HTTP/2 or HTTP/3 transport yet. Once a stream is open, `WebSocket.over_upgraded` runs the
+/// WebSocket protocol on it. Failures are Custom errors with the code `ws.handshake`.
+/// @see [Std.Net.Realtime.Ws.ExtendedConnect](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-ExtendedConnect)
+#Since("0.3.0")
+export let ExtendedConnect = module (
+    /// @brief The identifier of SETTINGS_ENABLE_CONNECT_PROTOCOL in HTTP/2 (RFC 8441 section 9.1) and HTTP/3
+    /// (RFC 9220 section 5).
+    export const SettingsEnableConnectProtocol: int = 8;
+
+    /// @brief The `:protocol` value that bootstraps a WebSocket.
+    export const ProtocolToken: string = "websocket";
+
+    /// @brief Whether a received SETTINGS_ENABLE_CONNECT_PROTOCOL value allows extended CONNECT: 1 allows it, 0
+    /// does not, and any other value is a connection error (RFC 8441 section 3).
+    #NoDiscard
+    export let enables_extended_connect = func(value: int64) -> Result<bool> {
+        if (value == 0 || value == 1) {
+            return Result<bool>.Ok(value == 1);
+        }
+        return fail<bool>("SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1, not " + value.to_string());
+    };
+
+    /// @brief The request fields of an extended CONNECT for a WebSocket (RFC 8441 section 5 and its example in
+    /// section 5.1). `secure` selects `https` (wss) or `http` (ws); an empty `origin` or `extensions` is left
+    /// out, as is an empty protocol list.
+    #NoDiscard
+    export let request_headers = func(secure: bool, authority: string, path: string, protocols: string[list],
+        extensions: string, origin: string) -> handshake.Header[list] {
+        last list: handshake.Header[list] = new;
+        list.append(new handshake.Header(":method", "CONNECT"));
+        list.append(new handshake.Header(":protocol", ProtocolToken));
+        list.append(new handshake.Header(":scheme", secure ? "https" : "http"));
+        list.append(new handshake.Header(":path", path));
+        list.append(new handshake.Header(":authority", authority));
+        if (protocols.length > 0) {
+            list.append(new handshake.Header("sec-websocket-protocol", strings.join(protocols, ", ")));
+        }
+        if (extensions.byte_length > 0) {
+            list.append(new handshake.Header("sec-websocket-extensions", extensions));
+        }
+        if (origin.byte_length > 0) {
+            list.append(new handshake.Header("origin", origin));
+        }
+        list.append(new handshake.Header("sec-websocket-version", handshake.Version));
+        return list;
+    };
+
+    /// @brief Checks an extended CONNECT request as a server must. Requires lowercase field names,
+    /// `:method CONNECT`, `:protocol websocket` (another token fails with a message naming it; RFC 9220 section
+    /// 3 suggests answering 501), non-empty `:scheme` (`http` or `https`), `:path` and `:authority`, no
+    /// Connection or Upgrade field, and `sec-websocket-version: 13`. The offer's key is empty: extended CONNECT
+    /// has no key.
+    #NoDiscard
+    export let validate_request = func(headers: handshake.Header[list]) -> Result<handshake.ClientOffer> {
+        for (let header in headers) {
+            if (strings.to_ascii_lower(header.name) != header.name) {
+                return fail<handshake.ClientOffer>("field names must be lowercase: " + header.name);
+            }
+            if (header.name == "connection" || header.name == "upgrade") {
+                return fail<handshake.ClientOffer>("the " + header.name + " field is not used with extended CONNECT");
+            }
+        }
+        if (field(headers, ":method") != "CONNECT") {
+            return fail<handshake.ClientOffer>("the method must be CONNECT");
+        }
+        last protocol = field(headers, ":protocol");
+        if (protocol != ProtocolToken) {
+            return fail<handshake.ClientOffer>("unsupported :protocol \"" + protocol + "\"");
+        }
+        last scheme = field(headers, ":scheme");
+        if (scheme != "https" && scheme != "http") {
+            return fail<handshake.ClientOffer>("the :scheme must be https or http");
+        }
+        last path = field(headers, ":path");
+        last authority = field(headers, ":authority");
+        if (path.byte_length == 0 || authority.byte_length == 0) {
+            return fail<handshake.ClientOffer>("the :path and :authority fields are required");
+        }
+        if (field(headers, "sec-websocket-version") != handshake.Version) {
+            return fail<handshake.ClientOffer>("sec-websocket-version must be 13");
+        }
+        return Result<handshake.ClientOffer>.Ok(new handshake.ClientOffer(path, authority, "", field(headers, "origin"),
+            handshake.split_list(field(headers, "sec-websocket-protocol")), field(headers, "sec-websocket-extensions")));
+    };
+
+    /// @brief The fields of a successful response (`:status 200`) with the chosen subprotocol and extension
+    /// response.
+    #NoDiscard
+    export let response_headers = func(protocol: Optional<string>, extensions: string) -> handshake.Header[list] {
+        last list: handshake.Header[list] = new;
+        list.append(new handshake.Header(":status", "200"));
+        match (protocol) {
+            Optional.Some(name) => {
+                list.append(new handshake.Header("sec-websocket-protocol", name));
+            },
+            Optional.None => {},
+        }
+        if (extensions.byte_length > 0) {
+            list.append(new handshake.Header("sec-websocket-extensions", extensions));
+        }
+        return list;
+    };
+
+    /// @brief Checks a response as a client must: `:status` 2xx (a CONNECT succeeds with 2xx, RFC 9110 section
+    /// 9.3.6), a subprotocol the client offered if any, and only extensions the client offered.
+    #NoDiscard
+    export let validate_response = func(offered_protocols: string[list], offered_extensions: string,
+        headers: handshake.Header[list]) -> Result<handshake.ServerAcceptance> {
+        last status = field(headers, ":status");
+        if (status.byte_length != 3 || status.byte_at(0) != 50) {
+            return fail<handshake.ServerAcceptance>("the :status must be 2xx, not \"" + status + "\"");
+        }
+        let protocol = Optional<string>.None;
+        last chosen = field(headers, "sec-websocket-protocol");
+        if (chosen.byte_length > 0) {
+            let known = false;
+            for (let name in offered_protocols) {
+                if (name == chosen) {
+                    known = true;
+                }
+            }
+            if (!known) {
+                return fail<handshake.ServerAcceptance>("the server chose a subprotocol the client did not offer: "
+                    + chosen);
+            }
+            protocol = Optional<string>.Some(chosen);
+        }
+        last extensions = field(headers, "sec-websocket-extensions");
+        last offered = handshake.extension_names(offered_extensions);
+        for (let name in handshake.extension_names(extensions)) {
+            let known = false;
+            for (let offered_name in offered) {
+                if (offered_name == name) {
+                    known = true;
+                }
+            }
+            if (!known) {
+                return fail<handshake.ServerAcceptance>("the server accepted an extension the client did not offer: "
+                    + name);
+            }
+        }
+        return Result<handshake.ServerAcceptance>.Ok(new handshake.ServerAcceptance(protocol, extensions));
+    };
+
+    /// @brief Opens a WebSocket on a new HTTP/2 stream of a connection to `authority` with extended CONNECT.
+    /// @stub no HTTP/2 client transport in the standard library
+    #NoDiscard
+    export let connect_http2 = func(secure: bool, authority: string, path: string, protocols: string[list],
+        random: Random, options: ws.WebSocketOptions) -> Result<ws.WebSocket> {
+        trap_with_message("unsupported: Std.Net.Realtime.Ws.ExtendedConnect.connect_http2 is not implemented in Neura 0.3.0 (no HTTP/2 client transport in the standard library)");
+    };
+
+    /// @brief Opens a WebSocket on a new HTTP/3 request stream of a QUIC connection to `authority` with
+    /// extended CONNECT.
+    /// @stub no HTTP/3 or QUIC transport in the runtime
+    #NoDiscard
+    export let connect_http3 = func(authority: string, path: string, protocols: string[list], random: Random,
+        options: ws.WebSocketOptions) -> Result<ws.WebSocket> {
+        trap_with_message("unsupported: Std.Net.Realtime.Ws.ExtendedConnect.connect_http3 is not implemented in Neura 0.3.0 (no HTTP/3 or QUIC transport in the runtime)");
+    };
+
+    /// @brief The value of the field `name` (exact, lowercase), or the empty string.
+    let field = func(headers: handshake.Header[list], name: string) -> string {
+        for (let header in headers) {
+            if (header.name == name) {
+                return header.value;
+            }
+        }
+        return "";
+    };
+
+    /// @brief A bootstrapping failure.
+    let fail = func<T>(message: string) -> Result<T> => Result<T>.Err(errors.custom(handshake.ErrorCode, message));
+);

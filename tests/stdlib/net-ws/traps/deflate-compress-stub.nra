@@ -1,0 +1,13 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Realtime\.Ws\.PermessageDeflate\.DeflateCodec\.compress is not implemented in Neura 0\.3\.0
+let deflate = import:Std.Net.Realtime.Ws.PermessageDeflate;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last codec = new deflate.DeflateCodec(new deflate.DeflateParams(false, false, 0, 0), frames.Role.Client);
+        let _ = codec.compress(new);
+        return program.ExitCode.Ok;
+    };
+);

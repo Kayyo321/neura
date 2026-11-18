@@ -1,0 +1,151 @@
+let deflate = import:Std.Net.Realtime.Ws.PermessageDeflate;
+let exts = import:Std.Net.Realtime.Ws.Extensions;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let hex = import:Std.Encoding.Hex;
+let optional = import:Std.Core.Optional;
+let test = import:Std.Test;
+
+// Sec-WebSocket-Extensions parsing and permessage-deflate negotiation (RFC 7692).
+let DeflateTests = module (
+    let parse = func(value: string) -> exts.Extension[list] => test.assert_ok<exts.Extension[list]>(exts.parse(value));
+
+    let one = func(value: string) -> exts.Extension {
+        last list = parse(value);
+        test.assert_equal<int>(1, list.length);
+        return list[0];
+    };
+
+    // RFC 7692 section 5.2, "Negotiation Examples".
+    export let test_rfc7692_section_5_2_examples = func {
+        test.assert_equal_string("permessage-foo", one("permessage-foo").to_string());
+        last x = one("permessage-foo; x=10");
+        test.assert_equal_string("10", test.assert_some<string>(x.params[0].value));
+        // "The value may be quoted."
+        test.assert(one("permessage-foo; x=\"10\"").equals(x));
+        last two = parse("permessage-foo, permessage-bar");
+        test.assert_equal<int>(2, two.length);
+        test.assert_equal_string("permessage-bar", two[1].name);
+        last fallback = parse("permessage-foo; use_y, permessage-foo");
+        test.assert_equal<int>(1, fallback[0].params.length);
+        test.assert_none<string>(fallback[0].params[0].value);
+        test.assert_equal<int>(0, fallback[1].params.length);
+        test.assert_equal_string("permessage-foo; use_y, permessage-foo", exts.format(fallback));
+    };
+
+    export let test_extension_syntax_errors = func {
+        test.assert_err<exts.Extension[list]>(exts.parse(""));
+        test.assert_err<exts.Extension[list]>(exts.parse("; x"));
+        test.assert_err<exts.Extension[list]>(exts.parse("foo; =1"));
+        test.assert_err<exts.Extension[list]>(exts.parse("foo; x="));
+        test.assert_err<exts.Extension[list]>(exts.parse("foo; x=\"1 0\""));
+        test.assert_err<exts.Extension[list]>(exts.parse("foo; x=\"10"));
+        test.assert_err<exts.Extension[list]>(exts.parse("foo bar"));
+        // Non-ASCII inside quotes (U+00E9) and outside them.
+        test.assert_err<exts.Extension[list]>(exts.parse("foo; x=\"é\""));
+        test.assert_err<exts.Extension[list]>(exts.parse("foo; x=é"));
+        test.assert_err<exts.Extension[list]>(exts.parse("fé"));
+        // Whitespace around separators and empty elements are accepted.
+        test.assert_equal<int>(2, parse("  a ;b = 1 ,, c ").length);
+    };
+
+    let offers = func(value: string) -> exts.Extension[list] => parse(value);
+
+    let config = func(accept_limit: bool) -> deflate.ServerConfig => new deflate.ServerConfig(accept_limit, false,
+        false, 0);
+
+    // RFC 7692 section 7.1.3, "Examples".
+    export let test_rfc7692_section_7_1_3_examples = func {
+        // The simplest offer is accepted with the same element.
+        last simple = test.assert_some<deflate.DeflateParams>(deflate.negotiate(offers("permessage-deflate"),
+            config(true)));
+        test.assert_equal_string("permessage-deflate", simple.to_string());
+        // A small server window, with the client's support for client_max_window_bits.
+        last limited = "permessage-deflate; client_max_window_bits; server_max_window_bits=10";
+        last offer = test.assert_ok<deflate.DeflateParams>(deflate.parse_offer(one(limited)));
+        test.assert_equal<int>(10, offer.server_max_window_bits);
+        test.assert_equal<int>(-1, offer.client_max_window_bits);
+        // A server that does not support server_max_window_bits declines it, and takes the fallback.
+        last both = offers(limited + ", permessage-deflate; client_max_window_bits");
+        test.assert_none<deflate.DeflateParams>(deflate.negotiate(offers(limited), config(false)));
+        last second = test.assert_some<deflate.DeflateParams>(deflate.negotiate(both, config(false)));
+        test.assert_equal_string("permessage-deflate", second.to_string());
+        // Accepting the first option answers "permessage-deflate; server_max_window_bits=10".
+        last first = test.assert_some<deflate.DeflateParams>(deflate.negotiate(both, config(true)));
+        test.assert_equal_string("permessage-deflate; server_max_window_bits=10", first.to_string());
+        // The client accepts both responses of the example.
+        test.assert(test.assert_ok<deflate.DeflateParams>(deflate.validate_response(both,
+            one("permessage-deflate; server_max_window_bits=10"))).equals(first));
+        test.assert_ok<deflate.DeflateParams>(deflate.validate_response(both, one("permessage-deflate")));
+    };
+
+    export let test_offer_and_response_rules = func {
+        // Section 7: unknown, repeated and invalid parameters.
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; foo")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one(
+            "permessage-deflate; server_no_context_takeover; server_no_context_takeover")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; server_no_context_takeover=1")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; server_max_window_bits")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; server_max_window_bits=7")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; server_max_window_bits=16")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; server_max_window_bits=010")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one(
+            "permessage-deflate; server_max_window_bits=99999999999999999999")));
+        test.assert_ok<deflate.DeflateParams>(deflate.parse_offer(one("permessage-deflate; server_max_window_bits=\"8\"")));
+        test.assert_err<deflate.DeflateParams>(deflate.parse_offer(one("x-other")));
+        // A response's client_max_window_bits needs a value.
+        test.assert_err<deflate.DeflateParams>(deflate.parse_response(one("permessage-deflate; client_max_window_bits")));
+        last full = test.assert_ok<deflate.DeflateParams>(deflate.parse_response(one(
+            "permessage-deflate; server_no_context_takeover; client_no_context_takeover; server_max_window_bits=15; client_max_window_bits=9")));
+        test.assert(full.server_no_context_takeover && full.client_no_context_takeover);
+        test.assert_equal<int>(9, full.client_max_window_bits);
+        // Section 7.1.2.2: client_max_window_bits in a response needs it in the offer.
+        test.assert_err<deflate.DeflateParams>(deflate.validate_response(offers("permessage-deflate"),
+            one("permessage-deflate; client_max_window_bits=10")));
+        // Section 7.1.2.1: a larger server window than offered, or none, fails.
+        test.assert_err<deflate.DeflateParams>(deflate.validate_response(offers("permessage-deflate; server_max_window_bits=10"),
+            one("permessage-deflate; server_max_window_bits=11")));
+        test.assert_err<deflate.DeflateParams>(deflate.validate_response(offers("permessage-deflate; server_max_window_bits=10"),
+            one("permessage-deflate")));
+        // The server may add server_no_context_takeover unasked (section 7.1.1.1).
+        test.assert_ok<deflate.DeflateParams>(deflate.validate_response(offers("permessage-deflate"),
+            one("permessage-deflate; server_no_context_takeover")));
+    };
+
+    export let test_server_policy = func {
+        last policy = new deflate.ServerConfig(true, true, true, 12);
+        last answer = test.assert_some<deflate.DeflateParams>(deflate.negotiate(
+            offers("x-foo, permessage-deflate; client_max_window_bits=10"), policy));
+        test.assert_equal_string(
+            "permessage-deflate; server_no_context_takeover; client_no_context_takeover; client_max_window_bits=10",
+            answer.to_string());
+        // Without client_max_window_bits in the offer, the response must not carry it.
+        last plain = test.assert_some<deflate.DeflateParams>(deflate.negotiate(offers("permessage-deflate"), policy));
+        test.assert_equal<int>(0, plain.client_max_window_bits);
+        // An invalid first offer is skipped.
+        last skipped = test.assert_some<deflate.DeflateParams>(deflate.negotiate(
+            offers("permessage-deflate; bogus, permessage-deflate"), config(false)));
+        test.assert_equal_string("permessage-deflate", skipped.to_string());
+    };
+
+    // RFC 7692 section 7.2.3.1: "Hello" compressed with the flush tail, the payload, and the frames.
+    export let test_rfc7692_section_7_2_3_1_payload_and_frames = func {
+        last flushed = test.assert_ok<uint8[list]>(hex.decode("f248cdc9c907000000ffff"));
+        last payload = deflate.strip_tail(flushed);
+        test.assert_equal_string("f248cdc9c90700", hex.encode(payload));
+        test.assert_equal_string("f248cdc9c907000000ffff", hex.encode(deflate.append_tail(payload)));
+        test.assert_equal_string("f248cdc9c90700", hex.encode(deflate.strip_tail(payload)));
+        // 0xc1 0x07 ...: FIN, RSV1, text, unmasked, length 7; decodable once RSV1 is allowed.
+        last decoder = new frames.FrameDecoder(frames.Role.Client, 1024, 4);
+        decoder.push(test.assert_ok<uint8[list]>(hex.decode("c107f248cdc9c90700" + "4103f248cd" + "8004c9c90700")));
+        last whole = test.assert_some<frames.Frame>(test.assert_ok<optional.Optional<frames.Frame>>(decoder.next()));
+        test.assert(whole.rsv1 && whole.fin);
+        test.assert_equal_string("f248cdc9c90700", hex.encode(whole.payload));
+        last head = test.assert_some<frames.Frame>(test.assert_ok<optional.Optional<frames.Frame>>(decoder.next()));
+        test.assert(head.rsv1 && !head.fin);
+        last rest = test.assert_some<frames.Frame>(test.assert_ok<optional.Optional<frames.Frame>>(decoder.next()));
+        test.assert(!rest.rsv1 && rest.fin && rest.opcode == frames.Continuation);
+        // The encoder writes the same bytes.
+        test.assert_equal_string("c107f248cdc9c90700", hex.encode(test.assert_ok<uint8[list]>(frames.encode(
+            new frames.Frame(true, true, false, false, frames.Text, payload), optional.Optional<uint8[list]>.None))));
+    };
+);

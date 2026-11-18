@@ -1,0 +1,161 @@
+let errors = import:Std.Core.Error;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let hex = import:Std.Encoding.Hex;
+let random = import:Std.Random.Random;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// SHA-1 known answers and the RFC 6455 opening handshake.
+let HandshakeTests = module (
+    // Bytes (i * 7 + 1) mod 256 for i below n, the input of the generated vectors.
+    let pattern = func(n: int) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < n; i++) {
+            bytes.append(((i * 7 + 1) % 256) as uint8);
+        }
+        return bytes;
+    };
+
+    let sha1_hex = func(bytes: uint8[list]) -> string => hex.encode(handshake.sha1(bytes));
+
+    // Generated with:
+    // python3 -I -c 'import hashlib
+    // for n in [0,3,55,56,63,64,65,119,120,1000]:
+    //     print(n, hashlib.sha1(bytes((i*7+1)%256 for i in range(n))).hexdigest())
+    // print(hashlib.sha1(b"abc").hexdigest())'
+    export let test_sha1_known_answers = func {
+        test.assert_equal_string("da39a3ee5e6b4b0d3255bfef95601890afd80709", sha1_hex(pattern(0)));
+        test.assert_equal_string("29c4bb974bf7a401e2e225f0f9d7ab5e498cc742", sha1_hex(pattern(3)));
+        test.assert_equal_string("04bb34aef4880b625e6b1564a014abd25fc02bfe", sha1_hex(pattern(55)));
+        test.assert_equal_string("83b9fcb6d3e3b20f376ab989a1b6353bcc6c0f44", sha1_hex(pattern(56)));
+        test.assert_equal_string("ab15090e8dbe512f3733350f9623ab11f9b5165b", sha1_hex(pattern(63)));
+        test.assert_equal_string("54305ee7e4c7bc5a96afc6d1994fc52d9bcb665f", sha1_hex(pattern(64)));
+        test.assert_equal_string("5985422a25357371ebd2a7f6ecd7eebed43db42c", sha1_hex(pattern(65)));
+        test.assert_equal_string("6839d6c27f22ed884ac43ae6bd3bfcee9e04b938", sha1_hex(pattern(119)));
+        test.assert_equal_string("8c40517a14ab8b78fd4b8958f4e31254a34c3fb0", sha1_hex(pattern(120)));
+        test.assert_equal_string("f50d11c8ae2b20fe2598e99a6a2cb859e302615c", sha1_hex(pattern(1000)));
+        test.assert_equal_string("a9993e364706816aba3e25717850c26c9cd0d89d", sha1_hex(strings.to_bytes("abc")));
+    };
+
+    // RFC 6455 section 1.3 and section 4.2.2: the key "dGhlIHNhbXBsZSBub25jZQ==" gives the SHA-1 bytes
+    // 0xb3 0x7a 0x4f 0x2c 0xc0 0x62 0x4f 0x16 0x90 0xf6 0x46 0x06 0xcf 0x38 0x59 0x45 0xb2 0xbe 0xc4 0xea and
+    // the accept value "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=".
+    export let test_rfc6455_accept_key = func {
+        last key = "dGhlIHNhbXBsZSBub25jZQ==";
+        test.assert_equal_string("b37a4f2cc0624f1690f64606cf385945b2bec4ea",
+            sha1_hex(strings.to_bytes(key + handshake.Guid)));
+        test.assert_equal_string("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", handshake.accept_key(key));
+        test.assert(handshake.is_valid_key(key));
+        test.assert(!handshake.is_valid_key("dGhlIHNhbXBsZQ=="));
+        test.assert(!handshake.is_valid_key("not base64!"));
+    };
+
+    export let test_generated_key_is_deterministic_and_valid = func {
+        last first = handshake.generate_key(random.seeded(7));
+        last second = handshake.generate_key(random.seeded(7));
+        test.assert_equal_string(first, second);
+        test.assert(handshake.is_valid_key(first));
+        test.assert_equal<int>(24, first.byte_length);
+    };
+
+    // The client handshake of RFC 6455 section 1.2, as a server reads it.
+    let rfc_request = func -> string =>
+        "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nOrigin: http://example.com\r\n"
+        + "Sec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\n\r\n";
+
+    export let test_server_accepts_rfc_request = func {
+        last head = test.assert_ok<handshake.RequestHead>(handshake.parse_request_head(rfc_request()));
+        test.assert_equal_string("GET", head.method);
+        test.assert_equal_string("/chat", head.target);
+        last offer = test.assert_ok<handshake.ClientOffer>(handshake.validate_client_request(head));
+        test.assert_equal_string("server.example.com", offer.host);
+        test.assert_equal_string("http://example.com", offer.origin);
+        test.assert_equal<int>(2, offer.protocols.length);
+        test.assert_equal_string("superchat", offer.protocols[1]);
+        last supported: string[list] = new(["superchat", "chat"]);
+        last chosen = handshake.choose_protocol(offer.protocols, supported);
+        test.assert_equal_string("chat", test.assert_some<string>(chosen));
+        last headers = offer.accept_headers(chosen, "");
+        test.assert_equal_string("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+            test.assert_some<string>(handshake.header_value(headers, "sec-websocket-accept")));
+        // The response of RFC 6455 section 1.2.
+        last text = handshake.response_text(101, "Switching Protocols", headers);
+        test.assert(strings.contains(text, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"));
+        test.assert(strings.contains(text, "Sec-WebSocket-Protocol: chat\r\n\r\n"));
+    };
+
+    let request_with = func(replace: string, by: string) -> handshake.RequestHead {
+        last text = strings.replace(rfc_request(), replace, by);
+        return test.assert_ok<handshake.RequestHead>(handshake.parse_request_head(text));
+    };
+
+    let rejects = func(head: handshake.RequestHead, fragment: string) {
+        last problem = test.assert_err<handshake.ClientOffer>(handshake.validate_client_request(head));
+        last message = errors.message(problem);
+        test.assert_with(strings.contains(message, fragment), "message was: " + message);
+    };
+
+    export let test_server_rejections = func {
+        rejects(request_with("GET /chat", "POST /chat"), "GET");
+        rejects(request_with("HTTP/1.1\r\nHost", "HTTP/1.0\r\nHost"), "1.1");
+        rejects(request_with("Host: server.example.com\r\n", ""), "Host");
+        rejects(request_with("Upgrade: websocket", "Upgrade: h2c"), "Upgrade");
+        rejects(request_with("Connection: Upgrade", "Connection: keep-alive"), "Connection");
+        rejects(request_with("dGhlIHNhbXBsZSBub25jZQ==", "dGhlIHNhbXBsZQ=="), "16 bytes");
+        rejects(request_with("Version: 13", "Version: 8"), "\"8\"");
+        // Case and list forms that must be accepted.
+        last mixed = request_with("Connection: Upgrade", "connection: keep-alive, UPGRADE");
+        test.assert_ok<handshake.ClientOffer>(handshake.validate_client_request(mixed));
+        last header = handshake.version_mismatch_headers()[0];
+        test.assert_equal_string("Sec-WebSocket-Version: 13", header.to_string());
+    };
+
+    let client_request = func -> handshake.ClientRequest {
+        last protocols: string[list] = new(["chat", "superchat"]);
+        return new handshake.ClientRequest("server.example.com", "/chat", "dGhlIHNhbXBsZSBub25jZQ==", protocols,
+            "permessage-deflate");
+    };
+
+    let response = func(text: string) -> handshake.ResponseHead =>
+        test.assert_ok<handshake.ResponseHead>(handshake.parse_response_head(text));
+
+    export let test_client_request_text = func {
+        last text = client_request().to_text();
+        test.assert(strings.starts_with(text, "GET /chat HTTP/1.1\r\nHost: server.example.com\r\n"));
+        test.assert(strings.contains(text, "Sec-WebSocket-Protocol: chat, superchat\r\n"));
+        test.assert(strings.ends_with(text, "Sec-WebSocket-Extensions: permessage-deflate\r\n\r\n"));
+        // A server accepts what the client writes.
+        last head = test.assert_ok<handshake.RequestHead>(handshake.parse_request_head(text));
+        test.assert_ok<handshake.ClientOffer>(handshake.validate_client_request(head));
+        test.assert_equal<int>(-1, handshake.head_end(strings.to_bytes("GET / HTTP/1.1\r\n")));
+        test.assert_equal<int>(text.byte_length, handshake.head_end(strings.to_bytes(text)));
+    };
+
+    export let test_client_validates_response = func {
+        last request = client_request();
+        last good = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            + "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\nSec-WebSocket-Protocol: chat\r\n\r\n";
+        last accepted = test.assert_ok<handshake.ServerAcceptance>(
+            handshake.validate_server_response(request, response(good)));
+        test.assert_equal_string("chat", test.assert_some<string>(accepted.protocol));
+        last with_extension = strings.replace(good, "\r\n\r\n",
+            "\r\nSec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover\r\n\r\n");
+        last extended = test.assert_ok<handshake.ServerAcceptance>(
+            handshake.validate_server_response(request, response(with_extension)));
+        test.assert_equal_string("permessage-deflate; server_no_context_takeover", extended.extensions);
+        test.assert_err<handshake.ServerAcceptance>(
+            handshake.validate_server_response(request, response(strings.replace(good, "101", "200"))));
+        test.assert_err<handshake.ServerAcceptance>(handshake.validate_server_response(request,
+            response(strings.replace(good, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", "s3pPLMBiTxaQ9kYGzzhZRbK+xOp="))));
+        test.assert_err<handshake.ServerAcceptance>(handshake.validate_server_response(request,
+            response(strings.replace(good, "Protocol: chat", "Protocol: other"))));
+        test.assert_err<handshake.ServerAcceptance>(handshake.validate_server_response(request,
+            response(strings.replace(good, "\r\n\r\n", "\r\nSec-WebSocket-Extensions: x-unknown\r\n\r\n"))));
+        test.assert_err<handshake.ServerAcceptance>(handshake.validate_server_response(request,
+            response(strings.replace(good, "Upgrade: websocket", "Upgrade: h2c"))));
+        test.assert_err<handshake.ResponseHead>(handshake.parse_response_head("HTTP/1.1 1x1 Bad\r\n\r\n"));
+        test.assert_err<handshake.RequestHead>(handshake.parse_request_head("GET /\r\n\r\n"));
+        test.assert_err<handshake.RequestHead>(handshake.parse_request_head("GET / HTTP/1.1\r\nBad Name: x\r\n\r\n"));
+    };
+);

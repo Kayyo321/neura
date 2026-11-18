@@ -1,0 +1,625 @@
+let.promote _ = import:Std.Time.Clock;
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Net.FramedTransport;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let heartbeat = import:Std.Net.Realtime.Ws.Heartbeat;
+let.promote _ = import:Std.Net.Realtime.Ws.Message;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let tcp = import:Std.Net.TcpStream;
+let.promote _ = import:Std.Net.Transport;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A WebSocket connection over any byte transport (RFC 6455 sections 4 to 7), as a
+/// `Std.Net.FramedTransport<Message>`.
+///
+/// `connect` runs the client opening handshake and `accept` the server's over a
+/// `Std.Net.Transport<uint8[list], uint8[list]>`; `over_upgraded` wraps a transport whose handshake already
+/// happened elsewhere (an HTTP/2 or HTTP/3 extended CONNECT stream, RFC 8441 and RFC 9220). `StreamTransport`
+/// adapts read and write functions, such as those of a `Std.Net.TcpStream`, to a byte transport.
+///
+/// `receive` returns the next whole data message. Control frames are handled inside it: a ping is answered with
+/// a pong carrying the same payload, a pong is noted, and a close frame is answered with a close frame (the
+/// closing handshake, section 7.1.5) after which `receive` returns `None`. A protocol violation fails the
+/// connection: the endpoint sends a close frame with the matching status (1002, 1007, 1009), closes the
+/// transport, and `receive` returns the `ProtocolFailure`. The end of the byte stream without a close frame is a
+/// failure with status 1006, which is never sent. `send` fragments a message into frames of at most
+/// `max_fragment_size` bytes; frames a client sends are masked with fresh keys from the `Random`. `close` sends
+/// a close frame with status 1000, reads until the peer's close frame arrives (discarding data), and closes the
+/// transport. Extensions are never negotiated: RSV bits must be zero.
+/// @see [Std.Net.Realtime.Ws.WebSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Ws-WebSocket)
+#Since("0.3.0")
+export let WebSocket = module (
+    /// @brief The largest HTTP head `connect` and `accept` read, in bytes.
+    export const MaxHeadBytes: int = 16384;
+
+    /// @brief The states of a connection (RFC 6455 section 4.1 and 7).
+    export let ReadyState = enum (Open, Closing, Closed);
+
+    /// @brief Size limits of a connection.
+    #[Final, Immutable]
+    export let WebSocketOptions = class (
+        /// @brief The largest frame payload accepted.
+        export last max_frame_size: int;
+        /// @brief The largest reassembled message accepted.
+        export last max_message_size: int;
+        /// @brief The largest payload of a frame `send` writes.
+        export last max_fragment_size: int;
+
+        /// @brief Stores the limits. A frame limit below 125 or a fragment size below 1 traps with "invalid
+        /// argument: WebSocketOptions".
+        export let init = func(frame_limit: int, message_limit: int, fragment: int) {
+            if (frame_limit < 125 || message_limit < 0 || fragment < 1) {
+                trap_with_message("invalid argument: WebSocketOptions");
+            }
+            max_frame_size = frame_limit;
+            max_message_size = message_limit;
+            max_fragment_size = fragment;
+        };
+
+        /// @brief The three limits.
+        export let.override to_string = func -> string =>
+            "WebSocketOptions(frame " + max_frame_size.to_string() + ", message " + max_message_size.to_string()
+            + ", fragment " + max_fragment_size.to_string() + ")";
+    );
+
+    /// @brief 1 MiB frames, 16 MiB messages, 64 KiB fragments.
+    #NoDiscard
+    export let default_options = func -> WebSocketOptions => new WebSocketOptions(1048576, 16777216, 65536);
+
+    /// @brief A byte transport over read, write and close functions, such as the bound methods of a
+    /// `Std.Net.TcpStream`. `receive` reads at most `chunk` bytes; an empty read is the end of the stream.
+    #[Final, NotThreadSafe]
+    export let StreamTransport = class implements Transport<uint8[list], uint8[list]> (
+        /// @brief Reads up to the given number of bytes; an empty list at the end.
+        last read_fn: func(int) -> Result<uint8[list]>;
+        /// @brief Writes every byte.
+        last write_fn: func(uint8[list]) -> Result<Unit>;
+        /// @brief Releases the stream.
+        last close_fn: func() -> Result<Unit>;
+        /// @brief The read size.
+        last chunk: int;
+
+        /// @brief Stores the functions. A chunk below 1 traps with "invalid argument: chunk".
+        export let init = func(read: func(int) -> Result<uint8[list]>, write: func(uint8[list]) -> Result<Unit>,
+            release: func() -> Result<Unit>, size: int) {
+            if (size < 1) {
+                trap_with_message("invalid argument: chunk");
+            }
+            read_fn = read;
+            write_fn = write;
+            close_fn = release;
+            chunk = size;
+        };
+
+        /// @brief The next bytes, or `None` at the end of the stream.
+        export let receive = func -> Result<Optional<uint8[list]>> {
+            last bytes = read_fn(chunk)?;
+            if (bytes.length == 0) {
+                return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
+            }
+            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(bytes));
+        };
+
+        /// @brief Writes the bytes.
+        export let send = func(data: uint8[list]) -> Result<Unit> => write_fn(data);
+
+        /// @brief Releases the stream.
+        export let close = func -> Result<Unit> => close_fn();
+
+        /// @brief The read size.
+        export let.override to_string = func -> string => "StreamTransport(chunk " + chunk.to_string() + ")";
+    );
+
+    /// @brief A byte transport over a TCP stream, reading 16 KiB at a time.
+    #NoDiscard
+    export let over_tcp = func(stream: tcp.TcpStream) -> StreamTransport =>
+        new StreamTransport(new bound(stream.read), new bound(stream.write), new bound(stream.close), 16384);
+
+    /// @brief One WebSocket connection.
+    #[Final, NotThreadSafe]
+    export let WebSocket = class implements FramedTransport<Message> (
+        /// @brief The byte transport underneath.
+        last transport: Transport<uint8[list], uint8[list]>;
+        /// @brief Which end this is.
+        export last role: frames.Role;
+        /// @brief The source of masking keys.
+        last random: Random;
+        /// @brief The size limits.
+        last options: WebSocketOptions;
+        /// @brief Decodes received bytes into frames.
+        last decoder: frames.FrameDecoder;
+        /// @brief Reassembles data frames.
+        last assembler: MessageAssembler;
+        /// @brief The subprotocol agreed in the handshake, if any.
+        export last protocol: Optional<string>;
+        /// @brief The connection state.
+        export let state: ReadyState = ReadyState.Open;
+            | get: state;
+
+        /// @brief The status and reason of the peer's close frame, once received.
+        export let peer_close: Optional<close_status.CloseReason> = Optional<close_status.CloseReason>.None;
+            | get: peer_close;
+
+        /// @brief Whether this end has sent its close frame.
+        let sent_close: bool = false;
+        /// @brief Whether the peer's close frame arrived.
+        let received_close: bool = false;
+        /// @brief The attached heartbeat supervisor, if any.
+        let supervisor: Optional<heartbeat.Heartbeat> = Optional<heartbeat.Heartbeat>.None;
+        /// @brief The clock the heartbeat reads.
+        let clock: Optional<Clock> = Optional<Clock>.None;
+        /// @brief The number of pongs received.
+        export let pongs: int = 0;
+            | get: pongs;
+
+        /// @brief A connection whose handshake is done; `leftover` holds bytes read past the handshake.
+        export let init = func(bytes: Transport<uint8[list], uint8[list]>, endpoint: frames.Role, masks: Random,
+            limits: WebSocketOptions, agreed: Optional<string>, leftover: uint8[list]) {
+            transport = bytes;
+            role = endpoint;
+            random = masks;
+            options = limits;
+            protocol = agreed;
+            decoder = new frames.FrameDecoder(endpoint, limits.max_frame_size, 0);
+            assembler = new MessageAssembler(limits.max_message_size);
+            decoder.push(leftover);
+        };
+
+        /// @brief The next data message, `None` after the closing handshake, or the failure that ended the
+        /// connection. An Io error of kind TimedOut from the transport (a TCP read timeout) is returned without
+        /// closing anything: the caller may check the heartbeat and call `receive` again.
+        #NoDiscard
+        export let receive = func -> Result<Optional<Message>> {
+            while (state != ReadyState.Closed) {
+                let next = Optional<frames.Frame>.None;
+                match (decoder.next()) {
+                    Result.Err(problem) => {
+                        return fail_connection<Optional<Message>>(problem);
+                    },
+                    Result.Ok(decoded) => {
+                        next = decoded;
+                    },
+                }
+                match (next) {
+                    Optional.None => {
+                        last read = transport.receive();
+                        let chunk = Optional<uint8[list]>.None;
+                        match (read) {
+                            Result.Err(problem) => {
+                                // A read timeout leaves the connection open, so a caller can run the heartbeat
+                                // and read again.
+                                if (!is_timeout(problem)) {
+                                    state = ReadyState.Closed;
+                                    let _ = transport.close();
+                                }
+                                return Result<Optional<Message>>.Err(problem);
+                            },
+                            Result.Ok(received) => {
+                                chunk = received;
+                            },
+                        }
+                        match (chunk) {
+                            Optional.Some(bytes) => {
+                                decoder.push(bytes);
+                            },
+                            Optional.None => {
+                                state = ReadyState.Closed;
+                                let _ = transport.close();
+                                if (received_close) {
+                                    return Result<Optional<Message>>.Ok(Optional<Message>.None);
+                                }
+                                return Result<Optional<Message>>.Err(close_status.failure(
+                                    close_status.AbnormalClosure, "the connection ended without a close frame"));
+                            },
+                        }
+                    },
+                    Optional.Some(frame) => {
+                        note_activity();
+                        if (frame.is_control()) {
+                            match (handle_control(frame)) {
+                                Result.Err(problem) => {
+                                    return Result<Optional<Message>>.Err(problem);
+                                },
+                                Result.Ok(_) => {},
+                            }
+                        } else {
+                            last added = assembler.add(frame);
+                            match (added) {
+                                Result.Err(problem) => {
+                                    return fail_connection<Optional<Message>>(problem);
+                                },
+                                Result.Ok(message) => {
+                                    if (is_some<Message>(message)) {
+                                        return Result<Optional<Message>>.Ok(message);
+                                    }
+                                },
+                            }
+                        }
+                    },
+                }
+            }
+            return Result<Optional<Message>>.Ok(Optional<Message>.None);
+        };
+
+        /// @brief Sends a message, fragmented as the options say. Fails with an Io error of kind Closed once this
+        /// end has started closing.
+        #NoDiscard
+        export let send = func(data: Message) -> Result<Unit> {
+            if (state != ReadyState.Open || sent_close) {
+                return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
+                    message: "the WebSocket is closing", path: "" });
+            }
+            for (let frame in fragment(data, options.max_fragment_size)) {
+                write_frame(frame)?;
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Sends a ping with the payload (at most 125 bytes, or it fails with status 1002).
+        #NoDiscard
+        export let ping = func(payload: uint8[list]) -> Result<Unit> {
+            if (state != ReadyState.Open || sent_close) {
+                return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
+                    message: "the WebSocket is closing", path: "" });
+            }
+            return write_frame(frames.of(frames.Ping, payload));
+        };
+
+        /// @brief The closing handshake with status 1000 and no reason.
+        export let close = func -> Result<Unit> => close_with(close_status.Normal, "");
+
+        /// @brief The closing handshake (RFC 6455 section 7.1.2): sends a close frame with the status and reason,
+        /// reads until the peer's close frame (data messages are discarded) or the end of the stream, and closes
+        /// the transport. A status not valid on the wire or a reason over 123 bytes fails before anything is
+        /// sent. If the wait fails (a read timeout included), the transport is closed and the failure returned.
+        /// Closing a closed connection returns Ok.
+        export let close_with = func(code: int, reason: string) -> Result<Unit> {
+            if (state == ReadyState.Closed) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            last body = close_status.encode_body(code, reason)?;
+            if (!sent_close) {
+                sent_close = true;
+                state = ReadyState.Closing;
+                last written = write_frame(frames.of(frames.Close, body));
+                match (written) {
+                    Result.Err(problem) => {
+                        state = ReadyState.Closed;
+                        let _ = transport.close();
+                        return Result<Unit>.Err(problem);
+                    },
+                    Result.Ok(_) => {},
+                }
+            }
+            while (state != ReadyState.Closed) {
+                last next = receive();
+                match (next) {
+                    Result.Err(problem) => {
+                        if (state != ReadyState.Closed) {
+                            state = ReadyState.Closed;
+                            let _ = transport.close();
+                        }
+                        return close_status.status_of(problem) == close_status.AbnormalClosure
+                            ? Result<Unit>.Ok(Unit.Value) : Result<Unit>.Err(problem);
+                    },
+                    Result.Ok(_) => {},
+                }
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Starts the closing handshake without waiting: sends a close frame with the status and reason
+        /// and moves to Closing; `receive` then returns `None` once the peer's close frame arrives. Fails like
+        /// `close_with` for an invalid status or reason, and with an Io error of kind Closed when a close frame
+        /// was already sent.
+        #NoDiscard
+        export let send_close = func(code: int, reason: string) -> Result<Unit> {
+            if (state == ReadyState.Closed || sent_close) {
+                return Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.Closed,
+                    message: "the WebSocket is closing", path: "" });
+            }
+            last body = close_status.encode_body(code, reason)?;
+            sent_close = true;
+            state = ReadyState.Closing;
+            return write_frame(frames.of(frames.Close, body));
+        };
+
+        /// @brief Attaches a heartbeat supervisor that reads `source`'s monotonic time. Every received frame
+        /// counts as activity.
+        export let supervise = func(supervisor_value: heartbeat.Heartbeat, source: Clock) {
+            supervisor = Optional<heartbeat.Heartbeat>.Some(supervisor_value);
+            clock = Optional<Clock>.Some(source);
+        };
+
+        /// @brief Runs the attached heartbeat once: sends the ping it asks for, or on `PeerDead` closes the
+        /// transport without a closing handshake. Without a supervisor it answers `Wait`.
+        #NoDiscard
+        export let check_heartbeat = func -> Result<heartbeat.HeartbeatAction> {
+            match (supervisor) {
+                Optional.None => {
+                    return Result<heartbeat.HeartbeatAction>.Ok(heartbeat.HeartbeatAction.Wait);
+                },
+                Optional.Some(watch) => {
+                    last now = current_time()?;
+                    last action = watch.poll(now);
+                    match (action) {
+                        heartbeat.HeartbeatAction.SendPing => {
+                            if (state == ReadyState.Open && !sent_close) {
+                                write_frame(frames.of(frames.Ping, strings.to_bytes(watch.pings.to_string())))?;
+                            }
+                        },
+                        heartbeat.HeartbeatAction.PeerDead => {
+                            state = ReadyState.Closed;
+                            let _ = transport.close();
+                        },
+                        heartbeat.HeartbeatAction.Wait => {},
+                    }
+                    return Result<heartbeat.HeartbeatAction>.Ok(action);
+                },
+            }
+        };
+
+        /// @brief The role, state and protocol.
+        export let.override to_string = func -> string {
+            last name = match (protocol) {
+                Optional.Some(p) => p,
+                Optional.None => "none",
+            };
+            return "WebSocket(" + role.to_string() + ", " + state.to_string() + ", protocol " + name + ")";
+        };
+
+        /// @brief Answers a ping, notes a pong, or completes the closing handshake.
+        let handle_control = func(frame: frames.Frame) -> Result<Unit> {
+            if (frame.opcode == frames.Ping) {
+                if (!sent_close) {
+                    return write_frame(frames.of(frames.Pong, frame.payload));
+                }
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            if (frame.opcode == frames.Pong) {
+                pongs++;
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            last decoded = close_status.decode_body(frame.payload);
+            match (decoded) {
+                Result.Err(problem) => {
+                    return fail_connection<Unit>(problem);
+                },
+                Result.Ok(reason) => {
+                    received_close = true;
+                    peer_close = Optional<close_status.CloseReason>.Some(reason);
+                    if (!sent_close) {
+                        sent_close = true;
+                        // Echo the status (section 5.5.1); a frame without a status is answered without one.
+                        last echo: uint8[list] = new;
+                        if (reason.code != close_status.NoStatusReceived) {
+                            echo.append(frame.payload[0]);
+                            echo.append(frame.payload[1]);
+                        }
+                        let _ = write_frame(frames.of(frames.Close, echo));
+                    }
+                    state = ReadyState.Closed;
+                    let _ = transport.close();
+                    return Result<Unit>.Ok(Unit.Value);
+                },
+            }
+        };
+
+        /// @brief Sends a close frame with the failure's status if none was sent, closes, and returns the failure.
+        let fail_connection = func<T>(problem: errors.Error) -> Result<T> {
+            if (!sent_close) {
+                sent_close = true;
+                last status = close_status.status_of(problem);
+                match (close_status.encode_body(status, "")) {
+                    Result.Ok(body) => {
+                        let _ = write_frame(frames.of(frames.Close, body));
+                    },
+                    Result.Err(_) => {},
+                }
+            }
+            state = ReadyState.Closed;
+            let _ = transport.close();
+            return Result<T>.Err(problem);
+        };
+
+        /// @brief Encodes the frame for this role and writes it.
+        let write_frame = func(frame: frames.Frame) -> Result<Unit> {
+            last bytes = frames.encode_as(role, frame, random)?;
+            return transport.send(bytes);
+        };
+
+        /// @brief Tells the heartbeat that the peer was heard from.
+        let note_activity = func {
+            match (supervisor) {
+                Optional.Some(watch) => {
+                    match (current_time()) {
+                        Result.Ok(now) => {
+                            watch.record_activity(now);
+                        },
+                        Result.Err(_) => {},
+                    }
+                },
+                Optional.None => {},
+            }
+        };
+
+        /// @brief The clock's monotonic time.
+        let current_time = func -> Result<Duration> => match (clock) {
+            Optional.Some(source) => source.monotonic(),
+            Optional.None => Result<Duration>.Ok(of_nanos(0)),
+        };
+    );
+
+    /// @brief Wraps a transport whose opening handshake already happened (for instance an HTTP/2 or HTTP/3
+    /// stream opened by extended CONNECT).
+    #NoDiscard
+    export let over_upgraded = func(bytes: Transport<uint8[list], uint8[list]>, role: frames.Role, random: Random,
+        options: WebSocketOptions, protocol: Optional<string>) -> WebSocket =>
+        new WebSocket(bytes, role, random, options, protocol, new);
+
+    /// @brief The client opening handshake: writes the request, reads and validates the response
+    /// (`Handshake.validate_server_response`), and returns the open connection. A response that agrees to an
+    /// extension fails with status 1010, since this connection implements none. On failure the transport is
+    /// closed.
+    #NoDiscard
+    export let connect = func(bytes: Transport<uint8[list], uint8[list]>, request: handshake.ClientRequest,
+        random: Random, options: WebSocketOptions) -> Result<WebSocket> {
+        last sent = bytes.send(strings.to_bytes(request.to_text()));
+        match (sent) {
+            Result.Err(problem) => {
+                return abandon<WebSocket>(bytes, problem);
+            },
+            Result.Ok(_) => {},
+        }
+        last read = read_head(bytes);
+        match (read) {
+            Result.Err(problem) => {
+                return abandon<WebSocket>(bytes, problem);
+            },
+            Result.Ok(received) => {
+                last end = handshake.head_end(received);
+                last parsed = handshake.parse_response_head(strings.from_bytes_lossy(range(received, 0, end)));
+                match (parsed) {
+                    Result.Err(problem) => {
+                        return abandon<WebSocket>(bytes, problem);
+                    },
+                    Result.Ok(head) => {
+                        last checked = handshake.validate_server_response(request, head);
+                        match (checked) {
+                            Result.Err(problem) => {
+                                return abandon<WebSocket>(bytes, problem);
+                            },
+                            Result.Ok(acceptance) => {
+                                if (acceptance.extensions.byte_length > 0) {
+                                    return abandon<WebSocket>(bytes, close_status.failure(
+                                        close_status.MandatoryExtension,
+                                        "the server agreed to extensions this connection does not implement: "
+                                        + acceptance.extensions));
+                                }
+                                return Result<WebSocket>.Ok(new WebSocket(bytes, frames.Role.Client, random, options,
+                                    acceptance.protocol, range(received, end, received.length)));
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief The server opening handshake: reads and validates the request
+    /// (`Handshake.validate_client_request`), chooses the first offered protocol in `supported`, writes the 101
+    /// response without extensions, and returns the open connection. An invalid request is answered with 400
+    /// (426 and Sec-WebSocket-Version for a wrong version), the transport is closed, and the validation error
+    /// is returned.
+    #NoDiscard
+    export let accept = func(bytes: Transport<uint8[list], uint8[list]>, supported: string[list], random: Random,
+        options: WebSocketOptions) -> Result<WebSocket> {
+        last read = read_head(bytes);
+        match (read) {
+            Result.Err(problem) => {
+                return abandon<WebSocket>(bytes, problem);
+            },
+            Result.Ok(received) => {
+                last end = handshake.head_end(received);
+                last parsed = handshake.parse_request_head(strings.from_bytes_lossy(range(received, 0, end)));
+                match (parsed) {
+                    Result.Err(problem) => {
+                        return refuse(bytes, problem, 400, "Bad Request", new);
+                    },
+                    Result.Ok(head) => {
+                        last checked = handshake.validate_client_request(head);
+                        match (checked) {
+                            Result.Err(problem) => {
+                                if (wrong_version(head)) {
+                                    return refuse(bytes, problem, 426, "Upgrade Required",
+                                        handshake.version_mismatch_headers());
+                                }
+                                return refuse(bytes, problem, 400, "Bad Request", new);
+                            },
+                            Result.Ok(offer) => {
+                                last chosen = handshake.choose_protocol(offer.protocols, supported);
+                                last response = handshake.response_text(101, "Switching Protocols",
+                                    offer.accept_headers(chosen, ""));
+                                last sent = bytes.send(strings.to_bytes(response));
+                                match (sent) {
+                                    Result.Err(problem) => {
+                                        return abandon<WebSocket>(bytes, problem);
+                                    },
+                                    Result.Ok(_) => {},
+                                }
+                                return Result<WebSocket>.Ok(new WebSocket(bytes, frames.Role.Server, random, options,
+                                    chosen, range(received, end, received.length)));
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief Reads until the received bytes hold a whole HTTP head; fails at the end of the stream or past
+    /// `MaxHeadBytes`.
+    let read_head = func(bytes: Transport<uint8[list], uint8[list]>) -> Result<uint8[list]> {
+        last received: uint8[list] = new;
+        while (handshake.head_end(received) < 0) {
+            if (received.length > MaxHeadBytes) {
+                return Result<uint8[list]>.Err(errors.custom(handshake.ErrorCode, "the HTTP head exceeds "
+                    + MaxHeadBytes.to_string() + " bytes"));
+            }
+            last chunk = bytes.receive()?;
+            match (chunk) {
+                Optional.Some(data) => {
+                    for (let b in data) {
+                        received.append(b);
+                    }
+                },
+                Optional.None => {
+                    return Result<uint8[list]>.Err(errors.custom(handshake.ErrorCode,
+                        "the stream ended inside the HTTP head"));
+                },
+            }
+        }
+        return Result<uint8[list]>.Ok(received);
+    };
+
+    /// @brief Whether the error is an Io error of kind TimedOut.
+    let is_timeout = func(problem: errors.Error) -> bool => match (problem) {
+        errors.Error.Io { kind, message, path } => kind == errors.IoErrorKind.TimedOut,
+        _ => false,
+    };
+
+    /// @brief Whether the request names a Sec-WebSocket-Version other than 13.
+    let wrong_version = func(head: handshake.RequestHead) -> bool =>
+        match (handshake.header_value(head.headers, "Sec-WebSocket-Version")) {
+            Optional.Some(version) => version != handshake.Version,
+            Optional.None => false,
+        };
+
+    /// @brief Answers a refused request, closes the transport, and returns the problem.
+    let refuse = func(bytes: Transport<uint8[list], uint8[list]>, problem: errors.Error, status: int, reason: string,
+        headers: handshake.Header[list]) -> Result<WebSocket> {
+        let _ = bytes.send(strings.to_bytes(handshake.response_text(status, reason, headers)));
+        return abandon<WebSocket>(bytes, problem);
+    };
+
+    /// @brief Closes the transport and returns the problem.
+    let abandon = func<T>(bytes: Transport<uint8[list], uint8[list]>, problem: errors.Error) -> Result<T> {
+        let _ = bytes.close();
+        return Result<T>.Err(problem);
+    };
+
+    /// @brief The bytes from `start` to `end` as a new list.
+    let range = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
+    };
+);
