@@ -717,6 +717,8 @@ Attributed attributed_fixture(const Environment& environment, bool attributes = 
         check(binding != s.end(), "the linked program has a host binding");
         set_attribute(*binding, AttributeId::HostEffects,
                       host_effects_payload({.allocates = true, .traps = true, .scheduler = false, .retains = false}));
+        // An HTML factory names the string constant that holds its descriptor.
+        set_attribute(s[a.sum_to], AttributeId::UiFactory, attribute_symbol(find_symbol(p, "Attributes.SumLabel")));
     }
     if (deferred) {
         for (const auto local : {a.step, a.point_local}) {
@@ -784,6 +786,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::Synchronized, 9, "synchronized", on_function, false, "b"},
         {AttributeId::ClassShareable, 10, "class.shareable", on_class, false, "b"},
         {AttributeId::HostEffects, 11, "host.effects", on_function, false, "[b b b b]"},
+        {AttributeId::UiFactory, 32, "ui.factory", on_function, false, "s"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
