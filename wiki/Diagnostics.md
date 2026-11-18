@@ -365,6 +365,16 @@ Errors about application forms and their build limits.
 | [E1014](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1014.md) | invalid static document structure |
 | [E1015](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1015.md) | template or stylesheet exceeds a limit |
 
+## E13xx: Reflection
+
+Codes reported for `Std.Reflect` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Reflect030.md)).
+
+| Code | Error |
+| --- | --- |
+| [E1300](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1300.md) | a type that Std.Reflect.Proxy cannot proxy |
+| [E1301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1301.md) | a value a Std.Reflect dynamic value cannot hold |
+| [E1302](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1302.md) | a class with two reflection policies |
+
 ## Warnings
 
 Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.

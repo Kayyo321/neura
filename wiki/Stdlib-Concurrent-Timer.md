@@ -27,6 +27,8 @@ The following public declarations are taken from the module source; each links t
   A timer that fires when the monotonic clock reads `at` nanoseconds. Use after or at.
 - **Timer.Timer** · [`export let wait = func -> TimerOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L23)
   Waits until the timer has fired. Returns at once when it already has.
+- **Timer.Timer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L36)
+  Names the timer.
 - **Timer** · [`export let after = func(span: duration.Duration) -> result.Result<Timer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L41)
   A timer that fires once the duration has passed. Needs the clock capability. Tagged `#NoDiscard`.
 - **Timer** · [`export let at = func(moment: instant.Instant) -> result.Result<Timer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L49)

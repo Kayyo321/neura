@@ -31,6 +31,9 @@ export let Sha256 = module (
 
         /// @brief Pads the message, ends the digest, and returns the 32 bytes of the hash.
         export let finish = func -> uint8[list] => kernels.sha256_finish(state);
+
+        /// @brief Names the hasher.
+        export let.override to_string = func -> string => "Sha256";
     );
 
     /// @brief A new digest with no bytes added.

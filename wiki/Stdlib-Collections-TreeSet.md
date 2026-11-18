@@ -67,23 +67,23 @@ The following public declarations are taken from the module source; each links t
   Returns the least element strictly above `value` as `Some`, or `None` when absent. Tagged `#NoDiscard`.
 - **TreeSet.TreeSet** · [`export let is_subset_of = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L153)
   Whether every element of this set is in `other`, by the other set's comparator.
-- **TreeSet.TreeSet** · [`export let is_disjoint_from = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L170)
+- **TreeSet.TreeSet** · [`export let is_disjoint_from = func(other: TreeSet<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L168)
   Reports whether none of this set's elements pass `other`'s membership test.
-- **TreeSet.TreeSet** · [`export let union = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L184)
+- **TreeSet.TreeSet** · [`export let union = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L182)
   A new set with this set's comparator holding the elements of both.
-- **TreeSet.TreeSet** · [`export let intersection = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L192)
+- **TreeSet.TreeSet** · [`export let intersection = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L190)
   This set's elements that are in `other`.
-- **TreeSet.TreeSet** · [`export let difference = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L195)
+- **TreeSet.TreeSet** · [`export let difference = func(other: TreeSet<T>) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L193)
   This set's elements that are not in `other`.
-- **TreeSet.TreeSet** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L198)
+- **TreeSet.TreeSet** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L196)
   Traps with "invalid state: tree ..." on a broken AVL invariant.
-- **TreeSet.TreeSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L204)
+- **TreeSet.TreeSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L202)
   Another TreeSet of the same size whose elements this set all contains.
-- **TreeSet.TreeSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L225)
+- **TreeSet.TreeSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L220)
   The wrapping sum of the element hashes.
-- **TreeSet.TreeSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L239)
+- **TreeSet.TreeSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L234)
   Formats elements as `{a, b, c}` in ascending order. The set prints "(this collection)" where its own text reaches it again.
-- **TreeSet** · [`export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L266)
+- **TreeSet** · [`export let create = func<T>(comparator: func(T, T) -> ordering.Ordering) -> TreeSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/tree-set.nra#L261)
   An empty set ordered by `comparator`, which must define a total order.
 <!-- END SOURCE API -->
 

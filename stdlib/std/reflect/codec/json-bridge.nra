@@ -1,0 +1,462 @@
+let bfloat16s = import:Std.Core.BFloat16;
+let.promote errors = import:Std.Core.Error;
+let float16s = import:Std.Core.Float16;
+let float32s = import:Std.Core.Float32;
+let float64s = import:Std.Core.Float64;
+let int16s = import:Std.Core.Int16;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let int8s = import:Std.Core.Int8;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let uint16s = import:Std.Core.UInt16;
+let uint32s = import:Std.Core.UInt32;
+let uint64s = import:Std.Core.UInt64;
+let uint8s = import:Std.Core.UInt8;
+let.promote json = import:Std.Encoding.Json;
+let attributes = import:Std.Reflect.Attribute.Attributes;
+let model = import:Std.Reflect.Internal.Model;
+let kinds = import:Std.Reflect.Type.TypeKind;
+
+/// @brief A structural JSON serializer driven by reflection (docs/design/Reflect030.md, The packages): any value
+/// of the program's reflection universe to a `Std.Encoding.Json.JsonValue` and back, with no generated code.
+///
+/// Shapes: `bool`, numbers (integers exactly, floats as their shortest round-trip text), `string`, a class or
+/// record as an object with one member per field in declaration order, a list or tuple as an array, `Optional` as
+/// `null` or the value, any other enum as `{"variant": name, "payload": [...]}` (no `payload` for a fieldless
+/// variant), and nil as `null`. Field tags: `#SerialName("wire")` renames a member, `#Skip` leaves it out, and
+/// `#Sensitive` writes `"<redacted>"`, as does every value of a type tagged `#Sensitive`; a variant's
+/// `#SerialName` renames it; unexported fields and fields a Variant cannot hold (arrays, scope-bound values,
+/// primitive references) are left out. Decoding builds a record or class with the
+/// constructor whose parameters all name fields (a record's generated one), or with a constructor that takes no
+/// arguments and then sets each writable exported field; a `#Sensitive` or `#Skip` field keeps the value that
+/// constructor gave it, and a record with such a component cannot be decoded (`reflect.json.missing`). A reference
+/// cycle traps.
+/// @see [Std.Reflect.Codec.JsonBridge](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Codec-JsonBridge)
+#Since("0.3.0")
+export let JsonBridge = module (
+    /// @brief The placeholder written for a `#Sensitive` field.
+    #Since("0.3.0")
+    export const Redacted: string = "<redacted>";
+
+    /// @brief The value as a JSON tree. A NaN or infinite float and a reference cycle trap.
+    #Since("0.3.0")
+    export let to_json = func(value: model.Variant) -> JsonValue {
+        last open: model.Variant[list] = new;
+        return encode_value(value, open);
+    };
+
+    /// @brief The value as JSON text.
+    #Since("0.3.0")
+    export let encode = func(value: model.Variant) -> string => json.write(to_json(value));
+
+    /// @brief The value of type `type` that a JSON tree describes. A mismatch returns `Error.custom` with the code
+    /// `reflect.json.type`, `reflect.json.missing`, `reflect.json.range` or `reflect.json.variant` and a message
+    /// that begins with the JSON path.
+    #Since("0.3.0")
+    export let from_json = func(value: JsonValue, type: model.TypeDescriptor) -> Result<model.Variant> =>
+        decode_value(value, type, "$");
+
+    /// @brief `json.parse`, then `from_json`.
+    #Since("0.3.0")
+    export let decode = func(text: string, type: model.TypeDescriptor) -> Result<model.Variant> => match (json.parse(text)) {
+        Result.Ok(tree) => from_json(tree, type),
+        Result.Err(problem) => Result<model.Variant>.Err(problem),
+    };
+
+    /// @brief `decode` for the type `T`, unpacked: a JSON text that does not describe a `T` traps.
+    #Since("0.3.0")
+    export let decode_as = func<T>(text: string) -> T {
+        match (decode(text, model.descriptor_for<T>())) {
+            Result.Ok(value) => {
+                return value.get<T>();
+            },
+            Result.Err(problem) => {
+                trap_with_message("reflection: " .. problem.to_string());
+            },
+        }
+        return model.construct(0, 0, new).get<T>();
+    };
+
+    let encode_value = func(value: model.Variant, open: model.Variant[list]) -> JsonValue {
+        if (value.is_nil()) {
+            return JsonValue.Null;
+        }
+        last type = value.descriptor();
+        if (attributes.type_sensitive(type)) {
+            return JsonValue.Text(Redacted);
+        }
+        if (type.kind == kinds.TypeKind.Bool) {
+            return JsonValue.Boolean(value.get<bool>());
+        }
+        if (type.kind == kinds.TypeKind.Integer) {
+            return JsonValue.Number(value.to_string());
+        }
+        if (type.kind == kinds.TypeKind.Float) {
+            last text = value.to_string();
+            if (text == "NaN" || text == "inf" || text == "-inf" || text == "Infinity" || text == "-Infinity") {
+                trap_with_message("invalid argument: number is not finite");
+            }
+            return JsonValue.Number(text);
+        }
+        if (type.kind == kinds.TypeKind.String) {
+            return JsonValue.Text(value.get<string>());
+        }
+        if (type.kind == kinds.TypeKind.List || type.kind == kinds.TypeKind.Array ||
+            type.kind == kinds.TypeKind.Tuple) {
+            last items: JsonValue[list] = new;
+            for (let i in 0 .. value.length()) {
+                items.append(encode_value(value.element(i), open));
+            }
+            return JsonValue.Array(items);
+        }
+        if (type.kind == kinds.TypeKind.Enum) {
+            last chosen = type.variants[value.variant_index()];
+            if (optional_type(type)) {
+                return chosen.name == "Some" ? encode_value(value.element(0), open) : JsonValue.Null;
+            }
+            last members: [string, JsonValue][list] = new;
+            members.append(["variant", JsonValue.Text(attributes.variant_serial_name(chosen))]);
+            if (chosen.payloads.length > 0) {
+                last payload: JsonValue[list] = new;
+                for (let i in 0 .. chosen.payloads.length) {
+                    payload.append(encode_value(value.element(i), open));
+                }
+                members.append(["payload", JsonValue.Array(payload)]);
+            }
+            return JsonValue.Object(members);
+        }
+        if (type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record) {
+            for (let seen in open) {
+                if (seen.equals(value)) {
+                    trap_with_message("reflection: a reference cycle cannot be written as JSON");
+                }
+            }
+            open.append(value);
+            last members: [string, JsonValue][list] = new;
+            for (let field in type.fields) {
+                if (not attributes.written(field)) {
+                    continue;
+                }
+                last wire = attributes.serial_name(field);
+                if (attributes.sensitive(field)) {
+                    members.append([wire, JsonValue.Text(Redacted)]);
+                } else {
+                    members.append([wire, encode_value(value.field(field.index), open)]);
+                }
+            }
+            open.remove_at(open.length - 1);
+            return JsonValue.Object(members);
+        }
+        trap_with_message("reflection: a " .. type.name .. " cannot be written as JSON");
+        return JsonValue.Null;
+    };
+
+    let is_null = func(value: JsonValue) -> bool => match (value) {
+        JsonValue.Null => true,
+        _ => false,
+    };
+
+    let optional_type = func(type: model.TypeDescriptor) -> bool =>
+        type.generic_origin == "Optional" && type.variants.length == 2 && type.variants[0].name == "None";
+
+    let failure = func(code: string, path: string, text: string) -> Result<model.Variant> =>
+        Result<model.Variant>.Err(errors.custom(code, path .. ": " .. text));
+
+    let decode_value = func(value: JsonValue, type: model.TypeDescriptor, path: string) -> Result<model.Variant> {
+        if (type == nil) {
+            return failure("reflect.json.type", path, "a value of type any cannot be decoded");
+        }
+        if (attributes.type_sensitive(type)) {
+            return failure("reflect.json.missing", path, "a #Sensitive " .. type.name .. " is not written as JSON");
+        }
+        if (type.ordinal == 0) {
+            return Result<model.Variant>.Ok(model.wrap(nil as class));
+        }
+        if (type.kind == kinds.TypeKind.Enum && optional_type(type)) {
+            if (is_null(value)) {
+                return Result<model.Variant>.Ok(model.construct(type.ordinal, 0, new));
+            }
+            last inner = type.variants[1].payloads[0];
+            last arguments: model.Variant[list] = new;
+            match (decode_value(value, declared(inner.type_ordinal), path)) {
+                Result.Ok(item) => {
+                    arguments.append(item);
+                },
+                Result.Err(problem) => {
+                    return Result<model.Variant>.Err(problem);
+                },
+            }
+            return Result<model.Variant>.Ok(model.construct(type.ordinal, 1, arguments));
+        }
+        if ((type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record) && is_null(value)) {
+            return Result<model.Variant>.Ok(model.wrap(nil as class));
+        }
+        return match (value) {
+            JsonValue.Boolean(flag) => type.kind == kinds.TypeKind.Bool
+                ? Result<model.Variant>.Ok(model.variant_of(flag))
+                : failure("reflect.json.type", path, "expected " .. type.name),
+            JsonValue.Number(text) => decode_number(text, type, path),
+            JsonValue.Text(text) => type.kind == kinds.TypeKind.String
+                ? Result<model.Variant>.Ok(model.variant_of(text))
+                : failure("reflect.json.type", path, "expected " .. type.name),
+            JsonValue.Array(items) => decode_array(items, type, path),
+            JsonValue.Object(members) => type.kind == kinds.TypeKind.Enum
+                ? decode_enum(members, type, path)
+                : decode_object(members, type, path),
+            JsonValue.Null => failure("reflect.json.type", path, "null is not a " .. type.name),
+        };
+    };
+
+    let decode_number = func(text: string, type: model.TypeDescriptor, path: string) -> Result<model.Variant> {
+        last bad = failure("reflect.json.range", path, text .. " is not a " .. type.name);
+        if (type.name == "int8") {
+            return match (int8s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "int16") {
+            return match (int16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "int32") {
+            return match (int32s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "int64") {
+            return match (int64s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "uint8") {
+            return match (uint8s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "uint16") {
+            return match (uint16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "uint32") {
+            return match (uint32s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "uint64") {
+            return match (uint64s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "float16") {
+            return match (float16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "bfloat16") {
+            return match (bfloat16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        if (type.name == "float32") {
+            return match (float32s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
+        }
+        return if (type.name == "float64") -> match (float64s.parse(text)) {
+            Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+            Result.Err(_) => bad,
+        };
+        else -> failure("reflect.json.type", path, "a number is not a " .. type.name);
+    };
+
+    let decode_all = func(items: JsonValue[list], types: int[list], path: string) -> Result<model.Variant[list]> {
+        last values: model.Variant[list] = new;
+        for (let i in 0 .. items.length) {
+            last element_type = types.length == 1 ? types[0] : types[i];
+            match (decode_value(items[i], declared(element_type), path .. "[" .. i.to_string() .. "]")) {
+                Result.Ok(item) => {
+                    values.append(item);
+                },
+                Result.Err(problem) => {
+                    return Result<model.Variant[list]>.Err(problem);
+                },
+            }
+        }
+        return Result<model.Variant[list]>.Ok(values);
+    };
+
+    let decode_array = func(items: JsonValue[list], type: model.TypeDescriptor, path: string) -> Result<model.Variant> {
+        if (type.kind != kinds.TypeKind.List && type.kind != kinds.TypeKind.Tuple) {
+            return failure("reflect.json.type", path, "an array is not a " .. type.name);
+        }
+        if (type.kind == kinds.TypeKind.Tuple && items.length != type.elements.length) {
+            return failure("reflect.json.range", path, "expected " .. type.elements.length.to_string() .. " elements");
+        }
+        return match (decode_all(items, type.elements, path)) {
+            Result.Ok(values) => Result<model.Variant>.Ok(model.construct(type.ordinal, 0, values)),
+            Result.Err(problem) => Result<model.Variant>.Err(problem),
+        };
+    };
+
+    let decode_enum = func(members: [string, JsonValue][list], type: model.TypeDescriptor, path: string)
+        -> Result<model.Variant> {
+        last name = text_of(json.member(members, "variant"));
+        let chosen: model.VariantInfo = nil;
+        for (let variant in type.variants) {
+            if (attributes.variant_serial_name(variant) == name) {
+                chosen = variant;
+            }
+        }
+        if (chosen == nil) {
+            return failure("reflect.json.variant", path, "no variant named '" .. name .. "' in " .. type.name);
+        }
+        last payload = items_of(json.member(members, "payload"));
+        if (payload.length != chosen.payloads.length) {
+            return failure("reflect.json.variant", path, "variant " .. name .. " takes " ..
+                chosen.payloads.length.to_string() .. " payloads");
+        }
+        last types: int[list] = new;
+        for (let item in chosen.payloads) {
+            types.append(item.type_ordinal);
+        }
+        return match (decode_all(payload, types, path .. ".payload")) {
+            Result.Ok(values) => Result<model.Variant>.Ok(model.construct(type.ordinal, chosen.index, values)),
+            Result.Err(problem) => Result<model.Variant>.Err(problem),
+        };
+    };
+
+    let text_of = func(member: Optional<JsonValue>) -> string {
+        match (member) {
+            Optional.Some(value) => {
+                return match (value) {
+                    JsonValue.Text(text) => text,
+                    _ => "",
+                };
+            },
+            Optional.None => {
+                return "";
+            },
+        }
+    };
+
+    let items_of = func(member: Optional<JsonValue>) -> JsonValue[list] {
+        last none: JsonValue[list] = new;
+        match (member) {
+            Optional.Some(value) => {
+                return match (value) {
+                    JsonValue.Array(items) => items,
+                    _ => none,
+                };
+            },
+            Optional.None => {
+                return none;
+            },
+        }
+    };
+
+    // The descriptor of a declared type, or nil for `any`.
+    let declared = func(ordinal: int) -> model.TypeDescriptor => ordinal < 0 ? nil : model.descriptor_of(ordinal);
+
+    // Whether decoding can give the field a value: encoding wrote it as it is.
+    let readable = func(field: model.FieldInfo) -> bool {
+        return if (not attributes.written(field) || attributes.sensitive(field) || field.type_ordinal < 0) -> false;
+        else -> not attributes.type_sensitive(model.descriptor_of(field.type_ordinal));
+    };
+
+    let wire_member = func(members: [string, JsonValue][list], field: model.FieldInfo) -> Optional<JsonValue> =>
+        json.member(members, attributes.serial_name(field));
+
+    let decode_object = func(members: [string, JsonValue][list], type: model.TypeDescriptor, path: string)
+        -> Result<model.Variant> {
+        if (type.kind != kinds.TypeKind.Class && type.kind != kinds.TypeKind.Record) {
+            return failure("reflect.json.type", path, "an object is not a " .. type.name);
+        }
+        // A constructor whose parameters all name fields builds the value in one call.
+        for (let constructor in type.constructors) {
+            if (not constructor.exported || constructor.parameters.length == 0 || not names_fields(constructor.parameters, type)) {
+                continue;
+            }
+            last values: model.Variant[list] = new;
+            for (let parameter in constructor.parameters) {
+                last field = type.field(parameter.name);
+                last at = path .. "." .. attributes.serial_name(field);
+                if (not readable(field)) {
+                    // Encoding left the value out or wrote a placeholder, so nothing can rebuild it.
+                    return failure("reflect.json.missing", at, "a #Sensitive, #Skip, unexported or any field is not " ..
+                        "written as JSON, so " .. type.name .. " cannot be rebuilt by its constructor");
+                }
+                match (wire_member(members, field)) {
+                    Optional.Some(item) => {
+                        match (decode_value(item, declared(field.type_ordinal), at)) {
+                            Result.Ok(decoded) => {
+                                values.append(decoded);
+                            },
+                            Result.Err(problem) => {
+                                return Result<model.Variant>.Err(problem);
+                            },
+                        }
+                    },
+                    Optional.None => {
+                        last field_type = model.descriptor_of(field.type_ordinal);
+                        if (not optional_type(field_type)) {
+                            return failure("reflect.json.missing", at, "missing");
+                        }
+                        values.append(model.construct(field_type.ordinal, 0, new));
+                    },
+                }
+            }
+            return Result<model.Variant>.Ok(model.construct(type.ordinal, constructor.index, values));
+        }
+        for (let constructor in type.constructors) {
+            if (not constructor.exported || constructor.parameters.length != 0) {
+                continue;
+            }
+            last made = model.construct(type.ordinal, constructor.index, new);
+            for (let field in type.fields) {
+                if (not field.writable() || not readable(field)) {
+                    continue;
+                }
+                last at = path .. "." .. attributes.serial_name(field);
+                match (wire_member(members, field)) {
+                    Optional.Some(item) => {
+                        match (decode_value(item, declared(field.type_ordinal), at)) {
+                            Result.Ok(decoded) => {
+                                made.set_field(field.index, decoded);
+                            },
+                            Result.Err(problem) => {
+                                return Result<model.Variant>.Err(problem);
+                            },
+                        }
+                    },
+                    Optional.None => {},
+                }
+            }
+            return Result<model.Variant>.Ok(made);
+        }
+        return failure("reflect.json.type", path, type.name .. " has no constructor that decoding can call");
+    };
+
+    let names_fields = func(parameters: model.ParamInfo[list], type: model.TypeDescriptor) -> bool {
+        for (let parameter in parameters) {
+            last field = type.field(parameter.name);
+            if (field == nil || field.type_ordinal != parameter.type_ordinal) {
+                return false;
+            }
+        }
+        return true;
+    };
+);

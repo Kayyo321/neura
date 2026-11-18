@@ -59,9 +59,9 @@ The following public declarations are taken from the module source; each links t
   Traps with "invalid state: ..." when iteration and indexing disagree or the size is inconsistent.
 - **ArrayDeque.ArrayDeque** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L251)
   Formats elements as `[a, b, c]` from first to last. The deque prints "(this collection)" where its own text reaches it again.
-- **ArrayDeque** · [`export let create = func<T> -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L311)
+- **ArrayDeque** · [`export let create = func<T> -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L312)
   Creates an empty deque.
-- **ArrayDeque** · [`export let of = func<T>(items: T[list]) -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L314)
+- **ArrayDeque** · [`export let of = func<T>(items: T[list]) -> ArrayDeque<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-deque.nra#L315)
   Creates a deque from a shallow copy of `items`, in list order.
 <!-- END SOURCE API -->
 

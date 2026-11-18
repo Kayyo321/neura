@@ -64,10 +64,9 @@ export let ImmutableMap = module (
         /// @brief Another ImmutableMap of the same size in which, for each of its
         /// entries, this map holds an equal value for the key.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ImmutableMap<K, V>)) {
+            if (other is not that: ImmutableMap<K, V>) {
                 return false;
             }
-            last that = other as ImmutableMap<K, V>;
             if (that.size() != associations.size()) {
                 return false;
             }
@@ -78,7 +77,7 @@ export let ImmutableMap = module (
                 let [key, value] = items[i];
                 match (associations.get(key)) {
                     optional.Optional.Some(held) => {
-                        if (!(held === value)) {
+                        if (not (held === value)) {
                             return false;
                         }
                     },

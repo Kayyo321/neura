@@ -20,14 +20,14 @@ export let Controls = module (
         export let init = func(value: string, label: string) => set;
 
         /// @brief `value: label`.
-        export let.override to_string = func -> string => value + ": " + label;
+        export let.override to_string = func -> string => value .. ": " .. label;
 
         /// @brief Another choice with the same value and label.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Choice)) {
+            if (other is not that: Choice) {
                 return false;
             }
-            return value == (other as Choice).value && label == (other as Choice).label;
+            return value == that.value && label == that.label;
         };
 
         /// @brief Combines the hashes of the value and label.
@@ -43,14 +43,14 @@ export let Controls = module (
         export let init = func(key: string, cells: frozen.FrozenList<string>) => set;
 
         /// @brief `TableRow(` the key `)`.
-        export let.override to_string = func -> string => "TableRow(" + key + ")";
+        export let.override to_string = func -> string => "TableRow(" .. key .. ")";
 
         /// @brief Another row with the same key and cells.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is TableRow)) {
+            if (other is not that: TableRow) {
                 return false;
             }
-            return key == (other as TableRow).key && cells.equals((other as TableRow).cells);
+            return key == that.key && cells.equals(that.cells);
         };
 
         /// @brief Combines the hashes of the key and cells.
@@ -168,7 +168,7 @@ export let Controls = module (
         last on_blur = field.on_blur();
         return ui.component<forms.FieldState>(field.state, new func(state: forms.FieldState) -> ui.View =>
             text_input_view(id, label, kind, state.draft, state.shows_error(), described_by(id, state),
-                id + "-error", state.message, on_input, on_blur));
+                id .. "-error", state.message, on_input, on_blur));
     };
 
     /// @brief A labelled `textarea` over `field`, as `text_input`.
@@ -178,7 +178,7 @@ export let Controls = module (
         last on_input = field.on_input();
         last on_blur = field.on_blur();
         return ui.component<forms.FieldState>(field.state, new func(state: forms.FieldState) -> ui.View =>
-            text_area_view(id, label, state.draft, state.shows_error(), described_by(id, state), id + "-error",
+            text_area_view(id, label, state.draft, state.shows_error(), described_by(id, state), id .. "-error",
                 state.message, on_input, on_blur));
     };
 
@@ -249,8 +249,8 @@ export let Controls = module (
         return ui.component<frozen.FrozenList<TableRow>>(rows, new func(all: frozen.FrozenList<TableRow>) -> ui.View {
             for (let i = 0; i < all.length(); i++) {
                 if (all.get(i).cells.length() != columns.length()) {
-                    trap_with_message("a table row has " + all.get(i).cells.length().to_string() + " cells for "
-                        + columns.length().to_string() + " columns");
+                    trap_with_message("a table row has " .. all.get(i).cells.length().to_string() .. " cells for "
+                        .. columns.length().to_string() .. " columns");
                 }
             }
             return table_view(caption, columns, positions, all);
@@ -268,12 +268,12 @@ export let Controls = module (
             open.set(false);
         };
         return ui.component<bool>(open, new func(shown: bool) -> ui.View =>
-            dialog_view(id, id + "-title", title, shown, content(), on_close, on_dismiss));
+            dialog_view(id, id .. "-title", title, shown, content(), on_close, on_dismiss));
     };
 
     let described_by = func(id: string, state: forms.FieldState) -> optional.Optional<string> {
         if (state.shows_error()) {
-            return optional.Optional<string>.Some(id + "-error");
+            return optional.Optional<string>.Some(id .. "-error");
         }
         return optional.Optional<string>.None;
     };

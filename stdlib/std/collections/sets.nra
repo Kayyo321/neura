@@ -13,9 +13,7 @@ export let Sets = module (
         }
         last items = b.iterator();
         while (items.has_next()) {
-            if (!a.contains(items.next())) {
-                return false;
-            }
+            return false unless a.contains(items.next());
         }
         return true;
     };

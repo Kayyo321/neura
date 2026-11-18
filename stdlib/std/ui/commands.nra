@@ -26,7 +26,7 @@ export let Commands = module (
         export let init = func(generation: uint64, state: CommandState<O>) => set;
 
         /// @brief `Finished(generation N)`.
-        export let.override to_string = func -> string => "Finished(generation " + generation.to_string() + ")";
+        export let.override to_string = func -> string => "Finished(generation " .. generation.to_string() .. ")";
     );
 
     // The task of one command run: it runs `work` in a scope of its own, so that stopping the run
@@ -99,7 +99,7 @@ export let Commands = module (
         /// has its limit of commands in flight (U-10, 32 by default). The task starts when the root's
         /// `Commands.run` next takes a turn.
         export let run = func(input: I) -> RunOutcome {
-            if (owner == nil || !owner.is_mounted() || !owner.owner.can_launch()) {
+            if (owner == nil || not owner.is_mounted() || not owner.owner.can_launch()) {
                 return RunOutcome.Rejected;
             }
             last root = owner.owner;
@@ -191,7 +191,7 @@ export let Commands = module (
 
         /// @brief `Command(generation N, M in flight)`.
         export let.override to_string = func -> string =>
-            "Command(generation " + generation_count.to_string() + ", " + in_flight.length.to_string() + " in flight)";
+            "Command(generation " .. generation_count.to_string() .. ", " .. in_flight.length.to_string() .. " in flight)";
     );
 
     /// @brief Runs `root`'s turns, as `root.run()` does, inside a scope that owns every command task
@@ -201,7 +201,7 @@ export let Commands = module (
     /// or faulted, or when the host has no more events and no command is in flight; it cancels the
     /// commands still running and returns after their tasks have finished.
     export let run = func(root: ui.Root) {
-        if (!root.begin_commands()) {
+        if (not root.begin_commands()) {
             trap_with_message("Std.Ui.Commands.run is already running for this root");
         }
         scope (tasks) {
@@ -228,7 +228,7 @@ export let Commands = module (
                     continue;
                 }
                 if (root.commands_in_flight() == 0) {
-                    if (!root.wait_for_events()) {
+                    if (not root.wait_for_events()) {
                         break;
                     }
                     continue;

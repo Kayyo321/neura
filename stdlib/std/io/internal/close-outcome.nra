@@ -17,7 +17,7 @@ export let CloseOutcome = module (
             Result.Err(failure) => match (outcome) {
                 Result.Ok(_) => Result<T>.Err(failure),
                 Result.Err(original) => Result<T>.Err(error.Error.Context {
-                    message: "closing the resource also failed: " + error.message(failure),
+                    message: "closing the resource also failed: " .. error.message(failure),
                     cause: new error.ErrorLink(original) }),
             },
         };

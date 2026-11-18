@@ -90,10 +90,10 @@ export let Character = module (
 
         /// @brief Tests whether another Character holds the same code point.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Character)) {
+            if (other is not that: Character) {
                 return false;
             }
-            return code_point == (other as Character).code_point;
+            return code_point == that.code_point;
         };
 
         /// @brief The code point, as for a uint32 (Stdlib.md section 5.2).
@@ -254,10 +254,7 @@ export let Character = module (
                     }
                     return GeneralCategory.OtherLetter;
                 }
-                if (index < 6) {
-                    return GeneralCategory.NonspacingMark;
-                }
-                return GeneralCategory.SpacingMark;
+                return if (index < 6) -> GeneralCategory.NonspacingMark else -> GeneralCategory.SpacingMark;
             }
             if (index < 11) {
                 if (index < 9) {
@@ -266,10 +263,7 @@ export let Character = module (
                     }
                     return GeneralCategory.DecimalNumber;
                 }
-                if (index < 10) {
-                    return GeneralCategory.LetterNumber;
-                }
-                return GeneralCategory.OtherNumber;
+                return if (index < 10) -> GeneralCategory.LetterNumber else -> GeneralCategory.OtherNumber;
             }
             if (index < 13) {
                 if (index < 12) {
@@ -277,10 +271,7 @@ export let Character = module (
                 }
                 return GeneralCategory.DashPunctuation;
             }
-            if (index < 14) {
-                return GeneralCategory.OpenPunctuation;
-            }
-            return GeneralCategory.ClosePunctuation;
+            return if (index < 14) -> GeneralCategory.OpenPunctuation else -> GeneralCategory.ClosePunctuation;
         }
         if (index < 22) {
             if (index < 18) {
@@ -293,38 +284,20 @@ export let Character = module (
                 return GeneralCategory.OtherPunctuation;
             }
             if (index < 20) {
-                if (index < 19) {
-                    return GeneralCategory.MathSymbol;
-                }
-                return GeneralCategory.CurrencySymbol;
+                return if (index < 19) -> GeneralCategory.MathSymbol else -> GeneralCategory.CurrencySymbol;
             }
-            if (index < 21) {
-                return GeneralCategory.ModifierSymbol;
-            }
-            return GeneralCategory.OtherSymbol;
+            return if (index < 21) -> GeneralCategory.ModifierSymbol else -> GeneralCategory.OtherSymbol;
         }
         if (index < 26) {
             if (index < 24) {
-                if (index < 23) {
-                    return GeneralCategory.SpaceSeparator;
-                }
-                return GeneralCategory.LineSeparator;
+                return if (index < 23) -> GeneralCategory.SpaceSeparator else -> GeneralCategory.LineSeparator;
             }
-            if (index < 25) {
-                return GeneralCategory.ParagraphSeparator;
-            }
-            return GeneralCategory.Control;
+            return if (index < 25) -> GeneralCategory.ParagraphSeparator else -> GeneralCategory.Control;
         }
         if (index < 28) {
-            if (index < 27) {
-                return GeneralCategory.Format;
-            }
-            return GeneralCategory.Surrogate;
+            return if (index < 27) -> GeneralCategory.Format else -> GeneralCategory.Surrogate;
         }
-        if (index < 29) {
-            return GeneralCategory.PrivateUse;
-        }
-        return GeneralCategory.Unassigned;
+        return if (index < 29) -> GeneralCategory.PrivateUse else -> GeneralCategory.Unassigned;
     };
 
     /// @brief The bidi class with a declaration ordinal.
@@ -336,70 +309,46 @@ export let Character = module (
                     if (index < 1) {
                         return BidiClass.LeftToRight;
                     }
-                    if (index < 2) {
-                        return BidiClass.RightToLeft;
-                    }
-                    return BidiClass.ArabicLetter;
+                    return if (index < 2) -> BidiClass.RightToLeft else -> BidiClass.ArabicLetter;
                 }
                 if (index < 4) {
                     return BidiClass.EuropeanNumber;
                 }
-                if (index < 5) {
-                    return BidiClass.EuropeanSeparator;
-                }
-                return BidiClass.EuropeanTerminator;
+                return if (index < 5) -> BidiClass.EuropeanSeparator else -> BidiClass.EuropeanTerminator;
             }
             if (index < 9) {
                 if (index < 7) {
                     return BidiClass.ArabicNumber;
                 }
-                if (index < 8) {
-                    return BidiClass.CommonSeparator;
-                }
-                return BidiClass.NonspacingMark;
+                return if (index < 8) -> BidiClass.CommonSeparator else -> BidiClass.NonspacingMark;
             }
             if (index < 10) {
                 return BidiClass.BoundaryNeutral;
             }
-            if (index < 11) {
-                return BidiClass.ParagraphSeparator;
-            }
-            return BidiClass.SegmentSeparator;
+            return if (index < 11) -> BidiClass.ParagraphSeparator else -> BidiClass.SegmentSeparator;
         }
         if (index < 18) {
             if (index < 15) {
                 if (index < 13) {
                     return BidiClass.WhiteSpace;
                 }
-                if (index < 14) {
-                    return BidiClass.OtherNeutral;
-                }
-                return BidiClass.LeftToRightEmbedding;
+                return if (index < 14) -> BidiClass.OtherNeutral else -> BidiClass.LeftToRightEmbedding;
             }
             if (index < 16) {
                 return BidiClass.LeftToRightOverride;
             }
-            if (index < 17) {
-                return BidiClass.RightToLeftEmbedding;
-            }
-            return BidiClass.RightToLeftOverride;
+            return if (index < 17) -> BidiClass.RightToLeftEmbedding else -> BidiClass.RightToLeftOverride;
         }
         if (index < 21) {
             if (index < 19) {
                 return BidiClass.PopDirectionalFormat;
             }
-            if (index < 20) {
-                return BidiClass.LeftToRightIsolate;
-            }
-            return BidiClass.RightToLeftIsolate;
+            return if (index < 20) -> BidiClass.LeftToRightIsolate else -> BidiClass.RightToLeftIsolate;
         }
         if (index < 22) {
             return BidiClass.FirstStrongIsolate;
         }
-        if (index < 23) {
-            return BidiClass.PopDirectionalIsolate;
-        }
-        return BidiClass.Undefined;
+        return if (index < 23) -> BidiClass.PopDirectionalIsolate else -> BidiClass.Undefined;
     };
 
     // Values
@@ -757,7 +706,7 @@ export let Character = module (
     /// not validate, a pair that is not one traps with "invalid argument: not a surrogate pair".
     #[Pure, ThreadSafe]
     export let to_code_point = func(high: uint32, low: uint32) -> uint32 {
-        if (!is_surrogate_pair(high, low)) {
+        if (not is_surrogate_pair(high, low)) {
             trap_with_message("invalid argument: not a surrogate pair");
         }
         return ((high - MinHighSurrogate) << 10) + (low - MinLowSurrogate) + MinSupplementaryCodePoint;
@@ -935,7 +884,7 @@ export let Character = module (
 
     /// @brief Traps unless the value is U+10000 through U+10FFFF.
     let check_supplementary = func(code_point: uint32) {
-        if (!is_supplementary(code_point)) {
+        if (not is_supplementary(code_point)) {
             trap_with_message("invalid argument: not a supplementary code point");
         }
     };

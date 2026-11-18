@@ -420,8 +420,24 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
-| [`Std.Reflect.Core.TypeInfo`](Stdlib-Reflect-TypeInfo) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-TypeInfo#exported-declarations) |
-| [`Std.Reflect.Type.TypeKind`](Stdlib-Reflect-TypeKind) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-TypeKind#exported-declarations) |
+| [`Std.Reflect.Core.TypeInfo`](Stdlib-Reflect-Core-TypeInfo) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-Core-TypeInfo#exported-declarations) |
+| [`Std.Reflect.Type.TypeKind`](Stdlib-Reflect-Type-TypeKind) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-Type-TypeKind#exported-declarations) |
+| [`Std.Reflect.Core.TypeId`](Stdlib-Reflect-Core-TypeId) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-TypeId#exported-declarations) |
+| [`Std.Reflect.Core.MemoryLayout`](Stdlib-Reflect-Core-MemoryLayout) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-MemoryLayout#exported-declarations) |
+| [`Std.Reflect.Core.ReflectPolicy`](Stdlib-Reflect-Core-ReflectPolicy) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-ReflectPolicy#exported-declarations) |
+| [`Std.Reflect.Core.TypeRegistry`](Stdlib-Reflect-Core-TypeRegistry) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-TypeRegistry#exported-declarations) |
+| [`Std.Reflect.Core.Reflectable`](Stdlib-Reflect-Core-Reflectable) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-Reflectable#exported-declarations) |
+| [`Std.Reflect.Type.TypeDescriptor`](Stdlib-Reflect-Type-TypeDescriptor) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Type-TypeDescriptor#exported-declarations) |
+| [`Std.Reflect.Member.Members`](Stdlib-Reflect-Member-Members) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Member-Members#exported-declarations) |
+| [`Std.Reflect.Member.ValueCursor`](Stdlib-Reflect-Member-ValueCursor) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Member-ValueCursor#exported-declarations) |
+| [`Std.Reflect.Attribute.Attributes`](Stdlib-Reflect-Attribute-Attributes) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Attribute-Attributes#exported-declarations) |
+| [`Std.Reflect.Dynamic.Variant`](Stdlib-Reflect-Dynamic-Variant) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Dynamic-Variant#exported-declarations) |
+| [`Std.Reflect.Codec.JsonBridge`](Stdlib-Reflect-Codec-JsonBridge) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Codec-JsonBridge#exported-declarations) |
+| [`Std.Reflect.Codec.Walk`](Stdlib-Reflect-Codec-Walk) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Codec-Walk#exported-declarations) |
+| [`Std.Reflect.Codec.SchemaBuilder`](Stdlib-Reflect-Codec-SchemaBuilder) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Codec-SchemaBuilder#exported-declarations) |
+| [`Std.Reflect.Ffi.Abi`](Stdlib-Reflect-Ffi-Abi) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Ffi-Abi#exported-declarations) |
+| [`Std.Reflect.Ffi.ForeignCall`](Stdlib-Reflect-Ffi-ForeignCall) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Ffi-ForeignCall#exported-declarations) |
+| [`Std.Reflect.Proxy.DynamicProxy`](Stdlib-Reflect-Proxy-DynamicProxy) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Proxy-DynamicProxy#exported-declarations) |
 
 ### `Std.Random`
 

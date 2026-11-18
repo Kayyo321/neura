@@ -23,11 +23,11 @@ The following public declarations are taken from the module source; each links t
   Returns true when exactly one operand is true. Tagged `#Pure`, `#ThreadSafe`.
 - **Bool** · [`export let compare = func(a: bool, b: bool) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L19)
   The natural order: false before true. Usable as a comparator. Tagged `#Pure`, `#ThreadSafe`.
-- **Bool** · [`export let hash = func(v: bool) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L31)
+- **Bool** · [`export let hash = func(v: bool) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L28)
   1231 for true and 1237 for false (section 5.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Bool** · [`export let to_string = func(v: bool) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L35)
+- **Bool** · [`export let to_string = func(v: bool) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L32)
   Returns the lowercase text `true` or `false`. Tagged `#Pure`, `#ThreadSafe`.
-- **Bool** · [`export let parse = func(text: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L47)
+- **Bool** · [`export let parse = func(text: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/bool.nra#L41)
   Accepts exactly `true` and `false`. The empty text fails with Empty; a proper prefix of either word with UnexpectedEnd at its length; any other text with InvalidCharacter at the first byte that matches neither word. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

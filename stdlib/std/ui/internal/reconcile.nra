@@ -123,6 +123,9 @@ export let Reconcile = module (
         // Static attributes have slot -1; dynamic ones name their slot.
         export let attributes: [string, string, int64][list] = new();
         export let children: TNode[list] = new();
+
+        /// @brief Names the template node.
+        export let.override to_string = func -> string => "TNode(" .. name .. ")";
     );
 
     #NotThreadSafe
@@ -132,12 +135,18 @@ export let Reconcile = module (
         export let prevent_default: bool = false;
         export let stop_propagation: bool = false;
         export let list: bool = false;
+
+        /// @brief Names the template slot.
+        export let.override to_string = func -> string => "TSlot(" .. kind .. " " .. name .. ")";
     );
 
     #NotThreadSafe
     let TFragment = class (
         export let nodes: TNode[list] = new();
         export let slots: TSlot[list] = new();
+
+        /// @brief Names the fragment and its node count.
+        export let.override to_string = func -> string => "TFragment(" .. nodes.length.to_string() .. " nodes)";
     );
 
     #NotThreadSafe
@@ -146,10 +155,13 @@ export let Reconcile = module (
         export let fragments: TFragment[list] = new();
 
         export let init = func(id: int) => set;
+
+        /// @brief Names the template and its identifier.
+        export let.override to_string = func -> string => "Template(" .. id.to_string() .. ")";
     );
 
     let malformed = func(what: string) {
-        trap_with_message("invalid UI descriptor: expected " + what);
+        trap_with_message("invalid UI descriptor: expected " .. what);
     };
 
     let text_of = func(value: json.JsonValue) -> string {
@@ -211,7 +223,7 @@ export let Reconcile = module (
         json.member(members, name);
 
     let required = func(members: [string, json.JsonValue][list], name: string) -> json.JsonValue =>
-        optional.expect<json.JsonValue>(json.member(members, name), "invalid UI descriptor: missing " + name);
+        optional.expect<json.JsonValue>(json.member(members, name), "invalid UI descriptor: missing " .. name);
 
     let parse_node = func(value: json.JsonValue) -> TNode {
         last members = members_of(value);
@@ -310,6 +322,9 @@ export let Reconcile = module (
 
         export let init = func(event: string, prevent_default: bool, stop_propagation: bool, callable: storage.Slot)
             => set;
+
+        /// @brief Names the listener and its event.
+        export let.override to_string = func -> string => "Listener(" .. event .. ")";
     );
 
     #NotThreadSafe
@@ -320,6 +335,9 @@ export let Reconcile = module (
         export last text: string;
 
         export let init = func(name: string, boolean: bool, flag: bool, text: string) => set;
+
+        /// @brief Names the property.
+        export let.override to_string = func -> string => "Property(" .. name .. ")";
     );
 
     // One host node of an expanded view.
@@ -349,6 +367,9 @@ export let Reconcile = module (
         export let reused: uint64 = 0;
 
         export let init = func(element: bool, name: string, svg: bool, origin: string, key: string) => set;
+
+        /// @brief Names the node.
+        export let.override to_string = func -> string => "VNode(" .. name .. ")";
     );
 
     // A component's part of the mounted tree: its top-level nodes, under the key path they were expanded at, the
@@ -376,6 +397,9 @@ export let Reconcile = module (
             instance.nested = nested;
             instance.pass = pass;
         };
+
+        /// @brief Names the memo and its key.
+        export let.override to_string = func -> string => "Memo(" .. key .. ")";
     );
 
     /// @brief The result of `prepare`: a refusal, or the operations of a valid commit.
@@ -396,8 +420,8 @@ export let Reconcile = module (
         export let encode = func -> uint8[list] => encode_commit(operations);
 
         export let.override to_string = func -> string =>
-            (diagnostic == nil) ? "Plan(" + operations.length.to_string() + " operations)"
-            : "Plan(invalid: " + diagnostic.message + ")";
+            (diagnostic == nil) ? "Plan(" .. operations.length.to_string() .. " operations)"
+            : "Plan(invalid: " .. diagnostic.message .. ")";
     );
 
     // Thrown out of an expansion when the view is refused.
@@ -406,6 +430,9 @@ export let Reconcile = module (
         export last diagnostic: ui.Diagnostic;
 
         export let init = func(diagnostic: ui.Diagnostic) => set;
+
+        /// @brief Names the refusal with its diagnostic message.
+        export let.override to_string = func -> string => "Refusal(" .. diagnostic.message .. ")";
     );
 
     let MaxItems: int = 10000;
@@ -434,6 +461,9 @@ export let Reconcile = module (
         export let reuse_failed: bool = false;
         // The pass of this expansion, which marks the nodes it reused.
         export let claimed_pass: uint64 = 0;
+
+        /// @brief Names the expansion and its node count.
+        export let.override to_string = func -> string => "Expansion(" .. nodes.to_string() .. " nodes)";
     );
 
     // The descriptor of the view that `ui.slot` makes: one payload, the embedded component.
@@ -478,7 +508,7 @@ export let Reconcile = module (
         let mounted_pass: uint64 = 0;
 
         export let.override to_string = func -> string =>
-            "Reconciler(" + mounted.length.to_string() + " top-level nodes)";
+            "Reconciler(" .. mounted.length.to_string() .. " top-level nodes)";
 
         let template = func(descriptor: string) -> Template {
             last found = templates.get(descriptor);
@@ -520,7 +550,7 @@ export let Reconcile = module (
             last here = view.owner != nil && view.owner === instance;
             if (view.owner != nil &&
                 ((here && (view.pass == pass || (view.pass == mounted_pass && state.fresh))) ||
-                    (!here && view.owner is Reconciler && (view.owner as Reconciler).holds(view.pass)))) {
+                    (not here && view.owner is Reconciler && (view.owner as Reconciler).holds(view.pass)))) {
                 refuse(state, ui.DiagnosticKind.ViewReused, "a view appears once in one tree, in one root", 0, -1, "");
                 return false;
             }
@@ -537,7 +567,7 @@ export let Reconcile = module (
         // A component boundary: the embedded component's current view takes the slot's place, expanded as fresh
         // when the component rendered for this commit and as retained otherwise. Its listeners belong to it.
         let expand_component = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
-            if (!claim(view, pass, state)) {
+            if (not claim(view, pass, state)) {
                 return;
             }
             last child = (view.last_slot as storage.Payload<ui.Component>).value;
@@ -617,7 +647,7 @@ export let Reconcile = module (
                 expand_component(view, key, pass, state, out);
                 return;
             }
-            if (!claim(view, pass, state)) {
+            if (not claim(view, pass, state)) {
                 return;
             }
             last t = template(view.descriptor);
@@ -633,7 +663,7 @@ export let Reconcile = module (
                 values[slot.index as int] = slot;
                 slot = slot.next;
             }
-            last origin = t.id.to_string() + ":" + view.fragment.to_string() + ":";
+            last origin = t.id.to_string() .. ":" .. view.fragment.to_string() .. ":";
             expand_nodes(fragment, values, fragment.nodes, origin, key, pass, state, out);
         };
 
@@ -642,7 +672,7 @@ export let Reconcile = module (
             let i = 0;
             while (i < nodes.length && state.refusal == nil) {
                 last node = nodes[i];
-                last path = key + "." + i.to_string();
+                last path = key .. "." .. i.to_string();
                 last where = origin + i.to_string();
                 if (node.kind == 0) {
                     last text = new VNode(false, "", false, where, path);
@@ -662,7 +692,7 @@ export let Reconcile = module (
                                 values[attribute[2] as int], element, state);
                         }
                     }
-                    expand_nodes(fragment, values, node.children, where + ".", path, pass, state, element.children);
+                    expand_nodes(fragment, values, node.children, where .. ".", path, pass, state, element.children);
                     out.append(element);
                 } else {
                     expand_slot(fragment.slots[node.slot as int], node.slot, values[node.slot as int], where, path,
@@ -729,10 +759,10 @@ export let Reconcile = module (
                 count(state);
                 out.append(text);
             } else if (slot.kind == "child") {
-                expand_view((value as storage.Payload<ui.View>).value, key + "v", pass, state, out);
-            } else if (!slot.list) {
+                expand_view((value as storage.Payload<ui.View>).value, key .. "v", pass, state, out);
+            } else if (not slot.list) {
                 last branch = (value as storage.Payload<ui.View>).value;
-                expand_view(branch, key + "b" + branch.fragment.to_string(), pass, state, out);
+                expand_view(branch, key .. "b" .. branch.fragment.to_string(), pass, state, out);
             } else {
                 last items = (value as storage.Payload<build.Items>).value;
                 last seen = string_maps.create<bool>();
@@ -747,11 +777,11 @@ export let Reconcile = module (
                     }
                     if (seen.contains_key(item.key)) {
                         refuse(state, ui.DiagnosticKind.DuplicateKey,
-                            "two items of one @for have the key '" + item.key + "'", index, position, item.key);
+                            "two items of one @for have the key '" .. item.key .. "'", index, position, item.key);
                         return;
                     }
                     seen.set(item.key, true);
-                    expand_view(item.view, key + "k" + item.key.byte_length.to_string() + ":" + item.key, pass, state,
+                    expand_view(item.view, key .. "k" .. item.key.byte_length.to_string() .. ":" .. item.key, pass, state,
                         out);
                     position += 1;
                 }
@@ -776,9 +806,7 @@ export let Reconcile = module (
             // from the same node identifiers.
             last ids = next_id;
             last plan = plan_from(view, turn_state(top, rendered, true));
-            if (!plan.reuse_failed) {
-                return plan;
-            }
+            return plan unless plan.reuse_failed;
             next_id = ids;
             return plan_from(view, turn_state(top, rendered, false));
         };
@@ -798,7 +826,7 @@ export let Reconcile = module (
             passes = pass;
             plan.pass = pass;
             state.claimed_pass = pass;
-            if (!state.whole) {
+            if (not state.whole) {
                 for (let entry in state.rendered) {
                     entry.component.rendered_by = instance;
                     entry.component.rendered_pass = pass;
@@ -844,13 +872,13 @@ export let Reconcile = module (
             let i = 0;
             while (i < old.length) {
                 old[i].removed = true;
-                if (in_order && !(old[i].key == fresh[i].key)) {
+                if (in_order && not (old[i].key == fresh[i].key)) {
                     in_order = false;
                 }
                 i += 1;
             }
             last positions = string_maps.create<int>();
-            if (!in_order) {
+            if (not in_order) {
                 i = 0;
                 while (i < old.length) {
                     positions.set(old[i].key, i);
@@ -863,7 +891,7 @@ export let Reconcile = module (
                 let index = -1;
                 let at = place;
                 place += 1;
-                if (!in_order) {
+                if (not in_order) {
                     last position = positions.get(node.key);
                     at = optional.is_some<int>(position) ? optional.expect<int>(position, "position") : -1;
                 }
@@ -873,7 +901,7 @@ export let Reconcile = module (
                         index = at;
                     }
                 }
-                if (node.reused == state.claimed_pass && (index < 0 || !(old[index] === node))) {
+                if (node.reused == state.claimed_pass && (index < 0 || not (old[index] === node))) {
                     // A reused node matches only itself; anywhere else the turn is planned without reuse.
                     state.reuse_failed = true;
                     return;
@@ -1010,7 +1038,7 @@ export let Reconcile = module (
                     continue;
                 }
                 last old = node.old;
-                if (!node.element) {
+                if (not node.element) {
                     if (old != nil && old.text != node.text) {
                         last operation = new Operation(OpKind.SetText, node.id);
                         operation.value = node.text;
@@ -1027,7 +1055,7 @@ export let Reconcile = module (
                             }
                         }
                     }
-                    if (!same) {
+                    if (not same) {
                         last operation = new Operation(OpKind.Attribute, node.id);
                         operation.name = attribute[0];
                         operation.value = attribute[1];
@@ -1042,7 +1070,7 @@ export let Reconcile = module (
                                 kept = true;
                             }
                         }
-                        if (!kept) {
+                        if (not kept) {
                             last operation = new Operation(OpKind.Attribute, node.id);
                             operation.name = previous[0];
                             operation.present = false;
@@ -1060,7 +1088,7 @@ export let Reconcile = module (
                             }
                         }
                     }
-                    if (!same) {
+                    if (not same) {
                         last operation = new Operation(OpKind.Variable, node.id);
                         operation.name = variable[0];
                         operation.number = variable[1].value;
@@ -1076,7 +1104,7 @@ export let Reconcile = module (
                                 kept = true;
                             }
                         }
-                        if (!kept) {
+                        if (not kept) {
                             last operation = new Operation(OpKind.Variable, node.id);
                             operation.name = previous[0];
                             operation.present = false;
@@ -1118,7 +1146,7 @@ export let Reconcile = module (
                                 kept = true;
                             }
                         }
-                        if (!kept) {
+                        if (not kept) {
                             last operation = new Operation(OpKind.Handler, node.id);
                             operation.name = previous.event;
                             operation.present = false;

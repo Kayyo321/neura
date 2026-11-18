@@ -33,4 +33,6 @@ The following public declarations are taken from the module source; each links t
   Calls the function with values already tagged by carrier; each must match its layout exactly.
 - **MethodHandle.MethodHandle** · [`export let invoke_values_with = func(allocator: Arena, values: ForeignValue[list]) -> ForeignValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L147)
   invoke_values, copying a struct result into `allocator`.
+- **MethodHandle.MethodHandle** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/method-handle.nra#L166)
+  Names the handle with its signature and target.
 <!-- END SOURCE API -->

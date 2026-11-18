@@ -53,17 +53,17 @@ The following public declarations are taken from the module source; each links t
   Returns an iterator over the elements in index order.
 - **Frozen.FrozenList** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L149)
   Another FrozenList of the same element type with equal elements (`===`) at each index. `==` stays reference identity.
-- **Frozen.FrozenList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L169)
+- **Frozen.FrozenList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L168)
   Folds the element hashes in index order, as a built-in list's `hash_code` does.
-- **Frozen.FrozenList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L172)
+- **Frozen.FrozenList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L171)
   `[a, b, c]`.
-- **Frozen** · [`export let copy_of = func<T>(source: T[]) -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L206)
+- **Frozen** · [`export let copy_of = func<T>(source: T[]) -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L205)
   Copies the elements of `source` into a new FrozenList.
-- **Frozen** · [`export let copy_of_list = func<T>(source: T[list]) -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L218)
+- **Frozen** · [`export let copy_of_list = func<T>(source: T[list]) -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L217)
   Copies the elements of the list `source` into a new FrozenList; later changes to `source` are not seen.
-- **Frozen** · [`export let empty = func<T>() -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L221)
+- **Frozen** · [`export let empty = func<T>() -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L220)
   Returns a FrozenList with no elements.
-- **Frozen** · [`export let of = func<T>(items: ...T) -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L227)
+- **Frozen** · [`export let of = func<T>(items: ...T) -> FrozenList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/frozen.nra#L226)
   Returns a FrozenList of the arguments in order.
 <!-- END SOURCE API -->
 

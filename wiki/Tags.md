@@ -23,7 +23,7 @@ let Shapes = module (
 );
 ```
 
-`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 87 tags: 18 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
+`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 87 tags: 18 implemented, 20 informational, and 49 reserved. The [catalogue](#catalogue) below lists them all.
 
 ## Syntax
 
@@ -367,7 +367,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#RequiresCapability(capability: name...)` | modules, functions, methods | reserved, repeatable | Callers need the named runtime capability. Instead: capabilities are granted per run (`neura run --deny-*`); document the requirement. |
-| `#Sensitive` | classes, fields, file and module bindings, locals, parameters | reserved | A secret kept out of traces, dumps, and to_string. Instead: avoid printing the value; --record and --task-dump may contain it. |
+| `#Sensitive` | classes, fields, file and module bindings, locals, parameters | informational | A secret: on a field or class, [`Std.Reflect.Codec`](Stdlib-Design#22-stdreflect) writes a placeholder instead of the value. On other declarations it is only recorded; `to_string`, traces, `--record` and `--task-dump` do not read the tag. |
 | `#Untrusted` | functions, methods, fields, file and module bindings, parameters | reserved | Data from outside the program that must be validated before use. Instead: validate the value where it enters the program. |
 | `#ConstantTime` | functions, methods | reserved | Runs in time independent of secret inputs. Instead: write the comparison without early exits; no analysis proves it yet. |
 
@@ -376,8 +376,8 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#Serializable` | classes, enums | reserved | Can be written and read by Std serializers. Instead: write to_json and from_json with Std.Encoding.Json explicitly. |
-| `#SerialName(name: string)` | classes, variants, fields | reserved | The name used when serialized. Instead: choose the key in the explicit to_json. |
-| `#Skip` | fields | reserved | Left out when serialized. Instead: leave the field out of the explicit to_json. |
+| `#SerialName(name: string)` | classes, variants, fields | informational | The name [`Std.Reflect.Codec`](Stdlib-Design#22-stdreflect) uses for a field or variant, and for a class in schemas. `derive json.Codec` does not read it. |
+| `#Skip` | fields | informational | Left out when [`Std.Reflect.Codec`](Stdlib-Design#22-stdreflect) serializes. `derive json.Codec` does not read it. |
 | `#SerialDefault(value: literal)` | fields | reserved | The value used when the input has no entry. Instead: supply the default in the explicit from_json. |
 
 ### Resource management

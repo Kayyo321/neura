@@ -24,7 +24,7 @@ export let UnicodeNameLookup = module (
         if (special >= 0) {
             last java = digit(names.SpecialKinds, (special << 1) + 1);
             if (java > 0) {
-                return entry(names.JavaBlocks, names.JavaBlockOffsets, java - 1) + " " + hex(point, 1);
+                return entry(names.JavaBlocks, names.JavaBlockOffsets, java - 1) .. " " .. hex(point, 1);
             }
             return special_name(point, special);
         }
@@ -44,10 +44,7 @@ export let UnicodeNameLookup = module (
         if (special >= 0) {
             return special_name(point, special);
         }
-        if (point < 32 || (point >= 127 && point <= 159)) {
-            return "";
-        }
-        return stored_name(point);
+        return if (point < 32 || (point >= 127 && point <= 159)) -> "" else -> stored_name(point);
     };
 
     /// @brief The code point that a Java name or a Unicode name names, after removing leading and trailing
@@ -264,10 +261,7 @@ export let UnicodeNameLookup = module (
                 high = middle;
             }
         }
-        if (low == 0 || number(names.SpecialLasts, (low - 1) << 2) < point) {
-            return -1;
-        }
-        return low - 1;
+        return if (low == 0 || number(names.SpecialLasts, (low - 1) << 2) < point) -> -1 else -> low - 1;
     };
 
     /// @brief The Unicode name of a code point in Special range `special`, or the empty string.
@@ -290,7 +284,7 @@ export let UnicodeNameLookup = module (
                 rest -= 28;
                 vowel += 1;
             }
-            return "HANGUL SYLLABLE " + jamo(lead) + jamo(19 + vowel) + jamo(40 + rest);
+            return "HANGUL SYLLABLE " .. jamo(lead) .. jamo(19 + vowel) .. jamo(40 + rest);
         }
         return entry(names.Prefixes, names.PrefixOffsets, prefix - 2) + hex(point, 4);
     };
@@ -330,7 +324,7 @@ export let UnicodeNameLookup = module (
     #Pure
     let hangul = func(key: string) -> int {
         last prefix = "HANGUL SYLLABLE ";
-        if (key.byte_length <= prefix.byte_length || !starts_with(key, prefix, 0)) {
+        if (key.byte_length <= prefix.byte_length || not starts_with(key, prefix, 0)) {
             return -1;
         }
         last rest = key.slice(prefix.byte_length, key.byte_length);

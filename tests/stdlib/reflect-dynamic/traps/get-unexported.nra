@@ -1,0 +1,20 @@
+// status: 134
+// stderr: reflection: field secret of Box is not exported
+// Dynamic access reaches only exported members (docs/design/Reflect030.md, Dynamic values).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Box = class (
+    let secret: int32 = 7;
+    export let shown: int32 = 1;
+);
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last box = variants.of(new Box());
+        console.print_line(box.field_named("shown").to_string());
+        console.print_line(box.field_named("secret").to_string());
+        return program.ExitCode.Ok;
+    };
+);

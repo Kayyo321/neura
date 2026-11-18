@@ -59,6 +59,9 @@ export let SystemClock = module (
                 DoneOutcome.Error(code) => result.Result<Unit>.Err(host_error.io(code, "sleep failed", "")),
             };
         };
+
+        /// @brief Names the clock.
+        export let.override to_string = func -> string => "SystemClock";
     );
 
     /// @brief Creates a clock backed by the host's wall and monotonic clocks.

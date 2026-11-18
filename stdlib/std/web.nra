@@ -68,7 +68,7 @@ export let Web = module (
             }
             at += count;
             last decoded = string.from_utf8(part);
-            if (!decoded[0]) {
+            if (not decoded[0]) {
                 trap_with_message("invalid UI event batch: text is not UTF-8");
             }
             return decoded[1];
@@ -83,7 +83,7 @@ export let Web = module (
 
         /// @brief `Reader(` the position and the length `)`.
         export let.override to_string = func -> string =>
-            "Reader(" + at.to_string() + " of " + bytes.length.to_string() + ")";
+            "Reader(" .. at.to_string() .. " of " .. bytes.length.to_string() .. ")";
     );
 
     /// @brief What the browser host keeps for one root.
@@ -103,7 +103,7 @@ export let Web = module (
 
         /// @brief `Mounted(` the selector and the browser's handle `)`.
         export let.override to_string = func -> string =>
-            "Mounted(" + selector + ", " + provider.to_string() + (open ? ")" : ", closed)");
+            "Mounted(" .. selector .. ", " .. provider.to_string() .. (open ? ")" : ", closed)");
     );
 
     // The most event records one wait takes from the browser; below the root's queue limit, so the root never
@@ -111,7 +111,7 @@ export let Web = module (
     let BatchLimit: int = 64;
 
     let host_error = func(service: string, code: uint32) -> Error {
-        let reason = "host error " + code.to_string();
+        let reason = "host error " .. code.to_string();
         if (code == 1) {
             reason = "no element matches the selector";
         } else if (code == 3) {
@@ -125,7 +125,7 @@ export let Web = module (
         } else if (code == 100) {
             reason = "the browser failed, or U-9 roots are open";
         }
-        return error.custom("ui.web", service + ": " + reason + " (" + code.to_string() + ")");
+        return error.custom("ui.web", service .. ": " .. reason .. " (" .. code.to_string() .. ")");
     };
 
     // The browser's next events for a root, as a function a race can spawn.
@@ -152,8 +152,8 @@ export let Web = module (
 
         /// @brief `RaceResult(` what the race saw `)`.
         export let.override to_string = func -> string =>
-            "RaceResult(" + (posted ? "posted" : "") + (completed ? " completed " + ticket.to_string() : "")
-            + (failed ? " failed" : "") + ")";
+            "RaceResult(" .. (posted ? "posted" : "") .. (completed ? " completed " .. ticket.to_string() : "")
+            .. (failed ? " failed" : "") .. ")";
     );
 
     /// @brief The `ui.Host` of a browser page. Each instance serves the roots it opened; `mount` makes one per root.
@@ -192,13 +192,13 @@ export let Web = module (
         /// @brief The `href` of a link to `path` in the page's routing mode (`neura.history.link`): `#/parts/7`
         /// with hash routing, `/parts/7` below the bundle's base with history routing; the hash form when the page
         /// keeps no history.
-        export let link = func(path: string) -> string => path_of(host.link_path(path), "#" + path);
+        export let link = func(path: string) -> string => path_of(host.link_path(path), "#" .. path);
 
         /// @brief Moves the keyboard focus to the element of the root whose `id` is `element_id`
         /// (`neura.ui.focus`); false when the root is closed or holds no such element.
         export let focus = func(root: uint64, element_id: string) -> bool {
             last mounted = entry(root);
-            if (!mounted.open) {
+            if (not mounted.open) {
                 return false;
             }
             match (host.focus(mounted.provider, element_id)) {
@@ -227,7 +227,7 @@ export let Web = module (
                     return result.Result<uint64>.Ok(roots.length as uint64);
                 },
                 host.HandleOutcome.Error(code) => {
-                    return result.Result<uint64>.Err(host_error("open " + target, code));
+                    return result.Result<uint64>.Err(host_error("open " .. target, code));
                 },
             }
         };
@@ -236,7 +236,7 @@ export let Web = module (
         /// encoded operations. A refused tree changes nothing; a browser failure faults the root.
         export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome> {
             last mounted = entry(root);
-            if (!mounted.open) {
+            if (not mounted.open) {
                 return result.Result<ui.RenderOutcome>.Err(error.custom("ui.web", "the root is closed"));
             }
             last plan = mounted.reconciler.prepare_turn(batch.top, batch.rendered);
@@ -250,7 +250,7 @@ export let Web = module (
                     host.HandleOutcome.Ok(_) => {},
                     host.HandleOutcome.Error(code) => {
                         last refusal = new ui.Diagnostic(ui.DiagnosticKind.LimitExceeded,
-                            "U-1 to U-3: the browser refused a template (error " + code.to_string() + ")", 0, -1, "");
+                            "U-1 to U-3: the browser refused a template (error " .. code.to_string() .. ")", 0, -1, "");
                         return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(refusal));
                     },
                 }
@@ -271,10 +271,10 @@ export let Web = module (
         /// posts it with `post_navigation`. False when the root was closed or the wait failed.
         export let wait = func(root: ui.Root) -> bool {
             last mounted = entry(root.host_handle());
-            if (!mounted.open || mounted.failed) {
+            if (not mounted.open || mounted.failed) {
                 return false;
             }
-            if (history_off || !root.listens_for_navigation()) {
+            if (history_off || not root.listens_for_navigation()) {
                 match (host.next_events(mounted.provider, BatchLimit)) {
                     host.BytesOutcome.Ok(bytes) => {
                         return post_batch(root, mounted, bytes) > 0;
@@ -306,7 +306,7 @@ export let Web = module (
         /// that arrived meanwhile is posted too, so no event is lost.
         export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake {
             last mounted = entry(root.host_handle());
-            if (!mounted.open || mounted.failed) {
+            if (not mounted.open || mounted.failed) {
                 return ui.Wake.Idle;
             }
             while (true) {
@@ -327,7 +327,7 @@ export let Web = module (
         // One race between the root's event wait, a navigation wait and `completions`.
         let race = func(root: ui.Root, mounted: Mounted, completions: channels.Receiver<uint64>) -> RaceResult {
             last seen = new RaceResult();
-            last listen = !history_off && root.listens_for_navigation();
+            last listen = not history_off && root.listens_for_navigation();
             last provider = mounted.provider;
             // Nothing is sent on the gate: the race's cancellation ends a navigation wait that does not listen.
             const [_, gate, _] = channels.open<int>(0);
@@ -359,10 +359,10 @@ export let Web = module (
                 }
                 waits.cancel();
                 // A wait that the browser answered before its cancellation keeps its answer.
-                if (!events_taken) {
+                if (not events_taken) {
                     take_events(root, mounted, events.join(), seen);
                 }
-                if (!path_taken) {
+                if (not path_taken) {
                     take_path(root, paths.join(), seen);
                 }
             }
@@ -408,7 +408,7 @@ export let Web = module (
         /// @brief Empties a faulted root by closing it and opening a new one on the same element.
         export let reset = func(root: uint64) {
             last mounted = entry(root);
-            if (!mounted.open) {
+            if (not mounted.open) {
                 return;
             }
             host.close_root(mounted.provider);
@@ -427,7 +427,7 @@ export let Web = module (
         /// @brief Closes the root: the browser empties its element and detaches its listeners.
         export let close = func(root: uint64) {
             last mounted = entry(root);
-            if (!mounted.open) {
+            if (not mounted.open) {
                 return;
             }
             mounted.open = false;
@@ -525,17 +525,17 @@ export let Web = module (
                 } else if (kind == 16) {
                     root.post_overflow(reader.u32());
                 } else {
-                    trap_with_message("invalid UI event batch: unknown event kind " + kind.to_string());
+                    trap_with_message("invalid UI event batch: unknown event kind " .. kind.to_string());
                 }
             }
-            if (!reader.done()) {
+            if (not reader.done()) {
                 trap_with_message("invalid UI event batch: trailing bytes");
             }
             return count;
         };
 
         /// @brief `WebHost(` the number of roots opened `)`.
-        export let.override to_string = func -> string => "WebHost(" + roots.length.to_string() + " roots)";
+        export let.override to_string = func -> string => "WebHost(" .. roots.length.to_string() .. " roots)";
     );
 
     /// @brief Mounts `component` on the first element that `selector` matches and commits its first render.

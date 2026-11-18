@@ -35,11 +35,11 @@ The following public declarations are taken from the module source; each links t
   Calls `action` with each distinct element in first-occurrence order.
 - **ImmutableSet.ImmutableSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L47)
   Another ImmutableSet of the same size whose elements this set all contains.
-- **ImmutableSet.ImmutableSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L68)
+- **ImmutableSet.ImmutableSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L65)
   The wrapping sum of the element hashes.
-- **ImmutableSet.ImmutableSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L72)
+- **ImmutableSet.ImmutableSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L69)
   `{a, b, c}` in iteration order. The elements exist before the set, so it can never contain itself.
-- **ImmutableSet** · [`export let of = func<T>(items: T[list]) -> ImmutableSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L76)
+- **ImmutableSet** · [`export let of = func<T>(items: T[list]) -> ImmutableSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-set.nra#L73)
   Creates a set from a shallow copy of `items`, dropping later duplicates.
 <!-- END SOURCE API -->
 

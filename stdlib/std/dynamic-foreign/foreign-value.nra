@@ -26,7 +26,7 @@ export let ForeignValue = module (
 
     /// @brief Traps with "invalid argument: expected <kind>, got <value>".
     let mismatch = func(expected: string, value: ForeignValue) {
-        trap_with_message("invalid argument: expected " + expected + ", got " + describe(value));
+        trap_with_message("invalid argument: expected " .. expected .. ", got " .. describe(value));
     };
 
     /// @brief The value of a Bool result.
@@ -149,18 +149,18 @@ export let ForeignValue = module (
     #Pure
     export let describe = func(value: ForeignValue) -> string => match (value) {
         ForeignValue.Void => "Void",
-        ForeignValue.Bool(v) => "Bool(" + v.to_string() + ")",
-        ForeignValue.Int8(v) => "Int8(" + v.to_string() + ")",
-        ForeignValue.UInt8(v) => "UInt8(" + v.to_string() + ")",
-        ForeignValue.Int16(v) => "Int16(" + v.to_string() + ")",
-        ForeignValue.UInt16(v) => "UInt16(" + v.to_string() + ")",
-        ForeignValue.Int32(v) => "Int32(" + v.to_string() + ")",
-        ForeignValue.UInt32(v) => "UInt32(" + v.to_string() + ")",
-        ForeignValue.Int64(v) => "Int64(" + v.to_string() + ")",
-        ForeignValue.UInt64(v) => "UInt64(" + v.to_string() + ")",
-        ForeignValue.Float32(v) => "Float32(" + v.to_string() + ")",
-        ForeignValue.Float64(v) => "Float64(" + v.to_string() + ")",
-        ForeignValue.Address(v) => "Address(" + v.to_string() + ")",
-        ForeignValue.Struct(v) => "Struct(" + v.to_string() + ")",
+        ForeignValue.Bool(v) => "Bool(" .. v.to_string() .. ")",
+        ForeignValue.Int8(v) => "Int8(" .. v.to_string() .. ")",
+        ForeignValue.UInt8(v) => "UInt8(" .. v.to_string() .. ")",
+        ForeignValue.Int16(v) => "Int16(" .. v.to_string() .. ")",
+        ForeignValue.UInt16(v) => "UInt16(" .. v.to_string() .. ")",
+        ForeignValue.Int32(v) => "Int32(" .. v.to_string() .. ")",
+        ForeignValue.UInt32(v) => "UInt32(" .. v.to_string() .. ")",
+        ForeignValue.Int64(v) => "Int64(" .. v.to_string() .. ")",
+        ForeignValue.UInt64(v) => "UInt64(" .. v.to_string() .. ")",
+        ForeignValue.Float32(v) => "Float32(" .. v.to_string() .. ")",
+        ForeignValue.Float64(v) => "Float64(" .. v.to_string() .. ")",
+        ForeignValue.Address(v) => "Address(" .. v.to_string() .. ")",
+        ForeignValue.Struct(v) => "Struct(" .. v.to_string() .. ")",
     };
 );

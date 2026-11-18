@@ -61,9 +61,9 @@ The following public declarations are taken from the module source; each links t
   Traps with "invalid state: ..." on a broken table invariant or when a live element's hash differs from its cached hash.
 - **HashSet.HashSet** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L197)
   Another HashSet of the same size whose elements this set all contains.
-- **HashSet.HashSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L218)
+- **HashSet.HashSet** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L215)
   The wrapping sum of the element hashes.
-- **HashSet.HashSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L234)
+- **HashSet.HashSet** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L231)
   Formats elements as `{a, b, c}` in iteration order. The set prints "(this collection)" where its own text reaches it again.
 - **HashSet** · [`export let create = func<T> -> HashSet<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/hash-set.nra#L397)
   Creates an empty set using `equals` and `hash_code` for its elements.

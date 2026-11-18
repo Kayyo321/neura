@@ -24,7 +24,10 @@ export let Utf8Writer = module (
         /// @brief Writes the text and one LF.
         #NoDiscard
         export let write_line = func(text: string) -> Result<Unit> =>
-            sink(bytes.of_string(text + "\n"));
+            sink(bytes.of_string(text .. "\n"));
+
+        /// @brief Names the writer.
+        export let.override to_string = func -> string => "Utf8Writer";
     );
 
     /// @brief Creates a UTF-8 writer over the supplied byte sink.

@@ -18,7 +18,7 @@ export let UnicodeCase = module (
         for (let index = 0; index < source.length; index += 1) {
             last scalar = source[index];
             append_lowercase(result, source, index, locale, before_cased);
-            if (!case_ignorable(scalar)) {
+            if (not case_ignorable(scalar)) {
                 before_cased = cased(scalar);
             }
         }
@@ -85,10 +85,7 @@ export let UnicodeCase = module (
         if ((first == 116 && second == 114) || (first == 97 && second == 122)) {
             return CasingLocale.Turkic;
         }
-        if (first == 108 && second == 116) {
-            return CasingLocale.Lithuanian;
-        }
-        return CasingLocale.Root;
+        return if (first == 108 && second == 116) -> CasingLocale.Lithuanian else -> CasingLocale.Root;
     };
 
     /// @brief Appends the uppercase mapping of the scalar, including multi-scalar expansions.
@@ -138,7 +135,7 @@ export let UnicodeCase = module (
                     return;
                 }
             }
-            if (scalar == 931 && before_cased && !following_cased(source, index)) {
+            if (scalar == 931 && before_cased && not following_cased(source, index)) {
                 let _ = result.append_scalar(962);
             } else if (scalar < 128) {
                 let _ = result.append_scalar(scalars.to_ascii_lower(scalar));
@@ -160,9 +157,7 @@ export let UnicodeCase = module (
     let following_cased = func(source: uint32[list], index: int) -> bool {
         for (let next = index + 1; next < source.length; next += 1) {
             last scalar = source[next];
-            if (!case_ignorable(scalar)) {
-                return cased(scalar);
-            }
+            return cased(scalar) unless case_ignorable(scalar);
         }
         return false;
     };
@@ -171,9 +166,7 @@ export let UnicodeCase = module (
     let following_above = func(source: uint32[list], index: int) -> uint32 {
         for (let next = index + 1; next < source.length; next += 1) {
             last scalar = source[next];
-            if (!contains_property(data.Combining, scalar)) {
-                return 0;
-            }
+            return 0 unless contains_property(data.Combining, scalar);
             if (contains_property(data.Above, scalar)) {
                 return scalar;
             }
@@ -187,9 +180,7 @@ export let UnicodeCase = module (
         while (previous > 0) {
             previous -= 1;
             last scalar = source[previous];
-            if (!contains_property(data.Combining, scalar)) {
-                return scalar;
-            }
+            return scalar unless contains_property(data.Combining, scalar);
             if (contains_property(data.Above, scalar)) {
                 return 0;
             }
@@ -271,9 +262,6 @@ export let UnicodeCase = module (
         if (code >= 65 && code <= 90) {
             return code - 55;
         }
-        if (code >= 48 && code <= 57) {
-            return code - 48;
-        }
-        return code == 45 ? 62 : 63;
+        return if (code >= 48 && code <= 57) -> code - 48 else -> code == 45 ? 62 : 63;
     };
 );

@@ -1,3 +1,4 @@
+let hashing = import:Std.Core.Hash;
 let atomics = import:Std.Concurrent.AtomicInt64;
 let bytes = import:Std.Io.Internal.Bytes;
 let channels = import:Std.Concurrent.Channel;
@@ -69,8 +70,8 @@ export let Desktop = module (
         /// "invalid argument: registry operation" otherwise.
         export let init = func(ids: string[list]) {
             for (let i = 0; i < ids.length; i = i + 1) {
-                if (!valid_operation(ids[i])) {
-                    trap_with_message("invalid argument: registry operation " + ids[i]);
+                if (not valid_operation(ids[i])) {
+                    trap_with_message("invalid argument: registry operation " .. ids[i]);
                 }
                 if (i > 0 && strings.compare(ids[i - 1], ids[i]) != ordering.Ordering.Less) {
                     trap_with_message("invalid argument: registry operations must be distinct and sorted");
@@ -96,15 +97,15 @@ export let Desktop = module (
                 if (i > 0) {
                     text += ",";
                 }
-                text += "\"" + operations[i] + "\"";
+                text += "\"" .. operations[i] .. "\"";
             }
-            return text + "],\"schema\":1}";
+            return text .. "],\"schema\":1}";
         };
 
         /// @brief The 32-byte SHA-256 of the canonical text.
         export let digest = func -> uint8[list] => sha256.of(strings.to_bytes(json()));
 
-        export let.override to_string = func -> string => "Registry(" + json() + ")";
+        export let.override to_string = func -> string => "Registry(" .. json() .. ")";
 
         export let.override equals = func(other: class) -> bool {
             if (other is Registry) {
@@ -195,8 +196,8 @@ export let Desktop = module (
         /// route starts with `/`. Busy when D-1 windows are open.
         export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int,
             route: string) -> Result<Window> {
-            if (!valid_size(width) || !valid_size(height) || !valid_size(min_width) || !valid_size(min_height) ||
-                !strings.starts_with(route, "/")) {
+            if (not valid_size(width) || not valid_size(height) || not valid_size(min_width) || not valid_size(min_height) ||
+                not strings.starts_with(route, "/")) {
                 return Result<Window>.Err(failure(4, "invalid window size or route"));
             }
             if (window_count.load() >= MaxWindows as int64) {
@@ -213,7 +214,7 @@ export let Desktop = module (
                 Result.Ok(answer) => {
                     last cursor = new wire.Cursor(answer);
                     last handle = cursor.u32();
-                    if (!cursor.finished()) {
+                    if (not cursor.finished()) {
                         return Result<Window>.Err(failure(100, "malformed window.open answer"));
                     }
                     window_count.add(1);
@@ -245,7 +246,7 @@ export let Desktop = module (
                 Result.Ok(answer) => {
                     last cursor = new wire.Cursor(answer);
                     last outcome = cursor.u32();
-                    if (!cursor.finished() || outcome > 2) {
+                    if (not cursor.finished() || outcome > 2) {
                         return Result<NotifyOutcome>.Err(failure(100, "malformed notify answer"));
                     }
                     if (outcome == 0) {
@@ -328,7 +329,7 @@ export let Desktop = module (
                     last chosen = cursor.u32();
                     last handle = cursor.u32();
                     last name = cursor.text();
-                    if (!cursor.finished() || chosen > 1) {
+                    if (not cursor.finished() || chosen > 1) {
                         return Result<DialogOutcome<GrantedFile>>.Err(failure(100, "malformed dialog answer"));
                     }
                     if (chosen == 0) {
@@ -389,7 +390,7 @@ export let Desktop = module (
             match (waiters.send(Waiter.Waiting(id, reply))) {
                 channels.SendOutcome.Sent => {},
                 channels.SendOutcome.Cancelled => {
-                    return Result<uint8[list]>.Err(failure(15, service + " cancelled"));
+                    return Result<uint8[list]>.Err(failure(15, service .. " cancelled"));
                 },
                 channels.SendOutcome.Closed => {
                     return Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel"));
@@ -399,7 +400,7 @@ export let Desktop = module (
             wire.put_u32(body, id);
             wire.put_text(body, service);
             bytes.append_range(body, args, 0, args.length);
-            if (!writer.send(wire.HostCall, body)) {
+            if (not writer.send(wire.HostCall, body)) {
                 return Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel"));
             }
             return match (answers.receive()) {
@@ -408,9 +409,9 @@ export let Desktop = module (
                         ? Result<uint8[list]>.Ok(unpack(packed))
                         : Result<uint8[list]>.Err(code == EndedCode
                         ? failure(code, "the window host closed the channel")
-                        : failure(code, service + " failed")),
+                        : failure(code, service .. " failed")),
                 },
-                channels.Received.Cancelled => Result<uint8[list]>.Err(failure(15, service + " cancelled")),
+                channels.Received.Cancelled => Result<uint8[list]>.Err(failure(15, service .. " cancelled")),
                 channels.Received.Closed => Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel")),
             };
         };
@@ -457,7 +458,7 @@ export let Desktop = module (
         /// @brief The services this window uses.
         export let host = func -> Host => services;
 
-        export let.override to_string = func -> string => "Window(" + handle.to_string() + ")";
+        export let.override to_string = func -> string => "Window(" .. handle.to_string() .. ")";
 
         export let.override equals = func(other: class) -> bool {
             if (other is Window) {
@@ -503,7 +504,30 @@ export let Desktop = module (
             extensions = types;
         };
 
-        export let.override to_string = func -> string => "FileFilter(" + label + ")";
+        /// @brief Filters are equal when the label and the extensions, in order, are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FileFilter) {
+                return false;
+            }
+            if (label != that.label || extensions.length != that.extensions.length) {
+                return false;
+            }
+            for (let i = 0; i < extensions.length; i += 1) {
+                return false unless extensions[i] == that.extensions[i];
+            }
+            return true;
+        };
+
+        /// @brief Combines the label and the extensions into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, label.hash_code());
+            for (let extension in extensions) {
+                code = hashing.combine(code, extension.hash_code());
+            }
+            return code;
+        };
+
+        export let.override to_string = func -> string => "FileFilter(" .. label .. ")";
     );
 
     /// @brief One entry of an application menu: an item, a separator, or a submenu. Immutable; the `with_`
@@ -549,13 +573,44 @@ export let Desktop = module (
         export let with_enabled = func(active: bool) -> MenuItem =>
             new MenuItem(kind, id, label, accelerator, role, active, target, items);
 
-        export let.override to_string = func -> string => "MenuItem(" + kind + ", " + id + ", " + label + ")";
+        /// @brief Entries are equal when every component, and every submenu entry in order, is.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: MenuItem) {
+                return false;
+            }
+            if (kind != that.kind || id != that.id || label != that.label || accelerator != that.accelerator ||
+                role != that.role || enabled != that.enabled || target != that.target ||
+                items.length != that.items.length) {
+                return false;
+            }
+            for (let i = 0; i < items.length; i += 1) {
+                return false unless items[i].equals(that.items[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines every component and submenu entry into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, kind.hash_code());
+            code = hashing.combine(code, id.hash_code());
+            code = hashing.combine(code, label.hash_code());
+            code = hashing.combine(code, accelerator.hash_code());
+            code = hashing.combine(code, role.hash_code());
+            code = hashing.combine(code, enabled.hash_code());
+            code = hashing.combine(code, target.hash_code());
+            for (let item in items) {
+                code = hashing.combine(code, item.hash_code());
+            }
+            return code;
+        };
+
+        export let.override to_string = func -> string => "MenuItem(" .. kind .. ", " .. id .. ", " .. label .. ")";
     );
 
     /// @brief An item whose activation goes to `target`.
     export let action = func(id: string, label: string, target: MenuTarget) -> MenuItem {
-        if (!valid_operation(id)) {
-            trap_with_message("invalid argument: menu item id " + id);
+        if (not valid_operation(id)) {
+            trap_with_message("invalid argument: menu item id " .. id);
         }
         return new MenuItem("item", id, label, "", "", true, target, new MenuItem[list]());
     };
@@ -563,12 +618,12 @@ export let Desktop = module (
     /// @brief An item the system performs: `copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit` or
     /// `about`. Traps with "invalid argument: menu role" for any other.
     export let role_item = func(id: string, label: string, role: string) -> MenuItem {
-        if (!valid_operation(id)) {
-            trap_with_message("invalid argument: menu item id " + id);
+        if (not valid_operation(id)) {
+            trap_with_message("invalid argument: menu item id " .. id);
         }
         if (role != "copy" && role != "paste" && role != "cut" && role != "undo" && role != "redo" &&
             role != "select_all" && role != "quit" && role != "about") {
-            trap_with_message("invalid argument: menu role " + role);
+            trap_with_message("invalid argument: menu role " .. role);
         }
         return new MenuItem("item", id, label, "", role, true, MenuTarget.Native, new MenuItem[list]());
     };
@@ -639,7 +694,7 @@ export let Desktop = module (
                 Result.Ok(answer) => {
                     last cursor = new wire.Cursor(answer);
                     last count = cursor.i64();
-                    if (!cursor.finished()) {
+                    if (not cursor.finished()) {
                         return Result<int64>.Err(failure(100, "malformed file.write answer"));
                     }
                     return Result<int64>.Ok(count);
@@ -665,7 +720,7 @@ export let Desktop = module (
             };
         };
 
-        export let.override to_string = func -> string => "GrantedFile(" + name + ")";
+        export let.override to_string = func -> string => "GrantedFile(" .. name .. ")";
     );
 
     /// @brief One bridge call from a window. It carries nothing of the page: no URL, no script, no path. A call
@@ -720,7 +775,7 @@ export let Desktop = module (
         export let host = func -> Host => services;
 
         export let.override to_string = func -> string =>
-            "Call(" + id.to_string() + ", " + operation + ", Window(" + window_handle.to_string() + "))";
+            "Call(" .. id.to_string() .. ", " .. operation .. ", Window(" .. window_handle.to_string() .. "))";
     );
 
     /// @brief One operation of a dispatcher and its implementation.
@@ -737,7 +792,7 @@ export let Desktop = module (
             handler = implementation;
         };
 
-        export let.override to_string = func -> string => "Route(" + operation + ")";
+        export let.override to_string = func -> string => "Route(" .. operation .. ")";
     );
 
     /// @brief Maps each operation of a registry to its implementation. An operation without one answers the
@@ -760,8 +815,8 @@ export let Desktop = module (
         /// @brief Adds the implementation of `operation`, which must be in the registry and not yet added. Traps
         /// with "invalid argument: dispatcher operation" otherwise.
         export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher {
-            if (!registry.contains(operation) || find(operation) >= 0) {
-                trap_with_message("invalid argument: dispatcher operation " + operation);
+            if (not registry.contains(operation) || find(operation) >= 0) {
+                trap_with_message("invalid argument: dispatcher operation " .. operation);
             }
             routes.append(new Route(operation, handler));
             return instance;
@@ -796,7 +851,7 @@ export let Desktop = module (
         export let dispatch = func(call: Call) -> [uint32, uint8[list]] {
             last index = find(call.operation);
             if (index < 0) {
-                return [13 as uint32, strings.to_bytes("unsupported: operation " + call.operation)];
+                return [13 as uint32, strings.to_bytes("unsupported: operation " .. call.operation)];
             }
             return outcome(routes[index].handler(call));
         };
@@ -812,7 +867,7 @@ export let Desktop = module (
         };
 
         export let.override to_string = func -> string =>
-            "Dispatcher(" + routes.length.to_string() + " of " + registry.operations.length.to_string() + ")";
+            "Dispatcher(" .. routes.length.to_string() .. " of " .. registry.operations.length.to_string() .. ")";
     );
 
     /// @brief A bridge call that `Context.run` started and that has not reported finishing.
@@ -829,7 +884,7 @@ export let Desktop = module (
             cancel = stop;
         };
 
-        export let.override to_string = func -> string => "Running(" + id.to_string() + ")";
+        export let.override to_string = func -> string => "Running(" .. id.to_string() .. ")";
     );
 
     /// @brief The connection of the native child to its window host, used by the task that runs `start`.
@@ -964,7 +1019,7 @@ export let Desktop = module (
         /// is abandoned and the process ends at once with the application's status; when none is left, `run`
         /// returns. A dispatcher for another registry is InvalidInput.
         export let run = func(dispatcher: Dispatcher) -> Result<Unit> {
-            if (!dispatcher.registry.equals(registry)) {
+            if (not dispatcher.registry.equals(registry)) {
                 return Result<Unit>.Err(failure(4, "the dispatcher serves another registry"));
             }
             scope (serving) {
@@ -994,7 +1049,7 @@ export let Desktop = module (
                                     spawn serve(handler, call, stopped, finished_sender, writer);
                                 },
                                 Optional.None => {
-                                    answer(writer, id, 13, strings.to_bytes("unsupported: operation " + operation));
+                                    answer(writer, id, 13, strings.to_bytes("unsupported: operation " .. operation));
                                 },
                             }
                         },
@@ -1160,7 +1215,7 @@ export let Desktop = module (
         };
 
         export let.override to_string = func -> string =>
-            "Context(" + windows.length.to_string() + " windows)";
+            "Context(" .. windows.length.to_string() .. " windows)";
     );
 
     /// @brief Connects to the window host, runs `start`, and ends the process with the application's status:
@@ -1225,7 +1280,7 @@ export let Desktop = module (
                 match (reader.next()) {
                     Optional.Some(frame) => {
                         last cursor = new wire.Cursor(frame.body);
-                        if (!connected) {
+                        if (not connected) {
                             if (frame.kind != wire.Hello) {
                                 backlog.append(Inbound.Refused("the first frame from the host is not Hello"));
                                 finish(waiters, waiter_closer, pending, inbound, backlog);
@@ -1266,7 +1321,7 @@ export let Desktop = module (
                                     },
                                 }
                             }
-                            if (!found) {
+                            if (not found) {
                                 trap_with_message("invalid state: a HostReturn for a request the child did not make");
                             }
                         } else if (frame.kind == wire.Call) {
@@ -1281,7 +1336,7 @@ export let Desktop = module (
                             backlog.append(Inbound.Call(id, handle, operation, nanos, pack(request)));
                         } else if (frame.kind == wire.Cancel) {
                             last id = cursor.u32();
-                            if (!cursor.finished()) {
+                            if (not cursor.finished()) {
                                 trap_with_message("invalid state: malformed Cancel frame from the window host");
                             }
                             backlog.append(Inbound.Cancel(id));
@@ -1291,7 +1346,7 @@ export let Desktop = module (
                             last first = cursor.i64();
                             last second = cursor.i64();
                             last identifier = cursor.text();
-                            if (!cursor.finished() || kind > 4) {
+                            if (not cursor.finished() || kind > 4) {
                                 trap_with_message("invalid state: malformed Event frame from the window host");
                             }
                             if (kind == 0) {
@@ -1408,9 +1463,9 @@ export let Desktop = module (
     let pack = func(data: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(data);
         if (valid) {
-            return "t" + text;
+            return "t" .. text;
         }
-        return "x" + hex.encode(data);
+        return "x" .. hex.encode(data);
     };
 
     /// @brief The bytes `pack` packed.
@@ -1432,7 +1487,7 @@ export let Desktop = module (
         }
         for (let i = 0; i < count; i = i + 1) {
             last c = id.byte_at(i);
-            if (!((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 46 || c == 95 || c == 45)) {
+            if (not ((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 46 || c == 95 || c == 45)) {
                 return false;
             }
         }
@@ -1446,14 +1501,14 @@ export let Desktop = module (
     let text_answer = func(answer: uint8[list]) -> Result<string> {
         last cursor = new wire.Cursor(answer);
         last text = cursor.text();
-        if (!cursor.finished()) {
+        if (not cursor.finished()) {
             return Result<string>.Err(failure(100, "malformed host answer"));
         }
         return Result<string>.Ok(text);
     };
 
     /// @brief The canonical JSON text of a menu: `{"items":[...],"schema":1}` with sorted keys.
-    let menu_json = func(items: MenuItem[list]) -> string => "{\"items\":" + menu_entries(items) + ",\"schema\":1}";
+    let menu_json = func(items: MenuItem[list]) -> string => "{\"items\":" .. menu_entries(items) .. ",\"schema\":1}";
 
     /// @brief The JSON array of menu entries.
     let menu_entries = func(items: MenuItem[list]) -> string {
@@ -1466,18 +1521,18 @@ export let Desktop = module (
             if (item.kind == "separator") {
                 text += "{\"kind\":\"separator\"}";
             } else if (item.kind == "submenu") {
-                text += "{\"items\":" + menu_entries(item.items) + ",\"kind\":\"submenu\",\"label\":" + json_text(item.label) + "}";
+                text += "{\"items\":" .. menu_entries(item.items) .. ",\"kind\":\"submenu\",\"label\":" .. json_text(item.label) .. "}";
             } else {
                 last target = match (item.target) {
                     MenuTarget.Native => "native",
                     MenuTarget.Window => "window",
                 };
-                text += "{\"accelerator\":" + json_text(item.accelerator) + ",\"enabled\":" + item.enabled.to_string() +
-                    ",\"id\":" + json_text(item.id) + ",\"kind\":\"item\",\"label\":" + json_text(item.label) +
-                    ",\"role\":" + json_text(item.role) + ",\"target\":\"" + target + "\"}";
+                text += "{\"accelerator\":" .. json_text(item.accelerator) .. ",\"enabled\":" .. item.enabled.to_string() ..
+                    ",\"id\":" .. json_text(item.id) .. ",\"kind\":\"item\",\"label\":" .. json_text(item.label) ..
+                    ",\"role\":" .. json_text(item.role) .. ",\"target\":\"" .. target .. "\"}";
             }
         }
-        return text + "]";
+        return text .. "]";
     };
 
     /// @brief `value` as a JSON string: quotes, backslashes and control characters escaped.
@@ -1494,12 +1549,12 @@ export let Desktop = module (
                     text += "\\\\";
                 } else {
                     last digits = "0123456789abcdef";
-                    text += "\\u00" + digits.slice((c / 16) as int, (c / 16) as int + 1) + digits.slice((c % 16) as int, (c % 16) as int + 1);
+                    text += "\\u00" .. digits.slice((c / 16) as int, (c / 16) as int + 1) .. digits.slice((c % 16) as int, (c % 16) as int + 1);
                 }
                 start = i + 1;
             }
         }
-        return text + value.slice(start, value.byte_length) + "\"";
+        return text .. value.slice(start, value.byte_length) .. "\"";
     };
 
     /// @brief The error for host code `code`.

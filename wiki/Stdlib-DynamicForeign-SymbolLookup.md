@@ -25,10 +25,12 @@ The following public declarations are taken from the module source; each links t
   The address of `name`. Traps with "invalid argument: no symbol <name>" when it is missing.
 - **SymbolLookup.SymbolLookup** · [`export let or_else = func(other: SymbolLookup) -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L57)
   A lookup that tries this one, then `other` (Java's SymbolLookup.or). Tagged `#Pure`.
-- **SymbolLookup** · [`export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L67)
+- **SymbolLookup.SymbolLookup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L64)
+  Names the lookup and its library identifier.
+- **SymbolLookup** · [`export let library_lookup = func(path: string, arena: Arena) -> Result<SymbolLookup>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L70)
   Loads the library at `path`, or by name through the platform's search when `path` has no slash (such as "libm.so.6"), owned by `arena` (Java's SymbolLookup.libraryLookup). A library that cannot be loaded is an Io error of kind NotFound.
-- **SymbolLookup** · [`export let default_lookup = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L81)
+- **SymbolLookup** · [`export let default_lookup = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L84)
   The libraries already loaded into the process, including the C library.
-- **SymbolLookup** · [`export let embedded = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L84)
+- **SymbolLookup** · [`export let embedded = func -> SymbolLookup`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/symbol-lookup.nra#L87)
   The native library linked into the image from C imports (ForeignInterop.md).
 <!-- END SOURCE API -->

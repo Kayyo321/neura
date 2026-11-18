@@ -54,16 +54,16 @@ export let LocalTime = module (
             if (nanos_of_day < other.nanos_of_day) {
                 return Ordering.Less;
             }
-            if (nanos_of_day > other.nanos_of_day) {
-                return Ordering.Greater;
-            }
-            return Ordering.Equal;
+            return if (nanos_of_day > other.nanos_of_day) -> Ordering.Greater else -> Ordering.Equal;
         };
 
         /// @brief Tests equality of nanosecond offsets from midnight.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            return other is LocalTime && nanos_of_day == (other as LocalTime).nanos_of_day;
+            if (other is not that: LocalTime) {
+                return false;
+            }
+            return nanos_of_day == that.nanos_of_day;
         };
 
         /// @brief Hashes the nanosecond offset from midnight.
@@ -109,9 +109,7 @@ export let LocalTime = module (
         last scan = new calendar.Scanner(text);
         last nanos = calendar.read_time(scan);
         scan.finish();
-        if (!scan.ok()) {
-            return result.Result<LocalTime>.Err(scan.failure());
-        }
+        return result.Result<LocalTime>.Err(scan.failure()) unless scan.ok();
         return result.Result<LocalTime>.Ok(new LocalTime(nanos));
     };
 );

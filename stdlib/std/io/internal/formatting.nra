@@ -28,6 +28,10 @@ export let Formatting = module (
         export let precision: int = -1;
         /// @brief The presentation byte, or zero for the default.
         export let presentation: uint8 = 0;
+
+        /// @brief Names the specification with its width and precision.
+        export let.override to_string = func -> string =>
+            "Spec(width " .. width.to_string() .. ", precision " .. precision.to_string() .. ")";
     );
 
     /// @brief Parses a UTF-8 pattern and tracks argument indexing and the first error.
@@ -201,7 +205,7 @@ export let Formatting = module (
             }
             b = peek();
             if (issue == "" && b != 125 && position < pattern.byte_length) {
-                if (!is_presentation(b)) {
+                if (not is_presentation(b)) {
                     fail(errors.ParseErrorKind.Syntax, "unsupported format presentation");
                     return;
                 }
@@ -260,10 +264,7 @@ export let Formatting = module (
 
         /// @brief Returns the next byte or zero at the end of the pattern.
         let peek = func -> uint8 {
-            if (position >= pattern.byte_length) {
-                return 0;
-            }
-            return pattern.byte_at(position);
+            return if (position >= pattern.byte_length) -> 0 else -> pattern.byte_at(position);
         };
 
         /// @brief Records an error at the current pattern offset.
@@ -317,10 +318,7 @@ export let Formatting = module (
             if (spec.presentation != 0 && spec.presentation != 115) {
                 return invalid_spec();
             }
-            if (flag) {
-                return render_text("true", spec);
-            }
-            return render_text("false", spec);
+            return if (flag) -> render_text("true", spec) else -> render_text("false", spec);
         };
 
         /// @brief Separates the signed integer's magnitude and sign without overflowing at the minimum value.
@@ -349,7 +347,7 @@ export let Formatting = module (
                 output.append_scalar(magnitude as uint32);
                 return pad(output.to_string(), "", false, spec);
             }
-            if (presentation != 0 && !is_integer_presentation(presentation)) {
+            if (presentation != 0 && not is_integer_presentation(presentation)) {
                 return invalid_spec();
             }
             let radix = 10;
@@ -383,7 +381,7 @@ export let Formatting = module (
             last presentation = spec.presentation;
             last hexadecimal = presentation == 97 || presentation == 65;
             if (presentation != 0 && presentation != 102 && presentation != 70 && presentation != 101 &&
-                presentation != 69 && presentation != 103 && presentation != 71 && !hexadecimal) {
+                presentation != 69 && presentation != 103 && presentation != 71 && not hexadecimal) {
                 return invalid_spec();
             }
             let digits = spec.precision;
@@ -394,9 +392,9 @@ export let Formatting = module (
             let body = original;
             last negative = body.byte_at(0) == 45;
             last special = body == "Infinity" || body == "-Infinity" || body == "NaN";
-            if (hexadecimal && !special) {
+            if (hexadecimal && not special) {
                 body = hex_float(n, digits, spec.alternate);
-            } else if (!special) {
+            } else if (not special) {
                 if (digits < 0) {
                     digits = 6;
                 }
@@ -411,7 +409,7 @@ export let Formatting = module (
                     body = finish_float(body, spec.alternate);
                 }
             }
-            if (negative && (!hexadecimal || special)) {
+            if (negative && (not hexadecimal || special)) {
                 body = body.slice(1, body.byte_length);
             }
             if (special && presentation != 0) {
@@ -431,11 +429,15 @@ export let Formatting = module (
             fail(errors.ParseErrorKind.Syntax, "format specification is invalid for the argument type");
             return "";
         };
+
+        /// @brief Names the cursor and its position in the pattern.
+        export let.override to_string = func -> string =>
+            "Cursor(" .. position.to_string() .. "/" .. pattern.byte_length.to_string() .. ")";
     );
 
     /// @brief Formats a prebuilt argument array and reports pattern failures with byte offsets.
     export let try_vformat = func(pattern: string, args: Argument[]) -> Result<string> {
-        if (!strings.contains(pattern, "{") && !strings.contains(pattern, "}")) {
+        if (not strings.contains(pattern, "{") && not strings.contains(pattern, "}")) {
             return Result<string>.Ok(pattern);
         }
         last cursor: Cursor = new(pattern);
@@ -462,10 +464,7 @@ export let Formatting = module (
 
     /// @brief Returns an object's text representation, or `nil` for a nil reference.
     let object_text = func(value: class) -> string {
-        if (value == nil) {
-            return "nil";
-        }
-        return value.to_string();
+        return if (value == nil) -> "nil" else -> value.to_string();
     };
 
     /// @brief Returns the UTF-8 boundary after at most count scalars.
@@ -502,7 +501,7 @@ export let Formatting = module (
             } else if (b == 13) {
                 escape = "\\r";
             } else if (b < 32 || b == 127) {
-                escape = "\\u{" + unsigned.to_string_radix(b as uint64, 16) + "}";
+                escape = "\\u{" .. unsigned.to_string_radix(b as uint64, 16) .. "}";
             }
             if (escape != "") {
                 output.append(text.slice(start, end));
@@ -524,10 +523,7 @@ export let Formatting = module (
         if (sign == 43) {
             return "+";
         }
-        if (sign == 32) {
-            return " ";
-        }
-        return "";
+        return if (sign == 32) -> " " else -> "";
     };
 
     /// @brief Pads by scalar width, inserting implicit numeric zeros after the sign and radix prefix.
@@ -596,7 +592,7 @@ export let Formatting = module (
         }
         last point = alternate || digits != "" ? "." : "";
         last sign = exponent >= 0 ? "+" : "";
-        return leading.to_string() + point + digits + "p" + sign + exponent.to_string();
+        return leading.to_string() .. point .. digits .. "p" .. sign .. exponent.to_string();
     };
 
     /// @brief Pick fixed or scientific form using the rounded exponent. Rearranging the already-rounded
@@ -611,7 +607,7 @@ export let Formatting = module (
         last exponent = parse_exponent(scientific, marker + 1);
         let mantissa = scientific.slice(0, marker);
         if (exponent < -4 || exponent >= digits) {
-            if (!alternate) {
+            if (not alternate) {
                 mantissa = trim_fraction(mantissa);
             }
             return mantissa + scientific.slice(marker, scientific.byte_length);
@@ -628,13 +624,13 @@ export let Formatting = module (
         last point = exponent + 1;
         let fixed = "";
         if (point <= 0) {
-            fixed = "0." + strings.repeat("0", -point) + significant;
+            fixed = "0." .. strings.repeat("0", -point) .. significant;
         } else if (point < digits) {
-            fixed = significant.slice(0, point) + "." + significant.slice(point, digits);
+            fixed = significant.slice(0, point) .. "." .. significant.slice(point, digits);
         } else {
             fixed = significant;
         }
-        if (!alternate) {
+        if (not alternate) {
             fixed = trim_fraction(fixed);
         }
         return sign + fixed;
@@ -652,10 +648,7 @@ export let Formatting = module (
             value = value * 10 + (text.byte_at(i) - 48) as int;
             i += 1;
         }
-        if (negative) {
-            return -value;
-        }
-        return value;
+        return if (negative) -> -value else -> value;
     };
 
     /// @brief Removes trailing fractional zeros and a trailing decimal point.
@@ -678,13 +671,10 @@ export let Formatting = module (
     let finish_float = func(body: string, alternate: bool) -> string {
         last marker = strings.index_of(body, "e");
         if (marker < 0) {
-            if (alternate && !strings.contains(body, ".")) {
-                return body + ".";
-            }
-            return body;
+            return if (alternate && not strings.contains(body, ".")) -> body .. "." else -> body;
         }
         let mantissa = body.slice(0, marker);
-        if (alternate && !strings.contains(mantissa, ".")) {
+        if (alternate && not strings.contains(mantissa, ".")) {
             mantissa += ".";
         }
         let exponent = parse_exponent(body, marker + 1);
@@ -695,8 +685,8 @@ export let Formatting = module (
         }
         let digits = exponent.to_string();
         if (exponent < 10) {
-            digits = "0" + digits;
+            digits = "0" .. digits;
         }
-        return mantissa + "e" + sign + digits;
+        return mantissa .. "e" .. sign .. digits;
     };
 );

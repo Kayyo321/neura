@@ -47,11 +47,11 @@ The following public declarations are taken from the module source; each links t
   Returns an iterator over `[key, value]` tuples in construction order.
 - **ImmutableMap.ImmutableMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L66)
   Another ImmutableMap of the same size in which, for each of its entries, this map holds an equal value for the key.
-- **ImmutableMap.ImmutableMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L96)
+- **ImmutableMap.ImmutableMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L95)
   The wrapping sum over entries of the key hash exclusive-or the value hash.
-- **ImmutableMap.ImmutableMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L100)
+- **ImmutableMap.ImmutableMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L99)
   `{k: v, k2: v2}` in iteration order. The entries exist before the map, so it can never contain itself.
-- **ImmutableMap** · [`export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L105)
+- **ImmutableMap** · [`export let of = func<K, V>(entries: [K, V][list]) -> ImmutableMap<K, V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-map.nra#L104)
   Copies `entries`. Traps with "invalid argument: duplicate key" when two entries have equal keys.
 <!-- END SOURCE API -->
 

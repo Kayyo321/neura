@@ -68,6 +68,10 @@ export let BufferedWriter = module (
             buffer = empty;
             return sink(full);
         };
+
+        /// @brief Names the writer and the bytes it holds.
+        export let.override to_string = func -> string =>
+            "BufferedWriter(" .. buffer.length.to_string() .. " of " .. capacity.to_string() .. " buffered)";
     );
 
     /// @brief A writer collecting up to 8,192 bytes.

@@ -55,11 +55,11 @@ The following public declarations are taken from the module source; each links t
   Returns an iterator over the stable list in index order.
 - **ImmutableList.ImmutableList** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L162)
   Another ImmutableList with the same element type, size, and equal elements at each index.
-- **ImmutableList.ImmutableList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L180)
+- **ImmutableList.ImmutableList** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L179)
   Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
-- **ImmutableList.ImmutableList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L184)
+- **ImmutableList.ImmutableList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L183)
   `[a, b, c]`. The elements exist before the list, so it can never contain itself.
-- **ImmutableList** · [`export let of = func<T>(items: T[list]) -> ImmutableList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L214)
+- **ImmutableList** · [`export let of = func<T>(items: T[list]) -> ImmutableList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/immutable-list.nra#L217)
   Copies `items`.
 <!-- END SOURCE API -->
 

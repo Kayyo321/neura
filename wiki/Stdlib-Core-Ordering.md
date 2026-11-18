@@ -21,15 +21,15 @@ The following public declarations are taken from the module source; each links t
   The three outcomes of comparing a left operand to a right operand. Since 0.1.0.
 - **Ordering** · [`export let reverse = func(o: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L12)
   Swaps Less and Greater while preserving Equal. Tagged `#Pure`, `#ThreadSafe`.
-- **Ordering** · [`export let then = func(first: Ordering, second: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L24)
+- **Ordering** · [`export let then = func(first: Ordering, second: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L21)
   `first` unless it is Equal, for comparing by several keys. Tagged `#Pure`, `#ThreadSafe`.
-- **Ordering** · [`export let is_less = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L29)
+- **Ordering** · [`export let is_less = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L26)
   Tests whether the left operand precedes the right. Tagged `#Pure`, `#ThreadSafe`.
-- **Ordering** · [`export let is_at_most = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L33)
+- **Ordering** · [`export let is_at_most = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L30)
   Tests whether the left operand precedes or equals the right. Tagged `#Pure`, `#ThreadSafe`.
-- **Ordering** · [`export let is_greater = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L37)
+- **Ordering** · [`export let is_greater = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L34)
   Tests whether the left operand follows the right. Tagged `#Pure`, `#ThreadSafe`.
-- **Ordering** · [`export let is_at_least = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L41)
+- **Ordering** · [`export let is_at_least = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L38)
   Tests whether the left operand follows or equals the right. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

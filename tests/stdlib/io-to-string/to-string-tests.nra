@@ -1,0 +1,30 @@
+let buffered_reader = import:Std.Io.BufferedReader;
+let buffered_writer = import:Std.Io.BufferedWriter;
+let error = import:Std.Core.Error;
+let logger = import:Std.Log.Logger;
+let random = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+let utf8_reader = import:Std.Io.Utf8Reader;
+let utf8_writer = import:Std.Io.Utf8Writer;
+
+let ToStringTests = module (
+    let sink = func(bytes: uint8[list]) -> result.Result<unit.Unit> => result.Result<unit.Unit>.Ok(unit.Unit.Value);
+    let source = func(count: int) -> result.Result<uint8[list]> => result.Result<uint8[list]>.Ok(new);
+
+    export let test_streams_name_their_buffers = func() -> void {
+        test.assert_equal_string("BufferedWriter(0 of 8192 buffered)", buffered_writer.create(sink).to_string());
+        test.assert_equal_string("BufferedWriter(0 of 16 buffered)", buffered_writer.with_capacity(sink, 16).to_string());
+        test.assert_equal_string("BufferedReader(capacity 16)", buffered_reader.with_capacity(source, 16).to_string());
+        test.assert_equal_string("Utf8Writer", utf8_writer.create(sink).to_string());
+        test.assert_equal_string("Utf8Reader", utf8_reader.create(source).to_string());
+    };
+
+    export let test_logger_names_itself_and_random_hides_its_state = func() -> void {
+        last log = logger.create("app", new func(line: string) {}, logger.LogLevel.Info);
+        test.assert_equal_string("Logger(app)", log.to_string());
+        last generator = random.seeded(42);
+        test.assert_equal_string("Random", generator.to_string());
+    };
+);

@@ -1,0 +1,45 @@
+let duration = import:Std.Time.Duration;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let local_date = import:Std.Time.LocalDate;
+let local_date_time = import:Std.Time.LocalDateTime;
+let local_time = import:Std.Time.LocalTime;
+let result = import:Std.Core.Result;
+let stopwatch = import:Std.Time.Stopwatch;
+let system_clock = import:Std.Time.SystemClock;
+let test = import:Std.Test;
+let zone_offset = import:Std.Time.ZoneOffset;
+
+let EqualityHashTests = module (
+    let agree = func(a: class, b: class) -> void {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+    };
+
+    export let test_time_values_agree = func() -> void {
+        agree(duration.of_seconds(90), duration.of_millis(90000));
+        agree(zone_offset.of_hours_minutes(5, 30), zone_offset.of_hours_minutes(5, 30));
+        agree(instant.of_epoch_seconds(10, 5), instant.of_epoch_seconds(10, 5));
+        agree(local_date.of_epoch_day(100), local_date.of_epoch_day(100));
+        agree(local_time.of_nano_of_day(5000), local_time.of_nano_of_day(5000));
+        test.assert(not duration.of_seconds(1).equals(duration.of_seconds(2)));
+        test.assert(not duration.of_seconds(1).equals(instant.of_epoch_seconds(1, 0)));
+        test.assert(not local_date.of_epoch_day(1).equals(local_time.of_nano_of_day(1)));
+        test.assert(not zone_offset.of_hours_minutes(1, 0).equals(duration.of_seconds(3600)));
+    };
+
+    export let test_local_date_time_agrees = func() -> void {
+        last a = test.assert_ok(local_date_time.parse("2026-11-18T10:15:30"));
+        last b = test.assert_ok(local_date_time.parse("2026-11-18T10:15:30"));
+        agree(a, b);
+        test.assert_equal_string("2026-11-18T10:15:30", a.to_string());
+    };
+
+    export let test_clocks_and_stopwatch_have_names = func() -> void {
+        test.assert_equal_string("SystemClock", system_clock.create().to_string());
+        last clock = fixed_clock.of(instant.of_epoch_seconds(0, 0));
+        test.assert_equal_string("FixedClock(" .. instant.of_epoch_seconds(0, 0).to_string() .. ")", clock.to_string());
+        test.assert_equal_string("Stopwatch(stopped)", stopwatch.create(clock).to_string());
+    };
+);

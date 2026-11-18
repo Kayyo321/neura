@@ -1,0 +1,7 @@
+// A class keeps one reflection policy (E1302).
+let policies = import:Std.Reflect.Core.ReflectPolicy;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+
+let Secret = class implements policies.Strip, policies.Layout ( );
+
+let describe = func -> string => types.of<Secret>().name;

@@ -31,7 +31,9 @@ The following public declarations are taken from the module source; each links t
   Stops and clears the measured time.
 - **Stopwatch.Stopwatch** · [`export let elapsed = func -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L76)
   The time measured so far, including the current run. A stopped stopwatch does not read the clock. Tagged `#NoDiscard`.
-- **Stopwatch** · [`export let create = func(time_source: Clock) -> Stopwatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L89)
+- **Stopwatch.Stopwatch** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L85)
+  Names the stopwatch and whether it runs.
+- **Stopwatch** · [`export let create = func(time_source: Clock) -> Stopwatch`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/stopwatch.nra#L90)
   A stopped stopwatch over `time_source`. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

@@ -47,7 +47,7 @@ export let Charsets = module (
         if (key == "utf-32le" || key == "utf32le") {
             return result.Result<Charset>.Ok(Charset.Utf32Le);
         }
-        return result.Result<Charset>.Err(error.custom("charset.unsupported", "unsupported charset: " + name));
+        return result.Result<Charset>.Err(error.custom("charset.unsupported", "unsupported charset: " .. name));
     };
 
     /// @brief Encodes text, substituting a question mark for unrepresentable ASCII or Latin-1 scalars.
@@ -169,7 +169,7 @@ export let Charsets = module (
                 return [65536 + ((unit - 55296) << 10) + (low - 56320), 4];
             }
         }
-        if (!scalars.is_valid(unit) || (charset == Charset.Ascii && unit > 127)) {
+        if (not scalars.is_valid(unit) || (charset == Charset.Ascii && unit > 127)) {
             return [InvalidScalar, width];
         }
         return [unit, width];

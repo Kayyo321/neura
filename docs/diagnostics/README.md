@@ -362,6 +362,16 @@ Errors about application forms and their build limits.
 | [E1014](E1014.md) | invalid static document structure |
 | [E1015](E1015.md) | template or stylesheet exceeds a limit |
 
+## E13xx: Reflection
+
+Codes reported for `Std.Reflect` ([design](../design/Reflect030.md)).
+
+| Code | Error |
+| --- | --- |
+| [E1300](E1300.md) | a type that Std.Reflect.Proxy cannot proxy |
+| [E1301](E1301.md) | a value a Std.Reflect dynamic value cannot hold |
+| [E1302](E1302.md) | a class with two reflection policies |
+
 ## Warnings
 
 Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.

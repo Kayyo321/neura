@@ -129,7 +129,7 @@ export let BigDecimal = module (
             last billion = big_integer.of_int64(1000000000);
             do {
                 let [quotient, rest] = value.divide_and_remainder(billion);
-                if (!rest.is_zero()) {
+                if (not rest.is_zero()) {
                     break;
                 }
                 value = quotient;
@@ -137,7 +137,7 @@ export let BigDecimal = module (
             }
             do {
                 let [quotient, rest] = value.divide_and_remainder(big_integer.of_int64(10));
-                if (!rest.is_zero()) {
+                if (not rest.is_zero()) {
                     break;
                 }
                 value = quotient;
@@ -190,7 +190,7 @@ export let BigDecimal = module (
             }
             let [quotient, rest] = numerator.divide_and_remainder(denominator);
             last top = optional.expect<int64>(quotient.to_int64(), "quotient below 2^63") as uint64;
-            return rounding.compose(negative, top, -shift, !rest.is_zero());
+            return rounding.compose(negative, top, -shift, not rest.is_zero());
         };
 
         /// @brief Compares numerical values independently of scale without aligning widely separated scales.
@@ -199,10 +199,7 @@ export let BigDecimal = module (
             last sa = unscaled.sign();
             last sb = other.unscaled.sign();
             if (sa != sb) {
-                if (sa < sb) {
-                    return Ordering.Less;
-                }
-                return Ordering.Greater;
+                return if (sa < sb) -> Ordering.Less else -> Ordering.Greater;
             }
             if (sa == 0) {
                 return Ordering.Equal;
@@ -214,10 +211,7 @@ export let BigDecimal = module (
                 last ea = (digit_count(unscaled) as int64) - (scale as int64);
                 last eb = (digit_count(other.unscaled) as int64) - (other.scale as int64);
                 if (ea != eb) {
-                    if ((ea < eb) == (sa > 0)) {
-                        return Ordering.Less;
-                    }
-                    return Ordering.Greater;
+                    return if ((ea < eb) == (sa > 0)) -> Ordering.Less else -> Ordering.Greater;
                 }
             }
             if (gap >= 0) {
@@ -229,10 +223,10 @@ export let BigDecimal = module (
         /// @brief Numeric equality: 2.0 equals 2.00.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is BigDecimal)) {
+            if (other is not that: BigDecimal) {
                 return false;
             }
-            return compare_to(other as BigDecimal) == Ordering.Equal;
+            return compare_to(that) == Ordering.Equal;
         };
 
         /// @brief From 17, combines the hashes of the stripped form's unscaled value and scale.
@@ -251,16 +245,13 @@ export let BigDecimal = module (
                 text = "-";
             }
             if (scale <= 0) {
-                if (unscaled.is_zero()) {
-                    return "0";
-                }
-                return text + digits + zeros_text(-(scale as int64));
+                return if (unscaled.is_zero()) -> "0" else -> text + digits + zeros_text(-(scale as int64));
             }
             last length = digits.byte_length;
             if (length > scale) {
-                return text + digits.slice(0, length - scale) + "." + digits.slice(length - scale, length);
+                return text .. digits.slice(0, length - scale) .. "." .. digits.slice(length - scale, length);
             }
-            return text + "0." + zeros_text((scale - length) as int64) + digits;
+            return text .. "0." .. zeros_text((scale - length) as int64) .. digits;
         };
     );
 
@@ -375,7 +366,7 @@ export let BigDecimal = module (
         }
         let digits = text.slice(integer_start, integer_end) + text.slice(fraction_start, fraction_end);
         if (negative) {
-            digits = "-" + digits;
+            digits = "-" .. digits;
         }
         last unscaled_part = result.expect<BigInteger>(big_integer.parse(digits), "digits");
         return Result<BigDecimal>.Ok(new BigDecimal(unscaled_part, new_scale as int));
@@ -410,19 +401,13 @@ export let BigDecimal = module (
 
     /// @brief value * 10^k for k >= 0; k beyond the int range traps (reason 1).
     let times_power_of_ten = func(value: BigInteger, k: int64) -> BigInteger {
-        if (k == 0 || value.is_zero()) {
-            return value;
-        }
-        return value.multiply(power_of_ten(k as int));
+        return if (k == 0 || value.is_zero()) -> value else -> value.multiply(power_of_ten(k as int));
     };
 
     /// @brief The number of decimal digits of |value|; 1 for zero.
     let digit_count = func(value: BigInteger) -> int {
         last text = value.to_string();
-        if (value.sign() < 0) {
-            return text.byte_length - 1;
-        }
-        return text.byte_length;
+        return if (value.sign() < 0) -> text.byte_length - 1 else -> text.byte_length;
     };
 
     /// @brief value / 10^k rounded with mode, for k >= 0. When 10^k has more digits than value the quotient is
@@ -459,7 +444,7 @@ export let BigDecimal = module (
         } else if (mode == RoundingMode.Down) {
             away = false;
         } else if (mode == RoundingMode.Ceiling) {
-            away = !negative;
+            away = not negative;
         } else if (mode == RoundingMode.Floor) {
             away = negative;
         } else if (mode == RoundingMode.HalfUp) {
@@ -467,11 +452,9 @@ export let BigDecimal = module (
         } else if (mode == RoundingMode.HalfDown) {
             away = half == Ordering.Greater;
         } else {
-            away = half == Ordering.Greater || (half == Ordering.Equal && !truncated.is_even());
+            away = half == Ordering.Greater || (half == Ordering.Equal && not truncated.is_even());
         }
-        if (!away) {
-            return truncated;
-        }
+        return truncated unless away;
         if (negative) {
             return truncated.subtract(big_integer.of_int64(1));
         }

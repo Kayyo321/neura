@@ -26,7 +26,7 @@ export let Routing = module (
         export let get = func(name: string) -> string {
             last at = names.index_of(name);
             if (at < 0) {
-                trap_with_message("the route has no parameter '" + name + "'");
+                trap_with_message("the route has no parameter '" .. name .. "'");
             }
             return values.get(at);
         };
@@ -42,19 +42,19 @@ export let Routing = module (
             let text = "{";
             for (let i = 0; i < names.length(); i++) {
                 if (i > 0) {
-                    text = text + ", ";
+                    text ..= ", ";
                 }
-                text = text + names.get(i) + "=" + values.get(i);
+                text ..= names.get(i) .. "=" .. values.get(i);
             }
-            return text + "}";
+            return text .. "}";
         };
 
         /// @brief Other parameters with equal names and values in the same order.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Params)) {
+            if (other is not that: Params) {
                 return false;
             }
-            return to_string() == (other as Params).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the text.
@@ -78,18 +78,14 @@ export let Routing = module (
 
         /// @brief The path, with `?` and the query when there is one.
         export let.override to_string = func -> string {
-            if (query == "") {
-                return path;
-            }
-            return path + "?" + query;
+            return if (query == "") -> path else -> path .. "?" .. query;
         };
 
         /// @brief Another location with the same path, query and route.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Location)) {
+            if (other is not that: Location) {
                 return false;
             }
-            last that = other as Location;
             return path == that.path && query == that.query && route == that.route;
         };
 
@@ -107,7 +103,7 @@ export let Routing = module (
         export let init = func(pattern: string, segments: string[list], make: func(Params) -> ui.Component) => set;
 
         /// @brief `Route(` the pattern `)`.
-        export let.override to_string = func -> string => "Route(" + pattern + ")";
+        export let.override to_string = func -> string => "Route(" .. pattern .. ")";
     );
 
     let empty_view = html() {
@@ -151,7 +147,7 @@ export let Routing = module (
             last shape = shape_of(segments);
             for (let i = 0; i < routes.length; i++) {
                 if (shape_of(routes[i].segments) == shape) {
-                    trap_with_message("route " + pattern + " conflicts with route " + routes[i].pattern);
+                    trap_with_message("route " .. pattern .. " conflicts with route " .. routes[i].pattern);
                 }
             }
             routes.append(new Route(pattern, segments, make));
@@ -216,7 +212,7 @@ export let Routing = module (
                 return history.link(path);
             }
             early_links = true;
-            return "#" + path;
+            return "#" .. path;
         };
 
         /// @brief A click handler that navigates to `path`; bind it with `on:click.prevent_default`
@@ -277,7 +273,7 @@ export let Routing = module (
 
         #Internal
         export let page_for = func(at: Location) -> ui.Component {
-            last key = at.route + " " + at.to_string();
+            last key = at.route .. " " .. at.to_string();
             if (page_made && key == page_key) {
                 return page;
             }
@@ -326,7 +322,7 @@ export let Routing = module (
 
         /// @brief `Router(` the number of routes `, at ` the location `)`.
         export let.override to_string = func -> string =>
-            "Router(" + routes.length.to_string() + " routes, at " + location.get().to_string() + ")";
+            "Router(" .. routes.length.to_string() .. " routes, at " .. location.get().to_string() .. ")";
     );
 
     let no_params = func -> Params => new Params(frozen.empty<string>(), frozen.empty<string>());
@@ -342,7 +338,7 @@ export let Routing = module (
         }
         last pieces = strings.split(path.slice(1, path.byte_length), "/");
         for (let i = 0; i < pieces.length; i++) {
-            if (!(i == pieces.length - 1 && pieces[i] == "")) {
+            if (not (i == pieces.length - 1 && pieces[i] == "")) {
                 parts.append(pieces[i]);
             }
         }
@@ -351,7 +347,7 @@ export let Routing = module (
 
     let pattern_segments = func(pattern: string) -> string[list] {
         if (pattern.byte_length == 0 || pattern.byte_at(0) != 47) {
-            trap_with_message("invalid route pattern '" + pattern + "': a pattern begins with '/'");
+            trap_with_message("invalid route pattern '" .. pattern .. "': a pattern begins with '/'");
         }
         if (pattern == "/") {
             return new;
@@ -361,17 +357,17 @@ export let Routing = module (
         for (let i = 0; i < pieces.length; i++) {
             last piece = pieces[i];
             if (piece == "") {
-                trap_with_message("invalid route pattern '" + pattern + "': a segment is empty");
+                trap_with_message("invalid route pattern '" .. pattern .. "': a segment is empty");
             }
             if (is_parameter(piece)) {
                 last name = piece.slice(1, piece.byte_length - 1);
-                if (!is_name(name)) {
-                    trap_with_message("invalid route pattern '" + pattern + "': '" + name + "' is not a parameter name");
+                if (not is_name(name)) {
+                    trap_with_message("invalid route pattern '" .. pattern .. "': '" .. name .. "' is not a parameter name");
                 }
                 for (let j = 0; j < names.length; j++) {
                     if (names[j] == name) {
-                        trap_with_message("invalid route pattern '" + pattern + "': the parameter '" + name
-                            + "' appears twice");
+                        trap_with_message("invalid route pattern '" .. pattern .. "': the parameter '" .. name
+                            .. "' appears twice");
                     }
                 }
                 names.append(name);
@@ -380,8 +376,8 @@ export let Routing = module (
                     last byte = piece.byte_at(k);
                     if (byte <= 32 || byte == 127 || byte == 123 || byte == 125 || byte == 42 || byte == 63
                         || byte == 35 || byte == 37) {
-                        trap_with_message("invalid route pattern '" + pattern + "': segment '" + piece
-                            + "' has a character a literal segment cannot have");
+                        trap_with_message("invalid route pattern '" .. pattern .. "': segment '" .. piece
+                            .. "' has a character a literal segment cannot have");
                     }
                 }
             }
@@ -397,7 +393,7 @@ export let Routing = module (
             last byte = name.byte_at(i);
             last letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95;
             last digit = byte >= 48 && byte <= 57;
-            if (!letter && !(digit && i > 0)) {
+            if (not letter && not (digit && i > 0)) {
                 return false;
             }
         }
@@ -409,9 +405,9 @@ export let Routing = module (
         let text = "";
         for (let i = 0; i < segments.length; i++) {
             if (is_parameter(segments[i])) {
-                text = text + "/{}";
+                text ..= "/{}";
             } else {
-                text = text + "/" + segments[i];
+                text ..= "/" .. segments[i];
             }
         }
         return text;
@@ -420,8 +416,8 @@ export let Routing = module (
     // A literal segment wins over a parameter at the first position where the two routes differ.
     let more_specific = func(candidate: Route, best: Route) -> bool {
         for (let i = 0; i < candidate.segments.length; i++) {
-            last literal = !is_parameter(candidate.segments[i]);
-            last other = !is_parameter(best.segments[i]);
+            last literal = not is_parameter(candidate.segments[i]);
+            last other = not is_parameter(best.segments[i]);
             if (literal != other) {
                 return literal;
             }
@@ -460,10 +456,7 @@ export let Routing = module (
         if (byte >= 65 && byte <= 70) {
             return (byte - 55) as int;
         }
-        if (byte >= 97 && byte <= 102) {
-            return (byte - 87) as int;
-        }
-        return -1;
+        return if (byte >= 97 && byte <= 102) -> (byte - 87) as int else -> -1;
     };
 
     // `%2F` and the other escapes become their bytes; a malformed escape or invalid UTF-8 is Err.
@@ -498,7 +491,7 @@ export let Routing = module (
 
     let check_path = func(path: string) {
         if (path.byte_length == 0 || path.byte_at(0) != 47) {
-            trap_with_message("invalid route path '" + path + "': a path begins with '/'");
+            trap_with_message("invalid route path '" .. path .. "': a path begins with '/'");
         }
         if (path.byte_length > 8192) {
             trap_with_message("invalid route path: a path is at most 8 KiB");

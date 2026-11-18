@@ -45,6 +45,9 @@ export let Semaphore = module (
                 },
             }
         };
+
+        /// @brief Names the semaphore.
+        export let.override to_string = func -> string => "Semaphore";
     );
 
     /// @brief A semaphore with `permits` permits, all free. A negative count traps.

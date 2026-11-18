@@ -1,0 +1,28 @@
+// run-options: --allow-native
+// A ForeignSymbol found in the default lookup and called through a CallFrame of Variants
+// (docs/design/Reflect030.md, The packages): C's abs and llabs from the C library. `int` and `long long` have
+// the same width on every supported target, so the declared target does not change the calls.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote optional = import:Std.Core.Optional;
+let abi = import:Std.Reflect.Ffi.Abi;
+let calls = import:Std.Reflect.Ffi.ForeignCall;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last host = optional.expect(abi.target("x86_64-unknown-linux-gnu"), "target");
+        last ints: abi.CType[list] = new;
+        ints.append(abi.CType.Int);
+        last absolute = optional.expect(calls.lookup("abs", host, false, abi.CType.Int, ints), "abs");
+        console.print_line(absolute.to_string());
+        console.print_line(absolute.frame().push(variants.of(-42 as int32)).invoke().to_string());
+        last longs: abi.CType[list] = new;
+        longs.append(abi.CType.LongLong);
+        last wide = optional.expect(calls.lookup("llabs", host, false, abi.CType.LongLong, longs), "llabs");
+        last large: int64 = -5000000000;
+        console.print_line(wide.frame().push(variants.of(large)).invoke().to_string());
+        console.print_line(optional.is_some(calls.lookup("no_such_symbol_here", host, false, abi.CType.Int, ints)).to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -76,7 +76,7 @@ export let Codec = module (
             let carrier = layout.carrier();
             if (carrier == Carrier.Bool || carrier == Carrier.Int8 || carrier == Carrier.UInt8 ||
                 carrier == Carrier.Int16 || carrier == Carrier.UInt16 || carrier == Carrier.Float32) {
-                trap_with_message("invalid argument: a variadic argument must be promoted to int, long, double, " +
+                trap_with_message("invalid argument: a variadic argument must be promoted to int, long, double, " ..
                     "or an address");
             }
         }
@@ -160,7 +160,7 @@ export let Codec = module (
     /// @brief Traps with "invalid argument: argument does not fit <layout>".
     #Pure
     export let unfit = func(layout: MemoryLayout) -> ForeignValue {
-        trap_with_message("invalid argument: argument does not fit " + layout.to_string());
+        trap_with_message("invalid argument: argument does not fit " .. layout.to_string());
     };
 
     /// @brief Converts an untyped argument to the value `layout` describes.
@@ -236,7 +236,7 @@ export let Codec = module (
 
     /// @brief Traps with "invalid argument: expected <layout>, got <value>".
     let wrong = func(value: ForeignValue, layout: MemoryLayout) {
-        trap_with_message("invalid argument: expected " + layout.to_string() + ", got " + describe(value));
+        trap_with_message("invalid argument: expected " .. layout.to_string() .. ", got " .. describe(value));
     };
 
     /// @brief Appends the bytes of `value`, which must have the carrier or struct size of `layout`.
@@ -330,7 +330,7 @@ export let Codec = module (
                 if (carrier != Carrier.Address) {
                     wrong(value, layout);
                 }
-                if (!segment.is_null()) {
+                if (not segment.is_null()) {
                     segment.scope().check_alive();
                 }
                 native.put(bytes, native.signed_bits(segment.address()), size);

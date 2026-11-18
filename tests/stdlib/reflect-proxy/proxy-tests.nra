@@ -1,0 +1,112 @@
+// Std.Reflect.Proxy (docs/design/Reflect030.md, Proxies): interface proxies whose calls reach a handler, with
+// arguments packed into Variants and results unpacked to the method's type, and forwarding to a real object.
+let.promote optional = import:Std.Core.Optional;
+let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+let test = import:Std.Test;
+
+let Point = record (x: int32, y: int32);
+
+let Greeter = interface (
+    export let greet = func(name: string, times: int32) -> string;
+    export let count = func -> int32;
+    export let reset = func;
+);
+
+let Store = interface (
+    export let put = func(point: Point, tags: string[list]) -> Optional<int64>;
+);
+
+let Fancy = interface : Greeter (
+    export let shout = func(text: string) -> string;
+);
+
+let Real = class implements Greeter (
+    export let calls: int32 = 0;
+    export let greet = func(name: string, times: int32) -> string {
+        calls = calls + 1;
+        return name + times.to_string();
+    };
+    export let count = func -> int32 => calls;
+    export let reset = func {
+        calls = 0;
+    };
+);
+
+let Recorder = class implements proxies.InvocationHandler (
+    export let log: string[list] = new;
+    export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant {
+        log.append(context.to_string());
+        if (context.method.name == "greet") {
+            return variants.of("hi " + context.arguments[0].get<string>());
+        }
+        if (context.method.name == "count") {
+            return variants.of(log.length as int32);
+        }
+        if (context.method.name == "put") {
+            last point = context.arguments[0].get<Point>();
+            last tags = context.arguments[1].get<string[list]>();
+            return variants.of(Optional<int64>.Some((point.x + tags.length) as int64));
+        }
+        if (context.method.name == "shout") {
+            return variants.of(context.arguments[0].get<string>() + "!");
+        }
+        return variants.of(nil as class);
+    };
+);
+
+let Forwarder = class implements proxies.InvocationHandler (
+    export last target: variants.Variant;
+    export let init = func(real: Real) {
+        target = variants.of(real);
+    };
+    export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant =>
+        proxies.forward(target, context);
+);
+
+let ProxyTests = module (
+    export let test_calls_reach_the_handler = func() -> void {
+        last recorder = new Recorder();
+        last greeter = proxies.create<Greeter>(recorder);
+        test.assert_equal_string("hi Ada", greeter.greet("Ada", 2));
+        greeter.reset();
+        test.assert_equal_int32(3, greeter.count());
+        test.assert_equal_string("Greeter.greet(Ada, 2)", recorder.log[0]);
+        test.assert_equal_string("Greeter.reset()", recorder.log[1]);
+    };
+
+    export let test_arguments_and_results_any_cannot_hold = func() -> void {
+        last store = proxies.create<Store>(new Recorder());
+        last tags: string[list] = new;
+        tags.append("a");
+        test.assert(test.assert_some(store.put(new Point(4, 0), tags)) == 5);
+    };
+
+    export let test_extended_interfaces = func() -> void {
+        last fancy = proxies.create<Fancy>(new Recorder());
+        test.assert_equal_string("hey!", fancy.shout("hey"));
+        test.assert_equal_string("hi B", fancy.greet("B", 1));
+    };
+
+    export let test_forwarding = func() -> void {
+        last real = new Real();
+        last greeter = proxies.create<Greeter>(new Forwarder(real));
+        test.assert_equal_string("x3", greeter.greet("x", 3));
+        test.assert_equal_int32(1, real.calls);
+        test.assert_equal_int32(1, greeter.count());
+    };
+
+    export let test_a_proxy_is_its_interface = func() -> void {
+        last greeter = proxies.create<Greeter>(new Recorder());
+        test.assert(greeter is Greeter);
+        test.assert(!(greeter is Real));
+    };
+
+    export let test_a_proxy_is_described_as_its_interface = func() -> void {
+        last greeter = proxies.create<Greeter>(new Recorder());
+        last described = types.of_value(greeter);
+        test.assert_equal_string("Greeter", described.name);
+        test.assert(!variants.of(greeter).is_nil());
+    };
+);

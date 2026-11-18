@@ -128,25 +128,24 @@ export let Sql = module (
 
         /// @brief "sql." and the kind in lower case with underscores, such as sql.constraint_violation.
         #Pure
-        export let.override code = func -> string => "sql." + kind_code(kind);
+        export let.override code = func -> string => "sql." .. kind_code(kind);
 
         /// @brief The kind, the action and the detail, such as
         /// "ConstraintViolation: execute: UNIQUE constraint failed: parts.code".
         #Pure
         export let.override message = func -> string {
             if (detail == "") {
-                return kind.to_string() + ": " + action;
+                return kind.to_string() .. ": " .. action;
             }
-            return kind.to_string() + ": " + action + ": " + detail;
+            return kind.to_string() .. ": " .. action .. ": " .. detail;
         };
 
         /// @brief Equal when kind, action and detail are.
         #Pure
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SqlError)) {
+            if (other is not that: SqlError) {
                 return false;
             }
-            last that = other as SqlError;
             return kind == that.kind && action == that.action && detail == that.detail;
         };
 
@@ -234,10 +233,7 @@ export let Sql = module (
         if (code == 21) {
             return ErrorKind.ConstraintViolation;
         }
-        if (code == 22) {
-            return ErrorKind.Serialization;
-        }
-        return ErrorKind.Other;
+        return if (code == 22) -> ErrorKind.Serialization else -> ErrorKind.Other;
     };
 
     /// @brief An SQL error value.
@@ -255,7 +251,7 @@ export let Sql = module (
 
     /// @brief The error of an operation on a closed connection, transaction or cursor.
     let closed = func(what: string, action: string) -> errors.Error =>
-        failure(ErrorKind.InvalidInput, action, "the " + what + " is closed");
+        failure(ErrorKind.InvalidInput, action, "the " .. what .. " is closed");
 
     /// @brief Ok of Unit.
     let done = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
@@ -355,10 +351,9 @@ export let Sql = module (
         /// @brief Equal kinds and payloads; Floats compare by their bits, so NaN equals NaN.
         #Pure
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Value)) {
+            if (other is not that: Value) {
                 return false;
             }
-            last that = other as Value;
             if (kind != that.kind || integer != that.integer || characters != that.characters) {
                 return false;
             }
@@ -393,8 +388,8 @@ export let Sql = module (
             ValueKind.Bool => integer == 1 ? "true" : "false",
             ValueKind.Int => integer.to_string(),
             ValueKind.Float => real.to_string(),
-            ValueKind.Text => "'" + doubled_quotes(characters) + "'",
-            ValueKind.Bytes => "X'" + hexadecimal(octets) + "'",
+            ValueKind.Text => "'" .. doubled_quotes(characters) .. "'",
+            ValueKind.Bytes => "X'" .. hexadecimal(octets) .. "'",
         };
     );
 
@@ -428,7 +423,7 @@ export let Sql = module (
         let start = 0;
         for (let i = 0; i < text.byte_length; i += 1) {
             if (text.byte_at(i) == 39) {
-                out = out + text.slice(start, i + 1) + "'";
+                out ..= text.slice(start, i + 1) .. "'";
                 start = i + 1;
             }
         }
@@ -455,7 +450,7 @@ export let Sql = module (
         variadic.Argument.Signed(number) => Result<Value>.Ok(int_value(number)),
         variadic.Argument.Unsigned(number) => number > 9223372036854775807
             ? Result<Value>.Err(failure(ErrorKind.InvalidInput, "parameter",
-                "$" + position.to_string() + " is above the int64 range"))
+                "$" .. position.to_string() .. " is above the int64 range"))
             : Result<Value>.Ok(int_value(number as int64)),
         variadic.Argument.Floating16(number) => Result<Value>.Ok(float_value(number as float64)),
         variadic.Argument.BFloating16(number) => Result<Value>.Ok(float_value(number as float64)),
@@ -465,7 +460,7 @@ export let Sql = module (
         variadic.Argument.Object(item) => item is Value
             ? Result<Value>.Ok(item as Value)
             : Result<Value>.Err(failure(ErrorKind.InvalidInput, "parameter",
-                "$" + position.to_string() + " is an object that is not an sql.Value")),
+                "$" .. position.to_string() .. " is an object that is not an sql.Value")),
     };
 
     /// @brief The values of variadic arguments.
@@ -536,7 +531,7 @@ export let Sql = module (
         };
 
         /// @brief A fixed description.
-        export let.override to_string = func -> string => "Wire(" + kinds.length.to_string() + " values)";
+        export let.override to_string = func -> string => "Wire(" .. kinds.length.to_string() .. " values)";
     );
 
     /// @brief The values the host sent, in order.
@@ -615,10 +610,9 @@ export let Sql = module (
         /// @brief Equal names in the same order.
         #Pure
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Columns)) {
+            if (other is not that: Columns) {
                 return false;
             }
-            last that = other as Columns;
             if (names.length != that.names.length) {
                 return false;
             }
@@ -658,7 +652,7 @@ export let Sql = module (
         for (let i = 0; i < text.byte_length; i += 1) {
             last b = text.byte_at(i);
             if (b >= 65 && b <= 90) {
-                out = out + text.slice(start, i) + "abcdefghijklmnopqrstuvwxyz".slice((b - 65) as int, (b - 64) as int);
+                out ..= text.slice(start, i) .. "abcdefghijklmnopqrstuvwxyz".slice((b - 65) as int, (b - 64) as int);
                 start = i + 1;
             }
         }
@@ -698,7 +692,7 @@ export let Sql = module (
         export let value = func(name: string) -> Result<Value> {
             last index = header.index_of(name);
             if (index < 0) {
-                return Result<Value>.Err(failure(ErrorKind.NotFound, "row", "no column named " + name));
+                return Result<Value>.Err(failure(ErrorKind.NotFound, "row", "no column named " .. name));
             }
             return Result<Value>.Ok(cells[index]);
         };
@@ -733,7 +727,7 @@ export let Sql = module (
                     Optional.None => Result<Optional<int32>>.Ok(Optional<int32>.None),
                     Optional.Some(number) => number < -2147483648 || number > 2147483647
                         ? Result<Optional<int32>>.Err(failure(ErrorKind.InvalidInput, "row",
-                            "column " + name + " holds " + number.to_string() + ", outside the int32 range"))
+                            "column " .. name .. " holds " .. number.to_string() .. ", outside the int32 range"))
                         : Result<Optional<int32>>.Ok(Optional<int32>.Some(number as int32)),
                 },
             };
@@ -818,15 +812,14 @@ export let Sql = module (
         /// @brief Equal column names and values.
         #Pure
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Row)) {
+            if (other is not that: Row) {
                 return false;
             }
-            last that = other as Row;
             if (cells.length != that.cells.length) {
                 return false;
             }
             for (let i = 0; i < cells.length; i += 1) {
-                if (header.names[i] != that.header.names[i] || !cells[i].equals(that.cells[i])) {
+                if (header.names[i] != that.header.names[i] || not cells[i].equals(that.cells[i])) {
                     return false;
                 }
             }
@@ -848,9 +841,9 @@ export let Sql = module (
         export let.override to_string = func -> string {
             let out = "Row(";
             for (let i = 0; i < cells.length; i += 1) {
-                out = out + (i == 0 ? "" : ", ") + header.names[i] + "=" + cells[i].to_string();
+                out ..= (i == 0 ? "" : ", ") .. header.names[i] .. "=" .. cells[i].to_string();
             }
-            return out + ")";
+            return out .. ")";
         };
     );
 
@@ -859,14 +852,14 @@ export let Sql = module (
         Result.Err(problem) => Result<T>.Err(problem),
         Result.Ok(found) => match (found) {
             Optional.Some(item) => Result<T>.Ok(item),
-            Optional.None => Result<T>.Err(failure(ErrorKind.InvalidInput, "row", "column " + name + " is NULL")),
+            Optional.None => Result<T>.Err(failure(ErrorKind.InvalidInput, "row", "column " .. name .. " is NULL")),
         },
     };
 
     /// @brief The error of a value that does not convert to `wanted`.
     let mismatch = func(name: string, cell: Value, wanted: string) -> errors.Error =>
         failure(ErrorKind.InvalidInput, "row",
-            "column " + name + " holds a " + cell.kind.to_string() + " value, not " + wanted);
+            "column " .. name .. " holds a " .. cell.kind.to_string() .. " value, not " .. wanted);
 
     // ---------------------------------------------------------------------------------------------------
     // Statements, shared by connections and transactions
@@ -995,11 +988,16 @@ export let Sql = module (
 
         /// @brief The pool's name, such as "Pool(main)"; the host keeps its URL and password.
         #Pure
-        export let.override to_string = func -> string => "Pool(" + name + ")";
+        export let.override to_string = func -> string => "Pool(" .. name .. ")";
 
         /// @brief Equal names.
         #Pure
-        export let.override equals = func(other: class) -> bool => other is Pool && name == (other as Pool).name;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Pool) {
+                return false;
+            }
+            return name == that.name;
+        };
 
         /// @brief The name's hash.
         #Pure
@@ -1011,7 +1009,7 @@ export let Sql = module (
     export let pool = func(name: string) -> Result<Pool> {
         return match (host_pool(name)) {
             DoneOutcome.Ok => Result<Pool>.Ok(new Pool(name)),
-            DoneOutcome.Error(code) => Result<Pool>.Err(host_failure(code, "pool " + name)),
+            DoneOutcome.Error(code) => Result<Pool>.Err(host_failure(code, "pool " .. name)),
         };
     };
 
@@ -1076,9 +1074,7 @@ export let Sql = module (
         /// @brief Runs one statement and returns the affected row count (0 for a query).
         #NoDiscard
         export let execute = func(text: string, parameters: ...) -> Result<int64> {
-            if (!open_now) {
-                return Result<int64>.Err(closed("connection", "execute"));
-            }
+            return Result<int64>.Err(closed("connection", "execute")) unless open_now;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<int64>.Err(problem),
                 Result.Ok(values) => run_execute(lease, text, values),
@@ -1088,18 +1084,14 @@ export let Sql = module (
         /// @brief Runs one statement with a list of parameter values.
         #NoDiscard
         export let execute_values = func(text: string, values: Value[list]) -> Result<int64> {
-            if (!open_now) {
-                return Result<int64>.Err(closed("connection", "execute"));
-            }
+            return Result<int64>.Err(closed("connection", "execute")) unless open_now;
             return run_execute(lease, text, values);
         };
 
         /// @brief The first row of a query, or NotFound.
         #NoDiscard
         export let query_one = func(text: string, parameters: ...) -> Result<Row> {
-            if (!open_now) {
-                return Result<Row>.Err(closed("connection", "query_one"));
-            }
+            return Result<Row>.Err(closed("connection", "query_one")) unless open_now;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<Row>.Err(problem),
                 Result.Ok(values) => first_row(run_query(lease, text, values, one, "query_one")),
@@ -1111,9 +1103,7 @@ export let Sql = module (
         #NoDiscard
         export let query_page = func(text: string, limit: int, parameters: ...)
             -> Result<immutable.ImmutableList<Row>> {
-            if (!open_now) {
-                return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page"));
-            }
+            return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page")) unless open_now;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
                 Result.Ok(values) => page_of(run_query(lease, text, values, limit, "query_page")),
@@ -1124,18 +1114,14 @@ export let Sql = module (
         #NoDiscard
         export let query_page_values = func(text: string, limit: int, values: Value[list])
             -> Result<immutable.ImmutableList<Row>> {
-            if (!open_now) {
-                return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page"));
-            }
+            return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page")) unless open_now;
             return page_of(run_query(lease, text, values, limit, "query_page"));
         };
 
         /// @brief Runs a query whose rows are fetched in pages through the cursor, which must be closed.
         #NoDiscard
         export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor> {
-            if (!open_now) {
-                return Result<Cursor>.Err(closed("connection", "open_cursor"));
-            }
+            return Result<Cursor>.Err(closed("connection", "open_cursor")) unless open_now;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<Cursor>.Err(problem),
                 Result.Ok(values) => run_open_cursor(lease, text, values),
@@ -1146,17 +1132,13 @@ export let Sql = module (
         /// open. A second transaction while one is open is InvalidInput.
         #NoDiscard
         export let begin = func -> Result<Transaction> {
-            if (!open_now) {
-                return Result<Transaction>.Err(closed("connection", "begin"));
-            }
+            return Result<Transaction>.Err(closed("connection", "begin")) unless open_now;
             return start_transaction(lease, pool_name, false);
         };
 
         /// @brief Returns the connection to its pool. Closing again does nothing and returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return done();
-            }
+            return done() unless open_now;
             open_now = false;
             return match (host_release(lease)) {
                 DoneOutcome.Ok => done(),
@@ -1167,7 +1149,7 @@ export let Sql = module (
         /// @brief The pool and state, such as "Connection(main, open)"; never the URL or a password.
         #Pure
         export let.override to_string = func -> string =>
-            "Connection(" + pool_name + (open_now ? ", open)" : ", closed)");
+            "Connection(" .. pool_name .. (open_now ? ", open)" : ", closed)");
     );
 
     /// @brief A transaction. It ends by `commit` or by `close`: `close` without a commit rolls back; after a
@@ -1201,9 +1183,7 @@ export let Sql = module (
         /// @brief Runs one statement and returns the affected row count.
         #NoDiscard
         export let execute = func(text: string, parameters: ...) -> Result<int64> {
-            if (!active) {
-                return Result<int64>.Err(closed("transaction", "execute"));
-            }
+            return Result<int64>.Err(closed("transaction", "execute")) unless active;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<int64>.Err(problem),
                 Result.Ok(values) => run_execute(lease, text, values),
@@ -1213,9 +1193,7 @@ export let Sql = module (
         /// @brief The first row of a query, or NotFound.
         #NoDiscard
         export let query_one = func(text: string, parameters: ...) -> Result<Row> {
-            if (!active) {
-                return Result<Row>.Err(closed("transaction", "query_one"));
-            }
+            return Result<Row>.Err(closed("transaction", "query_one")) unless active;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<Row>.Err(problem),
                 Result.Ok(values) => first_row(run_query(lease, text, values, one, "query_one")),
@@ -1226,9 +1204,7 @@ export let Sql = module (
         #NoDiscard
         export let query_page = func(text: string, limit: int, parameters: ...)
             -> Result<immutable.ImmutableList<Row>> {
-            if (!active) {
-                return Result<immutable.ImmutableList<Row>>.Err(closed("transaction", "query_page"));
-            }
+            return Result<immutable.ImmutableList<Row>>.Err(closed("transaction", "query_page")) unless active;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
                 Result.Ok(values) => page_of(run_query(lease, text, values, limit, "query_page")),
@@ -1238,9 +1214,7 @@ export let Sql = module (
         /// @brief A cursor over a query's rows, within the transaction.
         #NoDiscard
         export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor> {
-            if (!active) {
-                return Result<Cursor>.Err(closed("transaction", "open_cursor"));
-            }
+            return Result<Cursor>.Err(closed("transaction", "open_cursor")) unless active;
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<Cursor>.Err(problem),
                 Result.Ok(values) => run_open_cursor(lease, text, values),
@@ -1251,9 +1225,7 @@ export let Sql = module (
         /// unknown; either way it has ended.
         #NoDiscard
         export let commit = func -> Result<Unit> {
-            if (!active) {
-                return Result<Unit>.Err(closed("transaction", "commit"));
-            }
+            return Result<Unit>.Err(closed("transaction", "commit")) unless active;
             active = false;
             return match (host_commit(lease)) {
                 DoneOutcome.Ok => done(),
@@ -1264,9 +1236,7 @@ export let Sql = module (
         /// @brief Rolls back.
         #NoDiscard
         export let rollback = func -> Result<Unit> {
-            if (!active) {
-                return Result<Unit>.Err(closed("transaction", "rollback"));
-            }
+            return Result<Unit>.Err(closed("transaction", "rollback")) unless active;
             active = false;
             return match (host_rollback(lease)) {
                 DoneOutcome.Ok => done(),
@@ -1304,7 +1274,7 @@ export let Sql = module (
         /// @brief The pool and state, such as "Transaction(main, active)".
         #Pure
         export let.override to_string = func -> string =>
-            "Transaction(" + pool_name + (active ? ", active)" : ", ended)");
+            "Transaction(" .. pool_name .. (active ? ", active)" : ", ended)");
     );
 
     /// @brief Runs `body` in a transaction of its own connection: commits when it returns Ok, rolls back when
@@ -1374,10 +1344,8 @@ export let Sql = module (
         /// TooLarge.
         #NoDiscard
         export let fetch = func(max: int) -> Result<immutable.ImmutableList<Row>> {
-            if (!open_now) {
-                return Result<immutable.ImmutableList<Row>>.Err(closed("cursor", "fetch"));
-            }
-            if (!remaining) {
+            return Result<immutable.ImmutableList<Row>>.Err(closed("cursor", "fetch")) unless open_now;
+            if (not remaining) {
                 last none: Row[list] = new;
                 return Result<immutable.ImmutableList<Row>>.Ok(new immutable.ImmutableList<Row>(none));
             }
@@ -1395,9 +1363,7 @@ export let Sql = module (
 
         /// @brief Ends the statement. Closing again does nothing and returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return done();
-            }
+            return done() unless open_now;
             open_now = false;
             return match (host_close_cursor(handle)) {
                 DoneOutcome.Ok => done(),
@@ -1408,6 +1374,6 @@ export let Sql = module (
         /// @brief The columns and state, such as "Cursor(id, name; open)".
         #Pure
         export let.override to_string = func -> string =>
-            "Cursor(" + columns.to_string() + (open_now ? "; open)" : "; closed)");
+            "Cursor(" .. columns.to_string() .. (open_now ? "; open)" : "; closed)");
     );
 );
