@@ -74,7 +74,12 @@ class Host:
                 pids += [int(pid) for pid in (task / "children").read_text().split()]
             except OSError:
                 pass
-        return sorted(set(pids))
+        # Each thread's list is read at a different moment, so a worker
+        # reaped after one list was read can appear next to its replacement
+        # from a later one. Only the processes that still exist after every
+        # list has been read (zombies included) are counted: all of them
+        # existed at one moment, the end of the reading.
+        return sorted(pid for pid in set(pids) if exists(pid))
 
     def stop(self, sig=signal.SIGTERM, timeout=15):
         if self.process.poll() is None:
@@ -86,6 +91,10 @@ class Host:
                 self.process.wait()
         self.err.close()
         return self.process.returncode
+
+
+def exists(pid):
+    return Path(f"/proc/{pid}").exists()
 
 
 def request(port, method, path, body=None, headers=None, timeout=30):
@@ -257,7 +266,10 @@ def test_basic(args, image):
 
 
 def test_limits(args, image):
-    host = Host(args, image, "--max-workers", "1", "--max-queue", "0", "--ready-workers", "0",
+    # One slot and one place in the queue: a worker holds its slot until it
+    # has been reaped, so a request that follows a response at once waits
+    # for it instead of being refused.
+    host = Host(args, image, "--max-workers", "1", "--max-queue", "1", "--ready-workers", "0",
                 "--request-timeout", "2", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
     try:
         port = host.port
@@ -275,13 +287,21 @@ def test_limits(args, image):
         def slow():
             results["slow"] = request(port, "GET", "/sleep")[0]
 
+        def queued():
+            results["queued"] = request(port, "GET", "/hello")[0]
+
         started = time.time()
         thread = threading.Thread(target=slow)
         thread.start()
         time.sleep(0.5)
+        waiting = threading.Thread(target=queued)
+        waiting.start()
+        time.sleep(0.3)
         status, headers, _ = request(port, "GET", "/hello")
         check(status == 503 and headers.get("retry-after") == "1", f"saturated: {status} {headers}")
         thread.join()
+        waiting.join()
+        check(results.get("queued") in (200, 503), f"queued behind the slow request: {results}")
         elapsed = time.time() - started
         check(results.get("slow") == 504 and elapsed < 6, f"deadline: {results} after {elapsed:.1f} s")
         time.sleep(0.5)
@@ -489,6 +509,46 @@ def test_dead_ready_worker(args, image):
     check("a ready worker had ended" in host.stderr(), "the discarded worker is logged")
 
 
+def test_process_bound(args, image):
+    # A worker holds its S-1 slot until it has been reaped, so the workers,
+    # exited or not, never outnumber S-1 plus S-2 (B-S4).
+    for start in ("exec",):
+        host = Host(args, image, "--max-workers", "2", "--ready-workers", "1", "--max-queue", "256")
+        peak = [0]
+        stop = threading.Event()
+
+        def sample():
+            while not stop.is_set():
+                peak[0] = max(peak[0], len(host.children()))
+                time.sleep(0.002)
+
+        def load(statuses):
+            connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
+            for _ in range(25):
+                connection.request("GET", "/info")
+                response = connection.getresponse()
+                response.read()
+                statuses.append(response.status)
+            connection.close()
+
+        try:
+            sampler = threading.Thread(target=sample)
+            sampler.start()
+            statuses = []
+            threads = [threading.Thread(target=load, args=(statuses,)) for _ in range(12)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            stop.set()
+            sampler.join()
+            check(statuses.count(200) == 300, f"bounded load ({start}): {sorted(set(statuses))} {len(statuses)}")
+            check(0 < peak[0] <= 3, f"workers at the peak ({start}): {peak[0]}, the bound is 3")
+        finally:
+            stop.set()
+            host.stop()
+
+
 def test_step_limit(args, image):
     # --max-steps bounds each request's execution; past it the execution
     # traps, the client gets 500, and the next request runs in a new worker.
@@ -634,7 +694,8 @@ def main():
         print(build.stdout + build.stderr)
         return 1
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
-             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker,
+             test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:
             continue

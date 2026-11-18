@@ -40,6 +40,10 @@
 #include <unistd.h>
 #include <vector>
 
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -303,6 +307,12 @@ public:
         nvr_check(bytes);
         std::random_device device;
         id_prefix_ = (static_cast<std::uint64_t>(device()) << 32) | device();
+        worker_arguments_ = worker_arguments();
+        if (::pipe(wake_) != 0) throw std::runtime_error("cannot create the reaper's wake pipe");
+        for (const int end : wake_) {
+            ::fcntl(end, F_SETFD, FD_CLOEXEC);
+            ::fcntl(end, F_SETFL, ::fcntl(end, F_GETFL) | O_NONBLOCK);
+        }
         reaper_ = std::jthread([this](std::stop_token stop) { reap(stop); });
         if (options_.ready_workers > 0) spawner_ = std::jthread([this](std::stop_token stop) { keep_ready(stop); });
     }
@@ -311,8 +321,13 @@ public:
         spawner_.request_stop();
         ready_changed_.notify_all();
         if (spawner_.joinable()) spawner_.join();
-        std::lock_guard lock(ready_mutex_);
-        ready_.clear(); // Closing the channels ends the ready workers.
+        {
+            std::lock_guard lock(ready_mutex_);
+            ready_.clear(); // Closing the channels ends the ready workers.
+        }
+        reaper_.request_stop();
+        wake_reaper();
+        if (reaper_.joinable()) reaper_.join();
     }
 
     // The startup check (Backend030): one worker runs `serve`, which answers
@@ -367,10 +382,16 @@ public:
             write_buffered(writer, unavailable());
             return;
         }
+        // The S-1 slot is held until the request's worker has been reaped:
+        // the reaper releases it then. Without a worker it is released here.
+        bool slot_held = true;
         struct Release {
             Host& host;
-            ~Release() { host.release(); }
-        } release{*this};
+            bool& held;
+            ~Release() {
+                if (held) host.release();
+            }
+        } release{*this, slot_held};
 
         neura::nvm::ServerRequest request;
         request.request_id = next_id();
@@ -387,7 +408,9 @@ public:
                                std::chrono::system_clock::now().time_since_epoch()).count() + left.count();
 
         // A worker that provably ran nothing (its channel ended before it
-        // took the Assign) is replaced once; no request is run twice.
+        // took the Assign) is replaced once; no request is run twice. The
+        // ended worker is killed and reaped before its replacement starts,
+        // so the slot never stands for two processes.
         Outcome outcome;
         std::optional<Worker> worker;
         for (int attempt = 0; attempt < 2; ++attempt) {
@@ -397,9 +420,7 @@ public:
             if (!outcome.unassigned) break;
             log(3, request.request_id, "a ready worker had ended before its assignment; using a new one");
             ++metrics_.retried;
-            ::kill(worker->pid, SIGKILL);
-            worker->channel.reset();
-            hand_to_reaper(worker->pid, {}, false);
+            discard(*worker);
             worker.reset();
         }
         if (!worker) {
@@ -417,7 +438,8 @@ public:
             ::kill(pid, SIGKILL);
         }
         worker->channel.reset();
-        hand_to_reaper(pid, request.request_id, outcome.done);
+        hand_to_reaper(pid, request.request_id, outcome.done, true);
+        slot_held = false;
         if (outcome.timed_out) {
             ++metrics_.timeouts;
             log(4, request.request_id, "request deadline passed; worker killed");
@@ -580,23 +602,9 @@ private:
         slot_free_.notify_one();
     }
 
-    std::optional<Worker> spawn() {
-        int pair[2];
-#ifdef SOCK_CLOEXEC
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) != 0) return std::nullopt;
-#else
-        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return std::nullopt;
-        ::fcntl(pair[0], F_SETFD, FD_CLOEXEC);
-        ::fcntl(pair[1], F_SETFD, FD_CLOEXEC);
-#endif
-        // dup2 onto the channel descriptor clears close-on-exec, except when
-        // the descriptor is already that number.
-        if (pair[1] == worker_channel_descriptor) {
-            const int moved = ::fcntl(pair[1], F_DUPFD_CLOEXEC, worker_channel_descriptor + 1);
-            ::close(pair[1]);
-            pair[1] = moved;
-        }
-        std::vector<std::string> arguments{executable_.string(), "--worker"};
+    // The worker's options after --worker, without the image.
+    std::vector<std::string> worker_arguments() const {
+        std::vector<std::string> arguments;
         const auto& caps = options_.capabilities;
         if (caps.fs) {
             std::string option = "--allow-fs";
@@ -613,20 +621,46 @@ private:
         if (options_.worker_tier) arguments.push_back("--tier=" + std::to_string(*options_.worker_tier));
         if (options_.worker_jit) arguments.push_back("--jit=" + *options_.worker_jit);
         arguments.push_back(options_.image.string());
+        return arguments;
+    }
+
+    pid_t exec_worker(int channel) {
+        std::vector<std::string> arguments{executable_.string(), "--worker"};
+        arguments.insert(arguments.end(), worker_arguments_.begin(), worker_arguments_.end());
         std::vector<char*> argv;
         for (auto& argument : arguments) argv.push_back(argument.data());
         argv.push_back(nullptr);
 
         posix_spawn_file_actions_t actions;
         posix_spawn_file_actions_init(&actions);
-        posix_spawn_file_actions_adddup2(&actions, pair[1], worker_channel_descriptor);
+        posix_spawn_file_actions_adddup2(&actions, channel, worker_channel_descriptor);
         // The image's console output goes to the host's standard error.
         posix_spawn_file_actions_adddup2(&actions, 2, 1);
         pid_t pid = -1;
         const int error = ::posix_spawn(&pid, executable_.c_str(), &actions, nullptr, argv.data(), environ);
         posix_spawn_file_actions_destroy(&actions);
+        return error == 0 ? pid : -1;
+    }
+
+    std::optional<Worker> spawn() {
+        int pair[2];
+#ifdef SOCK_CLOEXEC
+        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) != 0) return std::nullopt;
+#else
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return std::nullopt;
+        ::fcntl(pair[0], F_SETFD, FD_CLOEXEC);
+        ::fcntl(pair[1], F_SETFD, FD_CLOEXEC);
+#endif
+        // dup2 onto the channel descriptor clears close-on-exec, except when
+        // the descriptor is already that number.
+        if (pair[1] == worker_channel_descriptor) {
+            const int moved = ::fcntl(pair[1], F_DUPFD_CLOEXEC, worker_channel_descriptor + 1);
+            ::close(pair[1]);
+            pair[1] = moved;
+        }
+        const pid_t pid = exec_worker(pair[1]);
         ::close(pair[1]);
-        if (error != 0) {
+        if (pid < 0) {
             ::close(pair[0]);
             return std::nullopt;
         }
@@ -641,12 +675,24 @@ private:
         hello.identity = worker::server_identity(image_digest_);
         if (worker.channel->greet(hello, Clock::now() + 10s) != Channel::Status::Ok) {
             log(4, {}, "request worker failed its greeting");
-            ::kill(pid, SIGKILL);
-            worker.channel.reset();
-            hand_to_reaper(pid, {}, false);
+            discard(worker);
             return std::nullopt;
         }
         return worker;
+    }
+
+    // Kills a worker that ran nothing and waits for it, here: it holds no
+    // slot of its own, so it is gone before anything replaces it.
+    void discard(Worker& worker) {
+        ::kill(worker.pid, SIGKILL);
+        worker.channel.reset();
+        int status = 0;
+        while (::waitpid(worker.pid, &status, 0) < 0 && errno == EINTR) {}
+        {
+            std::lock_guard lock(pids_mutex_);
+            live_.erase(worker.pid);
+        }
+        ++metrics_.abnormal;
     }
 
     // A ready worker, or a new one. A ready worker whose channel is readable
@@ -667,9 +713,7 @@ private:
             if (::poll(&entry, 1, 0) == 0) return worker;
             log(3, {}, "a ready worker had ended; discarding it");
             ++metrics_.retried;
-            ::kill(worker->pid, SIGKILL);
-            worker->channel.reset();
-            hand_to_reaper(worker->pid, {}, false);
+            discard(*worker);
         }
     }
 
@@ -941,7 +985,8 @@ private:
             ready = ready_.size();
         }
         add("neura_http_in_flight", "gauge", "Requests being answered.", {{"", in_flight_.load()}});
-        add("neura_workers_running", "gauge", "Requests holding a worker slot (S-1).", {{"", running}});
+        add("neura_workers_running", "gauge", "Worker slots in use (S-1): a slot is held until its worker is reaped.",
+            {{"", running}});
         add("neura_workers_ready", "gauge", "Started workers waiting for a request (S-2).", {{"", ready}});
         add("neura_requests_waiting", "gauge", "Requests waiting for a worker (S-3).", {{"", waiting}});
         add("neura_ready", "gauge", "1 after the startup check while not draining.",
@@ -958,59 +1003,105 @@ private:
         pid_t pid;
         std::string id;
         bool answered;
+        bool slot; // Holds an S-1 slot until it is reaped.
         Clock::time_point kill_at;
+        int pidfd = -1;
+        bool killed = false;
     };
 
-    void hand_to_reaper(pid_t pid, std::string id, bool answered) {
+    void hand_to_reaper(pid_t pid, std::string id, bool answered, bool slot) {
         {
             std::lock_guard lock(reap_mutex_);
-            exiting_.push_back({pid, std::move(id), answered, Clock::now() + options_.grace});
+            exiting_.push_back({pid, std::move(id), answered, slot, Clock::now() + options_.grace});
         }
-        reap_changed_.notify_one();
+        wake_reaper();
     }
 
-    // Waits for every finished worker. A worker that answered and does not
-    // exit within the grace period is killed. Traps and failures are logged.
+    void wake_reaper() {
+        const char byte = 1;
+        (void)!::write(wake_[1], &byte, 1); // A full pipe already wakes it.
+    }
+
+    // A descriptor that becomes readable when `pid` exits, or -1 where the
+    // system has none (the reaper then looks every 2 ms).
+    static int open_pidfd(pid_t pid) {
+#if defined(__linux__) && defined(SYS_pidfd_open)
+        const long descriptor = ::syscall(SYS_pidfd_open, pid, 0);
+        if (descriptor >= 0) ::fcntl(static_cast<int>(descriptor), F_SETFD, FD_CLOEXEC);
+        return descriptor >= 0 ? static_cast<int>(descriptor) : -1;
+#else
+        (void)pid;
+        return -1;
+#endif
+    }
+
+    // Waits for every finished worker as it exits (on its pidfd), releases
+    // the S-1 slot it held, and logs traps and failures. A worker that does
+    // not exit within the grace period is killed.
     void reap(std::stop_token stop) {
+        std::vector<Exiting> pending;
+        std::vector<pollfd> watched;
         for (;;) {
-            std::vector<Exiting> batch;
             {
-                std::unique_lock lock(reap_mutex_);
-                reap_changed_.wait_for(lock, 20ms, [&] { return stop.stop_requested() || !exiting_.empty(); });
-                if (stop.stop_requested() && exiting_.empty()) return;
-                batch.swap(exiting_);
-            }
-            std::vector<Exiting> pending;
-            for (auto& entry : batch) {
-                int status = 0;
-                const auto done = ::waitpid(entry.pid, &status, WNOHANG);
-                if (done == 0) {
-                    if (Clock::now() >= entry.kill_at) ::kill(entry.pid, SIGKILL);
+                std::lock_guard lock(reap_mutex_);
+                for (auto& entry : exiting_) {
+                    entry.pidfd = open_pidfd(entry.pid);
                     pending.push_back(std::move(entry));
-                    continue;
                 }
-                {
-                    std::lock_guard lock(pids_mutex_);
-                    live_.erase(entry.pid);
-                }
-                if (done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0)) ++metrics_.abnormal;
-                if (done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0) && !entry.id.empty()) {
-                    log(entry.answered ? 3 : 4, entry.id, "request worker ended abnormally",
-                        {{"worker_exit", describe_exit(status)}});
-                }
+                exiting_.clear();
             }
-            if (!pending.empty()) {
-                std::unique_lock lock(reap_mutex_);
-                exiting_.insert(exiting_.end(), std::make_move_iterator(pending.begin()),
-                                std::make_move_iterator(pending.end()));
-                if (stop.stop_requested()) {
-                    for (auto& entry : exiting_) ::kill(entry.pid, SIGKILL);
+            const bool stopping = stop.stop_requested();
+            if (stopping && pending.empty()) return;
+            const auto now = Clock::now();
+            std::erase_if(pending, [&](Exiting& entry) {
+                if (!finish(entry)) {
+                    if (!entry.killed && (stopping || now >= entry.kill_at)) {
+                        ::kill(entry.pid, SIGKILL);
+                        entry.killed = true;
+                    }
+                    return false;
                 }
-                // Workers still exiting: look again shortly, not at once, or
-                // this thread spins on a core while they finish.
-                reap_changed_.wait_for(lock, 2ms, [&] { return stop.stop_requested(); });
+                if (entry.pidfd >= 0) ::close(entry.pidfd);
+                return true;
+            });
+            watched.assign(1, pollfd{wake_[0], POLLIN, 0});
+            auto next = now + 1s;
+            bool unwatched = false;
+            for (const auto& entry : pending) {
+                if (entry.pidfd >= 0) watched.push_back({entry.pidfd, POLLIN, 0});
+                else unwatched = true;
+                if (!entry.killed) next = std::min(next, entry.kill_at);
+            }
+            auto timeout = std::chrono::ceil<std::chrono::milliseconds>(next - Clock::now()).count();
+            if (unwatched) timeout = std::min<long long>(timeout, 2);
+            (void)::poll(watched.data(), watched.size(), static_cast<int>(std::max<long long>(0, timeout)));
+            if (watched[0].revents != 0) {
+                char drain[64];
+                while (::read(wake_[0], drain, sizeof drain) > 0) {}
             }
         }
+    }
+
+    // Reaps the worker if it has exited: true when it is gone.
+    bool finish(const Exiting& entry) {
+        int status = 0;
+        pid_t done = 0;
+        {
+            // With the pid set locked, kill_all never signals a reaped pid.
+            std::lock_guard lock(pids_mutex_);
+            do {
+                done = ::waitpid(entry.pid, &status, WNOHANG);
+            } while (done < 0 && errno == EINTR);
+            if (done == 0) return false;
+            live_.erase(entry.pid);
+        }
+        if (entry.slot) release();
+        const bool abnormal = done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        if (abnormal) ++metrics_.abnormal;
+        if (abnormal && !entry.id.empty()) {
+            log(entry.answered ? 3 : 4, entry.id, "request worker ended abnormally", {{"worker_exit", describe_exit(status)}});
+        }
+        return true;
     }
 
     HostOptions options_;
@@ -1033,8 +1124,10 @@ private:
     std::set<pid_t> live_;
 
     std::mutex reap_mutex_;
-    std::condition_variable reap_changed_;
     std::vector<Exiting> exiting_;
+    int wake_[2] = {-1, -1};
+
+    std::vector<std::string> worker_arguments_;
 
     struct Metrics {
         std::array<std::atomic<std::uint64_t>, 5> responses{};
