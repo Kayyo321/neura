@@ -556,6 +556,17 @@ export let Character = module (
     export let is_identifier_ignorable = func(code_point: uint32) -> bool =>
         ucd.is_identifier_ignorable(code_point);
 
+    /// @brief Tests whether a code point may start a Java identifier: a letter or category Nl, Sc, or Pc
+    /// (Java's isJavaIdentifierStart).
+    #[Pure, ThreadSafe]
+    export let is_java_identifier_start = func(code_point: uint32) -> bool =>
+        ucd.is_java_identifier_start(code_point);
+
+    /// @brief Tests whether a code point may continue a Java identifier: a letter, category Sc, Pc, Nd, Nl,
+    /// Mc, or Mn, or is_identifier_ignorable (Java's isJavaIdentifierPart).
+    #[Pure, ThreadSafe]
+    export let is_java_identifier_part = func(code_point: uint32) -> bool => ucd.is_java_identifier_part(code_point);
+
     /// @brief Tests the Emoji property of UTS #51 (Java's isEmoji). Digits, `#`, and `*` have it.
     #[Pure, ThreadSafe]
     export let is_emoji = func(code_point: uint32) -> bool => ucd.has(data.Emoji, code_point);
@@ -656,7 +667,8 @@ export let Character = module (
     #ThreadSafe
     export let get_name = func(code_point: uint32) -> Optional<string> {
         trap_with_message(
-            "unsupported: Std.Core.Character.get_name is not implemented in Neura 0.3.0 (the Unicode name table is not bundled)");
+            "unsupported: Std.Core.Character.get_name is not implemented in Neura 0.3.0 " +
+            "(the Unicode name table is not bundled)");
     };
 
     /// @brief The code point with a Unicode name, matched without regard to case (Java's codePointOf).
@@ -664,7 +676,8 @@ export let Character = module (
     #ThreadSafe
     export let code_point_of = func(name: string) -> Optional<uint32> {
         trap_with_message(
-            "unsupported: Std.Core.Character.code_point_of is not implemented in Neura 0.3.0 (the Unicode name table is not bundled)");
+            "unsupported: Std.Core.Character.code_point_of is not implemented in Neura 0.3.0 " +
+            "(the Unicode name table is not bundled)");
     };
 
     // Code points and encodings

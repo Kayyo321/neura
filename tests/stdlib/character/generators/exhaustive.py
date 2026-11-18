@@ -10,13 +10,16 @@ unpacked inversion maps of the dump and the Java definitions of
 docs/lang/Stdlib.md section 8.5. They do not read the packed tables, so the
 test checks the packing and the Neura lookups against the UCD data.
 
-Two independent checks run before anything is written, and the script stops
+Three independent checks run before anything is written, and the script stops
 when either finds a difference that is not listed below:
 
 * Python's unicodedata (Unicode 15.1.0 in Python 3.13) for every code point
   whose Age is 15.1 or earlier: General_Category, Bidi_Class, Bidi_Mirrored,
-  decimal and numeric values, str.isalpha, str.isnumeric, str.isalnum, and
-  one-to-one str.upper and str.lower results.
+  decimal and numeric values, str.isalpha, isnumeric, isalnum, isupper, and
+  islower, and one-to-one str.upper, lower, and title results.
+* Perl's regular expression engine, whose property tables are compiled into
+  the perl executable, for every code point: \p{...} of the binary
+  properties of REGEX_PROPERTIES, the categories L, Lt, Nd, and Cn included.
 * The Unicode 17.0.0 case tables of stdlib/std/text/internal/unicode-case-data.nra,
   generated from the unmodified UCD files: every one-scalar Upper and Lower
   record equals the simple mapping, and every code point without a record
@@ -29,6 +32,8 @@ wrapping at 2^32, over the plane's code points in order (Std.Core.Hash.combine).
 import argparse
 import importlib.util
 import re
+import shlex
+import subprocess
 import sys
 import unicodedata
 from fractions import Fraction
@@ -44,11 +49,11 @@ spec.loader.exec_module(tables)
 # unmodified 17.0.0 UCD files (cross_check_case_data).
 KNOWN_CHANGES = {
     # LATIN LETTER PHARYNGEAL VOICED FRICATIVE: Ll to Lo, so it is no longer a cased letter.
-    ("category", 0x0295), ("isalpha", 0x0295), ("isalnum", 0x0295),
+    ("category", 0x0295), ("isalpha", 0x0295), ("isalnum", 0x0295), ("islower", 0x0295),
     # AHOM CONSONANT SIGN MEDIAL RA: Mn and NSM to Mc and L.
     ("category", 0x1171E), ("bidirectional", 0x1171E),
     # New capitals U+A7DC, U+A7CB, U+A7D2, and U+A7D4 give these small letters uppercase mappings.
-    ("upper", 0x019B), ("upper", 0x0264), ("upper", 0xA7D3), ("upper", 0xA7D5),
+    *((name, p) for p in (0x019B, 0x0264, 0xA7D3, 0xA7D5) for name in ("upper", "title")),
     # NOT EQUIVALENT TO became Bidi_Mirrored.
     ("mirrored", 0x226D),
     # The mathematical nablas changed from L to ON.
@@ -139,6 +144,9 @@ def per_code_point(data):
         "is_identifier_start": lambda p: p == 0x2E2F or tables.in_list(lists["ID_Start"], p),
         "is_identifier_part": lambda p: p == 0x2E2F or tables.in_list(lists["ID_Continue"], p) or ignorable(p),
         "is_identifier_ignorable": ignorable,
+        "is_java_identifier_start": lambda p: letter(p) or gc(p) in ("Nl", "Sc", "Pc"),
+        "is_java_identifier_part": lambda p: (letter(p) or gc(p) in ("Sc", "Pc", "Nd", "Nl", "Mc", "Mn") or
+                                             ignorable(p)),
         "is_emoji": member("Emoji"),
         "is_emoji_presentation": member("Emoji_Presentation"),
         "is_emoji_modifier": member("Emoji_Modifier"),
@@ -153,7 +161,7 @@ def per_code_point(data):
         "script": lambda p: script_index[tables.value_at(sc_ranges, p)],
         "block": lambda p: block_index[tables.value_at(blk_ranges, p)],
     }
-    return properties, numeric, upper, lower, gc
+    return properties, numeric, upper, lower, title, gc
 
 
 NEURA_EXPRESSIONS = {
@@ -174,7 +182,7 @@ def neura_expression(name):
     return NEURA_EXPRESSIONS.get(name, f"bit(character.{name}(p))")
 
 
-def cross_check_python(data, properties, numeric, upper, lower, gc):
+def cross_check_python(data, properties, numeric, upper, lower, title, gc):
     differences = []
     age = data["maps"]["age"]["ranges"]
     stable = lambda p: tables.value_at(age, p) not in ("Unassigned", "16.0", "17.0")
@@ -209,9 +217,53 @@ def cross_check_python(data, properties, numeric, upper, lower, gc):
                 if getattr(ch, method)() != properties[name](p):
                     differ(method, p)
             if stable(p):
-                for result, table, method in ((ch.upper(), upper, "upper"), (ch.lower(), lower, "lower")):
+                for result, table, method in ((ch.upper(), upper, "upper"), (ch.lower(), lower, "lower"),
+                                              (ch.title(), title, "title")):
                     if len(result) == 1 and ord(result) != table.get(p, p):
                         differ(method, p)
+                if ch.isupper() != properties["is_upper"](p):
+                    differ("isupper", p)
+                if ch.islower() != properties["is_lower"](p):
+                    differ("islower", p)
+    return differences
+
+
+# Binary properties that Perl's regular expression engine tests from the property tables compiled into the
+# perl executable, a path separate from the Unicode::UCD files that the dump reads.
+REGEX_PROPERTIES = (
+    ("Alphabetic", "is_alphabetic"), ("Uppercase", "is_upper"), ("Lowercase", "is_lower"),
+    ("Ideographic", "is_ideographic"), ("ID_Start", None), ("ID_Continue", None), ("Bidi_Mirrored", "is_mirrored"),
+    ("White_Space", "is_space"), ("Emoji", "is_emoji"), ("Emoji_Presentation", "is_emoji_presentation"),
+    ("Emoji_Modifier", "is_emoji_modifier"), ("Emoji_Modifier_Base", "is_emoji_modifier_base"),
+    ("Emoji_Component", "is_emoji_component"), ("Extended_Pictographic", "is_extended_pictographic"),
+    ("Lt", "is_title_case"), ("L", "is_letter"), ("Nd", "is_digit"), ("Cn", None),
+)
+
+
+def cross_check_perl_regex(perl, data, properties):
+    """Compare each code point's \\p{...} results with the expected values: ID_Start and ID_Continue with the
+    dump's lists, which is_identifier_start and is_identifier_part extend, and Cn with is_defined."""
+    if perl is None:
+        print("skipped the Perl regular expression check (no --perl)")
+        return []
+    tests = ", ".join(f"($c =~ /\\p{{{name}}}/ ? 1 : 0)" for name, _ in REGEX_PROPERTIES)
+    program = ("no warnings; binmode STDOUT; for my $p (0 .. 0x10FFFF) { my $c = chr($p); "
+               f"print join('', {tests}), \"\\n\"; }}")
+    result = subprocess.run(shlex.split(perl) + ["-e", program], capture_output=True, check=True)
+    lines = result.stdout.decode().split("\n")
+    differences = []
+    for p in range(0x110000):
+        row = lines[p]
+        for i, (name, ours) in enumerate(REGEX_PROPERTIES):
+            got = row[i] == "1"
+            if ours is None and name != "Cn":
+                expected = tables.in_list(data["lists"][name], p)
+            elif name == "Cn":
+                expected = not properties["is_defined"](p)
+            else:
+                expected = bool(properties[ours](p))
+            if got != expected:
+                differences.append((f"perl \\p{{{name}}}", p))
     return differences
 
 
@@ -319,14 +371,17 @@ def write_test(expected):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--perl", default="perl")
+    parser.add_argument("--perl", default="perl",
+                        help="the perl whose Unicode::UCD is 17.0.0; 'none' skips the regular expression check")
     parser.add_argument("--dump", type=Path, help="read the dump from this file instead of running perl")
     args = parser.parse_args()
     dump = args.dump.read_bytes() if args.dump else tables.run_perl(args.perl)
+    perl = args.perl if args.perl != "none" else None
     data = tables.parse_dump(dump)
     print(f"Python unicodedata {unicodedata.unidata_version}; tables {tables.VERSION}")
-    properties, numeric, upper, lower, gc = per_code_point(data)
-    differences = cross_check_python(data, properties, numeric, upper, lower, gc)
+    properties, numeric, upper, lower, title, gc = per_code_point(data)
+    differences = cross_check_python(data, properties, numeric, upper, lower, title, gc)
+    differences += cross_check_perl_regex(perl, data, properties)
     differences += cross_check_case_data(upper, lower)
     if differences:
         for name, p in differences[:50]:

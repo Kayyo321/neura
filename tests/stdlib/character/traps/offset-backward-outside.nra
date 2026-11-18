@@ -1,0 +1,12 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: offset outside the list
+let character = import:Std.Core.Character;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(character.offset_by_code_points(new([65]), 1, -2).to_string());
+        return program.ExitCode.Ok;
+    };
+);

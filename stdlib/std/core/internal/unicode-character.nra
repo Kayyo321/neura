@@ -101,6 +101,22 @@ export let UnicodeCharacter = module (
     export let is_identifier_part = func(code_point: uint32) -> bool =>
         code_point == 11823 || has(data.IdContinue, code_point) || is_identifier_ignorable(code_point);
 
+    /// @brief Java's isJavaIdentifierStart: a letter, category Nl, Sc, or Pc.
+    #[Pure, ThreadSafe]
+    export let is_java_identifier_start = func(code_point: uint32) -> bool {
+        last c = category(code_point);
+        return c <= 4 || c == 9 || c == 19 || c == 11;
+    };
+
+    /// @brief Java's isJavaIdentifierPart: a letter, category Sc, Pc, Nd, Nl, Mc, or Mn, or the
+    /// identifier-ignorable set.
+    #[Pure, ThreadSafe]
+    export let is_java_identifier_part = func(code_point: uint32) -> bool {
+        last c = category(code_point);
+        return c <= 4 || c == 19 || c == 11 || c == 8 || c == 9 || c == 6 || c == 5 ||
+            is_identifier_ignorable(code_point);
+    };
+
     /// @brief The index into NumericIntegers plus one, or 0 when the code point has no Numeric_Value.
     #[Pure, ThreadSafe]
     export let numeric_index = func(code_point: uint32) -> int =>

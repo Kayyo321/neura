@@ -155,6 +155,17 @@ let CharacterTests = module (
         test.assert(character.is_identifier_start(8544) && character.is_identifier_start(20116));
     };
 
+    export let test_java_identifiers = func() -> void {
+        // Categories from Python's unicodedata: U+0024 Sc, U+005F Pc, U+0030 Nd, U+0300 Mn, U+0387 Po,
+        // U+2160 Nl, U+20AC Sc.
+        test.assert(character.is_java_identifier_start(36) && character.is_java_identifier_start(95));
+        test.assert(character.is_java_identifier_start(8364) && character.is_java_identifier_start(8544));
+        test.assert(!character.is_java_identifier_start(48) && !character.is_java_identifier_start(768));
+        test.assert(character.is_java_identifier_part(48) && character.is_java_identifier_part(768));
+        test.assert(character.is_java_identifier_part(0) && character.is_java_identifier_part(8203));
+        test.assert(!character.is_java_identifier_part(903) && !character.is_java_identifier_part(32));
+    };
+
     export let test_iso_control_and_defined = func() -> void {
         test.assert(character.is_iso_control(0) && character.is_iso_control(31) && !character.is_iso_control(32));
         test.assert(character.is_iso_control(127) && character.is_iso_control(159) && !character.is_iso_control(160));

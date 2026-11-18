@@ -21,7 +21,7 @@ let CharacterExhaustiveTests = module (
 
     /// @brief Checks one plane against the expected digests, in the order of the properties.
     let check_plane = func(plane: uint32, expected: uint32[]) -> void {
-        last digests: uint32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        last digests: uint32[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         for (let p: uint32 = plane * 65536; p < (plane + 1) * 65536; p += 1) {
             digests[0] = hashing.combine(digests[0], character.get_type(p) as uint32);
             digests[1] = hashing.combine(digests[1], character.bidi_class(p) as uint32);
@@ -46,30 +46,32 @@ let CharacterExhaustiveTests = module (
             digests[20] = hashing.combine(digests[20], bit(character.is_identifier_start(p)));
             digests[21] = hashing.combine(digests[21], bit(character.is_identifier_part(p)));
             digests[22] = hashing.combine(digests[22], bit(character.is_identifier_ignorable(p)));
-            digests[23] = hashing.combine(digests[23], bit(character.is_emoji(p)));
-            digests[24] = hashing.combine(digests[24], bit(character.is_emoji_presentation(p)));
-            digests[25] = hashing.combine(digests[25], bit(character.is_emoji_modifier(p)));
-            digests[26] = hashing.combine(digests[26], bit(character.is_emoji_modifier_base(p)));
-            digests[27] = hashing.combine(digests[27], bit(character.is_emoji_component(p)));
-            digests[28] = hashing.combine(digests[28], bit(character.is_extended_pictographic(p)));
-            digests[29] = hashing.combine(digests[29], character.to_upper(p));
-            digests[30] = hashing.combine(digests[30], character.to_lower(p));
-            digests[31] = hashing.combine(digests[31], character.to_title(p));
-            digests[32] = hashing.combine(digests[32], pattern(character.digit(p, 36)));
-            digests[33] = hashing.combine(digests[33], pattern(character.numeric_value(p)));
-            digests[34] = hashing.combine(digests[34], unicode_script.of(p) as uint32);
-            digests[35] = hashing.combine(digests[35], unicode_block.of(p) as uint32);
+            digests[23] = hashing.combine(digests[23], bit(character.is_java_identifier_start(p)));
+            digests[24] = hashing.combine(digests[24], bit(character.is_java_identifier_part(p)));
+            digests[25] = hashing.combine(digests[25], bit(character.is_emoji(p)));
+            digests[26] = hashing.combine(digests[26], bit(character.is_emoji_presentation(p)));
+            digests[27] = hashing.combine(digests[27], bit(character.is_emoji_modifier(p)));
+            digests[28] = hashing.combine(digests[28], bit(character.is_emoji_modifier_base(p)));
+            digests[29] = hashing.combine(digests[29], bit(character.is_emoji_component(p)));
+            digests[30] = hashing.combine(digests[30], bit(character.is_extended_pictographic(p)));
+            digests[31] = hashing.combine(digests[31], character.to_upper(p));
+            digests[32] = hashing.combine(digests[32], character.to_lower(p));
+            digests[33] = hashing.combine(digests[33], character.to_title(p));
+            digests[34] = hashing.combine(digests[34], pattern(character.digit(p, 36)));
+            digests[35] = hashing.combine(digests[35], pattern(character.numeric_value(p)));
+            digests[36] = hashing.combine(digests[36], unicode_script.of(p) as uint32);
+            digests[37] = hashing.combine(digests[37], unicode_block.of(p) as uint32);
         }
         last names: string[] = [
             "get_type", "bidi_class", "get_directionality", "is_upper", "is_lower", "is_title_case", "is_letter",
             "is_digit", "is_letter_or_digit", "is_alphabetic", "is_alpha", "is_numeric", "is_alpha_numeric",
             "is_whitespace", "is_space_char", "is_space", "is_iso_control", "is_defined", "is_ideographic",
-            "is_mirrored", "is_identifier_start", "is_identifier_part", "is_identifier_ignorable", "is_emoji",
-            "is_emoji_presentation", "is_emoji_modifier", "is_emoji_modifier_base", "is_emoji_component",
-            "is_extended_pictographic", "to_upper", "to_lower", "to_title", "digit", "numeric_value", "script",
-            "block"
+            "is_mirrored", "is_identifier_start", "is_identifier_part", "is_identifier_ignorable",
+            "is_java_identifier_start", "is_java_identifier_part", "is_emoji", "is_emoji_presentation",
+            "is_emoji_modifier", "is_emoji_modifier_base", "is_emoji_component", "is_extended_pictographic",
+            "to_upper", "to_lower", "to_title", "digit", "numeric_value", "script", "block"
         ];
-        for (let i = 0; i < 36; i += 1) {
+        for (let i = 0; i < 38; i += 1) {
             test.assert_with(digests[i] == expected[i],
                 "plane " + plane.to_string() + ": " + names[i] + " differs from the Unicode 17.0.0 data");
         }
@@ -79,9 +81,9 @@ let CharacterExhaustiveTests = module (
         check_plane(0, [
             1609432165, 3004381782, 375115829, 2112641985, 1449599543, 406722397, 231194847, 2738509600,
             2969704447, 762254662, 231194847, 573674934, 1147810876, 2656399293, 2808336605, 799537951, 2575406081,
-            3923015652, 1626147616, 4138638495, 970075708, 1540804500, 2004223009, 3219584638, 1643039842, 0,
-            2717715266, 2181489667, 867802814, 1407852868, 3716286523, 3842690692, 4148903717, 1433223476,
-            1246305028, 924525056
+            3923015652, 1626147616, 4138638495, 970075708, 1540804500, 2004223009, 3239294564, 2426782198,
+            3219584638, 1643039842, 0, 2717715266, 2181489667, 867802814, 1407852868, 3716286523, 3842690692,
+            4148903717, 1433223476, 1246305028, 924525056
         ]);
     };
 
@@ -89,116 +91,117 @@ let CharacterExhaustiveTests = module (
         check_plane(1, [
             3098306626, 2083975249, 1488723962, 30859663, 2295571264, 0, 268643631, 2308019136, 2576662767,
             2339259303, 268643631, 1541503433, 2940017780, 0, 0, 0, 0, 3938536653, 4074239389, 632455685,
-            1748840813, 4111276896, 2687570498, 413629884, 1783577745, 475336641, 4188644416, 2467936673,
-            788666404, 3687039024, 3193907632, 3687039024, 1474572126, 3714606738, 4199704914, 3313785600
+            1748840813, 4111276896, 2687570498, 3337082637, 1404551424, 413629884, 1783577745, 475336641,
+            4188644416, 2467936673, 788666404, 3687039024, 3193907632, 3687039024, 1474572126, 3714606738,
+            4199704914, 3313785600
         ]);
     };
 
     export let test_plane_2 = func() -> void {
         check_plane(2, [
             3398333113, 288, 336247671, 0, 0, 0, 3404604511, 0, 3404604511, 3404604511, 3404604511, 3804284126,
-            3404604511, 0, 0, 0, 0, 3404604511, 3404604511, 0, 3404604511, 3404604511, 0, 0, 0, 0, 0, 0, 0,
-            2130739200, 2130739200, 2130739200, 502267904, 687304904, 3113836693, 520357888
+            3404604511, 0, 0, 0, 0, 3404604511, 3404604511, 0, 3404604511, 3404604511, 0, 3404604511, 3404604511,
+            0, 0, 0, 0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 687304904, 3113836693, 520357888
         ]);
     };
 
     export let test_plane_3 = func() -> void {
         check_plane(3, [
             2391911737, 288, 1643722999, 0, 0, 0, 2414069215, 0, 2414069215, 2414069215, 2414069215, 0, 2414069215,
-            0, 0, 0, 0, 2414069215, 2414069215, 0, 2414069215, 2414069215, 0, 0, 0, 0, 0, 0, 0, 2130739200,
-            2130739200, 2130739200, 502267904, 502267904, 3042349333, 3930374144
+            0, 0, 0, 0, 2414069215, 2414069215, 0, 2414069215, 2414069215, 0, 2414069215, 2414069215, 0, 0, 0, 0,
+            0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 3042349333, 3930374144
         ]);
     };
 
     export let test_plane_4 = func() -> void {
         check_plane(4, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_5 = func() -> void {
         check_plane(5, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_6 = func() -> void {
         check_plane(6, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_7 = func() -> void {
         check_plane(7, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_8 = func() -> void {
         check_plane(8, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_9 = func() -> void {
         check_plane(9, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_10 = func() -> void {
         check_plane(10, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_11 = func() -> void {
         check_plane(11, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_12 = func() -> void {
         check_plane(12, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_13 = func() -> void {
         check_plane(13, [
             2614099968, 288, 1332740096, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
+            0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 0
         ]);
     };
 
     export let test_plane_14 = func() -> void {
         check_plane(14, [
             2568036669, 2902725152, 2191425394, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3790061889, 0, 0, 0,
-            3790061889, 1875038785, 0, 0, 0, 0, 764462592, 0, 2130739200, 2130739200, 2130739200, 502267904,
-            502267904, 3768950002, 768794624
+            3790061889, 1875038785, 0, 3790061889, 0, 0, 0, 0, 764462592, 0, 2130739200, 2130739200, 2130739200,
+            502267904, 502267904, 3768950002, 768794624
         ]);
     };
 
     export let test_plane_15 = func() -> void {
         check_plane(15, [
             3116367904, 288, 736, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3792699360, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 2811232256
+            0, 0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 2811232256
         ]);
     };
 
     export let test_plane_16 = func() -> void {
         check_plane(16, [
             3116367904, 288, 736, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3792699360, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 2308964352
+            0, 0, 0, 0, 2130739200, 2130739200, 2130739200, 502267904, 502267904, 2020605952, 2308964352
         ]);
     };
 );
