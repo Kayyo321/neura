@@ -397,6 +397,20 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         return HostCompletion::ok(bytes_value(std::move(bytes)));
     });
 
+    // The ui and history groups are served by a browser page (docs/runtime/Providers.md, "UI services"). A native
+    // run binds them, so that an image that mounts a component loads, and answers every request with error 14.
+    const auto deny = [](const HostRequest&) { return denied(); };
+    add(signature("neura.ui.root.open", {text()}, int64()), deny);
+    add(signature("neura.ui.root.close", {int64()}, void_type()), deny);
+    add(signature("neura.ui.template", {int64(), text()}, int64()), deny);
+    add(signature("neura.ui.commit", {int64(), byte_list()}, void_type()), deny);
+    add(signature("neura.ui.event.next", {int64(), int32()}, byte_list()), deny);
+    add(signature("neura.ui.stats", {int64()}, tuple({int64(), int64(), int64(), int64()})), deny);
+    add(signature("neura.history.current", {}, text()), deny);
+    add(signature("neura.history.push", {text()}, text()), deny);
+    add(signature("neura.history.replace", {text()}, text()), deny);
+    add(signature("neura.history.next", {}, text()), deny);
+
     const Adder adder = [this](HostSignature signature, FunctionService::Handler handler) {
         add(std::move(signature), std::move(handler));
     };
