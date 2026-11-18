@@ -24,7 +24,31 @@ A text hole accepts a string, an integer in decimal, a `float32` or `float64` fo
 
 `on:event={handler}` binds a function of the event's record type. `prop:name={value}` sets a supported DOM property, and `var:--name={value}` takes a `ui.CssValue`. Dynamic URL attributes take a `ui.Url`, constructed with `ui.url(text)`. Static URLs accept relative references and the schemes `https`, `http`, `mailto`, and `tel`.
 
-A static `src` of `img`, `source`, `video`, `audio` or `track`, or `poster` of `video`, that names a local file is copied into the build output under its digest, and the template refers to the copy ([Stylesheets](Css.md#imports-and-assets)). A class name from a CSS module is `Styles.class_name("row")` ([Stylesheets](Css.md#modules)).
+A static `src` of `img`, `source`, `video`, `audio` or `track`, a `poster` of `video`, each URL of a `srcset` of `img` or `source`, or an `href` of an SVG `<use>`, that names a local file is copied into the build output under its digest, and the template refers to the copy ([Stylesheets](Css.md#imports-and-assets)). Each `srcset` URL follows the rule of static URLs, without `mailto` and `tel`. A class name from a CSS module is `Styles.class_name("row")` ([Stylesheets](Css.md#modules)).
+
+## Rendering has no effects
+
+Every expression in a template runs while the view is built, so it must not change anything that existed before. A hole may allocate, read bindings, fields and collections, and call functions that do the same. It may not assign a module binding, write a field or element of an object it did not create, make a host request such as printing, start or wait for tasks, or call a function value, whose effects the compiler cannot see; any of these is `E1010`, reported at the hole with the chain of calls that reaches the effect. A handler bound with `on:` runs later, when its event arrives, so its body may have effects.
+
+<!-- example: check -->
+```neura
+let ui = import:Std.Ui;
+
+let total = func(counts: int32[]) -> int32 {
+    let sum: int32 = 0;
+    for (let count in counts) {
+        sum += count;
+    }
+    return sum;
+};
+
+let summary = html(counts: int32[], reset: func(ui.ClickEvent) -> void) {
+    <p>{ total(counts) } parts</p>
+    <button type="button" on:click={reset}>Reset</button>
+};
+```
+
+A view keeps every handler bound in it, so a factory's retention summary says that a parameter reaching an `on:` hole is retained by the view it returns. A function value that captures a local and is passed for such a parameter therefore escapes with the view, and is written `new func`, as for any escaping function value.
 
 Holes evaluate once in document order, with an element's attributes evaluated before its children. `@if` evaluates conditions in order and renders the first matching branch. `@for` evaluates its source once, then evaluates the key before the body on each iteration. An array supplies items in index order. A key is a string or a fixed-width integer.
 
