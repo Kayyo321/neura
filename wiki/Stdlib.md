@@ -228,6 +228,12 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Math.BigInteger`](Stdlib-Math-BigInteger) | [Contracts](Stdlib-Math-BigInteger#detailed-contracts) | [Declarations](Stdlib-Math-BigInteger#exported-declarations) |
 | [`Std.Math.Math`](Stdlib-Math-Math) | [Contracts](Stdlib-Math-Math#detailed-contracts) | [Declarations](Stdlib-Math-Math#exported-declarations) |
 
+### `Std.Desktop`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Desktop`](Stdlib-Desktop) | [Contracts](Stdlib-Desktop#detailed-contracts) | [Declarations](Stdlib-Desktop#exported-declarations) |
+
 ### `Std.Net`
 
 The networking contracts, TCP streams and listeners, and the packages added in 0.3.0 (proposed; some host calls are stubs). The [specification](Stdlib-Design#114-stdnet) describes each package, and the design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository lists what each provides and what each stub needs.

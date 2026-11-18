@@ -1732,6 +1732,36 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
     endforeach()
 
+    # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the
+    # pinned Electron 45.3.3 of hosts/desktop/engine.lock, Node and xvfb-run, so they are registered only when
+    # NEURA_DESKTOP_ENGINE names that Electron executable. Each starts X servers and Electron processes, so they
+    # run one at a time.
+    set(NEURA_DESKTOP_ENGINE "" CACHE FILEPATH
+        "The pinned Electron 45.3.3 executable; when set, the desktop tests are registered")
+    if(NEURA_DESKTOP_ENGINE)
+        if(NOT EXISTS "${NEURA_DESKTOP_ENGINE}")
+            message(FATAL_ERROR "NEURA_DESKTOP_ENGINE names no file: ${NEURA_DESKTOP_ENGINE}")
+        endif()
+        find_program(NEURA_DESKTOP_NODE node REQUIRED)
+        find_program(NEURA_DESKTOP_XVFB_RUN xvfb-run REQUIRED)
+        set(neura_desktop_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
+        add_test(NAME desktop-native-child COMMAND "${NEURA_DESKTOP_NODE}" --test
+            "${neura_desktop_tests}/native_child_test.js")
+        add_test(NAME desktop-shell COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_shell_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --case shell --case child-mismatch --case child-close --case child-quit
+            --case child-crash)
+        add_test(NAME desktop-app COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_app_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
+        add_test(NAME desktop-package COMMAND "${Python3_EXECUTABLE}" "${neura_desktop_tests}/run_package_test.py"
+            "${NEURA_DESKTOP_ENGINE}" --neura "$<TARGET_FILE:neura>")
+        set_tests_properties(desktop-native-child desktop-shell desktop-app desktop-package PROPERTIES
+            RUN_SERIAL TRUE LABELS desktop WORKING_DIRECTORY "${neura_desktop_tests}")
+        set_tests_properties(desktop-app desktop-package PROPERTIES TIMEOUT 1200)
+    else()
+        message(STATUS "NEURA_DESKTOP_ENGINE is not set: the desktop tests are not registered "
+            "(desktop-native-child, desktop-shell, desktop-app, desktop-package)")
+    endif()
+
     add_test(NAME c-import COMMAND ${CMAKE_COMMAND}
         "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
