@@ -92,6 +92,8 @@ The page's `neuraDesktop.call(operation_id, bytes)` answers `{status, bytes}`. T
 
 Every runner starts Electron under `xvfb-run` with `--ozone-platform=x11`, without `WAYLAND_DISPLAY`, `DISPLAY` and `XAUTHORITY` of the user's session, and with the session bus disabled; the Electron fixtures assert both. `xvfb-run` alone replaces only `DISPLAY`, and Electron 45 prefers Wayland when `WAYLAND_DISPLAY` is set, so a run that kept it opened its windows, dialogs and notifications on the user's own desktop. One such dialog reached the owner's desktop during this work. It also checks that a bridge operation capturing the `Context` is rejected (`tests/desktop/fixtures/capture-context.nra`, `E0602` at the program's call of `run`).
 
+CTest registers these runners as `desktop-native-child`, `desktop-shell`, `desktop-app` and `desktop-package` (label `desktop`, run one at a time) when the build is configured with `-DNEURA_DESKTOP_ENGINE=<pinned electron executable>`; without it, or without Node and `xvfb-run`, they are not registered and configuration says so.
+
 #### Concurrent calls in the child
 
 `Std.Desktop` runs on the language's tasks ([Concurrency](../lang/Concurrency.md)):
