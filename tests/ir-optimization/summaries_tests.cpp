@@ -289,7 +289,8 @@ NEURA_TEST(structure, summary_flags_equal_the_optimizers_own_for_every_program) 
     for (const auto& file : files_in(environment.examples(), false)) inputs.push_back({{file}, true});
     for (const auto& directory : fs::directory_iterator(environment.examples())) {
         if (!directory.is_directory()) continue;
-        const auto files = files_in(directory.path());
+        auto files = files_in(directory.path());
+        std::erase_if(files, [&](const fs::path& file) { return in_example_project(environment, file); });
         for (const auto& file : files) inputs.push_back({{file}, true});
         if (files.size() > 1) inputs.push_back({files, true});
     }

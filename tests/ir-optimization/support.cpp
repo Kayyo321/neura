@@ -186,8 +186,22 @@ std::vector<fs::path> fixture_files(const Environment& environment) {
     return files;
 }
 
+bool in_example_project(const Environment& environment, const fs::path& file) {
+    const auto root = fs::canonical(environment.examples());
+    for (auto directory = fs::canonical(file).parent_path(); directory != root && directory.has_relative_path();
+         directory = directory.parent_path()) {
+        if (fs::exists(directory / "neura.toml")) return true;
+    }
+    return false;
+}
+
 std::vector<fs::path> example_files(const Environment& environment) {
-    return nra_files(environment.examples());
+    // The sources of an example project (a directory with neura.toml, such
+    // as examples/apps/stock) import each other by the project's module
+    // roots and are built with `neura build --project`, so they are left out.
+    auto files = nra_files(environment.examples());
+    std::erase_if(files, [&](const fs::path& file) { return in_example_project(environment, file); });
+    return files;
 }
 
 std::string qualified_name(const IrProgram& program, SymbolId id) {
