@@ -403,8 +403,8 @@ int connect_to(int port) {
     const int descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
     if (descriptor < 0) return -1;
     ::fcntl(descriptor, F_SETFD, FD_CLOEXEC);
-    const int on = 1;
-    ::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on);
+    const int no_sigpipe = 1;
+    ::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof no_sigpipe);
 #endif
     sockaddr_in address{};
     address.sin_family = AF_INET;
