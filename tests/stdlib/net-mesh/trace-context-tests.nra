@@ -1,0 +1,361 @@
+let baggages = import:Std.Net.Mesh.Baggage;
+let calls = import:Std.Net.Rpc.Call;
+let contexts = import:Std.Net.Mesh.TraceContext;
+let durations = import:Std.Time.Duration;
+let filters = import:Std.Net.Filter;
+let header_maps = import:Std.Net.Http.Headers;
+let messages = import:Std.Net.Http.Message;
+let meta = import:Std.Net.Rpc.Metadata;
+let methods = import:Std.Net.Http.Method;
+let optional = import:Std.Core.Optional;
+let parents = import:Std.Net.Mesh.TraceParent;
+let propagation = import:Std.Net.Mesh.TracePropagationFilter;
+let random = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let states = import:Std.Net.Mesh.TraceState;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let.promote _ = import:Std.Core.Unit;
+
+// W3C Trace Context and Baggage. Vectors marked "trace-context" come from
+// /home/dev/neura-gate/030/std-net/rfc/w3c-trace-context-20-http_request_header_format.md (w3c/trace-context main,
+// spec/20-http_request_header_format.md, fetched 2026-11-17); vectors marked "baggage" from
+// /home/dev/neura-gate/030/std-net/rfc/w3c-baggage-HTTP_HEADER_FORMAT.md (w3c/baggage main,
+// baggage/HTTP_HEADER_FORMAT.md, fetched 2026-11-17). Other inputs are built from the stated rule.
+let TraceContextTests = module (
+    let parse_ok = func(text: string) -> parents.TraceParent => test.assert_ok<parents.TraceParent>(parents.parse(text));
+
+    let parse_fails = func(text: string) {
+        test.assert_err<parents.TraceParent>(parents.parse(text));
+    };
+
+    export let test_traceparent_spec_examples = func {
+        // trace-context, "Examples of HTTP traceparent Headers".
+        last sampled = parse_ok("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        test.assert_equal<int>(0, sampled.version);
+        test.assert_equal_string("4bf92f3577b34da6a3ce929d0e0e4736", sampled.trace_id_hex());
+        test.assert_equal_string("00f067aa0ba902b7", sampled.parent_id_hex());
+        test.assert_equal_bool(true, sampled.sampled());
+        test.assert_equal_bool(false, sampled.random_trace_id());
+        test.assert_equal<int>(16, sampled.trace_id.length);
+        test.assert_equal<uint8>(75, sampled.trace_id[0]);
+        test.assert_equal_string("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", sampled.to_header());
+        last unsampled = parse_ok("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00");
+        test.assert_equal_bool(false, unsampled.sampled());
+        test.assert_equal_bool(false, sampled.equals(unsampled));
+        test.assert_equal_bool(true, sampled.equals(parse_ok("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")));
+        test.assert_equal<uint32>(sampled.hash_code(),
+            parse_ok("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").hash_code());
+        // trace-context, "Relationship Between the Headers".
+        last congo = parse_ok("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+        test.assert_equal_string("b7ad6b7169203331", congo.parent_id_hex());
+        // Flags 03: sampled and random-trace-id (section "trace-flags").
+        last both = parse_ok("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03");
+        test.assert_equal_bool(true, both.sampled());
+        test.assert_equal_bool(true, both.random_trace_id());
+    };
+
+    export let test_traceparent_rejections = func {
+        // All-zero ids (sections "trace-id", "parent-id").
+        parse_fails("00-00000000000000000000000000000000-00f067aa0ba902b7-01");
+        parse_fails("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01");
+        // Version ff is forbidden (section "version").
+        parse_fails("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        // Uppercase hex is not HEXDIGLC.
+        parse_fails("00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01");
+        parse_fails("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0A");
+        // Version 00 is exactly 55 characters: no extra field, no missing digit.
+        parse_fails("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra");
+        parse_fails("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-1");
+        // A version that is not two hex digits and a dash.
+        parse_fails("0-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        parse_fails("");
+        // Misplaced dashes.
+        parse_fails("00-4bf92f3577b34da6a3ce929d0e0e47360-0f067aa0ba902b7-01");
+        last error = test.assert_err<parents.TraceParent>(parents.parse("00_4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"));
+        test.assert_equal_bool(true, strings.contains(error.to_string(), "traceparent"));
+    };
+
+    export let test_traceparent_future_versions = func {
+        // Section "Versioning of traceparent": a higher version is parsed from the version-00 positions; the flags
+        // end the text or are followed by a dash, and later fields are ignored.
+        last future = parse_ok("cc-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-what-the-future-will-be-like");
+        test.assert_equal<int>(204, future.version);
+        test.assert_equal_bool(true, future.sampled());
+        // It is always re-emitted as version 00 (the "Downgrade the version" mutation).
+        test.assert_equal_string("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", future.to_header());
+        last exact = parse_ok("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00");
+        test.assert_equal<int>(1, exact.version);
+        // Shorter than 55 characters, or flags followed by something other than a dash.
+        parse_fails("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0");
+        parse_fails("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01x");
+    };
+
+    export let test_child_and_start = func {
+        last parent = parse_ok("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-ff");
+        // A child keeps the trace id and the known flags, and clears the undefined ones.
+        last ids = random.seeded(7);
+        last span = parents.random_id(ids, 8);
+        last child = parent.child(span);
+        test.assert_equal_string(parent.trace_id_hex(), child.trace_id_hex());
+        test.assert_equal<int>(3, child.flags);
+        test.assert_equal_string("00-4bf92f3577b34da6a3ce929d0e0e4736-" + child.parent_id_hex() + "-03", child.to_header());
+        // The parent id is the injected source's bytes: replay the same seed.
+        last replay = random.seeded(7).fill_bytes(8);
+        for (let i = 0; i < 8; i++) {
+            test.assert_equal<uint8>(replay[i], child.parent_id[i]);
+        }
+        test.assert_equal_bool(false, parent.child_sampled(span, false).sampled());
+        test.assert_equal_bool(true, parent.child_sampled(span, false).random_trace_id());
+        // A new trace sets the random-trace-id flag, and the sampled flag as asked.
+        last root = parents.start(random.seeded(11), true);
+        test.assert_equal<int>(3, root.flags);
+        last expected = random.seeded(11);
+        last trace = expected.fill_bytes(16);
+        last first = expected.fill_bytes(8);
+        for (let i = 0; i < 16; i++) {
+            test.assert_equal<uint8>(trace[i], root.trace_id[i]);
+        }
+        for (let i = 0; i < 8; i++) {
+            test.assert_equal<uint8>(first[i], root.parent_id[i]);
+        }
+        test.assert_equal<int>(2, parents.start(random.seeded(11), false).flags);
+    };
+
+    export let test_tracestate_parse_and_mutate = func {
+        // trace-context, "Relationship Between the Headers": Rojo's state, then Congo updates its own entry.
+        last received = test.assert_ok<states.TraceState>(states.parse("rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"));
+        test.assert_equal<int>(2, received.size());
+        test.assert_equal_string("t61rcWkgMzE", test.assert_some<string>(received.get("congo")));
+        last updated = test.assert_ok<states.TraceState>(received.put("congo", "ucfJifl5GOE"));
+        test.assert_equal_string("congo=ucfJifl5GOE,rojo=00f067aa0ba902b7", updated.to_header());
+        // The received state is unchanged (states are immutable).
+        test.assert_equal_string("rojo=00f067aa0ba902b7,congo=t61rcWkgMzE", received.to_header());
+        // "tracestate: congo=t61rcWkgMzE" then Rojo adds a new entry to the left.
+        last single = test.assert_ok<states.TraceState>(states.parse("congo=t61rcWkgMzE"));
+        test.assert_equal_string("rojo=00f067aa0ba902b7,congo=t61rcWkgMzE",
+            test.assert_ok<states.TraceState>(single.put("rojo", "00f067aa0ba902b7")).to_header());
+        // Spaces and tabs around members and empty members are ignored; leading spaces of a value are kept.
+        last spaced = test.assert_ok<states.TraceState>(states.parse(" a=1 ,\t, b= x  ,  "));
+        test.assert_equal<int>(2, spaced.size());
+        test.assert_equal_string(" x", test.assert_some<string>(spaced.get("b")));
+        test.assert_equal_string("a=1,b= x", spaced.to_header());
+        // An empty header is accepted.
+        test.assert_equal_bool(true, test.assert_ok<states.TraceState>(states.parse("")).is_empty());
+        // Keys may use the full keychar set.
+        test.assert_ok<states.TraceState>(states.parse("0tenant@vendor/x_y-z*=v"));
+        test.assert_equal_string("b= x", spaced.remove("a").to_header());
+        test.assert_equal_bool(true, spaced.equals(test.assert_ok<states.TraceState>(states.parse("a=1,b= x"))));
+    };
+
+    export let test_tracestate_rejections_and_limits = func {
+        test.assert_err<states.TraceState>(states.parse("Rojo=1"));
+        test.assert_err<states.TraceState>(states.parse("_rojo=1"));
+        test.assert_err<states.TraceState>(states.parse("rojo"));
+        test.assert_err<states.TraceState>(states.parse("rojo="));
+        test.assert_err<states.TraceState>(states.parse("rojo=a=b"));
+        test.assert_err<states.TraceState>(states.parse("rojo=1,rojo=2"));
+        test.assert_err<states.TraceState>(received_ok().put("bad key", "1"));
+        // 32 members are allowed; 33 are not.
+        let text = "";
+        for (let i = 0; i < 32; i++) {
+            text += (i > 0 ? "," : "") + "k" + i.to_string() + "=v";
+        }
+        last full = test.assert_ok<states.TraceState>(states.parse(text));
+        test.assert_equal<int>(32, full.size());
+        test.assert_err<states.TraceState>(states.parse(text + ",k32=v"));
+        // Adding to a full list drops the right-most member.
+        last added = test.assert_ok<states.TraceState>(full.put("new", "1"));
+        test.assert_equal<int>(32, added.size());
+        test.assert_equal_string("new", added.key_at(0));
+        test.assert_none<string>(added.get("k31"));
+        test.assert_equal_string("v", test.assert_some<string>(added.get("k30")));
+        // Truncation removes members over 128 characters first, then from the right.
+        let long_value = "";
+        for (let i = 0; i < 130; i++) {
+            long_value += "x";
+        }
+        last mixed = test.assert_ok<states.TraceState>(states.parse("a=1,big=" + long_value + ",c=3,d=4"));
+        test.assert_equal_string("a=1,c=3,d=4", mixed.truncated(20).to_header());
+        test.assert_equal_string("a=1,c=3", mixed.truncated(8).to_header());
+        test.assert_equal<int>(4, mixed.truncated(512).size());
+    };
+
+    let received_ok = func -> states.TraceState => test.assert_ok<states.TraceState>(states.parse("rojo=1"));
+
+    export let test_baggage_spec_examples = func {
+        // baggage, "Example": three list-members, 86 bytes.
+        last text = "key1=value1;property1;property2, key2 = value2, key3=value3; propertyKey=propertyValue";
+        test.assert_equal<int>(86, text.byte_length);
+        last items = test.assert_ok<baggages.Baggage>(baggages.parse(text));
+        test.assert_equal<int>(3, items.size());
+        test.assert_equal_string("value2", test.assert_some<string>(items.get("key2")));
+        last first = items.entry_at(0);
+        test.assert_equal<int>(2, first.property_count());
+        test.assert_equal_string("property2", first.property_at(1).key);
+        test.assert_none<string>(first.property_at(1).value);
+        test.assert_equal_string("propertyValue", test.assert_some<string>(items.entry_at(2).property_at(0).value));
+        test.assert_equal_string("key1=value1;property1;property2,key2=value2,key3=value3;propertyKey=propertyValue",
+            items.to_header());
+        // baggage, "Examples of HTTP headers": percent-encoded values.
+        last encoded = "userId=Am%C3%A9lie,serverNode=DF%2028,isProduction=false";
+        last people = test.assert_ok<baggages.Baggage>(baggages.parse(encoded));
+        test.assert_equal_string("Amélie", test.assert_some<string>(people.get("userId")));
+        test.assert_equal_string("DF 28", test.assert_some<string>(people.get("serverNode")));
+        test.assert_equal_string(encoded, people.to_header());
+        // Two baggage fields combined, and spaces around keys and values.
+        last split = test.assert_ok<baggages.Baggage>(baggages.parse("userId =   alice, serverNode = DF%2028, isProduction = false"));
+        test.assert_equal_string("userId=alice,serverNode=DF%2028,isProduction=false", split.to_header());
+        test.assert_equal_string("userId=alice,serverNode=DF%2028,isProduction=false",
+            test.assert_ok<baggages.Baggage>(baggages.parse("userId=alice")).set("serverNode", "DF 28")
+                .set("isProduction", "false").to_header());
+    };
+
+    export let test_baggage_rules = func {
+        // A value may contain '=' (split at the first one) and '%' is always encoded.
+        last eq = test.assert_ok<baggages.Baggage>(baggages.parse("k=a=b"));
+        test.assert_equal_string("a=b", test.assert_some<string>(eq.get("k")));
+        test.assert_equal_string("k=100%25", baggages.empty().set("k", "100%").to_header());
+        // Invalid UTF-8 after decoding becomes U+FFFD (EF BF BD).
+        last bad = test.assert_ok<baggages.Baggage>(baggages.parse("k=%FF"));
+        test.assert_equal_string("�", test.assert_some<string>(bad.get("k")));
+        // Rejections: no '=', a key that is not a token, a value with a space inside, a broken triplet.
+        test.assert_err<baggages.Baggage>(baggages.parse("novalue"));
+        test.assert_err<baggages.Baggage>(baggages.parse("a b=1"));
+        test.assert_err<baggages.Baggage>(baggages.parse("k=a b"));
+        test.assert_err<baggages.Baggage>(baggages.parse("k=%G1"));
+        test.assert_err<baggages.Baggage>(baggages.parse("k=\"q\""));
+        // Duplicates are kept in order; set replaces the first and removes the rest.
+        last dup = test.assert_ok<baggages.Baggage>(baggages.parse("k=1,j=2,k=3"));
+        test.assert_equal<int>(3, dup.size());
+        test.assert_equal_string("k=9,j=2", dup.set("k", "9").to_header());
+        test.assert_equal_string("j=2", dup.remove("k").to_header());
+        // to_header keeps at most 64 whole members.
+        let many = baggages.empty();
+        for (let i = 0; i < 70; i++) {
+            many = many.set("k" + i.to_string(), "v");
+        }
+        last limited = test.assert_ok<baggages.Baggage>(baggages.parse(many.to_header()));
+        test.assert_equal<int>(64, limited.size());
+        test.assert_none<string>(limited.get("k64"));
+        // and at most 8192 bytes (3 values of 3072 bytes), never a partial member.
+        let big = "vvv";
+        for (let i = 0; i < 10; i++) {
+            big += big;
+        }
+        last heavy = baggages.empty().set("a", big).set("b", big).set("c", big);
+        test.assert_equal_string("a=" + big + ",b=" + big, heavy.to_header());
+        test.assert_equal_string("Baggage(3 members)", heavy.to_string());
+    };
+
+    // HTTP request header functions over the Std.Net.Http.Message request type.
+    let http_get = func(request: messages.HttpRequest<string>, name: string) -> optional.Optional<string> =>
+        request.headers.joined(name);
+
+    let http_with = func(request: messages.HttpRequest<string>, name: string, value: string)
+            -> messages.HttpRequest<string> {
+        if (value.byte_length == 0) {
+            request.headers.remove(name);
+        } else {
+            request.headers.set(name, value);
+        }
+        return request;
+    };
+
+    let http_request = func(fields: header_maps.Headers) -> messages.HttpRequest<string> =>
+        new messages.HttpRequest<string>(methods.HttpMethod.Get, "/", fields, "", messages.Version.Http11);
+
+    let echo_headers = func(request: messages.HttpRequest<string>) -> result.Result<string> {
+        last parent = optional.value_or<string>(request.headers.get("traceparent"), "-");
+        last state = optional.value_or<string>(request.headers.get("tracestate"), "-");
+        last items = optional.value_or<string>(request.headers.get("baggage"), "-");
+        return result.Result<string>.Ok(parent + " | " + state + " | " + items);
+    };
+
+    export let test_filter_continues_an_http_trace = func {
+        last fields = new header_maps.Headers();
+        fields.add("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+        // Two tracestate fields combine into one list (RFC 9110 section 5.3).
+        fields.add("tracestate", "rojo=00f067aa0ba902b7");
+        fields.add("tracestate", "congo=t61rcWkgMzE");
+        fields.add("baggage", "userId=alice");
+        fields.add("baggage", "serverNode=DF%2028");
+        last filter = propagation.of<messages.HttpRequest<string>, string>(http_get, http_with, random.seeded(42), true);
+        last service = filters.bind<messages.HttpRequest<string>, string, messages.HttpRequest<string>, string>(
+            filter, services.of<messages.HttpRequest<string>, string>(echo_headers));
+        last answer = test.assert_ok<string>(service.call(http_request(fields)));
+        last span = random.seeded(42).fill_bytes(8);
+        last expected_parent = new parents.TraceParent(0, test.assert_ok<parents.TraceParent>(
+            parents.parse("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")).trace_id, span, 1);
+        test.assert_equal_string(expected_parent.to_header()
+            + " | rojo=00f067aa0ba902b7,congo=t61rcWkgMzE | userId=alice,serverNode=DF%2028", answer);
+        test.assert_equal<int64>(1, filter.continued());
+        test.assert_equal<int64>(0, filter.started());
+        test.assert_equal_bool(true, test.assert_some<parents.TraceParent>(filter.last_sent().parent).equals(expected_parent));
+        test.assert_equal_string("TracePropagationFilter(1 continued, 0 started)", filter.to_string());
+    };
+
+    export let test_filter_restarts_on_an_invalid_traceparent = func {
+        last fields = new header_maps.Headers();
+        fields.add("traceparent", "00-00000000000000000000000000000000-b7ad6b7169203331-01");
+        fields.add("tracestate", "rojo=00f067aa0ba902b7");
+        last filter = propagation.of<messages.HttpRequest<string>, string>(http_get, http_with, random.seeded(5), false);
+        last service = filters.bind<messages.HttpRequest<string>, string, messages.HttpRequest<string>, string>(
+            filter, services.of<messages.HttpRequest<string>, string>(echo_headers));
+        last answer = test.assert_ok<string>(service.call(http_request(fields)));
+        // A new unsampled trace with the random-trace-id flag; the tracestate is not parsed and not sent.
+        last expected = parents.start(random.seeded(5), false);
+        test.assert_equal_string(expected.to_header() + " | - | -", answer);
+        test.assert_equal<int64>(1, filter.started());
+        // A request with no trace headers at all also starts a trace.
+        test.assert_ok<string>(service.call(http_request(new header_maps.Headers())));
+        test.assert_equal<int64>(2, filter.started());
+    };
+
+    // RPC metadata functions. Metadata has no replace operation, so this writer only adds; the request below carries
+    // no trace metadata of its own.
+    let rpc_get = func(request: calls.RpcRequest, name: string) -> optional.Optional<string> {
+        last all = request.metadata.get_all(name);
+        return all.length == 0 ? optional.Optional<string>.None : optional.Optional<string>.Some(strings.join(all, ","));
+    };
+
+    let rpc_with = func(request: calls.RpcRequest, name: string, value: string) -> calls.RpcRequest {
+        if (value.byte_length > 0) {
+            test.assert_ok<Unit>(request.metadata.add(name, value));
+        }
+        return request;
+    };
+
+    let rpc_echo = func(request: calls.RpcRequest) -> result.Result<string> =>
+        result.Result<string>.Ok(optional.value_or<string>(request.metadata.get("traceparent"), "-"));
+
+    export let test_filter_over_rpc_metadata = func {
+        last empty_message: uint8[list] = new;
+        last request = calls.unary_request(test.assert_ok<calls.MethodPath>(calls.parse_path("/pkg.Greeter/Hello")),
+            empty_message, new meta.Metadata(), optional.Optional<durations.Duration>.None);
+        last filter = propagation.of<calls.RpcRequest, string>(rpc_get, rpc_with, random.seeded(9), true);
+        last answer = test.assert_ok<string>(filters.bind<calls.RpcRequest, string, calls.RpcRequest, string>(filter,
+            services.of<calls.RpcRequest, string>(rpc_echo)).call(request));
+        test.assert_equal_string(parents.start(random.seeded(9), true).to_header(), answer);
+    };
+
+    export let test_extract_and_inject_directly = func {
+        last fields = new header_maps.Headers();
+        fields.add("TraceParent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        fields.add("tracestate", "Bad=1");
+        fields.add("baggage", "k=v");
+        last context = contexts.extract<messages.HttpRequest<string>>(http_request(fields), http_get);
+        test.assert_equal_bool(true, context.has_parent());
+        // An invalid tracestate is dropped without affecting traceparent or baggage.
+        test.assert_equal_bool(true, context.state.is_empty());
+        test.assert_equal_string("v", test.assert_some<string>(context.baggage.get("k")));
+        last out = contexts.inject<messages.HttpRequest<string>>(context, http_request(new header_maps.Headers()), http_with);
+        test.assert_equal_string("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            test.assert_some<string>(out.headers.get("traceparent")));
+        test.assert_none<string>(out.headers.get("tracestate"));
+        test.assert_equal_string("TraceContext(00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01, , Baggage(1 members))",
+            context.to_string());
+        test.assert_equal_bool(false, contexts.empty().has_parent());
+    };
+);
