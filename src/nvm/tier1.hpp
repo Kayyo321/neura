@@ -431,6 +431,9 @@ private:
         // A form whose structural proof held while the overflow analysis ran
         // out of work, and whether it came from the hint.
         std::shared_ptr<const lift::LiftedForm> retry;
+        // Bounded attempts (TierOptions::attempt_work): the share of the
+        // graph the overflow analysis had settled when the last one ran out.
+        double bounded_progress = 0;
         bool from_hint = false;
         // The hint failed a proof; the block may still be searched for.
         bool hint_failed = false;
@@ -473,14 +476,24 @@ private:
         std::shared_ptr<const tier2::Region> region;
         std::uint64_t next_attempt = 0;
         // Formed while blocks it would reach were not settled: form it
-        // again at `refresh_at` arrivals (at most four times).
+        // again at `refresh_at` arrivals (at most four times, unless proofs
+        // are deferred: see settled_proofs_).
         std::uint64_t refresh_at = 0;
         std::uint32_t refreshes = 0;
         bool refreshing = false;
+        // Deferred proofs: settled_proofs_ of the function when this
+        // program was formed.
+        std::uint64_t formed_after = 0;
     };
     std::vector<RegionEntry> regions_;
     // Function programs, by function, and the next program number.
     std::vector<RegionEntry> programs_;
+    // With deferred proofs, by function: how many of its blocks idle proofs
+    // have settled. A program formed while blocks were pending is formed
+    // again, without the cap of four, once this has grown since; it is
+    // checked at arrivals that grow by an eighth, so the check stays cheap
+    // and a late proof is still picked up (Providers.md, "Idle proofs").
+    std::vector<std::uint64_t> settled_proofs_;
     std::uint32_t next_program_id_ = 0;
     // Regions replaced by a refresh, which runs may still hold.
     std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;

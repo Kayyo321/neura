@@ -1982,11 +1982,22 @@ void TierCache::add_region_events(const RegionCounts& counts,
 }
 
 TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint64_t arrivals) {
+    // With deferred proofs a program is checked again at arrivals that grow
+    // by an eighth, and formed again only when an idle proof has settled one
+    // of the function's blocks since it was formed.
+    const auto next_check = [](std::uint64_t at) { return at + std::max<std::uint64_t>(at / 8, 16); };
+    std::uint64_t settled_before = 0;
     {
         const std::lock_guard lock(mutex_);
         auto& found = programs_[function];
         if (found.state == RegionEntry::State::Settled &&
             (found.refresh_at == 0 || arrivals < found.refresh_at || found.refreshing)) {
+            return {found.region.get(), true, found.refresh_at};
+        }
+        settled_before = settled_proofs_[function];
+        if (found.state == RegionEntry::State::Settled && options_.defer_proofs &&
+            settled_before == found.formed_after) {
+            found.refresh_at = next_check(arrivals);
             return {found.region.get(), true, found.refresh_at};
         }
         if (found.state == RegionEntry::State::Forming) return {nullptr, false, std::max<std::uint64_t>(arrivals * 2, 2)};
@@ -2048,7 +2059,11 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         // refresh again later while blocks are still pending.
         found.refreshing = false;
         ++found.refreshes;
-        found.refresh_at = formation.pending && found.refreshes < 4 ? arrivals * 4 : 0;
+        found.formed_after = settled_before;
+        found.refresh_at = !formation.pending           ? 0
+                           : options_.defer_proofs     ? next_check(arrivals)
+                           : found.refreshes < 4       ? arrivals * 4
+                                                       : 0;
         if (!formation.region) return {found.region.get(), true, found.refresh_at};
         auto region = std::const_pointer_cast<tier2::Region>(formation.region);
         region->program_id = next_program_id_++;
@@ -2073,7 +2088,8 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         ++statistics_.program_rejections[formation.reason];
         return {nullptr, true, 0};
     }
-    found.refresh_at = formation.pending ? arrivals * 4 : 0;
+    found.formed_after = settled_before;
+    found.refresh_at = !formation.pending ? 0 : options_.defer_proofs ? next_check(arrivals) : arrivals * 4;
     // The cache numbers its programs; a run keeps one register image per
     // number (tier2_steps.inc).
     auto region = std::const_pointer_cast<tier2::Region>(formation.region);
