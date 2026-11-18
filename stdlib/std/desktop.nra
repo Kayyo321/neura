@@ -11,7 +11,7 @@ let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Unit;
 let wire = import:Std.Desktop.Internal.Wire;
 
-/// @brief The native side of a Neura desktop application (docs/apps/Desktop.md).
+/// @brief The native side of a Neura desktop application (docs/design/Desktop030.md).
 ///
 /// A desktop application is a window host, renderers that show the web target's bundle, and this native child.
 /// The child speaks to the host over its standard input and output; its standard error is its log. Everything
@@ -29,7 +29,8 @@ let wire = import:Std.Desktop.Internal.Wire;
 /// @see docs/design/Desktop030.md
 #Since("0.3.0")
 export let Desktop = module (
-    /// @brief The most windows open at once (D-1). `open_window` answers Busy beyond it.
+    /// @brief The most windows open at once (D-1). `open_window` answers Busy beyond it. The window host refuses
+    /// a package that raises D-1 or D-3, because this child keeps the defaults.
     export const MaxWindows: int = 8;
 
     /// @brief The error code a host service uses for too many windows (Busy).

@@ -740,10 +740,13 @@ const DesktopStatus = Object.freeze({
 });
 const NotifyOutcome = Object.freeze({ Shown: 0, Denied: 1, Unsupported: 2 });
 const EventKind = Object.freeze({ Closed: 0, Focused: 1, Blurred: 2, Resized: 3, MenuActivated: 4 });
+// Apps030 allows D-1 up to 64 and D-3 up to 64 MiB, but Std.Desktop keeps
+// the defaults (8 windows, 1 MiB frames), so a package may only lower them
+// until the child learns the package's limits.
 const desktopLimitTable = Object.freeze({
-    'D-1': { fallback: 8, maximum: 64 },
+    'D-1': { fallback: 8, maximum: 8 },
     'D-2': { fallback: 32, maximum: 1024 },
-    'D-3': { fallback: defaultFrameLimit, maximum: hardFrameLimit },
+    'D-3': { fallback: defaultFrameLimit, maximum: defaultFrameLimit },
     'D-4': { fallback: 30, maximum: 3600 },
 });
 const operationPattern = /^[a-z0-9._-]{1,128}$/;

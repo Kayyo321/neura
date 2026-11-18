@@ -91,10 +91,11 @@ test('the registry is canonical and hashed as written', () => {
     assert.throws(() => parseRegistry(Buffer.from([0xff])), /UTF-8/);
 });
 
-test('limits default to Apps030 and refuse values past their ceilings', () => {
+test('limits default to Apps030 and refuse values past their ceilings or the child\'s', () => {
     assert.deepEqual({ ...desktopLimits() }, { windows: 8, inFlight: 32, frameBytes: 1048576, deadlineMs: 30000 });
-    assert.equal(desktopLimits({ 'D-1': 64, 'D-2': 1024, 'D-4': 3600 }).windows, 64);
-    for (const bad of [{ 'D-1': 65 }, { 'D-2': 0 }, { 'D-3': 64 * 1024 * 1024 + 1 }, { 'D-4': 3601 }, { 'D-5': 1 }, { 'D-1': 1.5 }]) {
+    assert.equal(desktopLimits({ 'D-1': 2, 'D-2': 1024, 'D-4': 3600 }).windows, 2);
+    // The child keeps the default D-1 and D-3, so a package may lower them and not raise them.
+    for (const bad of [{ 'D-1': 9 }, { 'D-2': 0 }, { 'D-2': 1025 }, { 'D-3': 1048577 }, { 'D-4': 3601 }, { 'D-5': 1 }, { 'D-1': 1.5 }]) {
         assert.throws(() => desktopLimits(bad), RangeError, JSON.stringify(bad));
     }
 });
