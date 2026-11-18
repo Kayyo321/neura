@@ -18,6 +18,10 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#ifdef __APPLE__
+#include <locale>
+#include <sstream>
+#endif
 
 namespace neura::sql {
 
@@ -181,8 +185,18 @@ bool convert(Oid type, const char* text, int length, Value& value) {
         else if (field == "Infinity") value.real = HUGE_VAL;
         else if (field == "-Infinity") value.real = -HUGE_VAL;
         else {
+#ifdef __APPLE__
+            // Xcode 16's libc++ has no floating-point from_chars; the C
+            // locale's stream conversion reads PostgreSQL's float8 text
+            // (correctly rounded, through strtod) and must use every byte.
+            std::istringstream stream{std::string(field)};
+            stream.imbue(std::locale::classic());
+            stream >> value.real;
+            if (stream.fail() || stream.peek() != std::char_traits<char>::eof()) return false;
+#else
             const auto [end, error] = std::from_chars(field.data(), field.data() + field.size(), value.real);
             if (error != std::errc{} || end != field.data() + field.size()) return false;
+#endif
         }
         return true;
     }
