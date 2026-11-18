@@ -3,20 +3,34 @@
 
 #include "app/project.hpp"
 
+#include <algorithm>
 #include <iostream>
 
 namespace neura::app {
 
+// A project build takes no input file (docs/design/Projects030.md, "Commands"). With an input file the
+// command is the single-file build, where --target names a native launcher and needs --native.
 bool is_project_build(const std::vector<std::string>& arguments) {
-    bool project = false, target = false, native = false;
+    bool project = false, target = false, native = false, input = false;
     for (std::size_t i = 2; i < arguments.size(); ++i) {
         const auto& arg = arguments[i];
-        if (arg == "--") break;
+        if (arg == "--") {
+            input |= i + 1 < arguments.size();
+            break;
+        }
         project |= arg == "--project" || arg.starts_with("--project=");
         target |= arg == "--target" || arg.starts_with("--target=");
         native |= arg == "--native";
+        static constexpr std::string_view takes_value[] = {
+            "--project", "--target", "--out", "--web-runtime", "-o", "-I", "--launcher", "--max-errors",
+            "--max-tasks", "--task-quantum", "--max-queued-messages", "--max-pending-requests", "--parallel-workers"};
+        if (std::ranges::find(takes_value, std::string_view(arg)) != std::end(takes_value)) {
+            ++i;
+        } else if (!arg.empty() && arg[0] != '-') {
+            input = true;
+        }
     }
-    return project || (target && !native);
+    return project || (target && !native && !input);
 }
 
 namespace {
