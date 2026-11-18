@@ -54,21 +54,21 @@ The following public declarations are taken from the module source; each links t
   Adds every field of `other` after this map's fields.
 - **Headers.Headers** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L171)
   Equal when both hold the same fields in the same order, names compared without case.
-- **Headers.Headers** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L188)
+- **Headers.Headers** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L187)
   Combines each lowercase name and value in order.
-- **Headers.Headers** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L198)
+- **Headers.Headers** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L197)
   The fields as "Name: value" lines joined by "; ", in braces.
-- **Headers** · [`export let of = func(field_names: string[list], field_values: string[list]) -> Headers`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L232)
+- **Headers** · [`export let of = func(field_names: string[list], field_values: string[list]) -> Headers`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L231)
   A map holding the given names and values in order. The lists must have the same length. Tagged `#NoDiscard`.
-- **Headers** · [`export let is_token = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L245)
+- **Headers** · [`export let is_token = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L244)
   Whether `name` is a non-empty token (RFC 9110 section 5.6.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Headers** · [`export let is_tchar = func(b: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L259)
+- **Headers** · [`export let is_tchar = func(b: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L256)
   Whether byte `b` is a tchar (RFC 9110 section 5.6.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Headers** · [`export let is_valid_value = func(value: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L270)
+- **Headers** · [`export let is_valid_value = func(value: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L267)
   Whether `value` can be a field value: no CR, LF or NUL, and no other control byte except tab (RFC 9110 section 5.5). Tagged `#Pure`, `#ThreadSafe`.
-- **Headers** · [`export let trim_value = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L282)
+- **Headers** · [`export let trim_value = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L279)
   `value` without leading and trailing spaces and tabs. Tagged `#Pure`, `#ThreadSafe`.
-- **Headers** · [`export let split_list = func(value: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L297)
+- **Headers** · [`export let split_list = func(value: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/headers.nra#L294)
   The comma-separated elements of one field value, trimmed, empty ones dropped; commas inside quoted strings do not separate. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

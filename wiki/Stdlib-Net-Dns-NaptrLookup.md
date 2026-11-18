@@ -42,25 +42,25 @@ The following public declarations are taken from the module source; each links t
   Whether `service` is one of the services, '+'-separated, ignoring ASCII case. Tagged `#NoDiscard`.
 - **NaptrLookup.NaptrRule** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L73)
   Equal when every field is.
-- **NaptrLookup.NaptrRule** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L83)
+- **NaptrLookup.NaptrRule** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L82)
   Combines the fields.
-- **NaptrLookup.NaptrRule** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L87)
+- **NaptrLookup.NaptrRule** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L86)
   Text such as "100 10 \"S\" \"SIP+D2U\" \"\" _sip._udp.example.com.".
-- **NaptrLookup** · [`export let NaptrLookup = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L93)
+- **NaptrLookup** · [`export let NaptrLookup = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L92)
   NAPTR lookups through a resolver. Tagged `#Final`, `#NotThreadSafe`.
-- **NaptrLookup.NaptrLookup** · [`export let init = func(stub: resolvers.StubResolver)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L98)
+- **NaptrLookup.NaptrLookup** · [`export let init = func(stub: resolvers.StubResolver)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L97)
   A lookup over `stub`.
-- **NaptrLookup.NaptrLookup** · [`export let lookup = func(domain: string) -> Result<NaptrRule[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L104)
+- **NaptrLookup.NaptrLookup** · [`export let lookup = func(domain: string) -> Result<NaptrRule[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L103)
   The NAPTR rules of `domain`, sorted. Tagged `#NoDiscard`.
-- **NaptrLookup.NaptrLookup** · [`export let follow = func(domain: string, service: string) -> Result<NaptrRule>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L112)
+- **NaptrLookup.NaptrLookup** · [`export let follow = func(domain: string, service: string) -> Result<NaptrRule>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L111)
   Follows rules offering `service` from `domain` to a terminal rule. Err (Custom `dns.naptr`) when no rule matches, only regexp rules match, or after `MaxRewrites` rewrites. Tagged `#NoDiscard`.
-- **NaptrLookup.NaptrLookup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L148)
+- **NaptrLookup.NaptrLookup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L147)
   Text "NaptrLookup".
-- **NaptrLookup** · [`export let rules_from = func(records: messages.ResourceRecord[list]) -> NaptrRule[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L153)
+- **NaptrLookup** · [`export let rules_from = func(records: messages.ResourceRecord[list]) -> NaptrRule[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L152)
   The NAPTR rules among records, in record order. Tagged `#NoDiscard`.
-- **NaptrLookup** · [`export let sort_rules = func(rules: NaptrRule[list]) -> NaptrRule[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L169)
+- **NaptrLookup** · [`export let sort_rules = func(rules: NaptrRule[list]) -> NaptrRule[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L168)
   The rules sorted by order, then preference (stable). Tagged `#NoDiscard`.
-- **NaptrLookup** · [`export let select = func(rules: NaptrRule[list], service: string) -> NaptrRule[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L188)
+- **NaptrLookup** · [`export let select = func(rules: NaptrRule[list], service: string) -> NaptrRule[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/naptr-lookup.nra#L187)
   The sorted rules offering `service` within the lowest order that has one. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

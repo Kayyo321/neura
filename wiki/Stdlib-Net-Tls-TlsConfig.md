@@ -52,37 +52,37 @@ The following public declarations are taken from the module source; each links t
   True when both TLS 1.2 and 1.3 are allowed, the range the host's basic TLS service negotiates. Tagged `#Pure`.
 - **TlsConfig.TlsConfig** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L98)
   Equal when every setting is.
-- **TlsConfig.TlsConfig** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L111)
+- **TlsConfig.TlsConfig** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L110)
   A hash consistent with equals.
-- **TlsConfig.TlsConfig** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L126)
+- **TlsConfig.TlsConfig** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L125)
   Text such as "TlsConfig(Client, Tls12..Tls13, alpn h2,http/1.1, sni example.com)". File paths are named; their contents are never read here.
-- **TlsConfig** · [`export let TlsConfigBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L145)
+- **TlsConfig** · [`export let TlsConfigBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L144)
   Collects settings; `build_client` or `build_server` validates them. Setting a value again replaces it. Tagged `#Final`, `#NotThreadSafe`.
-- **TlsConfig.TlsConfigBuilder** · [`export let set_versions = func(lowest_version: TlsVersion, highest_version: TlsVersion)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L166)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_versions = func(lowest_version: TlsVersion, highest_version: TlsVersion)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L165)
   The versions accepted, from `lowest` through `highest` (default TLS 1.2 through 1.3).
-- **TlsConfig.TlsConfigBuilder** · [`export let set_alpn = func(names: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L172)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_alpn = func(names: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L171)
   The ALPN protocols, most preferred first (for example "h2", "http/1.1").
-- **TlsConfig.TlsConfigBuilder** · [`export let set_server_name = func(host_name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L181)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_server_name = func(host_name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L180)
   The SNI name a client sends and verifies the certificate against; empty uses the host.
-- **TlsConfig.TlsConfigBuilder** · [`export let set_ca_file = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L186)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_ca_file = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L185)
   The PEM CA bundle a client trusts instead of the system store.
-- **TlsConfig.TlsConfigBuilder** · [`export let set_certificate = func(certificate_path: string, key_path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L192)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_certificate = func(certificate_path: string, key_path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L191)
   The PEM certificate chain and private key this side presents (a server's identity, or a client's for mutual TLS).
-- **TlsConfig.TlsConfigBuilder** · [`export let set_client_ca_file = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L198)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_client_ca_file = func(path: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L197)
   A server's PEM CA bundle for client certificates; setting it requires mutual TLS.
-- **TlsConfig.TlsConfigBuilder** · [`export let set_handshake_timeout = func(limit: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L203)
+- **TlsConfig.TlsConfigBuilder** · [`export let set_handshake_timeout = func(limit: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L202)
   The longest a handshake may take; zero waits without limit.
-- **TlsConfig.TlsConfigBuilder** · [`export let build_client = func -> Result<TlsConfig>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L209)
+- **TlsConfig.TlsConfigBuilder** · [`export let build_client = func -> Result<TlsConfig>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L208)
   A validated client configuration, or a `tls.config` error. Tagged `#NoDiscard`.
-- **TlsConfig.TlsConfigBuilder** · [`export let build_server = func -> Result<TlsConfig>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L223)
+- **TlsConfig.TlsConfigBuilder** · [`export let build_server = func -> Result<TlsConfig>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L222)
   A validated server configuration, or a `tls.config` error. Tagged `#NoDiscard`.
-- **TlsConfig.TlsConfigBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L236)
+- **TlsConfig.TlsConfigBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L235)
   Text such as "TlsConfigBuilder".
-- **TlsConfig** · [`export let builder = func -> TlsConfigBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L256)
+- **TlsConfig** · [`export let builder = func -> TlsConfigBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L255)
   An empty builder: TLS 1.2 through 1.3, no ALPN, the system trust store, no certificate. Tagged `#NoDiscard`.
-- **TlsConfig** · [`export let check_alpn = func(names: string[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L260)
+- **TlsConfig** · [`export let check_alpn = func(names: string[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L259)
   Ok when `names` is a valid ALPN list (RFC 7301 section 3.1), else a `tls.config` error. Tagged `#NoDiscard`.
-- **TlsConfig** · [`export let check_server_name = func(name: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L277)
+- **TlsConfig** · [`export let check_server_name = func(name: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L276)
   Ok when `name` is a valid SNI host name (RFC 6066 section 3, see the module documentation), else a `tls.config` error. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

@@ -54,27 +54,27 @@ The following public declarations are taken from the module source; each links t
   Whether the opcode is a control opcode (8 to 15). Tagged `#NoDiscard`.
 - **Frame.Frame** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L73)
   Equal when every field and every payload byte are.
-- **Frame.Frame** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L91)
+- **Frame.Frame** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L90)
   Combines the header bits, the opcode and the payload bytes.
-- **Frame.Frame** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L101)
+- **Frame.Frame** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L100)
   The opcode, flags and payload length.
-- **Frame** · [`export let of = func(opcode: int, payload: uint8[list]) -> Frame`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L119)
+- **Frame** · [`export let of = func(opcode: int, payload: uint8[list]) -> Frame`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L118)
   A final frame with no reserved bits. Tagged `#NoDiscard`.
-- **Frame** · [`export let encode = func(frame: Frame, mask: Optional<uint8[list]>) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L128)
+- **Frame** · [`export let encode = func(frame: Frame, mask: Optional<uint8[list]>) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L127)
   Encodes the frame, masked with `mask` when it is `Some` (it must hold 4 bytes). Fails with status 1002 when the frame breaks a rule a sender must keep: a control frame longer than 125 bytes or not final, or a reserved opcode (3 to 7, 11 to 15). A mask that is not 4 bytes traps with "invalid argument: mask". Tagged `#NoDiscard`.
-- **Frame** · [`export let encode_as = func(role: Role, frame: Frame, random: Random) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L194)
+- **Frame** · [`export let encode_as = func(role: Role, frame: Frame, random: Random) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L193)
   Encodes a frame as `role` must send it: a client masks with 4 fresh bytes from `random`, a server does not mask. Tagged `#NoDiscard`.
-- **Frame** · [`export let FrameDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L208)
+- **Frame** · [`export let FrameDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L207)
   Decodes frames from a byte stream that arrives in chunks of any size. `receiver` is the role of the endpoint that reads: a server requires every frame to be masked and a client requires none to be (RFC 6455 section 5.1). `max_frame_size` bounds a frame's payload; a larger length fails with status 1009 as soon as the header is read, before the payload arrives. `allowed_rsv` is a bit set of the reserved bits an extension negotiated (4 for RSV1, 2 for RSV2, 1 for RSV3); any other reserved bit fails. After a failure the decoder stays failed. The buffered bytes are read through an offset and compacted once the consumed prefix is at least half the buffer. Tagged `#Final`, `#NotThreadSafe`.
-- **Frame.FrameDecoder** · [`export let init = func(role: Role, max_size: int, rsv_bits: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L224)
+- **Frame.FrameDecoder** · [`export let init = func(role: Role, max_size: int, rsv_bits: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L223)
   A decoder for the endpoint `role`. A maximum below 125 traps with "invalid argument: max_frame_size".
-- **Frame.FrameDecoder** · [`export let buffered = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L235)
+- **Frame.FrameDecoder** · [`export let buffered = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L234)
   The number of received bytes not yet decoded. Tagged `#NoDiscard`.
-- **Frame.FrameDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L238)
+- **Frame.FrameDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L237)
   Adds received bytes.
-- **Frame.FrameDecoder** · [`export let next = func -> Result<Optional<Frame>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L246)
+- **Frame.FrameDecoder** · [`export let next = func -> Result<Optional<Frame>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L245)
   The next whole frame, `None` when more bytes are needed, or the failure of a malformed frame. Tagged `#NoDiscard`.
-- **Frame.FrameDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L342)
+- **Frame.FrameDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/frame.nra#L339)
   The role and buffered byte count.
 <!-- END SOURCE API -->
 

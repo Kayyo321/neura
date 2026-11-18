@@ -36,31 +36,31 @@ The following public declarations are taken from the module source; each links t
   A descriptor with every part given.
 - **Reflection.MethodDescriptor** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L48)
   Equal when every part is.
-- **Reflection.MethodDescriptor** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L58)
+- **Reflection.MethodDescriptor** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L57)
   Combines the parts.
-- **Reflection.MethodDescriptor** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L63)
+- **Reflection.MethodDescriptor** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L62)
   `name(input) returns (output)` with `stream` markers, as in a `.proto` file.
-- **Reflection** · [`export let ReflectionRegistry = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L69)
+- **Reflection** · [`export let ReflectionRegistry = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L68)
   Registered services and their methods. Tagged `#Final`, `#NotThreadSafe`.
-- **Reflection.ReflectionRegistry** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L76)
+- **Reflection.ReflectionRegistry** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L75)
   An empty registry.
-- **Reflection.ReflectionRegistry** · [`export let add_service = func(name: string, service_methods: MethodDescriptor[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L80)
+- **Reflection.ReflectionRegistry** · [`export let add_service = func(name: string, service_methods: MethodDescriptor[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L79)
   Registers a service with its methods, replacing an earlier registration of the name.
-- **Reflection.ReflectionRegistry** · [`export let list_services = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L93)
+- **Reflection.ReflectionRegistry** · [`export let list_services = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L92)
   The registered service names, sorted. Tagged `#NoDiscard`.
-- **Reflection.ReflectionRegistry** · [`export let methods_of = func(service: string) -> MethodDescriptor[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L104)
+- **Reflection.ReflectionRegistry** · [`export let methods_of = func(service: string) -> MethodDescriptor[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L103)
   The methods of `service`, empty when unknown. Tagged `#NoDiscard`.
-- **Reflection.ReflectionRegistry** · [`export let method_paths = func -> calls.MethodPath[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L115)
+- **Reflection.ReflectionRegistry** · [`export let method_paths = func -> calls.MethodPath[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L114)
   The method paths of every registered method. Tagged `#NoDiscard`.
-- **Reflection.ReflectionRegistry** · [`export let file_by_filename = func(filename: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L128)
+- **Reflection.ReflectionRegistry** · [`export let file_by_filename = func(filename: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L127)
   The serialized `FileDescriptorProto`s of the file named `filename` and its dependencies. Tagged `#NoDiscard`.
-- **Reflection.ReflectionRegistry** · [`export let file_containing_symbol = func(symbol: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L135)
+- **Reflection.ReflectionRegistry** · [`export let file_containing_symbol = func(symbol: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L134)
   The serialized `FileDescriptorProto`s of the file defining `symbol` and its dependencies. Tagged `#NoDiscard`.
-- **Reflection.ReflectionRegistry** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L140)
+- **Reflection.ReflectionRegistry** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L139)
   The number of services.
-- **Reflection** · [`export let encode_list_services_response = func(names: string[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L147)
+- **Reflection** · [`export let encode_list_services_response = func(names: string[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L146)
   The `ServerReflectionResponse` answering a `list_services` request: field 6 holding a `ListServiceResponse` with one `ServiceResponse` per name, in the order given. Tagged `#NoDiscard`.
-- **Reflection** · [`export let decode_list_services_response = func(bytes: uint8[list]) -> Result<string[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L162)
+- **Reflection** · [`export let decode_list_services_response = func(bytes: uint8[list]) -> Result<string[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/reflection.nra#L161)
   The service names of a `ServerReflectionResponse` holding a `ListServiceResponse`; unknown fields are skipped. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

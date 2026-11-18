@@ -48,11 +48,11 @@ The following public declarations are taken from the module source; each links t
   The `obfuscated_ticket_age` at `now`: (age in milliseconds + ticket_age_add) mod 2^32. A negative age traps with "invalid argument: ticket age". Tagged `#Pure`.
 - **SessionTicket.SessionTicket** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L92)
   Equal when every field is.
-- **SessionTicket.SessionTicket** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L103)
+- **SessionTicket.SessionTicket** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L102)
   A hash consistent with equals.
-- **SessionTicket.SessionTicket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L107)
+- **SessionTicket.SessionTicket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L106)
   Text such as "SessionTicket(example.com, h3, 7200 s, 0-RTT, ticket redacted)".
-- **SessionTicket** · [`export let create = func(ticket: uint8[list], server_name: string, alpn: string, received: instants.Instant, lifetime_seconds: int64, age_add: int64, max_early_data: int64) -> Result<SessionTicket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L116)
+- **SessionTicket** · [`export let create = func(ticket: uint8[list], server_name: string, alpn: string, received: instants.Instant, lifetime_seconds: int64, age_add: int64, max_early_data: int64) -> Result<SessionTicket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/session-ticket.nra#L115)
   A ticket from a NewSessionTicket: the opaque ticket (1 through 65,535 bytes), the server name and ALPN, the receipt time, `ticket_lifetime` (1 through 604,800 seconds; 0 means discard and is an error here), `ticket_age_add` (0 through 2^32 - 1), and the `max_early_data_size` of its early_data extension (-1 when absent; present, it must be the QUIC sentinel 0xffffffff). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

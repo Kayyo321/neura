@@ -88,79 +88,79 @@ The following public declarations are taken from the module source; each links t
   Stores the value and the offset.
 - **H3.Decoded** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L100)
   Equal values and offsets.
-- **H3.Decoded** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L109)
+- **H3.Decoded** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L108)
   Combines the value and the offset.
-- **H3.Decoded** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L114)
+- **H3.Decoded** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L113)
   "value@next".
-- **H3** · [`export let FrameHeader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L119)
+- **H3** · [`export let FrameHeader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L118)
   A frame header: the type and the payload length, and the offset of the payload. Tagged `#Final`, `#Immutable`, `#ThreadSafe`.
-- **H3.FrameHeader** · [`export last frame_type: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L121)
+- **H3.FrameHeader** · [`export last frame_type: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L120)
   The frame type.
-- **H3.FrameHeader** · [`export last length: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L123)
+- **H3.FrameHeader** · [`export last length: uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L122)
   The payload length in bytes.
-- **H3.FrameHeader** · [`export last payload_offset: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L125)
+- **H3.FrameHeader** · [`export last payload_offset: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L124)
   The offset of the first payload byte.
-- **H3.FrameHeader** · [`export let init = func(kind: uint64, size: uint64, offset: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L128)
+- **H3.FrameHeader** · [`export let init = func(kind: uint64, size: uint64, offset: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L127)
   Stores the fields.
-- **H3.FrameHeader** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L135)
+- **H3.FrameHeader** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L134)
   Equal fields.
-- **H3.FrameHeader** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L144)
+- **H3.FrameHeader** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L142)
   Combines the fields.
-- **H3.FrameHeader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L147)
+- **H3.FrameHeader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L145)
   The fields by name.
-- **H3** · [`export let Settings = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L154)
+- **H3** · [`export let Settings = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L152)
   The identifiers and values of a SETTINGS frame, in order. Tagged `#Final`, `#NotThreadSafe`.
-- **H3.Settings** · [`export last ids: uint64[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L156)
+- **H3.Settings** · [`export last ids: uint64[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L154)
   The identifiers.
-- **H3.Settings** · [`export last values: uint64[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L158)
+- **H3.Settings** · [`export last values: uint64[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L156)
   The values, parallel to `ids`.
-- **H3.Settings** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L161)
+- **H3.Settings** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L159)
   An empty list.
-- **H3.Settings** · [`export let add = func(id: uint64, value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L165)
+- **H3.Settings** · [`export let add = func(id: uint64, value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L163)
   Appends a setting.
-- **H3.Settings** · [`export let get_or = func(id: uint64, fallback: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L171)
+- **H3.Settings** · [`export let get_or = func(id: uint64, fallback: uint64) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L169)
   The value of `id`, or `fallback` when absent.
-- **H3.Settings** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L181)
+- **H3.Settings** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L179)
   Equal settings in the same order.
-- **H3.Settings** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L189)
+- **H3.Settings** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L187)
   The hash of the text form.
-- **H3.Settings** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L192)
+- **H3.Settings** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L190)
   "Settings{id=value, ...}".
-- **H3** · [`export let encode_varint = func(value: uint64) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L207)
+- **H3** · [`export let encode_varint = func(value: uint64) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L205)
   The shortest encoding of `value` (RFC 9000 section 16): 1, 2, 4 or 8 bytes with the length in the two high bits. Traps with "invalid argument: varint out of range" above 2^62 - 1. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **H3** · [`export let append_varint = func(out: uint8[list], value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L214)
+- **H3** · [`export let append_varint = func(out: uint8[list], value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L212)
   Appends the shortest encoding of `value` to `out`; traps as `encode_varint` does.
-- **H3** · [`export let decode_varint = func(bytes: uint8[list], offset: int) -> Result<Decoded>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L240)
+- **H3** · [`export let decode_varint = func(bytes: uint8[list], offset: int) -> Result<Decoded>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L238)
   The variable-length integer at `offset` (RFC 9000 section 16, Appendix A.1). Err (UnexpectedEnd) when the bytes end inside it. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **H3** · [`export let encode_frame_header = func(frame_type: uint64, length: uint64) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L258)
+- **H3** · [`export let encode_frame_header = func(frame_type: uint64, length: uint64) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L256)
   The frame header Type (i), Length (i) (RFC 9114 section 7.1). Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **H3** · [`export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L268)
+- **H3** · [`export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L266)
   The frame header at `offset`; errors are those of `decode_varint`. The payload may extend past the end of `bytes`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **H3** · [`export let encode_settings = func(settings: Settings) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L276)
+- **H3** · [`export let encode_settings = func(settings: Settings) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L274)
   The SETTINGS frame payload holding `settings` in order (section 7.2.4). Tagged `#NoDiscard`.
-- **H3** · [`export let decode_settings = func(payload: uint8[list]) -> Result<Settings>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L289)
+- **H3** · [`export let decode_settings = func(payload: uint8[list]) -> Result<Settings>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L287)
   The settings of a SETTINGS frame payload (section 7.2.4). Err for a truncated pair (UnexpectedEnd), a repeated identifier, or an HTTP/2 identifier reserved by section 11.2.2 (0x00, 0x02 through 0x05); the last two are H3_SETTINGS_ERROR conditions (Syntax, at the identifier). Unknown identifiers are kept. Tagged `#NoDiscard`.
-- **H3** · [`export let is_reserved_setting = func(id: uint64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L311)
+- **H3** · [`export let is_reserved_setting = func(id: uint64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L309)
   Whether `id` is an HTTP/2 setting identifier reserved in HTTP/3 (section 11.2.2). Tagged `#Pure`, `#ThreadSafe`.
-- **H3** · [`export let is_grease = func(value: uint64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L316)
+- **H3** · [`export let is_grease = func(value: uint64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L314)
   Whether `value` has the form 0x1f * N + 0x21 used for reserved ("grease") types, settings and error codes (sections 6.2.3, 7.2.8, 7.2.4.1, 8.1). Tagged `#Pure`, `#ThreadSafe`.
-- **H3** · [`export let H3Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L320)
+- **H3** · [`export let H3Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L318)
   An HTTP/3 connection over QUIC. Tagged `#Final`, `#NotThreadSafe`.
-- **H3.H3Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L322)
+- **H3.H3Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L320)
   The authority the connection was opened to.
-- **H3.H3Connection** · [`export let init = func(target: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L325)
+- **H3.H3Connection** · [`export let init = func(target: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L323)
   Records the authority; only `connect` creates connections.
-- **H3.H3Connection** · [`export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L331)
+- **H3.H3Connection** · [`export let send_frame = func(stream_id: uint64, frame_type: uint64, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L329)
   Sends one frame on a request stream.
-- **H3.H3Connection** · [`export let close = func(error_code: uint64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L336)
+- **H3.H3Connection** · [`export let close = func(error_code: uint64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L334)
   Closes the connection with an HTTP/3 error code (section 8.1).
-- **H3.H3Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L339)
+- **H3.H3Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L337)
   The authority.
-- **H3** · [`export let connect = func(authority: string, settings: Settings) -> Result<H3Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L346)
+- **H3** · [`export let connect = func(authority: string, settings: Settings) -> Result<H3Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L344)
   Opens an HTTP/3 connection to `authority` (host:port): QUIC with TLS 1.3 and ALPN "h3", then the control stream and SETTINGS (sections 3.2, 6.2.1). Tagged `#NoDiscard`.
-- **H3** · [`export let encode_field_section = func(fields: header_map.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L352)
+- **H3** · [`export let encode_field_section = func(fields: header_map.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L350)
   The QPACK encoding of a field section (RFC 9204). Tagged `#NoDiscard`.
-- **H3** · [`export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L359)
+- **H3** · [`export let decode_field_section = func(encoded: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h3.nra#L357)
   The field section of a QPACK-encoded HEADERS payload (RFC 9204). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

@@ -24,49 +24,49 @@ The following public declarations are taken from the module source; each links t
   The overhead per field in the header list size (as HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`).
 - **Metadata** · [`export let is_valid_name = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L28)
   Whether `name` is a valid header name: 1 or more of `0-9 a-z _ - .`. Tagged `#NoDiscard`.
-- **Metadata** · [`export let is_valid_ascii_value = func(value: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L43)
+- **Metadata** · [`export let is_valid_ascii_value = func(value: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L41)
   Whether `value` is a valid ASCII value: 1 or more bytes in 0x20 to 0x7E. Tagged `#NoDiscard`.
-- **Metadata** · [`export let is_binary_name = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L58)
+- **Metadata** · [`export let is_binary_name = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L56)
   Whether `name` names a binary header. Tagged `#NoDiscard`.
-- **Metadata** · [`export let decode_binary = func(value: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L63)
+- **Metadata** · [`export let decode_binary = func(value: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L61)
   Decodes a binary header value: splits on `,`, then decodes each part as padded or unpadded base64 and joins the bytes of the parts in order. Tagged `#NoDiscard`.
-- **Metadata** · [`export let Metadata = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L78)
+- **Metadata** · [`export let Metadata = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L76)
   Ordered gRPC metadata entries as they travel: names lower-case, binary values base64. Tagged `#Final`, `#NotThreadSafe`.
-- **Metadata.Metadata** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L85)
+- **Metadata.Metadata** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L83)
   Empty metadata.
-- **Metadata.Metadata** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L90)
+- **Metadata.Metadata** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L88)
   The number of entries. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let add = func(name: string, value: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L95)
+- **Metadata.Metadata** · [`export let add = func(name: string, value: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L93)
   Adds an ASCII entry. The name is lower-cased first. Fails with a Parse error for an invalid name, a `-bin` name (use `add_binary`), or an invalid value. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let add_binary = func(name: string, value: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L113)
+- **Metadata.Metadata** · [`export let add_binary = func(name: string, value: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L107)
   Adds a binary entry, stored as unpadded base64. The name must end in `-bin`. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let get = func(name: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L125)
+- **Metadata.Metadata** · [`export let get = func(name: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L119)
   The first value of `name` as sent (base64 for a binary name). Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let get_all = func(name: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L137)
+- **Metadata.Metadata** · [`export let get_all = func(name: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L131)
   Every value of `name` in order. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let get_binary = func(name: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L150)
+- **Metadata.Metadata** · [`export let get_binary = func(name: string) -> Result<uint8[list][list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L144)
   Every decoded value of the binary header `name`, after splitting joined values on `,`. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let contains = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L162)
+- **Metadata.Metadata** · [`export let contains = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L156)
   Whether an entry named `name` exists. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let remove = func(name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L165)
+- **Metadata.Metadata** · [`export let remove = func(name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L159)
   Removes every entry named `name`; returns how many were removed.
-- **Metadata.Metadata** · [`export let add_raw = func(name: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L183)
+- **Metadata.Metadata** · [`export let add_raw = func(name: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L177)
   Appends an entry as received, without checks: `name` must already be lower-case and a binary value must be base64 text. `from_entries` uses it.
-- **Metadata.Metadata** · [`export let add_all = func(other: Metadata)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L189)
+- **Metadata.Metadata** · [`export let add_all = func(other: Metadata)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L183)
   Appends every entry of `other`.
-- **Metadata.Metadata** · [`export let entries = func -> [string, string][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L199)
+- **Metadata.Metadata** · [`export let entries = func -> [string, string][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L193)
   The entries as `[name, value]` pairs in order (a copy). Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let header_list_size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L209)
+- **Metadata.Metadata** · [`export let header_list_size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L203)
   The header list size: for each entry its name and value lengths plus 32. Tagged `#NoDiscard`.
-- **Metadata.Metadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L218)
+- **Metadata.Metadata** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L212)
   Equal when the entries are equal in order.
-- **Metadata.Metadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L235)
+- **Metadata.Metadata** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L229)
   Combines every name and value.
-- **Metadata.Metadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L244)
+- **Metadata.Metadata** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L238)
   `name: value` lines joined by `, `.
-- **Metadata** · [`export let empty = func -> Metadata`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L255)
+- **Metadata** · [`export let empty = func -> Metadata`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L249)
   New empty metadata. Tagged `#NoDiscard`.
-- **Metadata** · [`export let from_entries = func(pairs: [string, string][list]) -> Metadata`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L261)
+- **Metadata** · [`export let from_entries = func(pairs: [string, string][list]) -> Metadata`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/metadata.nra#L255)
   Metadata from received header pairs. Names are lower-cased; pseudo-headers (`:`), invalid names and ASCII entries with invalid values are dropped; binary values are kept as received and decoded by `get_binary`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

@@ -50,45 +50,45 @@ The following public declarations are taken from the module source; each links t
   Whether this is a gRPC-Web trailer frame. Tagged `#NoDiscard`.
 - **Framing.Frame** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L101)
   Equal when the flags and bytes are.
-- **Framing.Frame** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L118)
+- **Framing.Frame** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L117)
   Combines the flags and bytes.
-- **Framing.Frame** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L127)
+- **Framing.Frame** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L126)
   The flags and size.
-- **Framing** · [`export let append_frame = func(out: uint8[list], flags: int, payload: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L133)
+- **Framing** · [`export let append_frame = func(out: uint8[list], flags: int, payload: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L132)
   Appends a length-prefixed frame with `flags` to `out`. A payload of 2^32 bytes or more traps with "invalid argument: message too large".
-- **Framing** · [`export let encode_message = func(payload: uint8[list], compressed: bool) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L150)
+- **Framing** · [`export let encode_message = func(payload: uint8[list], compressed: bool) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L149)
   The length-prefixed encoding of one message. Tagged `#NoDiscard`.
-- **Framing** · [`export let encode_with = func(compression: Compression, payload: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L158)
+- **Framing** · [`export let encode_with = func(compression: Compression, payload: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L157)
   Compresses `payload` with `compression` (unless identity) and frames it with the matching flag. Tagged `#NoDiscard`.
-- **Framing** · [`export let message_of = func(frame: Frame, compression: Compression) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L169)
+- **Framing** · [`export let message_of = func(frame: Frame, compression: Compression) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L168)
   The message bytes of a frame received on a call whose `grpc-encoding` is `compression`: fails with INTERNAL when the compressed flag is set on an identity call (PROTOCOL-HTTP2.md "Compressed-Flag"). Tagged `#NoDiscard`.
-- **Framing** · [`export let MessageDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L185)
+- **Framing** · [`export let MessageDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L182)
   Decodes length-prefixed frames from chunks of any size. With `web` false only flags 0 and 1 are valid; with `web` true flags 128 and 129 (trailer frames) are too. Any other flags byte fails. Tagged `#Final`, `#NotThreadSafe`.
-- **Framing.MessageDecoder** · [`export let init = func(max_message_size: int, grpc_web: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L198)
+- **Framing.MessageDecoder** · [`export let init = func(max_message_size: int, grpc_web: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L195)
   A decoder; a maximum below 0 traps with "invalid argument: max_size".
-- **Framing.MessageDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L207)
+- **Framing.MessageDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L204)
   Adds received bytes.
-- **Framing.MessageDecoder** · [`export let buffered = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L215)
+- **Framing.MessageDecoder** · [`export let buffered = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L212)
   The number of bytes not yet decoded. Tagged `#NoDiscard`.
-- **Framing.MessageDecoder** · [`export let next = func -> Result<Optional<Frame>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L219)
+- **Framing.MessageDecoder** · [`export let next = func -> Result<Optional<Frame>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L216)
   The next whole frame, `None` when more bytes are needed, or the failure of a bad frame. Tagged `#NoDiscard`.
-- **Framing.MessageDecoder** · [`export let finish = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L255)
+- **Framing.MessageDecoder** · [`export let finish = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L250)
   Checks the stream ended on a frame boundary: leftover bytes fail with INTERNAL. Tagged `#NoDiscard`.
-- **Framing.MessageDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L264)
+- **Framing.MessageDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L259)
   The buffered byte count.
-- **Framing** · [`export let decode_all = func(body: uint8[list], max_message_size: int, grpc_web: bool) -> Result<Frame[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L289)
+- **Framing** · [`export let decode_all = func(body: uint8[list], max_message_size: int, grpc_web: bool) -> Result<Frame[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L284)
   Every frame of a complete body; fails on a bad frame or a body that ends inside a frame. Tagged `#NoDiscard`.
-- **Framing** · [`export let encode_delimited = func(payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L311)
+- **Framing** · [`export let encode_delimited = func(payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L306)
   The varint-delimited encoding of one message: a base-128 varint length, then the bytes (the protobuf `writeDelimitedTo` form). Tagged `#NoDiscard`.
-- **Framing** · [`export let DelimitedDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L322)
+- **Framing** · [`export let DelimitedDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L317)
   Decodes varint-delimited messages from chunks of any size. Tagged `#Final`, `#NotThreadSafe`.
-- **Framing.DelimitedDecoder** · [`export let init = func(max_message_size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L333)
+- **Framing.DelimitedDecoder** · [`export let init = func(max_message_size: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L328)
   A decoder; a maximum below 0 traps with "invalid argument: max_size".
-- **Framing.DelimitedDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L341)
+- **Framing.DelimitedDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L336)
   Adds received bytes.
-- **Framing.DelimitedDecoder** · [`export let next = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L350)
+- **Framing.DelimitedDecoder** · [`export let next = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L345)
   The next whole message, `None` when more bytes are needed, or a failure: a varint over 10 bytes or 64 bits (INTERNAL) or a length above the maximum (RESOURCE_EXHAUSTED). Tagged `#NoDiscard`.
-- **Framing.DelimitedDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L398)
+- **Framing.DelimitedDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/framing.nra#L393)
   The buffered byte count.
 <!-- END SOURCE API -->
 

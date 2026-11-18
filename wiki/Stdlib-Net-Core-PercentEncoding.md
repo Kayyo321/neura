@@ -38,11 +38,11 @@ The following public declarations are taken from the module source; each links t
   The bytes of the text with each `%XX` triplet decoded, without any UTF-8 check. Errors: Parse InvalidCharacter at a `%` not followed by two hex digits. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 - **PercentEncoding** · [`export let first_invalid = func(text: string, set: EncodeSet) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L117)
   The offset of the first byte that is neither kept by the set nor the start of a well-formed `%XX` triplet, or -1 when every byte is valid. Bytes of a triplet are skipped together. Tagged `#Pure`, `#ThreadSafe`.
-- **PercentEncoding** · [`export let normalize = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L140)
+- **PercentEncoding** · [`export let normalize = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L138)
   Percent-encoding normalization (RFC 3986 sections 6.2.2.1 and 6.2.2.2): a triplet that encodes an unreserved byte is decoded, every other triplet gets uppercase hex digits. A `%` that does not start a well-formed triplet is copied unchanged. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **PercentEncoding** · [`export let is_triplet = func(text: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L168)
+- **PercentEncoding** · [`export let is_triplet = func(text: string, offset: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L166)
   Tests whether the text has a well-formed `%XX` triplet at the offset. Tagged `#Pure`, `#ThreadSafe`.
-- **PercentEncoding** · [`export let hex_value = func(b: uint8) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L177)
+- **PercentEncoding** · [`export let hex_value = func(b: uint8) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/percent-encoding.nra#L175)
   The value of an ASCII hex digit in either case, or -1. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

@@ -58,15 +58,15 @@ The following public declarations are taken from the module source; each links t
   As `child` with the sampled flag set to `sample`; the spec allows changing it only together with the parent id. Tagged `#NoDiscard`.
 - **TraceParent.TraceParent** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L101)
   Equal when the version, both ids and the flags are.
-- **TraceParent.TraceParent** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L111)
+- **TraceParent.TraceParent** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L110)
   Combines the version, flags and id bytes.
-- **TraceParent.TraceParent** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L123)
+- **TraceParent.TraceParent** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L122)
   The version-00 header value.
-- **TraceParent** · [`export let parse = func(text: string) -> Result<TraceParent>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L128)
+- **TraceParent** · [`export let parse = func(text: string) -> Result<TraceParent>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L127)
   Parses a `traceparent` value by the rules described for the module. Tagged `#NoDiscard`.
-- **TraceParent** · [`export let random_id = func(random: Random, count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L168)
+- **TraceParent** · [`export let random_id = func(random: Random, count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L167)
   `count` random bytes from `random` that are not all zero (drawn again in the rare all-zero case). Tagged `#NoDiscard`.
-- **TraceParent** · [`export let start = func(random: Random, sample: bool) -> TraceParent`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L181)
+- **TraceParent** · [`export let start = func(random: Random, sample: bool) -> TraceParent`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-parent.nra#L178)
   A new trace: a random trace id (with the random-trace-id flag set), a random parent id, and the sampled flag set to `sample`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

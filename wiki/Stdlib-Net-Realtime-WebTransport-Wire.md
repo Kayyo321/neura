@@ -98,17 +98,17 @@ The following public declarations are taken from the module source; each links t
   Stores the code and message.
 - **Wire.SessionClose** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L300)
   Equal when the code and message are.
-- **Wire.SessionClose** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L309)
+- **Wire.SessionClose** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L308)
   Combines the code and message.
-- **Wire.SessionClose** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L312)
+- **Wire.SessionClose** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L311)
   `code: message`.
-- **Wire** · [`export let encode_close_capsule = func(close: SessionClose) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L318)
+- **Wire** · [`export let encode_close_capsule = func(close: SessionClose) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L317)
   The WT_CLOSE_SESSION capsule (type 0x2843, length, code, message). A message over 1024 bytes traps with "invalid argument: close message". Tagged `#NoDiscard`.
-- **Wire** · [`export let decode_close_capsule = func(bytes: uint8[list]) -> Result<SessionClose>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L337)
+- **Wire** · [`export let decode_close_capsule = func(bytes: uint8[list]) -> Result<SessionClose>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L336)
   Reads a WT_CLOSE_SESSION capsule. Fails for another capsule type, a length below 4 or past the bytes, a message over 1024 bytes, or a message that is not UTF-8. Tagged `#NoDiscard`.
-- **Wire** · [`export let to_http3_error = func(code: uint32) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L358)
+- **Wire** · [`export let to_http3_error = func(code: uint32) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L357)
   The HTTP/3 error code of a WebTransport application error code (draft section 4.4): `first + n + floor(n / 0x1e)`, skipping the reserved codepoints `0x1f * N + 0x21`. Tagged `#NoDiscard`.
-- **Wire** · [`export let from_http3_error = func(code: uint64) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L366)
+- **Wire** · [`export let from_http3_error = func(code: uint64) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L365)
   The WebTransport application error code of an HTTP/3 error code, or a failure when the code is outside the WT_APPLICATION_ERROR range or a reserved codepoint. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

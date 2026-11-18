@@ -44,23 +44,23 @@ The following public declarations are taken from the module source; each links t
   This name followed by `origin` (this name's labels, then the origin's). Err when the result is longer than 255 bytes. Tagged `#NoDiscard`.
 - **Name.DnsName** · [`export let is_within = func(other: DnsName) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L109)
   Whether this name is `other` or lies below it, label by label and ignoring ASCII case: `a.corp.example.` is within `corp.example.`, `notcorp.example.` is not. Tagged `#NoDiscard`.
-- **Name.DnsName** · [`export let to_lower = func -> DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L125)
+- **Name.DnsName** · [`export let to_lower = func -> DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L123)
   The name with ASCII letters lowered. Tagged `#NoDiscard`.
-- **Name.DnsName** · [`export let key = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L135)
+- **Name.DnsName** · [`export let key = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L133)
   The lowered text form: a key for maps that ignores case. Tagged `#NoDiscard`.
-- **Name.DnsName** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L138)
+- **Name.DnsName** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L136)
   Equal when the labels match ignoring ASCII case.
-- **Name.DnsName** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L155)
+- **Name.DnsName** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L150)
   The hash of the lowered labels.
-- **Name.DnsName** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L167)
+- **Name.DnsName** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L162)
   The master-file text with a trailing dot ("www.example.com."); "." for the root.
-- **Name** · [`export let root = func -> DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L181)
+- **Name** · [`export let root = func -> DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L176)
   The root name. Tagged `#NoDiscard`.
-- **Name** · [`export let from_labels = func(labels: uint8[list][list]) -> Result<DnsName>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L186)
+- **Name** · [`export let from_labels = func(labels: uint8[list][list]) -> Result<DnsName>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L181)
   A name of `labels`; Err (Parse, OutOfRange) for an empty label, a label above 63 bytes or a name above 255 wire bytes. Tagged `#NoDiscard`.
-- **Name** · [`export let parse = func(text: string) -> Result<DnsName>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L199)
+- **Name** · [`export let parse = func(text: string) -> Result<DnsName>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L194)
   Parses master-file text: labels separated by dots, an optional trailing dot, `\.`, `\\` and `\DDD` escapes. "" and "." are the root. Err (Parse) for an empty label, a bad escape, a label above 63 bytes or a name above 255 wire bytes. Tagged `#NoDiscard`.
-- **Name** · [`export let same_label = func(a: uint8[list], b: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L260)
+- **Name** · [`export let same_label = func(a: uint8[list], b: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/name.nra#L255)
   Whether two labels are equal ignoring ASCII case. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

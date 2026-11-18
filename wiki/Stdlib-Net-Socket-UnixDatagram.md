@@ -24,21 +24,21 @@ The following public declarations are taken from the module source; each links t
   Use `bind` or `unbound`; the ID comes from the library.
 - **UnixDatagram.UnixDatagram** · [`export let local_address = func -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L44)
   The bound address. An unbound socket has none: Err with InvalidInput. Tagged `#NoDiscard`.
-- **UnixDatagram.UnixDatagram** · [`export let send_to = func(data: uint8[list], target: UnixAddr) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L57)
+- **UnixDatagram.UnixDatagram** · [`export let send_to = func(data: uint8[list], target: UnixAddr) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L55)
   Sends `data` as one datagram to `target`; the count the host sent. Tagged `#NoDiscard`.
-- **UnixDatagram.UnixDatagram** · [`export let receive_from = func(max: int) -> Result<Datagram<UnixAddr>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L70)
+- **UnixDatagram.UnixDatagram** · [`export let receive_from = func(max: int) -> Result<Datagram<UnixAddr>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L66)
   One datagram of at most `max` bytes, waiting up to the read timeout. A maximum below 1 traps. Tagged `#NoDiscard`.
-- **UnixDatagram.UnixDatagram** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L83)
+- **UnixDatagram.UnixDatagram** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L77)
   The longest a receive waits; zero waits without limit.
-- **UnixDatagram.UnixDatagram** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L86)
+- **UnixDatagram.UnixDatagram** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L80)
   Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
-- **UnixDatagram.UnixDatagram** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L91)
+- **UnixDatagram.UnixDatagram** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L85)
   Releases the socket. Closing again returns Ok.
-- **UnixDatagram.UnixDatagram** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L103)
+- **UnixDatagram.UnixDatagram** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L95)
   Text such as "UnixDatagram(/run/app.sock)" or "UnixDatagram(unbound)".
-- **UnixDatagram** · [`export let bind = func(address: UnixAddr) -> Result<UnixDatagram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L114)
+- **UnixDatagram** · [`export let bind = func(address: UnixAddr) -> Result<UnixDatagram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L106)
   A socket bound to `address`. Tagged `#NoDiscard`.
-- **UnixDatagram** · [`export let unbound = func -> Result<UnixDatagram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L119)
+- **UnixDatagram** · [`export let unbound = func -> Result<UnixDatagram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-datagram.nra#L111)
   An unnamed socket. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

@@ -32,15 +32,15 @@ The following public declarations are taken from the module source; each links t
   The family of the network address. Tagged `#Pure`.
 - **CidrBlock.CidrBlock** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L61)
   Tests whether another object is a `CidrBlock` with an equal network and prefix length.
-- **CidrBlock.CidrBlock** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L71)
+- **CidrBlock.CidrBlock** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L70)
   Combines the network hash with the prefix length. Tagged `#Pure`.
-- **CidrBlock.CidrBlock** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L76)
+- **CidrBlock.CidrBlock** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L75)
   `network/prefix`, for example `10.0.0.0/8` or `2001:db8::/32`. Tagged `#Pure`.
-- **CidrBlock** · [`export let of = func(ip: ips.IpAddr, prefix: int) -> CidrBlock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L83)
+- **CidrBlock** · [`export let of = func(ip: ips.IpAddr, prefix: int) -> CidrBlock`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L82)
   The block of `ip` with the host bits cleared and any zone dropped; traps when the prefix is out of range for the family. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **CidrBlock** · [`export let parse = func(text: string) -> Result<CidrBlock>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L101)
+- **CidrBlock** · [`export let parse = func(text: string) -> Result<CidrBlock>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L100)
   Parses `address/prefix`, where the prefix is 1 to 3 decimal digits without a leading zero (except `0`), at most 32 for IPv4 and 128 for IPv6. Python's `ipaddress.ip_network` is laxer: it also takes a bare address (as a /32 or /128), a netmask (`10.0.0.0/255.0.0.0`), a leading zero (`/08`) and a zone; this parser rejects each. Errors: Empty for ""; Syntax at the length when there is no `/`; the address parser's error; Syntax at the `%` of a zone; InvalidCharacter at a byte of the prefix that is not a digit or follows a leading zero; UnexpectedEnd for an empty prefix; OutOfRange at the prefix's start when it is too long for the family; Syntax at the `/` when host bits are set. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **CidrBlock** · [`export let parse_lenient = func(text: string) -> Result<CidrBlock>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L106)
+- **CidrBlock** · [`export let parse_lenient = func(text: string) -> Result<CidrBlock>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/cidr-block.nra#L105)
   Parses like `parse`, but clears host bits (`10.1.2.3/8` gives `10.0.0.0/8`) and drops an IPv6 zone instead of reporting them. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

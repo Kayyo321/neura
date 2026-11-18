@@ -34,29 +34,29 @@ The following public declarations are taken from the module source; each links t
   The number of trusted CA certificates. Tagged `#Pure`.
 - **DynamicCertResolver.CertificateBundle** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L58)
   Equal when the chain, key and trust bundle are.
-- **DynamicCertResolver.CertificateBundle** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L68)
+- **DynamicCertResolver.CertificateBundle** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L67)
   A hash of the chain and trust bundle (not the key), consistent with equals.
-- **DynamicCertResolver.CertificateBundle** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L71)
+- **DynamicCertResolver.CertificateBundle** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L70)
   Text such as "CertificateBundle(2 certificates, key redacted, 1 trust anchors)".
-- **DynamicCertResolver** · [`export let DynamicCertResolver = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L77)
+- **DynamicCertResolver** · [`export let DynamicCertResolver = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L76)
   Rotates a `CertificateBundle` when the injected change detector reports new material. Tagged `#Final`, `#NotThreadSafe`.
-- **DynamicCertResolver.DynamicCertResolver** · [`export let init = func(first: CertificateBundle, load: func() -> Result<CertificateBundle>, detect: func() -> Result<bool>, source: Clock, check_interval: Duration, now: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L94)
+- **DynamicCertResolver.DynamicCertResolver** · [`export let init = func(first: CertificateBundle, load: func() -> Result<CertificateBundle>, detect: func() -> Result<bool>, source: Clock, check_interval: Duration, now: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L93)
   Use `create`, which loads the first bundle.
-- **DynamicCertResolver.DynamicCertResolver** · [`export let current = func -> CertificateBundle`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L106)
+- **DynamicCertResolver.DynamicCertResolver** · [`export let current = func -> CertificateBundle`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L105)
   The bundle in use now. Tagged `#NoDiscard`.
-- **DynamicCertResolver.DynamicCertResolver** · [`export let generation = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L110)
+- **DynamicCertResolver.DynamicCertResolver** · [`export let generation = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L109)
   How many times the bundle was replaced since creation. Tagged `#Pure`.
-- **DynamicCertResolver.DynamicCertResolver** · [`export let poll = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L116)
+- **DynamicCertResolver.DynamicCertResolver** · [`export let poll = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L115)
   When the check interval has passed since the last check, asks the detector and reloads on a change. Ok(true) when the bundle was replaced; Err when the clock, the detector or the reload failed (the current bundle stays). Tagged `#NoDiscard`.
-- **DynamicCertResolver.DynamicCertResolver** · [`export let reload = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L130)
+- **DynamicCertResolver.DynamicCertResolver** · [`export let reload = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L129)
   Loads and checks a bundle now and swaps it in. Ok(false) when it equals the current one. Tagged `#NoDiscard`.
-- **DynamicCertResolver.DynamicCertResolver** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L144)
+- **DynamicCertResolver.DynamicCertResolver** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L143)
   Text such as "DynamicCertResolver(generation 2, CertificateBundle(...))".
-- **DynamicCertResolver** · [`export let bundle = func(chain: string, key: string, trust: string) -> Result<CertificateBundle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L162)
+- **DynamicCertResolver** · [`export let bundle = func(chain: string, key: string, trust: string) -> Result<CertificateBundle>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L161)
   A bundle from PEM text: the chain must hold at least one complete certificate block, the key a `PRIVATE KEY` block, and a non-empty trust bundle at least one certificate block. Else a Custom error with the code `tls.certificate`. Tagged `#NoDiscard`.
-- **DynamicCertResolver** · [`export let create = func(loader: func() -> Result<CertificateBundle>, changed: func() -> Result<bool>, clock: Clock, check_interval: Duration) -> Result<DynamicCertResolver>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L168)
+- **DynamicCertResolver** · [`export let create = func(loader: func() -> Result<CertificateBundle>, changed: func() -> Result<bool>, clock: Clock, check_interval: Duration) -> Result<DynamicCertResolver>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L167)
   A resolver whose first bundle comes from `loader` now. A negative interval traps with "invalid argument: interval". Err when the clock, the loader or the first bundle fails. Tagged `#NoDiscard`.
-- **DynamicCertResolver** · [`export let watch_paths = func(resolver: DynamicCertResolver, paths: string[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L182)
+- **DynamicCertResolver** · [`export let watch_paths = func(resolver: DynamicCertResolver, paths: string[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/dynamic-cert-resolver.nra#L181)
   Watches files for changes and reloads the resolver when they change. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

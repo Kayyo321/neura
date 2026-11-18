@@ -40,25 +40,25 @@ The following public declarations are taken from the module source; each links t
   The peer this socket dialed, or `None` for an accepted socket (not reported by the host).
 - **TcpSocket.TcpSocket** · [`export let local_port = func -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L102)
   The local port, from the host. Works today. Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let local_address = func -> Result<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L115)
+- **TcpSocket.TcpSocket** · [`export let local_address = func -> Result<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L113)
   The local address. Known without the host for an accepted socket whose server is bound to a specific address; otherwise it asks the host, which traps in Neura 0.3.0 (no local-address service). Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L132)
+- **TcpSocket.TcpSocket** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L128)
   Ends reading, writing (the peer reads the end of the stream) or both, keeping the socket open. Traps in Neura 0.3.0: the runtime has no shutdown service. Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let set_options = func(options: SocketOptions) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L147)
+- **TcpSocket.TcpSocket** · [`export let set_options = func(options: SocketOptions) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L141)
   Applies an option set built for `SocketKind.TcpStream`; another kind, or a set with multipath (chosen at connect), traps with "invalid argument". An empty set does nothing; a non-empty set is applied with the host's option service. Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let send_file = func(path: string, offset: int64, count: int64) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L163)
+- **TcpSocket.TcpSocket** · [`export let send_file = func(path: string, offset: int64, count: int64) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L155)
   Sends up to `count` bytes of the file at `path`, from byte `offset`, straight from the file to the socket (`sendfile(2)` on Linux); the count sent, which is short at the end of the file. Opening the file needs the fs capability. The transfer needs the host's send-file service, which traps in Neura 0.3.0. A negative offset or count traps with "invalid argument". Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let splice_to = func(target: TcpSocket, count: int64) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L190)
+- **TcpSocket.TcpSocket** · [`export let splice_to = func(target: TcpSocket, count: int64) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L180)
   Moves up to `count` bytes from this socket to `target` inside the kernel (`splice(2)` through a pipe); the count moved. Needs a splice host service, which no runtime offers yet: traps in Neura 0.3.0. Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let send_zerocopy = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L207)
+- **TcpSocket.TcpSocket** · [`export let send_zerocopy = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L195)
   Sends every byte with `MSG_ZEROCOPY`, so the kernel reads the caller's pages instead of copying them. Needs a zero-copy host service, which no runtime offers yet (host values are copied at the boundary): traps in Neura 0.3.0. Tagged `#NoDiscard`.
-- **TcpSocket.TcpSocket** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L219)
+- **TcpSocket.TcpSocket** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L205)
   Releases the connection, as `TcpStream.close`. Closing again returns Ok.
-- **TcpSocket.TcpSocket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L225)
+- **TcpSocket.TcpSocket** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L211)
   Text such as "TcpSocket(to 127.0.0.1:8080)" or "TcpSocket(accepted on 127.0.0.1:9000)".
-- **TcpSocket** · [`export let connect = func(address: SocketAddr, timeout: Duration) -> Result<TcpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L234)
+- **TcpSocket** · [`export let connect = func(address: SocketAddr, timeout: Duration) -> Result<TcpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L220)
   Connects to `address`, waiting at most `timeout` (zero waits without limit). A negative timeout traps with "invalid argument: negative timeout". Tagged `#NoDiscard`.
-- **TcpSocket** · [`export let connect_with = func(address: SocketAddr, timeout: Duration, options: SocketOptions) -> Result<TcpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L242)
+- **TcpSocket** · [`export let connect_with = func(address: SocketAddr, timeout: Duration, options: SocketOptions) -> Result<TcpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-socket.nra#L228)
   Connects to `address` with an option set built for `SocketKind.TcpStream` (another kind traps). With multipath the socket is created with Multipath TCP, which needs a host service that no runtime offers yet and traps. The other options are applied after the connection is made; if that fails the socket is closed and the error returned. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

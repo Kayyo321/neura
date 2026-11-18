@@ -90,23 +90,23 @@ The following public declarations are taken from the module source; each links t
   The directives as a field value: joined with ", ", arguments as tokens where possible and as quoted-strings otherwise (always quoted for the field lists of `no-cache` and `private`).
 - **CacheControl.CacheControl** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L209)
   Equal when both hold equal directives in the same order.
-- **CacheControl.CacheControl** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L226)
+- **CacheControl.CacheControl** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L223)
   Combines the directives' hashes in order.
-- **CacheControl.CacheControl** · [`export let mark_malformed = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L235)
+- **CacheControl.CacheControl** · [`export let mark_malformed = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L232)
   Records that a parsed element did not fit the grammar.
-- **CacheControl.CacheControl** · [`export let append_directive = func(d: Directive)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L240)
+- **CacheControl.CacheControl** · [`export let append_directive = func(d: Directive)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L237)
   Appends an already-built directive (used by the parser).
-- **CacheControl** · [`export let parse = func(text: string) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L300)
+- **CacheControl** · [`export let parse = func(text: string) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L297)
   The directives of a `Cache-Control` field value (RFC 9111 section 5.2). Never fails; see the module description for malformed elements. Tagged `#NoDiscard`.
-- **CacheControl** · [`export let of_headers = func(fields: headers.Headers) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L308)
+- **CacheControl** · [`export let of_headers = func(fields: headers.Headers) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L305)
   The directives of every `Cache-Control` field line of `fields`, in order. Tagged `#NoDiscard`.
-- **CacheControl** · [`export let parse_strict = func(text: string) -> Result<CacheControl>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L319)
+- **CacheControl** · [`export let parse_strict = func(text: string) -> Result<CacheControl>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L316)
   `parse`, but Err (Syntax, at the start of the offending element) when an element does not fit `token [ "=" ( token / quoted-string ) ]`. Tagged `#NoDiscard`.
-- **CacheControl** · [`export let parse_delta_seconds = func(text: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L332)
+- **CacheControl** · [`export let parse_delta_seconds = func(text: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L329)
   delta-seconds (RFC 9111 section 1.2.2): one or more ASCII digits; values above 2147483648 read as 2147483648. None for an empty text or any other byte. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **CacheControl** · [`export let is_known = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L354)
+- **CacheControl** · [`export let is_known = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L351)
   Whether RFC 9111 section 5.2 defines `name` (lowercase), as a request or a response directive. Tagged `#Pure`, `#ThreadSafe`.
-- **CacheControl** · [`export let quote = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L362)
+- **CacheControl** · [`export let quote = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L359)
   `text` as a quoted-string: in double quotes, with `"` and `\` escaped by a backslash. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

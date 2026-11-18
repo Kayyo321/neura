@@ -38,13 +38,13 @@ The following public declarations are taken from the module source; each links t
   The dialed peer, or `None` for an accepted socket.
 - **UnixStream.UnixStream** · [`export let local_address = func -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L86)
   The listener's address for an accepted socket; otherwise it asks the host, which traps in Neura 0.3.0 (no local-address service). Tagged `#NoDiscard`.
-- **UnixStream.UnixStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L102)
+- **UnixStream.UnixStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L100)
   Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service. Tagged `#NoDiscard`.
-- **UnixStream.UnixStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L114)
+- **UnixStream.UnixStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L110)
   Releases the connection. Closing again returns Ok.
-- **UnixStream.UnixStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L120)
+- **UnixStream.UnixStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L116)
   Text such as "UnixStream(to /run/app.sock)" or "UnixStream(accepted on @bus)".
-- **UnixStream** · [`export let connect = func(address: UnixAddr) -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L128)
+- **UnixStream** · [`export let connect = func(address: UnixAddr) -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L124)
   Connects to the Unix-domain stream socket at `address` (`neura.net.unix.connect`). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

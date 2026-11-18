@@ -40,9 +40,9 @@ The following public declarations are taken from the module source; each links t
   The context to send on: with a parent, the same trace with a new random span id as parent id and the state kept; without one, a new trace (sampled when `sample_new`) with an empty state. The baggage is kept either way. Tagged `#NoDiscard`.
 - **TraceContext.TraceContext** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-context.nra#L66)
   Equal when the parent, state and baggage are.
-- **TraceContext.TraceContext** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-context.nra#L75)
+- **TraceContext.TraceContext** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-context.nra#L74)
   Combines the parts' hashes.
-- **TraceContext.TraceContext** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-context.nra#L78)
+- **TraceContext.TraceContext** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-context.nra#L77)
   Text such as "TraceContext(00-...-01, rojo=1, Baggage(2 members))".
 - **TraceContext** · [`export let empty = func -> TraceContext`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-context.nra#L86)
   An empty context: no parent, state or baggage. Tagged `#NoDiscard`.

@@ -54,15 +54,15 @@ The following public declarations are taken from the module source; each links t
   A report.
 - **ShadowFilter.WorkerReport** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L172)
   Equal when both counts are.
-- **ShadowFilter.WorkerReport** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L177)
+- **ShadowFilter.WorkerReport** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L181)
   Combines the counts.
-- **ShadowFilter.WorkerReport** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L181)
+- **ShadowFilter.WorkerReport** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L185)
   Text such as "WorkerReport(3 handled, 1 failed)".
-- **ShadowFilter** · [`export let run_worker = func<Req, Resp>(queue: channels.Receiver<Req>, shadow: func(Req) -> Result<Resp>) -> WorkerReport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L188)
+- **ShadowFilter** · [`export let run_worker = func<Req, Resp>(queue: channels.Receiver<Req>, shadow: func(Req) -> Result<Resp>) -> WorkerReport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L192)
   Calls `shadow` for each request received from `queue`, in order, until the channel is closed (or this task is cancelled); run it with `spawn` in the scope that serves requests. Tagged `#NoDiscard`.
-- **ShadowFilter** · [`export let of_percent = func<Req, Resp>(queue: channels.Sender<Req>, percent: int, random: Random) -> ShadowFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L217)
+- **ShadowFilter** · [`export let of_percent = func<Req, Resp>(queue: channels.Sender<Req>, percent: int, random: Random) -> ShadowFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L221)
   A non-blocking filter mirroring `percent` % (0 to 100) of requests to `queue`. Tagged `#NoDiscard`.
-- **ShadowFilter** · [`export let concurrent_percent = func<Req, Resp>(shadow: func(Req) -> Result<Resp>, percent: int, random: Random) -> ConcurrentShadowFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L227)
+- **ShadowFilter** · [`export let concurrent_percent = func<Req, Resp>(shadow: func(Req) -> Result<Resp>, percent: int, random: Random) -> ConcurrentShadowFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/shadow-filter.nra#L231)
   A concurrent filter mirroring `percent` % (0 to 100) of requests to `shadow`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

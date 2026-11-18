@@ -28,11 +28,11 @@ The following public declarations are taken from the module source; each links t
   The bound address.
 - **QuicEndpoint.QuicEndpoint** · [`export let accept = func -> Result<QuicConnection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L56)
   Waits for the next connection and completes its handshake. Tagged `#NoDiscard`.
-- **QuicEndpoint.QuicEndpoint** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L68)
+- **QuicEndpoint.QuicEndpoint** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L66)
   Closes every connection and releases the port. Closing again returns Ok.
-- **QuicEndpoint.QuicEndpoint** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L80)
+- **QuicEndpoint.QuicEndpoint** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L76)
   Text such as "QuicEndpoint(0.0.0.0:443)".
-- **QuicEndpoint** · [`export let bind = func(address: SocketAddr, config: QuicConfig) -> Result<QuicEndpoint>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L86)
+- **QuicEndpoint** · [`export let bind = func(address: SocketAddr, config: QuicConfig) -> Result<QuicEndpoint>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-endpoint.nra#L82)
   Listens for QUIC on `address` (port 0 asks for a free port) with a server configuration. Traps in Neura 0.3.0 (no QUIC host service). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

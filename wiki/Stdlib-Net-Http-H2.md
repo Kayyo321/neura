@@ -120,55 +120,55 @@ The following public declarations are taken from the module source; each links t
   Whether every bit of `flag` is set.
 - **H2.FrameHeader** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L137)
   Equal fields.
-- **H2.FrameHeader** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L147)
+- **H2.FrameHeader** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L146)
   Combines the fields.
-- **H2.FrameHeader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L150)
+- **H2.FrameHeader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L149)
   The fields by name.
-- **H2** · [`export let Settings = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L157)
+- **H2** · [`export let Settings = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L156)
   The identifiers and values of a SETTINGS frame, in order. Tagged `#Final`, `#NotThreadSafe`.
-- **H2.Settings** · [`export last ids: int[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L159)
+- **H2.Settings** · [`export last ids: int[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L158)
   The identifiers, 0 through 65,535.
-- **H2.Settings** · [`export last values: int64[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L161)
+- **H2.Settings** · [`export last values: int64[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L160)
   The values, 0 through 2^32-1, parallel to `ids`.
-- **H2.Settings** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L164)
+- **H2.Settings** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L163)
   An empty list.
-- **H2.Settings** · [`export let add = func(id: int, value: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L169)
+- **H2.Settings** · [`export let add = func(id: int, value: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L168)
   Appends a setting. Traps with "invalid argument: setting" when the identifier or value does not fit 16 or 32 bits.
-- **H2.Settings** · [`export let get_or = func(id: int, fallback: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L178)
+- **H2.Settings** · [`export let get_or = func(id: int, fallback: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L177)
   The last value of `id` (later entries override earlier ones, section 6.5.3), or `fallback`.
-- **H2.Settings** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L189)
+- **H2.Settings** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L188)
   Equal settings in the same order.
-- **H2.Settings** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L197)
+- **H2.Settings** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L196)
   The hash of the text form.
-- **H2.Settings** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L200)
+- **H2.Settings** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L199)
   "Settings{id=value, ...}".
-- **H2** · [`export let preface_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L214)
+- **H2** · [`export let preface_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L213)
   The preface as bytes. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **H2** · [`export let encode_frame_header = func(header: FrameHeader) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L225)
+- **H2** · [`export let encode_frame_header = func(header: FrameHeader) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L224)
   The 9 octets of `header`, the reserved bit unset. Traps with "invalid argument: frame header" when a field is out of range. Tagged `#NoDiscard`.
-- **H2** · [`export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L248)
+- **H2** · [`export let decode_frame_header = func(bytes: uint8[list], offset: int) -> Result<FrameHeader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L247)
   The frame header at `offset`; the reserved bit is ignored. Err (UnexpectedEnd) when fewer than 9 bytes remain. Tagged `#NoDiscard`.
-- **H2** · [`export let encode_settings = func(settings: Settings) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L262)
+- **H2** · [`export let encode_settings = func(settings: Settings) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L261)
   The SETTINGS payload holding `settings` in order (section 6.5.1). Tagged `#NoDiscard`.
-- **H2** · [`export let decode_settings = func(payload: uint8[list]) -> Result<Settings>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L282)
+- **H2** · [`export let decode_settings = func(payload: uint8[list]) -> Result<Settings>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L281)
   The settings of a SETTINGS payload. Errors are `error.custom` with the HTTP/2 error name as the code: FRAME_SIZE_ERROR for a length that is not a multiple of 6 (section 6.5); PROTOCOL_ERROR for ENABLE_PUSH or ENABLE_CONNECT_PROTOCOL other than 0 or 1, or MAX_FRAME_SIZE outside 16,384 through 16,777,215; FLOW_CONTROL_ERROR for INITIAL_WINDOW_SIZE above 2^31-1 (section 6.5.2). Tagged `#NoDiscard`.
-- **H2** · [`export let H2Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L308)
+- **H2** · [`export let H2Connection = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L307)
   An HTTP/2 connection over TLS. Tagged `#Final`, `#NotThreadSafe`.
-- **H2.H2Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L310)
+- **H2.H2Connection** · [`export last authority: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L309)
   The authority the connection was opened to.
-- **H2.H2Connection** · [`export let init = func(target: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L313)
+- **H2.H2Connection** · [`export let init = func(target: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L312)
   Records the authority; only `connect` creates connections.
-- **H2.H2Connection** · [`export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L319)
+- **H2.H2Connection** · [`export let send_frame = func(header: FrameHeader, payload: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L318)
   Writes one frame: its header, then the payload.
-- **H2.H2Connection** · [`export let close = func(error_code: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L324)
+- **H2.H2Connection** · [`export let close = func(error_code: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L323)
   Sends GOAWAY with `error_code` and closes the connection (section 6.8).
-- **H2.H2Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L327)
+- **H2.H2Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L326)
   The authority.
-- **H2** · [`export let connect = func(authority: string, settings: Settings) -> Result<H2Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L334)
+- **H2** · [`export let connect = func(authority: string, settings: Settings) -> Result<H2Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L333)
   Opens an HTTP/2 connection to `authority` (host:port): TCP, TLS with ALPN "h2", the preface and a SETTINGS frame holding `settings` (sections 3.2, 3.4). Tagged `#NoDiscard`.
-- **H2** · [`export let hpack_encode = func(fields: header_map.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L340)
+- **H2** · [`export let hpack_encode = func(fields: header_map.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L339)
   The HPACK encoding of a field section (RFC 7541). Tagged `#NoDiscard`.
-- **H2** · [`export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L347)
+- **H2** · [`export let hpack_decode = func(block: uint8[list]) -> Result<header_map.Headers>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/h2.nra#L346)
   The field section of an HPACK header block (RFC 7541). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

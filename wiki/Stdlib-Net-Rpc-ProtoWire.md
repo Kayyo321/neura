@@ -114,63 +114,63 @@ The following public declarations are taken from the module source; each links t
   A key with both parts.
 - **ProtoWire.FieldKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L268)
   Equal when the number and wire type are.
-- **ProtoWire.FieldKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L272)
+- **ProtoWire.FieldKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L276)
   Combines the number and wire type.
-- **ProtoWire.FieldKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L276)
+- **ProtoWire.FieldKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L280)
   `field N, wire type W`.
-- **ProtoWire** · [`export let ProtoReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L285)
+- **ProtoWire** · [`export let ProtoReader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L289)
   Reads the fields of one protobuf message in order. Call `has_next`, then `read_key`, then the reader that fits the key's wire type, or `skip` for a field the program does not know. Offsets in errors are relative to the start of the bytes given to `of`. Tagged `#Final`, `#NotThreadSafe`.
-- **ProtoWire.ProtoReader** · [`export let init = func(bytes: uint8[list], start: int, stop: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L294)
+- **ProtoWire.ProtoReader** · [`export let init = func(bytes: uint8[list], start: int, stop: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L298)
   A reader over `data[start, stop)`; a range outside the list traps with "invalid argument: range".
-- **ProtoWire.ProtoReader** · [`export let has_next = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L305)
+- **ProtoWire.ProtoReader** · [`export let has_next = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L309)
   Whether bytes remain. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let position = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L309)
+- **ProtoWire.ProtoReader** · [`export let position = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L313)
   The offset of the next unread byte. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_key = func -> Result<FieldKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L313)
+- **ProtoWire.ProtoReader** · [`export let read_key = func -> Result<FieldKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L317)
   Reads a tag and checks its field number and wire type. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_varint = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L332)
+- **ProtoWire.ProtoReader** · [`export let read_varint = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L336)
   Reads a varint of at most 10 bytes whose value fits 64 bits. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_uint64 = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L355)
+- **ProtoWire.ProtoReader** · [`export let read_uint64 = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L359)
   Reads a `uint64` varint. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_uint32 = func -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L359)
+- **ProtoWire.ProtoReader** · [`export let read_uint32 = func -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L363)
   Reads a `uint32` varint (the low 32 bits, as protobuf parsers do). Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_int64 = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L363)
+- **ProtoWire.ProtoReader** · [`export let read_int64 = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L367)
   Reads an `int64` varint. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_int32 = func -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L367)
+- **ProtoWire.ProtoReader** · [`export let read_int32 = func -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L371)
   Reads an `int32` varint (the low 32 bits as a signed value). Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_sint64 = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L371)
+- **ProtoWire.ProtoReader** · [`export let read_sint64 = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L375)
   Reads a `sint64` (zigzag) varint. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_sint32 = func -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L375)
+- **ProtoWire.ProtoReader** · [`export let read_sint32 = func -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L379)
   Reads a `sint32` (zigzag) varint. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_bool = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L380)
+- **ProtoWire.ProtoReader** · [`export let read_bool = func -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L384)
   Reads a `bool`: any nonzero varint is true. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_fixed32 = func -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L384)
+- **ProtoWire.ProtoReader** · [`export let read_fixed32 = func -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L388)
   Reads a `fixed32`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_fixed64 = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L388)
+- **ProtoWire.ProtoReader** · [`export let read_fixed64 = func -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L392)
   Reads a `fixed64`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_sfixed32 = func -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L392)
+- **ProtoWire.ProtoReader** · [`export let read_sfixed32 = func -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L396)
   Reads an `sfixed32`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_sfixed64 = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L396)
+- **ProtoWire.ProtoReader** · [`export let read_sfixed64 = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L400)
   Reads an `sfixed64`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_float = func -> Result<float32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L400)
+- **ProtoWire.ProtoReader** · [`export let read_float = func -> Result<float32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L404)
   Reads a `float`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_double = func -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L404)
+- **ProtoWire.ProtoReader** · [`export let read_double = func -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L408)
   Reads a `double`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_bytes = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L408)
+- **ProtoWire.ProtoReader** · [`export let read_bytes = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L412)
   Reads a length-delimited field's bytes. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_string = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L419)
+- **ProtoWire.ProtoReader** · [`export let read_string = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L423)
   Reads a length-delimited field as UTF-8 text; invalid UTF-8 is an Encoding error. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_message = func -> Result<ProtoReader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L431)
+- **ProtoWire.ProtoReader** · [`export let read_message = func -> Result<ProtoReader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L435)
   A reader over an embedded message field, without copying its bytes. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let read_packed_uint64 = func -> Result<uint64[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L438)
+- **ProtoWire.ProtoReader** · [`export let read_packed_uint64 = func -> Result<uint64[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L442)
   Reads a packed repeated varint field. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let skip = func(wire_type: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L449)
+- **ProtoWire.ProtoReader** · [`export let skip = func(wire_type: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L453)
   Skips the value of a field with wire type `wire_type`. Tagged `#NoDiscard`.
-- **ProtoWire.ProtoReader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L465)
+- **ProtoWire.ProtoReader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L469)
   The position and the end.
-- **ProtoWire** · [`export let reader = func(bytes: uint8[list]) -> ProtoReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L499)
+- **ProtoWire** · [`export let reader = func(bytes: uint8[list]) -> ProtoReader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L503)
   A reader over all of `bytes`. Tagged `#NoDiscard`.
-- **ProtoWire** · [`export let writer = func -> ProtoWriter`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L503)
+- **ProtoWire** · [`export let writer = func -> ProtoWriter`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/proto-wire.nra#L507)
   A new empty writer. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
