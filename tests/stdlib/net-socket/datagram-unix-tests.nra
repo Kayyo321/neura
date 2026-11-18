@@ -14,7 +14,9 @@ let unix_listener = import:Std.Net.Socket.UnixListener;
 let unix_stream = import:Std.Net.Socket.UnixStream;
 
 // UdpSocket, UnixDatagram, UnixListener and UnixStream over real sockets: UDP on the loopback interface, Unix
-// sockets in the Linux abstract namespace (named after a fresh UDP port, so parallel runs do not collide).
+// sockets named `@...` after a fresh UDP port, so parallel runs do not collide. On Linux the names are in the
+// abstract namespace; elsewhere the host takes them as paths in the working directory, which nothing here
+// binds twice.
 let DatagramUnixTests = module (
     let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
@@ -123,9 +125,6 @@ let DatagramUnixTests = module (
         test.assert_none<uint8[list]>(test.assert_ok<optional.Optional<uint8[list]>>(client.receive()));
         test.assert_ok<unit.Unit>(client.close());
         test.assert_ok<unit.Unit>(listener.close());
-        // The abstract name is free again once the listener is closed.
-        last again = test.assert_ok<unix_listener.UnixListener>(unix_listener.bind(name));
-        test.assert_ok<unit.Unit>(again.close());
     };
 
     export let test_unix_connect_without_listener_fails = func {
