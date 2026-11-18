@@ -8,41 +8,80 @@ and then we can genuinely say that Neura is a memory safe programming langauge.
 This will also add langauge features, and only one new Std library, 
 > Std.Core.Pointer
 
-## Addition 1; [COME UP WITH GOOD NAME HERE]
+## Typed numeric literals
 
-[TURN THE FOLLOWING INTO MARKDOWN]
-// allow the following syntax for making large numbers
-// A) more easy to read with apostrphoes splicing them up and
-// B) can be easily tied to one specific type:
-// - u64 -> the number writen will be of type uint64
-// - s32 -> the number writen will be of type int64 (signed)
-// - f64 -> the number writen will be of type float64 (so on and so forth)
+A numeric literal may contain `'` between digits, and it may end in a type suffix. The marks make a long value easier to read. The suffix fixes the literal's type, so the literal no longer takes the type of its context.
+
+```neura
 let x = 120'000'000u64;
 let y = 64'000s32;
 let z = 100s16;
 let w = 13.885f64;
+```
 
-## Addition 2; REFACTOR:[variable initialization inside of if statements]
+`x` is `uint64`, `y` is `int32`, `z` is `int16`, and `w` is `float64`. A suffix names a width, not an alias: `s32` is `int32` (and therefore also `int`), and there is no suffix that means the names `int`, `byte`, or `float` by themselves.
 
-[TURN THE FOLLOWING INTO MARKDOWN]
+| Suffix | Type |
+| --- | --- |
+| `s8`, `s16`, `s32`, `s64` | `int8`, `int16`, `int32`, `int64` |
+| `u8`, `u16`, `u32`, `u64` | `uint8`, `uint16`, `uint32`, `uint64` |
+| `f16`, `bf16`, `f32`, `f64` | `float16`, `bfloat16`, `float32`, `float64` |
+
+An integer suffix applies to an integer literal. A float suffix applies to a floating-point literal, and also to a literal written with only integer digits, which is then a value of that float type (`1f32` is the `float32` value 1). An integer suffix on a literal that has a fraction or an exponent is a lexical error, as is an unknown suffix.
+
+`'` is ignored when the compiler reads the value. A mark must sit between two digits of the same digit group: the integer part, the fraction, or the exponent. It must not start or end a group, repeat (`1''0`), or sit next to `.`, `e`, `E`, a sign, or the suffix. `120'000'000` is 120000000. The existing range and rounding rules still apply, so `300u8` and `-1u32` are compile-time errors, and a float suffix is rounded once into that format.
+
+A literal with no suffix is unchanged: it takes the expected numeric type, or `int32` / `float64` when the context does not name one ([Numbers](Numbers.md)).
+
+## If initializers
+
+An `if` condition may open with one `let` declaration, a `;`, and then the condition. The declaration is evaluated once, before the condition. Its names are in scope in the condition, the `if` body, and the `else` body, and nowhere after the statement. The declaration may bind one name or destructure, and it follows the ordinary rules for `let`. The text after `;` is a condition under the same rules as a condition written on its own.
+
+```neura
+let console = import:Std.Io.Console;
+
+let bytes: uint8[] = [104, 105];
+
 if (let [valid, text] = string.from_utf8(bytes); valid) {
     console.println(text);
 }
+```
 
-## Addition 3; [COME UP WITH GOOD NAME HERE]
+`string.from_utf8` returns `[bool, string]`. The condition reads `valid` from that pair, and `text` is available only when the branch that uses it is inside this `if`. An `else if` may carry its own initializer. `while` does not take one.
 
-[TURN THE FOLLOWING INTO MARKDOWN]
-let val: Error = nil;
+## Nil conditions
+
+A condition is a `bool`, or a class or interface reference. A reference is true when it refers to an instance and false when it is `nil`. `if (!val)` is the nil check: its body runs when `val` is `nil`, the same way `if (!pointer)` runs when `pointer` is `NULL` in C. `if (val)` runs only when `val` refers to an instance.
+
+Numbers, strings, enums, and other values that cannot be `nil` are still not conditions. `and` and `or` still require `bool`. A reference becomes a `bool` through `!` or through a comparison, and that `bool` can then be combined with `and` or `or`.
+
+`Error` is a payload enum and cannot be `nil`. The test applies to a reference, such as a missing log entry:
+
+```neura
+let console = import:Std.Io.Console;
+
+let LogEntry = class (
+    export last message: string;
+
+    export let init = func(text: string) {
+        message = text;
+    };
+);
+
+let val: LogEntry = nil;
+
 if (!val) {
-    // when non boolean/comparision is evaluated (and it's a value that *can* be nil), evaluate if it's nil or not.
-    // this body should not be ran
+    console.println("nil");
 }
 
 if (val) {
-    console.println("this one shall!");
+    console.println("live");
 }
+```
 
-## Addition 4; REFACTOR:[the pointer standard library]
+`val` is `nil`, so `!val` is true, the first body prints `nil`, and the second body does not run. After `val` is assigned an instance, `if (val)` runs and `if (!val)` does not. A comparison such as `val == nil` remains an ordinary `bool`. A number, a string, an enum, and a `bool` keep the condition rules they already have.
+
+## `Std.Core.Pointer`
 
 ## 1. Overview
 
