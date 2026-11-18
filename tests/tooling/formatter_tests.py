@@ -532,7 +532,9 @@ let h = func(values: int[list]) -> int {
         self.assertGreater(len(sources), 100)
         for source in sources:
             with self.subTest(source=str(source.relative_to(repository))):
-                self.formatted(source.read_bytes())
+                # The standard library and the examples are formatted:
+                # `neura fmt --check` passes on both trees.
+                self.assertEqual(self.formatted(source.read_bytes()), source.read_text())
 
 
 if __name__ == '__main__':
