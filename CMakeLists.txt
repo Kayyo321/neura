@@ -872,6 +872,12 @@ if(BUILD_TESTING)
     foreach(suite IN ITEMS proof overflow execute corpus floats)
         add_test(NAME lift-${suite} COMMAND neura_lift_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+    # Graphs and proofs that do not depend on the C++ compiler (tests/lift/portable.cmake).
+    add_test(NAME lift-portable COMMAND ${CMAKE_COMMAND}
+        "-DNEURA=$<TARGET_FILE:neura>"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/lift-portable"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lift/portable.cmake")
 
     add_test(NAME backend-cli COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"

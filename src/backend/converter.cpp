@@ -3264,8 +3264,9 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         if (type.kind != TypeKind::Float) return word;
         const auto format = float_of(type);
         const auto first_exponent = word.begin() + format.fraction_bits;
-        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}),
-                                             circuit.any({word.begin(), first_exponent}));
+        // Fraction first, then exponent: the order of src/lift/proof.cpp.
+        const auto fraction = circuit.any({word.begin(), first_exponent});
+        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}), fraction);
         const auto canonical = constant_word(format.canonical_nan(), format.width());
         for (std::size_t bit = 0; bit < word.size(); ++bit) {
             word[bit] = circuit.choose(nan, canonical[bit], word[bit]);
@@ -3998,7 +3999,10 @@ void FunctionCompiler::append_text_bytes(const Operand& buffer, const Operand& s
     const auto head = new_block();
     jump(head);
     begin(head, span);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto next = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, next);
@@ -4085,7 +4089,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
         if (equality) {
             const auto other = state(nvr::StateOp::ReadLength, 0, {slot_operand(right)}, count, span);
-            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), lanes(other))});
+            const auto other_lanes = lanes(other);
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), other_lanes)});
             require_equal(described(std::move(same), binary_form("==", boolean, length, other)));
         }
         const auto position = new_slot(count);
@@ -4095,7 +4100,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto done = new_block();
         jump(head);
         begin(head, span);
-        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+        const auto limit = lanes(length);
+        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
         branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), next, done);
         begin(next, span);
         if (!equality && !hashing) {
@@ -4248,7 +4254,8 @@ void FunctionCompiler::compile_unbox_collection() {
     const auto done = new_block();
     jump(head);
     begin(head, span);
-    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+    const auto limit = lanes(length);
+    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
     branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), body, done);
     begin(body, span);
     const auto handle = state(nvr::StateOp::ReadElement, 0, {slot_operand(input), slot_operand(position)}, boxed, span);
@@ -4289,7 +4296,10 @@ void FunctionCompiler::compile_hash_text() {
     const auto head = new_block();
     jump(head);
     begin(head, none);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto done = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, done);
