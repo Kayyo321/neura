@@ -63,8 +63,8 @@ export let Grpc = module (
         };
 
         /// @brief The method and the counts.
-        export let.override to_string = func -> string => "ServerStream(" + request.path.to_string() + ", "
-            + sent.length.to_string() + " sent)";
+        export let.override to_string = func -> string => "ServerStream(" .. request.path.to_string() .. ", "
+            .. sent.length.to_string() .. " sent)";
     );
 
     /// @brief A streaming handler: reads requests from and sends responses to a `ServerStream`, then ends with
@@ -146,9 +146,7 @@ export let Grpc = module (
         #NoDiscard
         export let handle = func(wire: calls.WireRequest) -> calls.WireResponse {
             last content_type = optional.value_or<string>(wire.header("content-type"), "");
-            if (!calls.is_grpc_content_type(content_type)) {
-                return new calls.WireResponse(415, new, new, new);
-            }
+            return new calls.WireResponse(415, new, new, new) unless calls.is_grpc_content_type(content_type);
             last subtype = subtype_of(content_type, calls.GrpcContentType);
             return calls.encode_response(dispatch(wire), subtype);
         };
@@ -159,7 +157,7 @@ export let Grpc = module (
         export let handle_web = func(wire: calls.WireRequest) -> calls.WireResponse {
             last content_type = strings.to_ascii_lower(optional.value_or<string>(wire.header("content-type"), ""));
             last text = strings.starts_with(content_type, web.TextContentType);
-            if (!text && !strings.starts_with(content_type, web.ContentType)) {
+            if (not text && not strings.starts_with(content_type, web.ContentType)) {
                 return new calls.WireResponse(415, new, new, new);
             }
             last prefix = text ? web.TextContentType : web.ContentType;
@@ -192,7 +190,7 @@ export let Grpc = module (
             host_serve(port, protocol, new bound(handle));
 
         /// @brief The number of methods.
-        export let.override to_string = func -> string => "GrpcServer(" + paths.length.to_string() + " methods)";
+        export let.override to_string = func -> string => "GrpcServer(" .. paths.length.to_string() .. " methods)";
 
         /// @brief Runs the handler of a request and returns its response.
         let dispatch = func(wire: calls.WireRequest) -> calls.RpcResponse {
@@ -214,7 +212,7 @@ export let Grpc = module (
                     return run(i, request);
                 }
             }
-            return calls.status_response(statuses.of(statuses.Code.Unimplemented, "unknown method " + key));
+            return calls.status_response(statuses.of(statuses.Code.Unimplemented, "unknown method " .. key));
         };
 
         /// @brief Runs handler `index`.
@@ -223,7 +221,7 @@ export let Grpc = module (
                 optional.Optional.Some(service) => {
                     if (request.messages.length != 1) {
                         return calls.status_response(statuses.of(statuses.Code.Unimplemented,
-                            "unary method received " + request.messages.length.to_string() + " messages"));
+                            "unary method received " .. request.messages.length.to_string() .. " messages"));
                     }
                     return match (service.call(request)) {
                         Result.Ok(response) => response,
@@ -317,7 +315,7 @@ export let Grpc = module (
             last response = ok_response(call(calls.unary_request(path, message, call_metadata, budget))?)?;
             if (response.messages.length != 1) {
                 return Result<uint8[list]>.Err(statuses.error(statuses.Code.Unimplemented,
-                    "unary method answered " + response.messages.length.to_string() + " messages"));
+                    "unary method answered " .. response.messages.length.to_string() .. " messages"));
             }
             return Result<uint8[list]>.Ok(response.messages[0]);
         };
@@ -337,7 +335,7 @@ export let Grpc = module (
             new ClientStream(new bound(call), path, call_metadata);
 
         /// @brief The authority and subtype.
-        export let.override to_string = func -> string => "GrpcChannel(" + authority + ", " + subtype + ")";
+        export let.override to_string = func -> string => "GrpcChannel(" .. authority .. ", " .. subtype .. ")";
     );
 
     /// @brief The client's side of a streaming call over a whole-body exchange: `send` queues requests,
@@ -406,8 +404,8 @@ export let Grpc = module (
         };
 
         /// @brief The method and queued count.
-        export let.override to_string = func -> string => "ClientStream(" + path.to_string() + ", "
-            + outgoing.length.to_string() + " queued)";
+        export let.override to_string = func -> string => "ClientStream(" .. path.to_string() .. ", "
+            .. outgoing.length.to_string() .. " queued)";
     );
 
     /// @brief A typed unary call through `codec`s for the request and response.
@@ -419,7 +417,7 @@ export let Grpc = module (
         return match (response_codec.decode(bytes)) {
             Result.Ok(value) => Result<Resp>.Ok(value),
             Result.Err(e) => Result<Resp>.Err(statuses.error(statuses.Code.Internal, "error parsing response: "
-                + errors.message(e))),
+                .. errors.message(e))),
         };
     };
 
@@ -472,7 +470,7 @@ export let Grpc = module (
             host_exchange(handle, request);
 
         /// @brief The handle.
-        export let.override to_string = func -> string => "HostTransport(" + handle.to_string() + ")";
+        export let.override to_string = func -> string => "HostTransport(" .. handle.to_string() .. ")";
     );
 
     /// @brief The status error of a transport failure: a status error as is, otherwise UNAVAILABLE.
@@ -485,16 +483,14 @@ export let Grpc = module (
 
     /// @brief The response when its status is OK, otherwise the status as an error.
     let ok_response = func(response: calls.RpcResponse) -> Result<calls.RpcResponse> {
-        if (!response.status.is_ok()) {
-            return Result<calls.RpcResponse>.Err(statuses.to_error(response.status));
-        }
+        return Result<calls.RpcResponse>.Err(statuses.to_error(response.status)) unless response.status.is_ok();
         return Result<calls.RpcResponse>.Ok(response);
     };
 
     /// @brief The subtype after `prefix+` in a content type, `proto` when absent.
     let subtype_of = func(content_type: string, prefix: string) -> string {
         last lower = strings.to_ascii_lower(content_type);
-        if (strings.starts_with(lower, prefix + "+")) {
+        if (strings.starts_with(lower, prefix .. "+")) {
             last rest = lower.slice(prefix.byte_length + 1, lower.byte_length);
             last semi = strings.index_of(rest, ";");
             return semi < 0 ? rest : rest.slice(0, semi);
@@ -506,7 +502,7 @@ export let Grpc = module (
     let web_response = func(response: calls.RpcResponse, prefix: string, subtype: string, text: bool)
         -> calls.WireResponse {
         last headers: [string, string][list] = new;
-        headers.append(["content-type", prefix + "+" + subtype]);
+        headers.append(["content-type", prefix .. "+" .. subtype]);
         for (let pair in response.headers.entries()) {
             headers.append(pair);
         }

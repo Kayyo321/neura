@@ -65,7 +65,7 @@ export let Timeout = module (
             }
         }
         // Unreachable: the int64 range is under 2562048 hours.
-        return MaxValue.to_string() + "H";
+        return MaxValue.to_string() .. "H";
     };
 
     /// @brief The nanoseconds of a unit byte, or 0 for an unknown unit.

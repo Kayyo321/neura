@@ -131,7 +131,7 @@ export let Health = module (
         export let report = func(value: ServingStatus) => callback(value);
 
         /// @brief The id and name.
-        export let.override to_string = func -> string => "Watcher(" + id.to_string() + ", '" + service + "')";
+        export let.override to_string = func -> string => "Watcher(" .. id.to_string() .. ", '" .. service .. "')";
     );
 
     /// @brief Serving statuses by service name, with watchers.
@@ -203,7 +203,7 @@ export let Health = module (
                     return Result<ServingStatus>.Ok(values[i]);
                 }
             }
-            return Result<ServingStatus>.Err(statuses.error(statuses.Code.NotFound, "unknown service '" + service + "'"));
+            return Result<ServingStatus>.Err(statuses.error(statuses.Code.NotFound, "unknown service '" .. service .. "'"));
         };
 
         /// @brief Reports the current status of `service` to `callback` at once (SERVICE_UNKNOWN when not
@@ -238,7 +238,7 @@ export let Health = module (
             grpc.unary_handler(new bound(answer));
 
         /// @brief The number of registered names.
-        export let.override to_string = func -> string => "HealthService(" + names.length.to_string() + " services)";
+        export let.override to_string = func -> string => "HealthService(" .. names.length.to_string() .. " services)";
 
         /// @brief Answers one encoded request.
         let answer = func(request: uint8[list]) -> Result<uint8[list]> {

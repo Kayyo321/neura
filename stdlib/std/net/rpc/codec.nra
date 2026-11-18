@@ -27,7 +27,7 @@ export let Codec = module (
 
     /// @brief The gRPC content type of a codec: `application/grpc+<subtype>`.
     #NoDiscard
-    export let content_type = func<T>(codec: RpcCodec<T>) -> string => "application/grpc+" + codec.subtype();
+    export let content_type = func<T>(codec: RpcCodec<T>) -> string => "application/grpc+" .. codec.subtype();
 
     /// @brief Bytes as they are; subtype `proto` by default, since raw gRPC payloads are usually protobuf.
     #Final
@@ -50,7 +50,7 @@ export let Codec = module (
         export let subtype = func -> string => name;
 
         /// @brief `RawCodec(subtype)`.
-        export let.override to_string = func -> string => "RawCodec(" + name + ")";
+        export let.override to_string = func -> string => "RawCodec(" .. name .. ")";
     );
 
     /// @brief JSON values as UTF-8 JSON text (RFC 8259), subtype `json`.
@@ -66,7 +66,7 @@ export let Codec = module (
         /// @brief Parses UTF-8 JSON text.
         export let decode = func(bytes: uint8[list]) -> Result<JsonValue> {
             last text = string.from_utf8(bytes);
-            if (!text[0]) {
+            if (not text[0]) {
                 return Result<JsonValue>.Err(errors.Error.Encoding { offset: 0, message: "JSON message is not UTF-8" });
             }
             return json.parse(text[1]);
@@ -99,7 +99,7 @@ export let Codec = module (
         /// @brief Parses JSON text, then maps it.
         export let decode = func(bytes: uint8[list]) -> Result<T> {
             last text = string.from_utf8(bytes);
-            if (!text[0]) {
+            if (not text[0]) {
                 return Result<T>.Err(errors.Error.Encoding { offset: 0, message: "JSON message is not UTF-8" });
             }
             return from_json(json.parse(text[1])?);
@@ -170,7 +170,7 @@ export let Codec = module (
         export let subtype = func -> string => "flatbuffers";
 
         /// @brief `FlatBuffersCodec(table)`.
-        export let.override to_string = func -> string => "FlatBuffersCodec(" + table + ")";
+        export let.override to_string = func -> string => "FlatBuffersCodec(" .. table .. ")";
     );
 
     /// @brief A Cap'n Proto codec for the struct type named `struct_name` (subtype `capnp`).
@@ -200,6 +200,6 @@ export let Codec = module (
         export let subtype = func -> string => "capnp";
 
         /// @brief `CapnProtoCodec(struct)`.
-        export let.override to_string = func -> string => "CapnProtoCodec(" + struct_name + ")";
+        export let.override to_string = func -> string => "CapnProtoCodec(" .. struct_name .. ")";
     );
 );

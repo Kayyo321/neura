@@ -31,9 +31,7 @@ export let Metadata = module (
         }
         for (let i = 0; i < name.byte_length; i++) {
             last b = name.byte_at(i);
-            if (!((b >= 48 && b <= 57) || (b >= 97 && b <= 122) || b == 95 || b == 45 || b == 46)) {
-                return false;
-            }
+            return false unless(b >= 48 && b <= 57) || (b >= 97 && b <= 122) || b == 95 || b == 45 || b == 46;
         }
         return true;
     };
@@ -94,15 +92,11 @@ export let Metadata = module (
         #NoDiscard
         export let add = func(name: string, value: string) -> Result<Unit> {
             last lower = strings.to_ascii_lower(name);
-            if (!is_valid_name(lower)) {
-                return invalid("invalid metadata name '" + name + "'");
-            }
+            return invalid("invalid metadata name '" .. name .. "'") unless is_valid_name(lower);
             if (is_binary_name(lower)) {
-                return invalid("metadata name '" + lower + "' is binary; use add_binary");
+                return invalid("metadata name '" .. lower .. "' is binary; use add_binary");
             }
-            if (!is_valid_ascii_value(value)) {
-                return invalid("invalid metadata value for '" + lower + "'");
-            }
+            return invalid("invalid metadata value for '" .. lower .. "'") unless is_valid_ascii_value(value);
             names.append(lower);
             values.append(value);
             return Result<Unit>.Ok(Unit.Value);
@@ -112,8 +106,8 @@ export let Metadata = module (
         #NoDiscard
         export let add_binary = func(name: string, value: uint8[list]) -> Result<Unit> {
             last lower = strings.to_ascii_lower(name);
-            if (!is_valid_name(lower) || !is_binary_name(lower)) {
-                return invalid("binary metadata name '" + name + "' must be valid and end in -bin");
+            if (not is_valid_name(lower) || not is_binary_name(lower)) {
+                return invalid("binary metadata name '" .. name .. "' must be valid and end in -bin");
             }
             names.append(lower);
             values.append(base64.encode_unpadded(value));
@@ -216,10 +210,10 @@ export let Metadata = module (
 
         /// @brief Equal when the entries are equal in order.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Metadata)) {
+            if (other is not that: Metadata) {
                 return false;
             }
-            last pairs = (other as Metadata).entries();
+            last pairs = that.entries();
             if (pairs.length != names.length) {
                 return false;
             }
@@ -244,9 +238,9 @@ export let Metadata = module (
         export let.override to_string = func -> string {
             last parts: string[list] = new;
             for (let i = 0; i < names.length; i++) {
-                parts.append(names[i] + ": " + values[i]);
+                parts.append(names[i] .. ": " .. values[i]);
             }
-            return "Metadata{" + strings.join(parts, ", ") + "}";
+            return "Metadata{" .. strings.join(parts, ", ") .. "}";
         };
     );
 
@@ -262,7 +256,7 @@ export let Metadata = module (
         last out: Metadata = new;
         for (let pair in pairs) {
             last lower = strings.to_ascii_lower(pair[0]);
-            if (!is_valid_name(lower)) {
+            if (not is_valid_name(lower)) {
                 continue;
             }
             if (is_binary_name(lower)) {

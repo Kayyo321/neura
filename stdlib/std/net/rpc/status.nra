@@ -211,10 +211,9 @@ export let Status = module (
 
         /// @brief Equal when the code, message and details are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RpcStatus)) {
+            if (other is not that: RpcStatus) {
                 return false;
             }
-            last that = other as RpcStatus;
             if (number(code) != number(that.code) || message != that.message || details.length != that.details.length) {
                 return false;
             }
@@ -257,7 +256,7 @@ export let Status = module (
         if (status.message.byte_length > 0) {
             out.add_raw(MessageHeader, encode_message(status.message));
         }
-        if (!status.is_ok() && status.details.length > 0) {
+        if (not status.is_ok() && status.details.length > 0) {
             last ignored = out.add_binary(DetailsHeader, status.details);
         }
         return out;
@@ -291,7 +290,7 @@ export let Status = module (
                     Result.Ok(parts) => parts.length == 1 ? parts[0] : new,
                     Result.Err(e) => new,
                 };
-                if (details.length > 0 && !details_agree(details, number(code))) {
+                if (details.length > 0 && not details_agree(details, number(code))) {
                     return of(code, message);
                 }
                 return new RpcStatus(code, message, details);
@@ -339,7 +338,7 @@ export let Status = module (
         export let.override hash_code = func -> uint32 => status.hash_code();
 
         /// @brief `grpc.status NAME: message`.
-        export let.override to_string = func -> string => ErrorCode + " " + status.to_string();
+        export let.override to_string = func -> string => ErrorCode .. " " .. status.to_string();
     );
 
     /// @brief A Custom error carrying `status`.
