@@ -61,10 +61,9 @@ export let Spiffe = module (
 
         /// @brief Equal when the trust domain and path are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SpiffeId)) {
+            if (other is not that: SpiffeId) {
                 return false;
             }
-            last that = other as SpiffeId;
             return trust_domain == that.trust_domain && path == that.path;
         };
 
@@ -72,7 +71,7 @@ export let Spiffe = module (
         export let.override hash_code = func -> uint32 => hashing.combine(trust_domain.hash_code(), path.hash_code());
 
         /// @brief The URI text, `spiffe://<trust domain><path>`.
-        export let.override to_string = func -> string => "spiffe://" + trust_domain + path;
+        export let.override to_string = func -> string => "spiffe://" .. trust_domain .. path;
     );
 
     /// @brief Parses a SPIFFE ID (see the module documentation).
@@ -81,7 +80,7 @@ export let Spiffe = module (
         if (text.byte_length > MaxIdLength) {
             return fail(ParseErrorKind.OutOfRange, MaxIdLength, "a SPIFFE ID is longer than 2048 bytes");
         }
-        if (text.byte_length < 9 || !strings.equals_ignore_ascii_case(text.slice(0, 9), "spiffe://")) {
+        if (text.byte_length < 9 || not strings.equals_ignore_ascii_case(text.slice(0, 9), "spiffe://")) {
             return fail(ParseErrorKind.Syntax, 0, "a SPIFFE ID starts with spiffe://");
         }
         last rest = text.slice(9, text.byte_length);
@@ -97,7 +96,7 @@ export let Spiffe = module (
     /// offsets refer to the joined text.
     #NoDiscard
     export let of = func(trust_domain: string, path: string) -> Result<SpiffeId> =>
-        parse("spiffe://" + trust_domain + path);
+        parse("spiffe://" .. trust_domain .. path);
 
     /// @brief Ok when `domain` is a valid trust domain name (section 2.1).
     #NoDiscard
@@ -131,7 +130,7 @@ export let Spiffe = module (
         let i = 0;
         while (i < domain.byte_length) {
             last c = domain.byte_at(i);
-            if (!((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 46 || c == 45 || c == 95)) {
+            if (not ((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 46 || c == 45 || c == 95)) {
                 return fail_bool(ParseErrorKind.InvalidCharacter, base + i,
                     "a trust domain holds only lowercase letters, digits, dots, dashes and underscores");
             }
@@ -150,7 +149,7 @@ export let Spiffe = module (
             let end = start;
             while (end < path.byte_length && path.byte_at(end) != 47) {
                 last c = path.byte_at(end);
-                if (!((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 46 || c == 45
+                if (not ((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 46 || c == 45
                     || c == 95)) {
                     return fail_bool(ParseErrorKind.InvalidCharacter, base + end,
                         "a path segment holds only letters, digits, dots, dashes and underscores");

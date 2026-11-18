@@ -50,9 +50,7 @@ export let TlsStream = module (
         #NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return Result<uint8[list]>.Err(bytes.closed("stream", label));
-            }
+            return Result<uint8[list]>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.tls_read(id, max, timeout_nanos)) {
                 host.BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
                 host.BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, "TLS read failed", label)),
@@ -62,9 +60,7 @@ export let TlsStream = module (
         /// @brief Encrypts and writes every byte, repeating partial host writes.
         #NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("stream", label));
-            }
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
             let remaining = data;
             while (remaining.length > 0) {
                 match (host.tls_write(id, remaining)) {
@@ -111,9 +107,7 @@ export let TlsStream = module (
         /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
         #NoDiscard
         export let local_address = func -> Result<SocketAddr> {
-            if (!open_now) {
-                return Result<SocketAddr>.Err(bytes.closed("stream", label));
-            }
+            return Result<SocketAddr>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.local_address(id)) {
                 host.AddressOutcome.Ok(reported) => support.reported_address(reported),
                 host.AddressOutcome.Error(code) => Result<SocketAddr>.Err(
@@ -125,9 +119,7 @@ export let TlsStream = module (
         /// runtime has no shutdown service. `close` sends `close_notify`.
         #NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("stream", label));
-            }
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
             last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
             return match (host.shutdown(id, code)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -139,9 +131,7 @@ export let TlsStream = module (
         /// Traps in Neura 0.3.0: no runtime offers kTLS.
         #NoDiscard
         export let enable_kernel_offload = func -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("stream", label));
-            }
+            return Result<Unit>.Err(bytes.closed("stream", label)) unless open_now;
             return match (host.tls_enable_kernel_offload(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
                 host.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "kernel TLS failed", label)),
@@ -151,9 +141,7 @@ export let TlsStream = module (
         /// @brief Sends `close_notify` and releases the stream. Closing again returns Ok; the stream is closed
         /// even when the host reports an error.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (host.tls_close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -164,10 +152,10 @@ export let TlsStream = module (
         /// @brief Text such as "TlsStream(to 192.0.2.1:443, alpn h2)".
         export let.override to_string = func -> string {
             last side = match (peer) {
-                Optional.Some(address) => "to " + address.to_string(),
-                Optional.None => "accepted on " + label,
+                Optional.Some(address) => "to " .. address.to_string(),
+                Optional.None => "accepted on " .. label,
             };
-            return "TlsStream(" + side + (alpn.byte_length > 0 ? ", alpn " + alpn : "") + ")";
+            return "TlsStream(" .. side .. (alpn.byte_length > 0 ? ", alpn " + alpn : "") .. ")";
         };
     );
 );
