@@ -4,6 +4,7 @@
 #include "analysis_cache.hpp"
 #include "effects.hpp"
 #include "locals.hpp"
+#include "neura-ir/lifetime.hpp"
 
 #include "neura-ir/attributes.hpp"
 #include "neura-ir/control_flow.hpp"
@@ -501,6 +502,14 @@ std::vector<InlineRefusal> Inliner::refusals() const {
         if (function_body(program_, body)) ++bodies[body.owner];
     }
     for (const auto& body : program_.bodies) {
+        // A body with a cleanup or a suspension is left as written
+        // (docs/design/Lifetime030.md), which function_body reports.
+        if (body.owner < program_.symbols.size() && program_.symbols[body.owner].kind == SymbolKind::Function &&
+            uses_lifetime_operations(body.instructions) &&
+            inline_directive(program_.symbols[body.owner]) == InlineDirective::Always) {
+            result.push_back({body.owner, "it contains a deferred call, a 'using' block or a 'yield'"});
+            continue;
+        }
         if (!function_body(program_, body) ||
             inline_directive(program_.symbols[body.owner]) != InlineDirective::Always)
             continue;

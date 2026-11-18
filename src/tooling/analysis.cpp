@@ -1262,7 +1262,9 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
     statement = [&](const Statement &s) {
         if (s.declaration)
             declaration(*s.declaration);
-        if (s.kind == Statement::Kind::Scope || s.kind == Statement::Kind::Select)
+        if (s.kind == Statement::Kind::Scope || s.kind == Statement::Kind::Select ||
+            s.kind == Statement::Kind::Defer || s.kind == Statement::Kind::Using ||
+            s.kind == Statement::Kind::Yield)
             put(s.keyword, 14, 0, 2);
         if (s.binding_type)
             type(*s.binding_type);
@@ -1287,8 +1289,10 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
         }
     };
     declaration = [&](const Declaration &d) {
+        if (d.generator && d.generator_keyword)
+            put(*d.generator_keyword, 14, 0, 2);
         if (d.type)
-            type(*d.type);
+            type(d.generator && !d.type->arguments.empty() ? d.type->arguments.front() : *d.type);
         if (d.base)
             type(*d.base);
         for (const auto &t : d.interfaces)
@@ -2220,7 +2224,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             add_declaration(candidates.front());
         }
         for (const auto &word : {"let", "last", "const", "func", "class", "interface", "module", "enum", "if", "else",
-                                 "while", "for", "return", "match", "scope", "spawn", "select", "new", "nil", "true",
+                                 "while", "for", "return", "match", "scope", "spawn", "select", "defer", "using", "iterator", "yield", "new", "nil", "true",
                                  "false", "export", "import"}) add(word, 14);
     }
     return Json{{"isIncomplete", false}, {"items", items}};

@@ -79,6 +79,9 @@ std::string_view op_name(IrOp op) {
     case IrOp::AnyUnpack: return "any_unpack";
     case IrOp::HookAdmit: return "hook_admit";
     case IrOp::ConformanceCall: return "conformance_call";
+    case IrOp::Cleanup: return "cleanup";
+    case IrOp::Pending: return "pending";
+    case IrOp::Yield: return "yield";
     }
     return "<invalid>";
 }

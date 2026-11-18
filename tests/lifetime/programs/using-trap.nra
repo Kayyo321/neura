@@ -1,0 +1,31 @@
+// A trap in the body of a `using` block ends the run; nothing is closed
+// (docs/design/Lifetime030.md, edge case 49).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> {
+        console.print_line("closed");
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let UsingTrap = module:program.Entry (
+    let work = func(divisor: int) -> Result<int> {
+        using (source = new Resource()) {
+            console.print_line("body");
+            return Result<int>.Ok(10 / divisor);
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let first = work(2);
+        console.print_line("first done");
+        let second = work(0);
+        console.print_line("not reached");
+        return program.ExitCode.Ok;
+    };
+);

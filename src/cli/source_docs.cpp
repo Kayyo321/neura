@@ -245,6 +245,11 @@ private:
             result += "func(";
             list(type.arguments, type.arguments.size() - 1);
             result += ") -> " + type_text(type.arguments.back());
+        } else if (type.name == "[generator]") {
+            // A generator's result (docs/design/Lifetime030.md).
+            result += "Sequence<";
+            list(type.arguments, type.arguments.size());
+            result += '>';
         } else {
             result += type.name + '<';
             list(type.arguments, type.arguments.size());
@@ -509,6 +514,8 @@ std::string doxygen_type(const TypeSyntax& type) {
             doxygen_types(type.arguments, type.arguments.size() - 1) + ")>";
     } else if (type.name == "[variadic argument]") {
         result = "NeuraValue";
+    } else if (type.name == "[generator]") {
+        result = "Sequence<" + doxygen_types(type.arguments, type.arguments.size()) + '>';
     } else if (type.name == "class" || type.anonymous) {
         // An anonymous class has no name to give Doxygen.
         result = "NeuraObject";

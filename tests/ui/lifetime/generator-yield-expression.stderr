@@ -1,0 +1,9 @@
+error[E0221]: 'yield' is a statement
+ --> $DIR/generator-yield-expression.nra:3:13
+  |
+3 |     let x = yield 1;
+  |             ^^^^^ 'yield' gives the generator's next value; it is not an expression
+  |
+  = help: write 'yield value;' on its own line
+
+For more information about this error, try `neura explain E0221`.

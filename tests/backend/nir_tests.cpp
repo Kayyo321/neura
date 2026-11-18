@@ -457,17 +457,18 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // The minor version after the newest is newer than this reader.
+    // The minor after the newest is newer than this reader.
+    const auto newest_text = "1." + std::to_string(nir_minor_version);
     auto newer = bytes;
-    const auto newest_minor = std::to_string(nir_minor_version);
     newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
     expect_nir_error(newer, "NeuraIR format 1." + std::to_string(nir_minor_version + 1) +
-                                " is not supported; this reader accepts 1.0 through 1." + newest_minor);
+                                " is not supported; this reader accepts 1.0 through " + newest_text);
     newer[6] = 200;
-    expect_nir_error(newer, "this reader accepts 1.0 through 1." + newest_minor);
+    expect_nir_error(newer, "this reader accepts 1.0 through " + newest_text);
 
     // An operation tag above the newest one. Operations after the 1.9 set
-    // are those of 1.12 (docs/design/Matching030.md).
+    // are those of 1.12 (docs/design/Matching030.md) and, after them, those
+    // of nir_lifetime_minor (docs/design/Lifetime030.md).
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
@@ -485,6 +486,29 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
         invalid[static_cast<std::size_t>(difference.first - above_bytes.begin())] = static_cast<std::uint8_t>(forbidden);
         expect_nir_error(invalid, "invalid operation tag " + std::to_string(forbidden));
     }
+    // The lifetime operations (docs/design/Lifetime030.md) follow
+    // ConformanceCall and need nir_lifetime_minor: a 1.13 file cannot hold
+    // one, and no tag after Yield is valid.
+    IrProgram cleanup = above;
+    cleanup.bodies.front().instructions.front().op = IrOp::Cleanup;
+    auto cleanup_bytes = write_nir(cleanup);
+    check_equal(static_cast<int>(cleanup_bytes[6]), static_cast<int>(nir_lifetime_minor),
+                "a Cleanup is written as the lifetime minor");
+    IrProgram pending = cleanup;
+    pending.bodies.front().instructions.front().op = IrOp::Pending;
+    const auto pending_bytes = write_nir(pending);
+    const auto tags = std::mismatch(cleanup_bytes.begin(), cleanup_bytes.end(), pending_bytes.begin());
+    check(tags.first != cleanup_bytes.end() && *tags.first == 70 && *tags.second == 71,
+          "the raw tags of Cleanup and Pending");
+    const auto cleanup_at = static_cast<std::size_t>(tags.first - cleanup_bytes.begin());
+    auto yield_bytes = cleanup_bytes;
+    yield_bytes[cleanup_at] = 72;
+    check(read_nir(yield_bytes, "yield").bodies.front().instructions.front().op == IrOp::Yield, "Yield reads as 72");
+    auto past_yield = cleanup_bytes;
+    past_yield[cleanup_at] = 73;
+    expect_nir_error(past_yield, "invalid operation tag 73");
+    cleanup_bytes[6] = static_cast<std::uint8_t>(nir_records_minor);
+    expect_nir_error(cleanup_bytes, "invalid operation tag 70");
     // The newest operation of 1.9 is accepted in 1.9, and the first of
     // 1.12 is not.
     IrProgram newest = above;
@@ -926,14 +950,14 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::HookGet, 15, "hook.get", on_class, false, "s"},
         {AttributeId::HookSet, 16, "hook.set", on_class, false, "s"},
         {AttributeId::HookOf, 17, "hook.of", on_function, false, "[s u1]"},
-        // docs/design/Records030.md; the milestone's identifiers are
-        // renumbered when it merges.
+        // docs/design/Records030.md.
         {AttributeId::ClassRecord, 18, "class.record", on_class, false, "s"},
         {AttributeId::PropertyRequirement, 19, "property.requirement", on_function, false, "[t u1]"},
         {AttributeId::AccessorVirtual, 20, "accessor.virtual", on_function, false, "b"},
         {AttributeId::StaticImplements, 21, "static.implements", on_function, true, "[s y]"},
         {AttributeId::Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false,
          "[t p]"},
+        {AttributeId::GeneratorResume, 23, "generator.resume", on_function, false, "s"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -942,7 +966,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
                   info->repeats == row.repeats && info->schema == row.schema,
               std::string(row.name) + " differs from the documented registry");
     }
-    check(find_attribute_info(0) == nullptr && find_attribute_info(23) == nullptr, "ids 0 and 23 are unregistered");
+    check(find_attribute_info(0) == nullptr && find_attribute_info(24) == nullptr, "ids 0 and 24 are unregistered");
     check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
 
     // Schemas accept the payloads of the helpers and reject other shapes.
@@ -1001,7 +1025,9 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
     const auto& program = fixture.program;
     const auto issues = verify_ir(program);
     check(issues.empty(), issues.empty() ? "" : issues.front().message);
-    // Later milestones exercise their own attributes.
+    // Later milestones exercise their own attributes: class hooks and
+    // records here, and generator.resume, which needs NeuraIR 1.14
+    // (docs/design/Lifetime030.md), in the lifetime programs.
     for (const auto& info : attribute_registry()) {
         if (static_cast<std::uint16_t>(info.id) >= static_cast<std::uint16_t>(AttributeId::HookGet)) continue;
         check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, info.id); }),

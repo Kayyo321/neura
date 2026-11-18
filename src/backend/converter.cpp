@@ -1,4 +1,5 @@
 #include "converter.hpp"
+#include "cleanup_stack.hpp"
 
 #include "circuit/block_synth.hpp"
 #include "circuit/circuit.hpp"
@@ -10,6 +11,7 @@
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
 #include "neura-ir/any.hpp"
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/class_hooks.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
@@ -17,6 +19,7 @@
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
+#include "neura-ir/lifetime.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
@@ -189,14 +192,33 @@ private:
     // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
     Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
                       std::uint32_t result_type, const Span& span);
-    struct ScopeExit {
-        std::optional<Operand> token;
-        bool joins_tasks;
+    // The exit work of the blocks a function is inside (cleanup_stack.hpp,
+    // cleanup_stack.inc). A Region entry holds the token of the region its
+    // block allocates in, if any.
+    struct ExitWork {
+        ExitWorkKind kind;
+        // The TaskScope or Cleanup node.
+        const IrNode* node = nullptr;
+        std::optional<Operand> token{};
     };
-    void leave_scopes(std::size_t depth, const Span& span);
+    // Emits the work of every entry above `depth`, innermost first, for an
+    // exit of kind `edge` written at `span`.
+    void leave_scopes(std::size_t depth, const Span& span, ExitEdge edge);
+    void exit_work(const ExitWork& entry, const Span& span, ExitEdge edge);
+    void release_region(const ExitWork& entry, const Span& span);
+    bool has_cleanup(std::size_t depth = 0) const;
+    void return_statement(const IrNode& node);
+    Values pending_values(const IrNode& node);
+    // Generators: the resume chain at the start of a `$resume` method, and
+    // a Yield, which stores its index and returns true.
+    void resume_chain();
+    void yield_statement(const IrNode& node);
     bool needs_region(const IrNode& node);
-    void enter_scope(bool allocate_region, bool joins_tasks, const Span& span);
-    void end_scope(const Span& span);
+    // A block's scope: a Region entry, and above it a TaskScope entry when
+    // the block joins tasks. Returns the depth below them, which end_scope
+    // takes back to after falling off the block's end.
+    std::size_t enter_scope(bool allocate_region, const IrNode* task_scope, const Span& span);
+    void end_scope(std::size_t depth, const Span& span);
     void lexical_region(const std::vector<IrNode>& statements, const Span& span);
     Operand region_token();
     bool has_array_word(const std::vector<std::uint32_t>& types) const;
@@ -318,11 +340,18 @@ private:
         std::uint32_t exit;
         // `continue` takes the back edge itself and the loop polls there.
         bool poll_on_continue;
-        // Lexical and task scopes open where the loop began.
+        // Exit work open where the loop began.
         std::size_t scopes;
     };
     std::vector<LoopTargets> loops_;
-    std::vector<ScopeExit> scopes_;
+    // Exit work open at the statement being converted, outermost first.
+    std::vector<ExitWork> exit_stack_;
+    // The returned value while a return runs the exit work it leaves.
+    std::optional<PendingSlots> pending_;
+    // A generator's `$resume`: the field of its resume index, and the block
+    // after each Yield, by index minus one.
+    SymbolId resume_field_ = no_symbol;
+    std::vector<std::uint32_t> resume_blocks_;
     std::uint32_t result_region_slot_ = absent;
     bool static_initializer_ = false;
     std::vector<std::uint32_t> placeholders_;
@@ -2276,31 +2305,29 @@ Operand FunctionCompiler::scheduler(nvr::SchedulerOp operation, std::uint32_t ta
     return result_slot == absent ? Operand{} : slot_operand(result_slot);
 }
 
-void FunctionCompiler::leave_scopes(std::size_t depth, const Span& span) {
-    const auto nothing = c_.scalar(nvr::TypeKind::Void);
-    for (auto i = scopes_.size(); i > depth; --i) {
-        const auto& scope = scopes_[i - 1];
-        if (scope.joins_tasks) scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, span);
-        if (scope.token) state(nvr::StateOp::ReleaseRegion, 0, {*scope.token}, nothing, span);
-    }
-}
+#include "cleanup_stack.inc"
 
-void FunctionCompiler::enter_scope(bool allocate_region, bool joins_tasks, const Span& span) {
-    ScopeExit scope{std::nullopt, joins_tasks};
+std::size_t FunctionCompiler::enter_scope(bool allocate_region, const IrNode* task_scope, const Span& span) {
+    const auto depth = exit_stack_.size();
+    ExitWork scope{ExitWorkKind::Region};
     if (allocate_region && !static_initializer_) {
         scope.token = state(nvr::StateOp::EnterRegion, 0, {}, c_.scalar(nvr::TypeKind::Unsigned, 64), span);
     }
-    scopes_.push_back(scope);
+    exit_stack_.push_back(scope);
+    // The region lies below the task scope, so that leaving the block joins
+    // its tasks before releasing it.
+    if (task_scope) exit_stack_.push_back({ExitWorkKind::TaskScope, task_scope});
+    return depth;
 }
 
-void FunctionCompiler::end_scope(const Span& span) {
-    if (open()) leave_scopes(scopes_.size() - 1, span);
-    scopes_.pop_back();
+void FunctionCompiler::end_scope(std::size_t depth, const Span& span) {
+    if (open()) leave_scopes(depth, span, ExitEdge::Fall);
+    exit_stack_.resize(depth);
 }
 
 Operand FunctionCompiler::region_token() {
     if (static_initializer_) return immediate(c_.scalar(nvr::TypeKind::Unsigned, 64), nvr::static_region_token);
-    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+    for (auto scope = exit_stack_.rbegin(); scope != exit_stack_.rend(); ++scope) {
         if (scope->token) return *scope->token;
     }
     throw std::logic_error("an activation allocation has no region");
@@ -2328,19 +2355,21 @@ bool FunctionCompiler::needs_region(const IrNode& node) {
 }
 
 void FunctionCompiler::lexical_region(const std::vector<IrNode>& statements, const Span& span) {
-    enter_scope(std::ranges::any_of(statements, [&](const auto& item) { return needs_region(item); }), false, span);
+    const auto depth =
+        enter_scope(std::ranges::any_of(statements, [&](const auto& item) { return needs_region(item); }), nullptr, span);
     region(statements);
-    end_scope(span);
+    end_scope(depth, span);
 }
 
 // ---------------------------------------------------------------------------
 // Statements
 
 void FunctionCompiler::region(const std::vector<IrNode>& statements) {
+    const auto depth = exit_stack_.size();
     for (const auto& item : statements) {
         if (!open()) {
             // Control cannot reach the rest of the region.
-            return;
+            break;
         }
         statement(item);
         if (c_.debug_statements() && open()) {
@@ -2351,6 +2380,11 @@ void FunctionCompiler::region(const std::vector<IrNode>& statements) {
             jump(next);
             begin(next, item.span);
         }
+    }
+    // The Cleanup statements of the block run when it falls off its end.
+    if (exit_stack_.size() > depth) {
+        if (open()) leave_scopes(depth, statements.back().span, ExitEdge::Fall);
+        exit_stack_.resize(depth);
     }
 }
 
@@ -2407,8 +2441,8 @@ void FunctionCompiler::statement(const IrNode& node) {
         loop(node);
         return;
     case IrOp::TaskScope: {
-        enter_scope(std::ranges::any_of(node.body, [&](const auto& item) { return needs_region(item); }), true,
-                    node.span);
+        const auto depth = enter_scope(
+            std::ranges::any_of(node.body, [&](const auto& item) { return needs_region(item); }), &node, node.span);
         const auto nothing = c_.scalar(nvr::TypeKind::Void);
         if (node.symbol != no_symbol) {
             // The scope's identity, for its handle.
@@ -2423,51 +2457,26 @@ void FunctionCompiler::statement(const IrNode& node) {
             scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
         }
         region(node.body);
-        end_scope(node.span);
+        end_scope(depth, node.span);
         return;
     }
-    case IrOp::Return: {
-        ExitSpec exit;
-        exit.kind = nvr::ExitKind::Return;
-        if (!node.operands.empty()) {
-            auto value = values(node.operands.front());
-            if (origin_.role == Role::Function) {
-                value = fit_reference(std::move(value), c_.symbol(origin_.symbol).type);
-                if (hook_owner(c_.symbol(origin_.symbol)) != no_symbol)
-                    value = normalize_hook_result(std::move(value), node.operands.front(), node.span);
-            }
-            if (result_region_slot_ != absent) {
-                for (auto& word : value) spill(word);
-                const auto nothing = c_.scalar(nvr::TypeKind::Void);
-                for (const auto& word : value) {
-                    if (c_.type_at(word.type).kind == nvr::TypeKind::Array) {
-                        state(nvr::StateOp::MoveToRegion, 1, {resolve(word), slot_operand(result_region_slot_)},
-                              nothing, node.span);
-                    }
-                }
-            }
-            if (std::ranges::any_of(scopes_, [](const auto& scope) { return scope.token || scope.joins_tasks; })) {
-                // Commit the return value before leaving the scopes. Any
-                // array result has already moved to the caller's region.
-                for (auto& word : value) spill(word);
-                leave_scopes(0, node.span);
-                for (auto& word : value) word = resolve(word);
-            }
-            exit.arguments = std::move(value);
-        } else {
-            leave_scopes(0, node.span);
-        }
-        operation_at(node.span);
-        close({exit});
+    case IrOp::Return:
+        return_statement(node);
         return;
-    }
     case IrOp::Break:
-        leave_scopes(loops_.back().scopes, node.span);
-        jump(loops_.back().exit);
+        leave_scopes(loops_.back().scopes, node.span, ExitEdge::Jump);
+        if (open()) jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        leave_scopes(loops_.back().scopes, node.span);
-        jump(loops_.back().next, loops_.back().poll_on_continue);
+        leave_scopes(loops_.back().scopes, node.span, ExitEdge::Jump);
+        if (open()) jump(loops_.back().next, loops_.back().poll_on_continue);
+        return;
+    case IrOp::Cleanup:
+        // Registered from here to every exit of the enclosing block.
+        exit_stack_.push_back({ExitWorkKind::Cleanup, &node});
+        return;
+    case IrOp::Yield:
+        yield_statement(node);
         return;
     case IrOp::Fail: {
         // The only failure NeuraIR names is a list changed during for-each.
@@ -2554,6 +2563,13 @@ void FunctionCompiler::store(const IrNode& node) {
         store_hook(destination, source);
         return;
     }
+    if (destination.op == IrOp::Pending) {
+        auto value = values(source);
+        pending_values(destination);
+        for (std::size_t i = 0; i < value.size(); ++i)
+            assign(pending_->first + static_cast<std::uint32_t>(i), value[i]);
+        return;
+    }
     const bool atomic = c_.value_layout(destination.type, node.span).carries_policy;
     switch (destination.op) {
     case IrOp::Load: {
@@ -2622,10 +2638,10 @@ void FunctionCompiler::loop(const IrNode& node) {
     const auto head = new_block();
     jump(head);
     begin(head, node.span);
-    enter_scope(needs_region(node.operands.front()), false, node.span);
+    const auto depth = enter_scope(needs_region(node.operands.front()), nullptr, node.span);
     auto condition = expression(node.operands.front());
-    if (scopes_.back().token) spill(condition);
-    end_scope(node.span);
+    if (exit_stack_.back().token) spill(condition);
+    end_scope(depth, node.span);
     condition = resolve(condition);
     const auto body = new_block();
     const auto exit = new_block();
@@ -2636,7 +2652,7 @@ void FunctionCompiler::loop(const IrNode& node) {
     // The poll of a loop rides on the exit that takes the back edge: the
     // jump from the latch, or without a latch every jump back to the head.
     const bool poll_at_head = node.poll && latch == head;
-    loops_.push_back({latch, exit, poll_at_head, scopes_.size()});
+    loops_.push_back({latch, exit, poll_at_head, exit_stack_.size()});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
     lexical_region(node.body, node.span);
     if (open()) {
@@ -3031,6 +3047,7 @@ Values FunctionCompiler::unpack_any(const IrNode& node) {
 }
 
 Values FunctionCompiler::values(const IrNode& node) {
+    if (node.op == IrOp::Pending) return pending_values(node);
     if (!c_.inline_value(node.type)) return {expression(node)};
     switch (node.op) {
     case IrOp::AnyPack: return pack_any(node);
@@ -3147,6 +3164,7 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         throw std::logic_error("an inline value reached the one-word path at " + node.span.file + ":" +
                                std::to_string(node.span.line));
     switch (node.op) {
+    case IrOp::Pending: return pending_values(node).front();
     case IrOp::AnyTag: return values(node.operands.front())[0];
     case IrOp::AnyUnpack: return unpack_any(node).front();
     case IrOp::ValueEquals:
@@ -4299,6 +4317,7 @@ void FunctionCompiler::compile_function() {
               c_.scalar(nvr::TypeKind::Void), function.span);
     }
     static_initializer_ = is_static_initializer(function);
+    resume_chain();
     lexical_region(c_.body(origin_.symbol), function.span);
     finish();
 }
@@ -4321,7 +4340,7 @@ void FunctionCompiler::compile_constructor() {
         [&](const auto* node) { return needs_region(*node); });
     const bool has_body_region = init != no_symbol && std::ranges::any_of(c_.body(init),
         [&](const auto& node) { return needs_region(node); });
-    enter_scope(has_field_region || has_body_region, false, item.span);
+    const auto depth = enter_scope(has_field_region || has_body_region, nullptr, item.span);
     if (init != no_symbol) {
         const auto& body = c_.body(init);
         std::size_t start = 0;
@@ -4347,7 +4366,7 @@ void FunctionCompiler::compile_constructor() {
         }
         field_initializers(cls);
     }
-    end_scope(item.span);
+    end_scope(depth, item.span);
     finish();
 }
 
@@ -4781,7 +4800,7 @@ void FunctionCompiler::compile_start() {
     const auto& items = c_.startup();
     const auto& start = items.empty() ? main.span : items.front().node->span;
     begin(new_block(), start);
-    enter_scope(std::ranges::any_of(items, [&](const auto& item) { return needs_region(*item.node); }), false, start);
+    enter_scope(std::ranges::any_of(items, [&](const auto& item) { return needs_region(*item.node); }), nullptr, start);
     for (const auto& item : items) {
         if (!open()) {
             break;

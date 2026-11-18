@@ -144,6 +144,9 @@ private:
         case IrOp::Receiver: case IrOp::ReinterpretFloat: case IrOp::ShortCircuit: case IrOp::ComparisonChain:
         case IrOp::ScopedValue: case IrOp::SelectValue: case IrOp::Block: case IrOp::Branch: case IrOp::Loop:
         case IrOp::Break: case IrOp::Continue: case IrOp::Return: case IrOp::Discard:
+        // docs/design/Lifetime030.md: a cleanup list's operations are its
+        // children; Pending and Yield do nothing of their own.
+        case IrOp::Cleanup: case IrOp::Pending: case IrOp::Yield:
             break;
         case IrOp::Load:
             if (!local(node.symbol)) flags.traps = true;
@@ -154,7 +157,7 @@ private:
                 break;
             }
             const auto& destination = node.operands.front();
-            if (destination.op != IrOp::Load) flags.traps = true;
+            if (destination.op != IrOp::Load && destination.op != IrOp::Pending) flags.traps = true;
             for (const auto& operand : destination.operands) add(operand, flags, callees);
             add(node.operands.back(), flags, callees);
             return;

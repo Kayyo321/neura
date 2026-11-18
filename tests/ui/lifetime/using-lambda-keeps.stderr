@@ -1,0 +1,11 @@
+error[E0475]: 'source' is closed at the end of its 'using' block and cannot be captured by a function value whose body keeps it
+  --> $DIR/using-lambda-keeps.nra:11:21
+   |
+10 |     using (source = new Resource()) {
+   |     ----- 'source' is bound here, and closed when this block is left
+11 |         let stash = func() -> void {
+   |                     ^^^^^^^^^^^^^^^^...
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

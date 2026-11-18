@@ -1,0 +1,9 @@
+error[E0219]: 'defer' takes one call
+ --> $DIR/defer-optional-call.nra:4:11
+  |
+4 |     defer log?.flush();
+  |           ^^^^^^^^^^^^ an optional-chained call may skip, so it cannot be deferred
+  |
+  = help: put the statements in a function and defer a call of it
+
+For more information about this error, try `neura explain E0219`.

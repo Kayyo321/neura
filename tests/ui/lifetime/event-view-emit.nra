@@ -1,0 +1,6 @@
+// Edge case 86: a view cannot emit.
+let events = import:Std.Events.Event;
+
+let send = func(event: events.Event<int>) {
+    event.view().emit(1);
+};

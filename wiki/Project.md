@@ -71,6 +71,17 @@ Kernel bindings ([Kernels](Kernels)) change the stages' contracts as follows.
 | IRtoNeuronConversion | Turns each call into a kernel state exit and lists the kernel with its signature in `KERN`. | NVR 1.6 with the `KERN` table |
 | Output | The kernel exit and `KERN`; an image without a kernel call keeps its earlier version and bytes. | An image whose loader checks every kernel against the runtime's table |
 
+Cleanups, scoped resources and generators ([the lifetime design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md)) change the stages' contracts as follows; the event library needs no stage of its own.
+
+| Stage | Contract for `defer`, `using` and generators | Hands on |
+| --- | --- | --- |
+| Lexer | None. `defer`, `using`, `iterator` and `yield` remain identifiers. | |
+| Parser | Reads each word as a form only by its fixed lookahead, and `yield` only directly in a generator's body (`E0219` to `E0222`). | Syntax nodes with the keyword's span; a generator is a function declaration with the result type `[generator]` of its element |
+| NeuraIR | Saves a deferred call's operands in hidden locals and registers a `cleanup`; binds a resource, its token and a `cleanup` whose return list combines the close with `pending`; builds a generator's state class with its `$resume` and `yield` operations. Checks `E0471` to `E0478`, and on the linked program the escape of a resource (`E0475`) and an emission under a guard (`E0550`). Written as `.nir` 1.14 only when used. | `cleanup`, `pending`, `yield` and `generator.resume`; no source-level rule after this point |
+| IR optimization | Leaves a body that holds one of the operations as lowering wrote it. | The same operations, in place |
+| IRtoNeuronConversion | Keeps one stack of the exit work of the blocks it is inside: each exit emits the cleanups, then the task scope's join (then, with the storage milestone, the region's release) of every block it leaves; starts a `$resume` with the comparison chain on its resume index. | Ordinary blocks, calls and field operations; an image without the features keeps its bytes |
+| Output | Nothing new: no NVR version, exit kind or trap reason. | An image a compatible runtime runs without source |
+
 A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](ForeignInterop#c-imports)).
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.

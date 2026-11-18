@@ -1,0 +1,7 @@
+error[E0305]: unknown or inaccessible member 'emit' of EventView<int32>
+ --> $DIR/event-view-emit.nra:5:5
+  |
+5 |     event.view().emit(1);
+  |     ^^^^^^^^^^^^^^^^^ EventView<int32> has no member 'emit'
+
+For more information about this error, try `neura explain E0305`.

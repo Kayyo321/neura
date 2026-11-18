@@ -188,7 +188,16 @@ enum class IrOp {
     // argument the type the call goes through, a type parameter bounded by
     // the interface, and its operands the arguments. Specialization replaces
     // it with a direct call of the implementation; none remains after it.
-    ConformanceCall
+    ConformanceCall,
+    // NeuraIR 1.14 (docs/design/Lifetime030.md, lifetime.hpp). Cleanup is a
+    // direct statement of a block: from where it stands to every exit of
+    // that block it is registered, and each exit runs its body, or on a
+    // return its alternative when that is not empty, last registered first,
+    // before the block's task scope is joined. Pending is the value a return
+    // carries, read and assigned only in a Cleanup's alternative. Yield is a
+    // statement of a function that carries generator.resume; its text is
+    // its suspension index, 1 to n.
+    Cleanup, Pending, Yield
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written

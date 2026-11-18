@@ -1,0 +1,6 @@
+// Edge case 26: a tag above a statement is rejected as it is today.
+let cleanup = func() -> void {};
+let work = func() -> void {
+    #Inline
+    defer cleanup();
+};

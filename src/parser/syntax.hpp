@@ -108,6 +108,10 @@ struct Expr {
         // a replacement, whose field name is in `labels` and `label_spans`
         // ("" for the source). The span starts at `new`.
         Copy,
+        // docs/design/Lifetime030.md. `iterator(parameters) -> T { body }`:
+        // `lambda` is the declaration, with `generator` set and the result
+        // type `[generator]` of the element type.
+        Generator,
     };
 
     Kind kind;
@@ -174,6 +178,12 @@ struct Statement {
         Scope,
         // select { arms }. `keyword` is the contextual word.
         Select,
+        // docs/design/Lifetime030.md. `defer call;`: the call is
+        // expressions[0]. `using (name = value) { body }`: `bindings` holds
+        // the name and expressions[0] the acquisition. `yield value;` in a
+        // generator body: the value is expressions[0]. `keyword` is the
+        // contextual word.
+        Defer, Using, Yield,
     };
 
     Kind kind;
@@ -419,6 +429,11 @@ struct Declaration {
     // A member that lowering generated and no source spells, such as a
     // record's value members. Tools skip it where they show written source.
     bool generated{};
+    // A generator, `iterator(parameters) -> T { body }`
+    // (docs/design/Lifetime030.md): `type` is `[generator]` with the element
+    // type as its argument, which lowering reads as Sequence<T>.
+    bool generator{};
+    std::optional<Span> generator_keyword{};
 };
 
 struct ResolvedImport {

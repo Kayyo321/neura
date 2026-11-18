@@ -1,0 +1,12 @@
+error[E0221]: a generator declares its element type: iterator(...) -> T { ... }
+ --> $DIR/generator-no-element-type.nra:2:34
+  |
+2 | let count = iterator(limit: int) {
+  |                                  ^ expected '->' and the type of the values the generator yields
+  |
+help: declare the element type
+  |
+2 | let count = iterator(limit: int) -> T {
+  |                                  +++++
+
+For more information about this error, try `neura explain E0221`.

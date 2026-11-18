@@ -745,14 +745,28 @@ private:
         return target;
     }
 
+    // A Cleanup (docs/design/Lifetime030.md) is registered where it stands;
+    // however the region is left, the registered lists run last first: a
+    // return runs the return list when there is one, reading and assigning
+    // the returned value as Pending. A list that returns makes the rest of
+    // the exit a return.
     Flow run_region(const std::vector<IrNode>& region, Frame& frame) {
+        std::vector<const IrNode*> cleanups;
+        auto flow = Flow::Next;
         for (const auto& statement : region) {
-            const auto flow = run_statement(statement, frame);
-            if (flow != Flow::Next) {
-                return flow;
+            if (statement.op == IrOp::Cleanup) {
+                cleanups.push_back(&statement);
+                continue;
             }
+            flow = run_statement(statement, frame);
+            if (flow != Flow::Next) break;
         }
-        return Flow::Next;
+        for (auto cleanup = cleanups.rbegin(); cleanup != cleanups.rend(); ++cleanup) {
+            const auto& node = **cleanup;
+            const auto& list = flow == Flow::Return && !node.alternative.empty() ? node.alternative : node.body;
+            if (run_region(list, frame) == Flow::Return) flow = Flow::Return;
+        }
+        return flow;
     }
 
     Flow run_statement(const IrNode& node, Frame& frame) {
@@ -787,6 +801,10 @@ private:
                 auto value = evaluate(node.operands.at(1), frame);
                 auto& entry = collection_entry(collection, node);
                 entry.elements[element_index(entry, index, destination)] = std::move(value);
+                return Flow::Next;
+            }
+            if (destination.op == IrOp::Pending) {
+                frame.result = evaluate(node.operands.at(1), frame);
                 return Flow::Next;
             }
             if (destination.op != IrOp::Load) {
@@ -915,6 +933,9 @@ private:
 
     Value evaluate(const IrNode& node, Frame& frame) {
         switch (node.op) {
+        case IrOp::Pending:
+            if (!frame.result) unsupported(node, "pending outside a return");
+            return *frame.result;
         case IrOp::Boolean:
             return bool_value(node.text == "true");
         case IrOp::Integer:

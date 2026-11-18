@@ -45,6 +45,10 @@ Errors about the grammar.
 | [E0216](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0216.md) | class hook outside a declared class |
 | [E0217](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0217.md) | malformed startup block |
 | [E0218](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0218.md) | misplaced startup block |
+| [E0219](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0219.md) | malformed defer statement |
+| [E0220](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0220.md) | malformed using statement |
+| [E0221](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0221.md) | malformed generator or yield |
+| [E0222](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0222.md) | yield outside a generator |
 | [E0225](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0225.md) | positional argument after a named argument |
 | [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
 | [E0227](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0227.md) | malformed interpolated string |
@@ -134,6 +138,14 @@ Errors about types, values, calls, and statements.
 | [E0452](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0452.md) | a primitive borrow escapes its owner |
 | [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md) | an escaping closure requires explicit construction |
 | [E0470](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0470.md) | return in a startup block |
+| [E0471](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0471.md) | deferred call with a result |
+| [E0472](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0472.md) | defer or using outside a function |
+| [E0473](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0473.md) | using in a function that cannot return a close error |
+| [E0474](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0474.md) | using resource that cannot be closed |
+| [E0475](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0475.md) | scoped resource leaves its using block |
+| [E0476](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0476.md) | yield with cleanup pending |
+| [E0477](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0477.md) | storage that cannot outlive a suspension |
+| [E0478](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0478.md) | return with a value in a generator |
 | [E0480](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0480.md) | conflicting inferred type arguments |
 | [E0481](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0481.md) | lambda does not fit its callable context |
 | [E0482](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0482.md) | unknown argument label |
@@ -199,6 +211,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0544](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0544.md) | class hook that may suspend |
 | [E0545](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0545.md) | hooked class storage without an initializer |
 | [E0546](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0546.md) | hooked class reference at a bodyless function |
+| [E0550](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0550.md) | event emitted under a monitor guard |
 | [E0560](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0560.md) | parameter names differ from the overridden method |
 | [E0561](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0561.md) | defaults differ from the overridden method |
 | [E0570](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0570.md) | invalid record declaration |

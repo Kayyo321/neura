@@ -1,0 +1,5 @@
+// Edge case 10: `defer;` is a name; the rest of the block is still read.
+let work = func() -> void {
+    defer;
+    let count: int = "text";
+};

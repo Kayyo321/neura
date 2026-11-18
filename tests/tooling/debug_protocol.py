@@ -529,6 +529,78 @@ let App = module:program.Entry (
         self.assertEqual(''.join(outputs).count('startup 8\n'), 1)
         self.assertIn('main\n', ''.join(outputs))
 
+    def test_generator_state_and_cleanup_stops(self):
+        # docs/design/Lifetime030.md, Tooling: a suspended generator is shown
+        # by its source names with its flags, inspecting it advances nothing,
+        # and a cleanup stops at its `defer` and at the closing brace of its
+        # `using` block.
+        source = """let console = import:Std.Io.Console;
+let closeable = import:Std.Io.Closeable;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let App = module:program.Entry (
+    let squares = iterator(count: int) -> int {
+        for (let index = 0; index < count; index++) {
+            let square = index * index;
+            yield square;
+        }
+    };
+    let used = func() -> Result<int> {
+        using (source = new Resource()) {
+            let label = "deferred";
+            defer console.print_line(label);
+            console.print_line("body");
+        }
+        return Result<int>.Ok(1);
+    };
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let items = squares(3).iterator();
+        console.print_line(items.next().to_string());
+        console.print_line(items.next().to_string());
+        let outcome = used();
+        return program.ExitCode.Ok;
+    };
+);
+"""
+        path = self.source('generator.nra', source)
+        self.launch(path)
+        lines = [13, 19, 20, 21]
+        result = self.client.request('setBreakpoints', {'source': {'path': str(path)},
+                                                        'breakpoints': [{'line': line} for line in lines]})
+        self.assertTrue(all(item['verified'] for item in result['breakpoints']))
+        self.client.request('configurationDone')
+        stops = []
+        for _ in range(7):
+            self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+            frame = self.frame()
+            stops.append(frame['line'])
+            if frame['line'] == 13 and len(stops) == 2:
+                self.assertIn('$resume', frame['name'])
+                scopes = self.client.request('scopes', {'frameId': frame['id']})['scopes']
+                variables = self.client.request('variables', {'variablesReference': scopes[0]['variablesReference']})['variables']
+                state = next(item for item in variables if item['name'] == 'this')
+                fields = {item['name']: item['value'] for item in self.client.request(
+                    'variables', {'variablesReference': state['variablesReference']})['variables']}
+                self.assertEqual(fields['count'], '3')
+                self.assertEqual(fields['index'], '1')
+                self.assertEqual(fields['square'], '1')
+                self.assertEqual(fields['$running'], 'true')
+                self.assertEqual(fields['$buffered'], 'false')
+            self.client.request('continue')
+        # The yield twice; the defer when it saves its argument, then the
+        # body, then the deferred call when the block is left; then the
+        # closing brace of the `using` block, where it closes.
+        self.assertEqual(stops[:6], [13, 13, 19, 20, 19, 21])
+        self.assertEqual(set(stops[6:]), {21})
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
+        self.assertEqual(outputs, '0\n1\nbody\ndeferred\n')
+
     def test_pending_breakpoint_keeps_id_and_condition_short_circuits(self):
         path = self.source('pending.nra', """let program = import:Std.Program;
 let App = module:program.Entry (

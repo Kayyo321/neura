@@ -76,6 +76,41 @@ let kind = func(v: class) -> int => match.is (v) {
         self.assertEqual(self.formatted(source), expected)
         self.assertEqual(self.formatted(expected), expected)
 
+    def test_defer_using_generators_and_yield(self):
+        # docs/design/Lifetime030.md, Tooling: `defer` and one space before
+        # its call, joined when split; `using (name = value) {` with one
+        # space before `(`, while a call `using(x)` keeps none; `iterator(`
+        # and `iterator<T>(` with none; `yield` and one space.
+        source = """let squares=iterator<T>(items:T[list])->T{
+for(let item:T in items){
+yield(item);
+}
+};
+let run=func(log:Log)->Result<int>{
+defer
+log.end();
+using(source=open()){
+using(source);
+}
+return Result<int>.Ok(0);
+};
+"""
+        expected = """let squares = iterator<T>(items: T[list]) -> T {
+    for (let item: T in items) {
+        yield (item);
+    }
+};
+let run = func(log: Log) -> Result<int> {
+    defer log.end();
+    using (source = open()) {
+        using(source);
+    }
+    return Result<int>.Ok(0);
+};
+"""
+        self.assertEqual(self.formatted(source), expected)
+        self.assertEqual(self.formatted(expected), expected)
+
     def test_comments_and_documentation_attachment(self):
         source = '''// ordinary comment: https://example.test/a//b
 /// Documentation has @param [in] name and \\return text.

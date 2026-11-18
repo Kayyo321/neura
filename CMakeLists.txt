@@ -316,6 +316,9 @@ add_library(neura_compiler STATIC
     src/neura-ir/integer.cpp
     src/neura-ir/float.cpp
     src/neura-ir/control_flow.cpp
+    src/neura-ir/lifetime.cpp
+    src/neura-ir/scoped_resources.cpp
+    src/neura-ir/event_guard.cpp
     src/neura-ir/specialize.cpp
     src/neura-ir/containment.cpp
     src/neura-ir/inline_limit.cpp
@@ -602,6 +605,13 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")
     set_tests_properties(matching-programs PROPERTIES TIMEOUT 180)
+    # Programs of the lifetime milestone (docs/design/Lifetime030.md), each
+    # in every build and execution mode with the same output, steps and peak
+    # cells, and their NeuraIR version.
+    add_test(NAME lifetime-programs COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifetime/programs")
+    set_tests_properties(lifetime-programs PROPERTIES TIMEOUT 900)
     add_test(NAME matching-nir COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/nir_versions.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")

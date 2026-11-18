@@ -126,7 +126,7 @@ private:
             throw Diagnostic(expr.span, "reference field '" + fields_[*field].name +
                                         "' may be read before it is bound").with_code("E0513");
         }
-        if (expr.kind == ExprKind::Lambda) return;
+        if (expr.kind == ExprKind::Lambda || expr.kind == ExprKind::Generator) return;
         if (expr.kind == ExprKind::Conditional) {
             read(expr.operands[0], flow);
             const auto selected = literal_condition(expr.operands[0]);

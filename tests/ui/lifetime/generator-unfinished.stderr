@@ -1,0 +1,8 @@
+error[E0203]: expected ')'
+ --> $DIR/generator-unfinished.nra:3:22
+  |
+3 |     return iterator(1;
+  |                      ^ expected ')', found ';'
+  |                    - unclosed '(' opened here
+
+For more information about this error, try `neura explain E0203`.

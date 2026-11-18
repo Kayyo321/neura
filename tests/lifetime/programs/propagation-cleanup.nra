@@ -1,0 +1,50 @@
+// Propagation evaluates the acquisition before registering its cleanup and
+// leaves already entered blocks in reverse order.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Resource = class implements closeable.Closeable (
+    let name: string;
+    export let init = func(label: string) -> void { name = label; };
+    export let close = func -> Result<Unit> {
+        console.print_line("close " + name);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let PropagationCleanup = module:program.Entry (
+    let log = func(text: string) -> void { console.print_line(text); };
+    let open = func(name: string, fail: bool) -> Result<Resource> {
+        console.print_line("open " + name);
+        if (fail) {
+            return Result<Resource>.Err(error.custom("open", "failed"));
+        }
+        return Result<Resource>.Ok(new Resource(name));
+    };
+    let run = func(fail_inner: bool) -> Result<int> {
+        defer log("outer defer");
+        using (outer = open("outer", false)?) {
+            defer log("inner defer");
+            using (inner = open("inner", fail_inner)?) {
+                log("body");
+                let missing = open("missing", true)?;
+                return Result<int>.Ok(1);
+            }
+        }
+    };
+    let show = func(result: Result<int>) -> void {
+        match (result) {
+            Result.Ok(value) => { log("ok"); },
+            Result.Err(failure) => { log("error"); },
+        }
+    };
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        show(run(true));
+        show(run(false));
+        return program.ExitCode.Ok;
+    };
+);

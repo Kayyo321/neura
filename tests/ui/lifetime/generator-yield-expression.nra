@@ -1,0 +1,4 @@
+// Edge case 57: 'yield' is a statement, not an expression.
+let one = iterator() -> int {
+    let x = yield 1;
+};

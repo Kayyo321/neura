@@ -1,0 +1,21 @@
+// Edge case 43: a value that retains the resource is scoped with it.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let flush = func() -> void {};
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let open = func() -> Resource => new Resource();
+let Reader = class (
+    let resource: Resource;
+    export let init = func(target: Resource) -> void {
+        resource = target;
+    };
+);
+let work = func() -> Result<Reader> {
+    using (source = open()) {
+        last reader = new Reader(source);
+        return Result<Reader>.Ok(reader);
+    }
+};

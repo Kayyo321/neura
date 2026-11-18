@@ -1,0 +1,113 @@
+// Std.Events.Event (docs/design/Lifetime030.md, Events, edge cases 80 to 83
+// and 87): retention, snapshot delivery, nested emission, idempotent
+// unsubscribe and an emission with no handlers.
+let events = import:Std.Events.Event;
+let test = import:Std.Test;
+
+let Log = class (
+    export let text: string = "";
+    export let add = func(part: string) {
+        text = text + part;
+    };
+);
+
+let EventTests = module (
+    export let test_delivers_in_registration_order = func() -> void {
+        last log = new Log();
+        last event = new events.Event<int>();
+        let first = event.subscribe(new func(value: int) { log.add("a" + value.to_string()); });
+        let second = event.subscribe(new func(value: int) { log.add("b" + value.to_string()); });
+        event.emit(1);
+        event.emit(2);
+        test.assert_equal_string("a1b1a2b2", log.text);
+        test.assert_equal_int32(2, event.subscriber_count());
+    };
+
+    export let test_the_same_handler_twice_is_two_registrations = func() -> void {
+        last log = new Log();
+        last event = new events.Event<int>();
+        last handler = new func(value: int) { log.add("h"); };
+        last first = event.subscribe(handler);
+        last second = event.subscribe(handler);
+        test.assert(first != second);
+        event.emit(0);
+        test.assert_equal_string("hh", log.text);
+        first.unsubscribe();
+        event.emit(0);
+        test.assert_equal_string("hhh", log.text);
+    };
+
+    export let test_a_handler_added_during_an_emission_runs_from_the_next = func() -> void {
+        last log = new Log();
+        last event = new events.Event<int>();
+        let first = event.subscribe(new func(value: int) {
+            log.add("first");
+            if (value == 1) {
+                let late = event.subscribe(new func(inner: int) { log.add("late"); });
+            }
+        });
+        event.emit(1);
+        test.assert_equal_string("first", log.text);
+        event.emit(2);
+        test.assert_equal_string("firstfirstlate", log.text);
+    };
+
+    export let test_a_handler_removed_during_an_emission_is_still_called_by_it = func() -> void {
+        last log = new Log();
+        last event = new events.Event<int>();
+        last holder = new SubscriptionHolder();
+        let first = event.subscribe(new func(value: int) {
+            log.add("first");
+            holder.held.unsubscribe();
+        });
+        holder.held = event.subscribe(new func(value: int) { log.add("second"); });
+        event.emit(1);
+        test.assert_equal_string("firstsecond", log.text);
+        event.emit(2);
+        test.assert_equal_string("firstsecondfirst", log.text);
+        test.assert(!holder.held.active());
+    };
+
+    export let test_unsubscribe_twice_does_nothing = func() -> void {
+        last event = new events.Event<string>();
+        last subscription = event.subscribe(func(text: string) { });
+        test.assert(subscription.active());
+        subscription.unsubscribe();
+        subscription.unsubscribe();
+        test.assert(!subscription.active());
+        test.assert_equal_int32(0, event.subscriber_count());
+    };
+
+    export let test_a_nested_emission_completes_inside_the_outer_one = func() -> void {
+        last log = new Log();
+        last event = new events.Event<int>();
+        let first = event.subscribe(new func(value: int) {
+            log.add("<" + value.to_string());
+            if (value > 0) {
+                event.emit(value - 1);
+            }
+            log.add(">");
+        });
+        event.emit(2);
+        test.assert_equal_string("<2<1<0>>>", log.text);
+    };
+
+    export let test_an_emission_with_no_handlers_does_nothing = func() -> void {
+        last event = new events.Event<int>();
+        event.emit(5);
+        test.assert_equal_int32(0, event.subscriber_count());
+    };
+
+    export let test_a_view_subscribes_to_the_event = func() -> void {
+        last log = new Log();
+        last event = new events.Event<int>();
+        last view = event.view();
+        let subscription = view.subscribe(new func(value: int) { log.add(value.to_string()); });
+        event.emit(7);
+        test.assert_equal_string("7", log.text);
+    };
+);
+
+let SubscriptionHolder = class (
+    export let held: events.Subscription = nil;
+);

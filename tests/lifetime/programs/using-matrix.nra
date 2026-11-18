@@ -1,0 +1,174 @@
+// The close-failure matrix of `using` (docs/design/Lifetime030.md, `using`
+// and "Exit order", edge cases 27, 35, 37 to 40, 47): the body returns Ok
+// or Err, the close succeeds or fails, the block is left by each kind of
+// exit, at one and two levels.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Resource = class implements closeable.Closeable (
+    export let name: string;
+    let fails: bool;
+    export let closes: int = 0;
+    export let init = func(label: string, failing: bool) -> void {
+        name = label;
+        fails = failing;
+    };
+
+    export let close = func -> Result<Unit> {
+        closes = closes + 1;
+        console.print_line("close " + name);
+        if (fails) {
+            return Result<Unit>.Err(error.custom("close", name + " failed to close"));
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    export let read = func() -> int {
+        console.print_line("read " + name);
+        return name.byte_length;
+    };
+);
+
+// A getter that would redirect the close: the object admitted is closed.
+let Holder = class (
+    let first: Resource;
+    let second: Resource;
+    let reads: int = 0;
+    export let init = func(a: Resource, b: Resource) -> void {
+        first = a;
+        second = b;
+    };
+
+    export let current = func() -> Resource {
+        reads = reads + 1;
+        return reads == 1 ? first : second;
+    };
+);
+
+let fail = func(message: string) -> error.Error => error.custom("body", message);
+
+let open = func(name: string, failing: bool) -> Result<Resource> {
+    if (name == "missing") {
+        return Result<Resource>.Err(error.custom("open", "no such resource"));
+    }
+    return Result<Resource>.Ok(new Resource(name, failing));
+};
+
+let show = func(label: string, outcome: Result<int>) -> void {
+    match (outcome) {
+        Result.Ok(value) => {
+            console.print_line(label + ": ok " + value.to_string());
+        },
+        Result.Err(failure) => {
+            console.print_line(label + ": error " + error.message(failure));
+        },
+    }
+};
+
+let UsingMatrix = module:program.Entry (
+    // A return of Ok or Err, with a close that succeeds or fails.
+    let returns = func(body_ok: bool, close_fails: bool) -> Result<int> {
+        using (source = open("returns", close_fails)?) {
+            if (body_ok) {
+                return Result<int>.Ok(source.read());
+            }
+            return Result<int>.Err(fail("the body failed"));
+        }
+    };
+
+    // Two levels, both closes failing after Ok: the inner error, then a
+    // Context around it from the outer close.
+
+    let nested = func(outer_fails: bool, inner_fails: bool, body_ok: bool) -> Result<int> {
+        using (outer = open("outer", outer_fails)?) {
+            using (inner = open("inner", inner_fails)?) {
+                if (body_ok) {
+                    return Result<int>.Ok(outer.read() + inner.read());
+                }
+                return Result<int>.Err(fail("the nested body failed"));
+            }
+        }
+    };
+
+    // Falling off the end: a failed close returns its error.
+
+    let falls = func(close_fails: bool) -> Result<int> {
+        let total = 0;
+        using (source = open("falls", close_fails)?) {
+            total = source.read();
+        }
+        console.print_line("after the block");
+        return Result<int>.Ok(total);
+    };
+
+    // break and continue out of a block in a loop.
+
+    let loops = func(close_fails: bool) -> Result<int> {
+        let count = 0;
+        for (let index = 0; index < 4; index++) {
+            using (source = open("loop" + index.to_string(), close_fails && index == 2)?) {
+                count = count + 1;
+                if (index == 1) {
+                    continue;
+                }
+                if (index == 3) {
+                    break;
+                }
+            }
+            console.print_line("end of iteration " + index.to_string());
+        }
+        return Result<int>.Ok(count);
+    };
+
+    // An acquisition that fails through `?` returns its error; nothing is
+    // closed.
+
+    let missing = func() -> Result<int> {
+        using (source = open("missing", false)?) {
+            return Result<int>.Ok(source.read());
+        }
+    };
+
+    // `?` inside the block leaves it as a return.
+
+    let propagates = func(close_fails: bool) -> Result<int> {
+        using (source = open("propagates", close_fails)?) {
+            let value = open("missing", false)?;
+            return Result<int>.Ok(value.read());
+        }
+    };
+
+    // The object admitted is closed, whatever a getter returns later.
+
+    let redirected = func() -> Result<int> {
+        let first = new Resource("admitted", false);
+        let holder = new Holder(first, new Resource("other", false));
+        using (source = holder.current()) {
+            return Result<int>.Ok(holder.current().read());
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        show("ok, close ok", returns(true, false));
+        show("ok, close fails", returns(true, true));
+        show("err, close ok", returns(false, false));
+        show("err, close fails", returns(false, true));
+        show("nested ok", nested(false, false, true));
+        show("nested both fail after ok", nested(true, true, true));
+        show("nested both fail after err", nested(true, true, false));
+        show("nested inner fails", nested(false, true, true));
+        show("falls, close ok", falls(false));
+        show("falls, close fails", falls(true));
+        show("loops, closes ok", loops(false));
+        show("loops, close fails", loops(true));
+        show("missing", missing());
+        show("propagates, close ok", propagates(false));
+        show("propagates, close fails", propagates(true));
+        show("redirected", redirected());
+        return program.ExitCode.Ok;
+    };
+);

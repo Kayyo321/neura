@@ -1,0 +1,87 @@
+// Generators (docs/design/Lifetime030.md, Generators, edge cases 50, 52,
+// 62 to 68, 76 and 77): laziness, buffering, exhaustion, early break, and
+// independent generators from one factory.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let say = func(text: string) -> void {
+    console.print_line(text);
+};
+
+let GeneratorBasics = module:program.Entry (
+    let squares = iterator(count: int) -> int {
+        for (let index = 0; index < count; index++) {
+            say("body computes " + index.to_string());
+            yield index * index;
+        }
+        say("body ends");
+    };
+
+    let nothing = iterator() -> string {
+        say("an empty generator runs");
+    };
+
+    let pairs = iterator(low, high: int) -> int {
+        let value = low;
+        while (true) {
+            if (value > high) {
+                return;
+            }
+            if (value % 2 == 0) {
+                yield value;
+            } else {
+                yield -value;
+            }
+            value = value + 1;
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // Called and never advanced: none of the body runs.
+        let unused = squares(3);
+        say("created");
+        // has_next three times, then next: the body runs to its first yield once.
+        let first = squares(3).iterator();
+        say("has_next " + first.has_next().to_string());
+        say("has_next " + first.has_next().to_string());
+        say("has_next " + first.has_next().to_string());
+        say("next " + first.next().to_string());
+        // next without has_next runs to the next yield and no further.
+        say("next " + first.next().to_string());
+        say("next " + first.next().to_string());
+        say("has_next " + first.has_next().to_string());
+        say("has_next " + first.has_next().to_string());
+        // A pipeline over a generator, and for-each.
+        last small = squares(10).filter(func(square: int) -> bool {
+            return square < 30;
+        }).map(func(square: int) -> string {
+            return "<" + square.to_string() + ">";
+        });
+        for (let text: string in small) {
+            say(text);
+        }
+        // break in the consuming loop: no later yield runs.
+        for (let value: int in squares(100)) {
+            if (value > 3) {
+                break;
+            }
+            say("got " + value.to_string());
+        }
+        // Two generators from one factory, advanced in turn.
+        let a = pairs(1, 4).iterator();
+        let b = pairs(10, 12).iterator();
+        while (a.has_next() || b.has_next()) {
+            if (a.has_next()) {
+                say("a " + a.next().to_string());
+            }
+            if (b.has_next()) {
+                say("b " + b.next().to_string());
+            }
+        }
+        for (let text: string in nothing()) {
+            say(text);
+        }
+        say("done");
+        return program.ExitCode.Ok;
+    };
+);
