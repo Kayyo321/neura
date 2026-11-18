@@ -194,7 +194,19 @@ jobs:
           cat "$SERVER_COMPONENTS/components.txt"
           exit "$status"
 
+      # The archives' OpenSSL takes its default trust anchors from /etc/ssl
+      # (docs/Install.md): a verifying connection with no CA file given
+      # shows that the runner's system keeps them there.
+      - name: Require the default trust anchors to verify a public server
+        run: |
+          ls -ld /etc/ssl/cert.pem /etc/ssl/certs 2> /dev/null || true
+          echo | "$SERVER_COMPONENTS/openssl/bin/openssl" s_client -connect github.com:443 -servername github.com \
+            -verify_return_error > trust.log 2>&1 || true
+          grep -E "Verify return code" trust.log
+          grep -q "Verify return code: 0 (ok)" trust.log
+
       - name: Build
+        id: build
         run: cmake --build build --parallel "$JOBS" 2>&1 | tee build/build.log
 
       - name: Require a build of Neura's sources without compiler warnings
@@ -221,6 +233,8 @@ jobs:
           MINIMUM: ${{ matrix.minimum }}
         run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
 
+      # The install and the checks of what it holds run whenever the build
+      # succeeded, so a failing test does not hide them; packing does not.
       # stage holds the core and the SDK, for the dependency checks below;
       # `cmake --install` without a component leaves the service out
       # (docs/design/Service030.md). Each stage-<component> holds one install
@@ -228,6 +242,7 @@ jobs:
       # target and describes with a manifest (docs/design/Lifecycle030.md).
       # stage-service is empty in a build without neurad.
       - name: Install into new prefixes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           cmake --install build --prefix stage
           for component in core sdk service; do
@@ -238,7 +253,7 @@ jobs:
       # The archive must run on a machine without a C++ runtime or libffi,
       # with a C library no newer than the one documented in docs/Install.md.
       - name: Require the documented system dependencies and no others (Linux)
-        if: ${{ runner.os == 'Linux' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' }}
         run: |
           status=0
           # Every executable of the three archives: stage holds core and sdk,
@@ -267,7 +282,7 @@ jobs:
       # On macOS the archive may need only libraries that are part of the
       # system: everything under /usr/lib and /System.
       - name: Require the documented system dependencies and no others (macOS)
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'macOS' }}
         run: |
           status=0
           for file in stage/bin/* stage/lib/neura/*.dylib $(find stage-service -type f 2> /dev/null); do
@@ -291,6 +306,7 @@ jobs:
       # OpenSSL are global symbols of the objects; the check covers the C
       # interfaces there.
       - name: Require the server components to stay private
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           status=0
           if [ "$RUNNER_OS" = Linux ]; then
