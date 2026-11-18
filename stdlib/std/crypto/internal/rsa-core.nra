@@ -54,8 +54,9 @@ export let RsaCore = module (
     export let PrivateCore = class (
         /// @brief The public part.
         export last public_core: PublicCore;
-        last p: mp.Modulus;
-        last q: mp.Modulus;
+        let p: mp.Modulus;
+        let q: mp.Modulus;
+        let wiped: bool = false;
         last d_p: uint32[list];
         last d_q: uint32[list];
         /// @brief qInv in Montgomery form modulo p.
@@ -72,9 +73,37 @@ export let RsaCore = module (
             q_inv = p.to_mont(mp.resize(coefficient, p.n));
         };
 
+        /// @brief Traps before a private operation when the owning key was wiped.
+        #Internal
+        export let require_live = func {
+            if (wiped) {
+                trap_with_message("invalid state: secret wiped");
+            }
+        };
+
+        /// @brief Disables this core and overwrites its directly accessible CRT buffers.
+        #Internal
+        export let wipe = func {
+            if (wiped) {
+                return;
+            }
+            wiped = true;
+            clear_limbs(d_p);
+            clear_limbs(d_q);
+            clear_limbs(q_inv);
+            clear_limbs(p.m);
+            clear_limbs(q.m);
+            clear_limbs(p.one);
+            clear_limbs(q.one);
+            // Each prime's Montgomery context is owned by this core. Release its other scratch buffers.
+            p = nil;
+            q = nil;
+        };
+
         /// @brief x^d mod n by the CRT (RFC 8017, section 5.1.2, 2.b), or an empty list when the check
-        /// y^e = x fails. x must be below n.
+        /// y^e = x fails. x must be below n. A wiped core traps.
         export let apply = func(x: uint32[list]) -> uint32[list] {
+            require_live();
             last m1 = p.from_mont(p.pow(p.to_mont(p.reduce(x)), d_p));
             last m2 = q.from_mont(q.pow(q.to_mont(q.reduce(x)), d_q));
             // h = qInv (m1 - m2) mod p; y = m2 + q h.
@@ -92,6 +121,12 @@ export let RsaCore = module (
         /// @brief Text naming the size, never a value.
         export let.override to_string = func -> string => "RsaCore.PrivateCore(<redacted>)";
     );
+
+    let clear_limbs = func(buffer: uint32[list]) {
+        for (let i = 0; i < buffer.length; i++) {
+            buffer[i] = 0;
+        }
+    };
 
     /// @brief The value with high zero limbs beyond `limbs` dropped (q h < n always fits).
     let trim_to = func(a: uint32[list], limbs: int) -> uint32[list] {

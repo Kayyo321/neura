@@ -68,6 +68,21 @@ let RsaTests = module (
         test.assert_err(rsa.parse_public_key(new([1, 2, 3]), decode(rows[2])));
     };
 
+    export let test_wipe_clears_serialized_material_and_keeps_public_verification = func {
+        last key = private_key("2048");
+        last exposed = key.expose();
+        last signer = new rsa_pss.RsaPssSigner(key, Algorithm.Sha256, 0);
+        last message: uint8[list] = new([1, 2, 3]);
+        last signature = test.assert_ok(signer.sign_with_salt(message, new));
+        key.wipe();
+        key.wipe();
+        test.assert(key.is_wiped());
+        for (let byte in exposed) {
+            test.assert(byte == 0);
+        }
+        test.assert(signer.verify(message, signature));
+    };
+
     export let test_pss_known_salts = func {
         last rows = vectors.pss;
         for (let i = 0; i < rows.length; i += 6) {

@@ -72,13 +72,14 @@ export let RsaPss = module (
         /// @brief The public key.
         export let public_key = func -> rsa.RsaPublicKey => key.public_key;
 
-        /// @brief The signature with the given salt (of the configured length; another traps).
+        /// @brief The signature with the given salt. A wiped key or a salt of the wrong length traps.
         #NoDiscard
         export let sign_with_salt = func(message: uint8[list], salt: uint8[list]) -> Result<uint8[list]> {
+            last core = key.core;
+            core.require_live();
             if (salt.length != salt_length) {
                 trap_with_message("invalid argument: RSA-PSS salt must be " + salt_length.to_string() + " bytes");
             }
-            last core = key.core;
             last em = rsa_core.pss_encode(hash, asym_hash.digest(hash, message), salt, core.public_core.bits - 1);
             last y = core.apply(rsa_core.os2ip_below(core.public_core, em));
             if (y.length == 0) {
@@ -88,9 +89,10 @@ export let RsaPss = module (
         };
 
         /// @brief The signature with a fresh salt. Fails when the entropy source or the private operation's
-        /// check fails.
+        /// check fails. A wiped key traps before requesting a salt.
         #NoDiscard
         export let try_sign = func(message: uint8[list]) -> Result<uint8[list]> {
+            key.core.require_live();
             last salt: Result<uint8[list]> = has_generator ? Result<uint8[list]>.Ok(generator.fill(salt_length))
                 : entropy.os_bytes(salt_length);
             match (salt) {

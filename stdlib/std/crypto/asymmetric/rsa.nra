@@ -157,7 +157,13 @@ export let Rsa = module (
         };
 
         export let expose = func -> uint8[list] => material.expose();
-        export let wipe = func => material.wipe();
+        /// @brief Disables private operations and zeros the serialized secret and the directly held CRT buffers.
+        /// Already-created signers and decryptors share this state. The runtime does not guarantee memory erasure.
+        export let wipe = func {
+            core.wipe();
+            material.wipe();
+        };
+
         export let is_wiped = func -> bool => material.is_wiped();
         export let lock = func => material.lock();
 

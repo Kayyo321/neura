@@ -85,11 +85,12 @@ export let RsaOaep = module (
             }
         };
 
-        /// @brief The message, or `Custom` code `crypto.decryption` for every kind of failure.
+        /// @brief The message, or `Custom` code `crypto.decryption` for any decryption failure. A wiped key traps.
         #NoDiscard
         export let decrypt = func(key: rsa.RsaPrivateKey, ciphertext: uint8[list], label: uint8[list])
             -> Result<uint8[list]> {
             last core = key.core;
+            core.require_live();
             last public_core = core.public_core;
             last failure = Result<uint8[list]>.Err(error.custom("crypto.decryption", "decryption failed"));
             if (ciphertext.length != public_core.k || public_core.k < 2 * asym_hash.output_length(hash) + 2) {
