@@ -1349,7 +1349,35 @@ FunctionOrigin Converter::entry_point() const {
         throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point").with_code("E0804");
     }
     const auto main = candidates.front();
-    return {Role::Function, main, symbol(main).owner};
+    // The entry module inherits Std.Program.Entry and overrides main, or
+    // inherits that override from a module of its own, such as a library's
+    // application module that calls a requirement the program implements
+    // (Modules.md, Interfaces and inheritance). The image runs main for the
+    // one module of that line that no other module inherits.
+    const auto owner = symbol(main).owner;
+    const auto inherits = [&](SymbolId module) {
+        for (auto scope = module; scope != no_symbol; scope = symbol(scope).base)
+            if (scope == owner) return true;
+        return false;
+    };
+    std::vector<SymbolId> line;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = program_.symbols[id];
+        if (item.kind == SymbolKind::Module && !is_static_scope(item) && inherits(id)) line.push_back(id);
+    }
+    std::vector<SymbolId> leaves;
+    for (const auto module : line) {
+        if (std::ranges::none_of(line, [&](SymbolId other) { return symbol(other).base == module; }))
+            leaves.push_back(module);
+    }
+    if (leaves.size() > 1) {
+        throw Diagnostic(symbol(leaves[1]).span, "the program has more than one entry point")
+            .with_code("E0804")
+            .label("'" + symbol(leaves[1]).name + "' and '" + symbol(leaves[0]).name + "' both inherit main from '" +
+                   symbol(owner).name + "'")
+            .help("let only one module inherit '" + symbol(owner).name + "'");
+    }
+    return {Role::Function, main, leaves.empty() ? owner : leaves.front()};
 }
 
 FunctionOrigin Converter::target(const Dispatch& dispatch, SymbolId cls) const {
@@ -3892,8 +3920,14 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
         const auto module = module_of(receiver);
         const auto implementation = c_.resolve_member(module, node.symbol);
         if (!c_.symbol(implementation).has_body) {
-            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" +
-                                            c_.symbol(node.symbol).name + "'").with_code("E0899");
+            // A call through a module of a requirement that it, and every
+            // module it inherits, leaves without a body.
+            const auto& name = c_.symbol(node.symbol).name;
+            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" + name + "'")
+                .with_code("E0434")
+                .label("this call runs in module '" + c_.symbol(module).name + "', where '" + name + "' has no body")
+                .help("implement '" + name + "' with `let.override` in '" + c_.symbol(module).name +
+                      "', or in a module that inherits it and that the call goes through");
         }
         auto arguments = sequence(node.operands, 1);
         return invoke_values({Role::Function, implementation, module}, std::move(arguments), results, node.span,
