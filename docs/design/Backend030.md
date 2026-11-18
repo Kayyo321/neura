@@ -155,6 +155,8 @@ Decision 9 now reads: no WebSocket and no connection upgrade in 0.3.0; HTTP/2 is
 | On drain (`SIGTERM`) each HTTP/2 connection sends `GOAWAY` with the last stream it accepted; those streams finish, later ones are refused. An idle connection gets `GOAWAY` after the keep-alive time and is closed. | implemented |
 | `SIGHUP` TLS reload keeps offering `h2`. The admin listener stays HTTP/1.1. | implemented |
 
+Load over HTTP/2 (2026-11-18, `GET /info`, 8 workers, the host started with `--h2c`; script `http2/h2bench.sh` in the lane's evidence): the `load` scenario of `neura_http2_test_client`, four connections with 8 streams in flight each (32 requests in flight, as B-S2's 32 connections), 30 s after 10 s, answered 4,316 and 3,023 requests per second with no failure (median 6.9 and 10.3 ms, 99th percentile 22 and 28 ms; load average 11.3 and 14.8). B-S2 over HTTP/1.1 against the same host, run alternately, gave 3,682 and 2,361 (load 10.7 and 13.4). The two loaders differ (Python threads for HTTP/1.1, a C++ nghttp2 client for HTTP/2), so the two rates show that HTTP/2 meets the B-S2 rate, not that one protocol is faster. TLS h2 was not put under load; it is covered by the `curl` tests only.
+
 Decisions taken without the owner, within the owner's yes:
 
 1. nghttp2 1.71.0, the current release, rather than the 1.64 the system curl uses.
