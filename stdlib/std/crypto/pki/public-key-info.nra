@@ -1,0 +1,398 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let der = import:Std.Crypto.Pki.Der;
+let identifiers = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let oids = import:Std.Crypto.Pki.Oids;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+/// @brief SubjectPublicKeyInfo (RFC 5280, section 4.1.2.7) with the key's algorithm identified (Stdlib.md section
+/// 20.9).
+///
+/// Known algorithms: rsaEncryption (RFC 3279, NULL parameters, the RSAPublicKey read), id-RSASSA-PSS (RFC 4055,
+/// optional parameters), id-ecPublicKey with a named curve (RFC 5480: P-256, P-384, P-521, secp256k1; explicit
+/// curve parameters are refused), Ed25519, Ed448, X25519 and X448 (RFC 8410), ML-DSA (RFC 9881), ML-KEM and
+/// SLH-DSA (NIST CSOR OIDs). The parameters must have the form each specification gives, and keys of a fixed
+/// size must have that size; anything else is a `Parse` error. Other algorithms parse as `Unknown`.
+/// @see [Std.Crypto.Pki.PublicKeyInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PublicKeyInfo)
+#Since("0.3.0")
+export let PublicKeyInfo = module (
+    /// @brief The public-key algorithms this module identifies.
+    #Since("0.3.0")
+    export let KeyAlgorithm = enum (Rsa, RsaPss, Ec, Ed25519, Ed448, X25519, X448, MlDsa44, MlDsa65, MlDsa87, MlKem512,
+        MlKem768, MlKem1024, SlhDsa, Unknown);
+
+    /// @brief A subject public key with its algorithm. Compared by its DER encoding.
+    #[Final, Since("0.3.0")]
+    export let SubjectPublicKeyInfo = class (
+        /// @brief The AlgorithmIdentifier.
+        export last algorithm: AlgorithmIdentifier;
+        /// @brief The subjectPublicKey BIT STRING's bytes (whole bytes).
+        export last key: uint8[list];
+        /// @brief The algorithm, identified.
+        export last key_algorithm: KeyAlgorithm;
+        /// @brief "P-256", "P-384", "P-521" or "secp256k1" for EC keys, the SLH-DSA parameter set (such as
+        /// "SLH-DSA-SHA2-128s"), else empty.
+        export last parameter_set: string;
+        /// @brief The RSA modulus as an unsigned big-endian magnitude (RSA and RSA-PSS keys), else empty.
+        export last rsa_modulus: uint8[list];
+        /// @brief The RSA public exponent as an unsigned big-endian magnitude, else empty.
+        export last rsa_exponent: uint8[list];
+        /// @brief The DER encoding of the whole SubjectPublicKeyInfo.
+        export last der_bytes: uint8[list];
+
+        /// @brief Records a checked key; use `parse` or `parse_der`.
+        export let init = func(id: AlgorithmIdentifier, key_bytes: uint8[list], which: KeyAlgorithm, set_name: string,
+                modulus: uint8[list], exponent: uint8[list], encoded: uint8[list]) {
+            algorithm = id;
+            key = key_bytes;
+            key_algorithm = which;
+            parameter_set = set_name;
+            rsa_modulus = modulus;
+            rsa_exponent = exponent;
+            der_bytes = encoded;
+        };
+
+        /// @brief The key size in bits: the RSA modulus length, the curve's field size, or the security
+        /// category's size for the fixed-size schemes (256 for Ed25519 and X25519, 448 for Ed448 and X448);
+        /// 0 for Unknown and the post-quantum schemes.
+        export let key_bits = func -> int {
+            match (key_algorithm) {
+                KeyAlgorithm.Rsa => {
+                    return modulus_bits(rsa_modulus);
+                },
+                KeyAlgorithm.RsaPss => {
+                    return modulus_bits(rsa_modulus);
+                },
+                KeyAlgorithm.Ec => {
+                    if (parameter_set == "P-384") {
+                        return 384;
+                    }
+                    if (parameter_set == "P-521") {
+                        return 521;
+                    }
+                    return 256;
+                },
+                KeyAlgorithm.Ed25519 => {
+                    return 256;
+                },
+                KeyAlgorithm.X25519 => {
+                    return 256;
+                },
+                KeyAlgorithm.Ed448 => {
+                    return 448;
+                },
+                KeyAlgorithm.X448 => {
+                    return 448;
+                },
+                _ => {
+                    return 0;
+                },
+            }
+            return 0;
+        };
+
+        /// @brief The `Std.Crypto.Algorithm` of a key whose scheme the library names, for policy checks.
+        export let policy_algorithm = func -> Optional<Algorithm> {
+            match (key_algorithm) {
+                KeyAlgorithm.Rsa => {
+                    return Optional<Algorithm>.Some(modulus_bits(rsa_modulus) <= 1024 ? Algorithm.Rsa1024 : Algorithm.RsaPkcs1v15);
+                },
+                KeyAlgorithm.RsaPss => {
+                    return Optional<Algorithm>.Some(Algorithm.RsaPss);
+                },
+                KeyAlgorithm.Ec => {
+                    if (parameter_set == "P-256") {
+                        return Optional<Algorithm>.Some(Algorithm.P256);
+                    }
+                    if (parameter_set == "P-384") {
+                        return Optional<Algorithm>.Some(Algorithm.P384);
+                    }
+                    if (parameter_set == "P-521") {
+                        return Optional<Algorithm>.Some(Algorithm.P521);
+                    }
+                    return Optional<Algorithm>.Some(Algorithm.Secp256k1);
+                },
+                KeyAlgorithm.Ed25519 => {
+                    return Optional<Algorithm>.Some(Algorithm.Ed25519);
+                },
+                KeyAlgorithm.Ed448 => {
+                    return Optional<Algorithm>.Some(Algorithm.Ed448);
+                },
+                KeyAlgorithm.X25519 => {
+                    return Optional<Algorithm>.Some(Algorithm.X25519);
+                },
+                KeyAlgorithm.X448 => {
+                    return Optional<Algorithm>.Some(Algorithm.X448);
+                },
+                KeyAlgorithm.MlDsa44 => {
+                    return Optional<Algorithm>.Some(Algorithm.MlDsa44);
+                },
+                KeyAlgorithm.MlDsa65 => {
+                    return Optional<Algorithm>.Some(Algorithm.MlDsa65);
+                },
+                KeyAlgorithm.MlDsa87 => {
+                    return Optional<Algorithm>.Some(Algorithm.MlDsa87);
+                },
+                KeyAlgorithm.MlKem512 => {
+                    return Optional<Algorithm>.Some(Algorithm.MlKem512);
+                },
+                KeyAlgorithm.MlKem768 => {
+                    return Optional<Algorithm>.Some(Algorithm.MlKem768);
+                },
+                KeyAlgorithm.MlKem1024 => {
+                    return Optional<Algorithm>.Some(Algorithm.MlKem1024);
+                },
+                KeyAlgorithm.SlhDsa => {
+                    return Optional<Algorithm>.Some(Algorithm.SlhDsa);
+                },
+                _ => {
+                    return Optional<Algorithm>.None;
+                },
+            }
+            return Optional<Algorithm>.None;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SubjectPublicKeyInfo)) {
+                return false;
+            }
+            last that = other as SubjectPublicKeyInfo;
+            if (that.der_bytes.length != der_bytes.length) {
+                return false;
+            }
+            for (let i = 0; i < der_bytes.length; i++) {
+                if (der_bytes[i] != that.der_bytes[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+
+        /// @brief "SubjectPublicKeyInfo(<algorithm>[ <parameter set>], <n> key bytes)".
+        export let.override to_string = func -> string {
+            last set = parameter_set.byte_length > 0 ? " " + parameter_set : "";
+            return $"SubjectPublicKeyInfo({oids.name_of(algorithm.oid.dotted)}{set}, {key.length} key bytes)";
+        };
+    );
+
+    let modulus_bits = func(modulus: uint8[list]) -> int {
+        if (modulus.length == 0) {
+            return 0;
+        }
+        let bits = modulus.length * 8;
+        let top = modulus[0] as int;
+        let mask = 128;
+        while (mask > 0 && (top & mask) == 0) {
+            bits--;
+            mask = mask >> 1;
+        }
+        return bits;
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Reads a SubjectPublicKeyInfo element.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(e: der.Element) -> Result<SubjectPublicKeyInfo> {
+        if (!e.is_universal(der.TagSequence)) {
+            return fail<SubjectPublicKeyInfo>(e.offset, "SubjectPublicKeyInfo must be a SEQUENCE");
+        }
+        let r = e.reader();
+        last id_element = r.next_universal(der.TagSequence, "algorithm")?;
+        last id = identifiers.parse(id_element)?;
+        last key_element = r.next_universal(der.TagBitString, "subjectPublicKey")?;
+        last bits = key_element.bit_string()?;
+        r.finish()?;
+        if (bits.unused_bits != 0) {
+            return fail<SubjectPublicKeyInfo>(key_element.offset, "public key must be whole bytes");
+        }
+        last key = bits.bytes;
+        last dotted = id.oid.dotted;
+        last at = id_element.offset;
+        let which = KeyAlgorithm.Unknown;
+        let set = "";
+        let modulus: uint8[list] = new;
+        let exponent: uint8[list] = new;
+        let size = -1;
+        if (dotted == oids.RsaEncryption || dotted == oids.RsaSsaPss) {
+            if (dotted == oids.RsaEncryption) {
+                which = KeyAlgorithm.Rsa;
+                if (!id.has_null_parameters()) {
+                    return fail<SubjectPublicKeyInfo>(at, "rsaEncryption parameters must be NULL");
+                }
+            } else {
+                which = KeyAlgorithm.RsaPss;
+                if (id.has_parameters()) {
+                    let _ = id.pss_parameters()?;
+                }
+            }
+            last rsa = der.parse(key)?;
+            if (!rsa.is_universal(der.TagSequence)) {
+                return fail<SubjectPublicKeyInfo>(key_element.offset, "RSAPublicKey must be a SEQUENCE");
+            }
+            let rr = rsa.reader();
+            last n = rr.next_universal(der.TagInteger, "modulus")?;
+            last exp = rr.next_universal(der.TagInteger, "publicExponent")?;
+            rr.finish()?;
+            modulus = magnitude(n.integer()?);
+            exponent = magnitude(exp.integer()?);
+            if (n.is_negative() || exp.is_negative() || modulus.length == 0 || exponent.length == 0) {
+                return fail<SubjectPublicKeyInfo>(key_element.offset, "RSA modulus and exponent must be positive");
+            }
+        } else if (dotted == oids.EcPublicKey) {
+            which = KeyAlgorithm.Ec;
+            if (id.parameters.length == 0) {
+                return fail<SubjectPublicKeyInfo>(at, "id-ecPublicKey needs a named curve");
+            }
+            last curve_element = der.parse(id.parameters)?;
+            if (!curve_element.is_universal(der.TagOid)) {
+                return fail<SubjectPublicKeyInfo>(at, "EC parameters must be a named curve");
+            }
+            last curve = (curve_element.oid()?).dotted;
+            let field = 0;
+            if (curve == oids.Prime256v1) {
+                set = "P-256";
+                field = 32;
+            } else if (curve == oids.Secp384r1) {
+                set = "P-384";
+                field = 48;
+            } else if (curve == oids.Secp521r1) {
+                set = "P-521";
+                field = 66;
+            } else if (curve == oids.Secp256k1) {
+                set = "secp256k1";
+                field = 32;
+            } else {
+                return fail<SubjectPublicKeyInfo>(at, "unsupported named curve " + curve);
+            }
+            if (!((key.length == 2 * field + 1 && key[0] == 4) || (key.length == field + 1 && (key[0] == 2 || key[0] == 3)))) {
+                return fail<SubjectPublicKeyInfo>(key_element.offset, "EC point has the wrong encoding or size");
+            }
+        } else {
+            if (dotted == oids.Ed25519) {
+                which = KeyAlgorithm.Ed25519;
+                size = 32;
+            } else if (dotted == oids.Ed448) {
+                which = KeyAlgorithm.Ed448;
+                size = 57;
+            } else if (dotted == oids.X25519) {
+                which = KeyAlgorithm.X25519;
+                size = 32;
+            } else if (dotted == oids.X448) {
+                which = KeyAlgorithm.X448;
+                size = 56;
+            } else if (dotted == oids.MlDsa44) {
+                which = KeyAlgorithm.MlDsa44;
+                size = 1312;
+            } else if (dotted == oids.MlDsa65) {
+                which = KeyAlgorithm.MlDsa65;
+                size = 1952;
+            } else if (dotted == oids.MlDsa87) {
+                which = KeyAlgorithm.MlDsa87;
+                size = 2592;
+            } else if (dotted == oids.MlKem512) {
+                which = KeyAlgorithm.MlKem512;
+                size = 800;
+            } else if (dotted == oids.MlKem768) {
+                which = KeyAlgorithm.MlKem768;
+                size = 1184;
+            } else if (dotted == oids.MlKem1024) {
+                which = KeyAlgorithm.MlKem1024;
+                size = 1568;
+            } else {
+                set = slh_dsa_name(dotted);
+                if (set.byte_length > 0) {
+                    which = KeyAlgorithm.SlhDsa;
+                    size = slh_dsa_key_size(set);
+                }
+            }
+            if (size >= 0) {
+                if (id.has_parameters()) {
+                    return fail<SubjectPublicKeyInfo>(at, oids.name_of(dotted) + " parameters must be absent");
+                }
+                if (key.length != size) {
+                    return fail<SubjectPublicKeyInfo>(key_element.offset, oids.name_of(dotted) + " key has the wrong size");
+                }
+            }
+        }
+        return Result<SubjectPublicKeyInfo>.Ok(new SubjectPublicKeyInfo(id, key, which, set, modulus, exponent, e.encoded()));
+    };
+
+    /// @brief Parses the DER encoding of a SubjectPublicKeyInfo.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_der = func(bytes: uint8[list]) -> Result<SubjectPublicKeyInfo> => parse(der.parse(bytes)?);
+
+    /// @brief A SubjectPublicKeyInfo from an AlgorithmIdentifier and the raw key bytes (checked like `parse`).
+    #[NoDiscard, Since("0.3.0")]
+    export let of = func(id: AlgorithmIdentifier, key: uint8[list]) -> Result<SubjectPublicKeyInfo> =>
+        parse_der(writer.sequence(new([id.der_bytes, writer.bit_string_bytes(key)])));
+
+    let magnitude = func(twos: uint8[list]) -> uint8[list] {
+        let start = 0;
+        while (start < twos.length && twos[start] == 0) {
+            start++;
+        }
+        return der.copy_range(twos, start, twos.length);
+    };
+
+    let slh_dsa_name = func(dotted: string) -> string {
+        if (dotted == oids.SlhDsaSha2_128s) {
+            return "SLH-DSA-SHA2-128s";
+        }
+        if (dotted == oids.SlhDsaSha2_128f) {
+            return "SLH-DSA-SHA2-128f";
+        }
+        if (dotted == oids.SlhDsaSha2_192s) {
+            return "SLH-DSA-SHA2-192s";
+        }
+        if (dotted == oids.SlhDsaSha2_192f) {
+            return "SLH-DSA-SHA2-192f";
+        }
+        if (dotted == oids.SlhDsaSha2_256s) {
+            return "SLH-DSA-SHA2-256s";
+        }
+        if (dotted == oids.SlhDsaSha2_256f) {
+            return "SLH-DSA-SHA2-256f";
+        }
+        if (dotted == oids.SlhDsaShake128s) {
+            return "SLH-DSA-SHAKE-128s";
+        }
+        if (dotted == oids.SlhDsaShake128f) {
+            return "SLH-DSA-SHAKE-128f";
+        }
+        if (dotted == oids.SlhDsaShake192s) {
+            return "SLH-DSA-SHAKE-192s";
+        }
+        if (dotted == oids.SlhDsaShake192f) {
+            return "SLH-DSA-SHAKE-192f";
+        }
+        if (dotted == oids.SlhDsaShake256s) {
+            return "SLH-DSA-SHAKE-256s";
+        }
+        if (dotted == oids.SlhDsaShake256f) {
+            return "SLH-DSA-SHAKE-256f";
+        }
+        return "";
+    };
+
+    /// @brief 2n bytes: n = 16, 24 or 32 for the 128, 192 and 256 sets (FIPS 205, table 2).
+    let slh_dsa_key_size = func(set: string) -> int {
+        if (set.byte_length >= 3) {
+            last digits = set.slice(set.byte_length - 4, set.byte_length - 1);
+            if (digits == "128") {
+                return 32;
+            }
+            if (digits == "192") {
+                return 48;
+            }
+        }
+        return 64;
+    };
+);

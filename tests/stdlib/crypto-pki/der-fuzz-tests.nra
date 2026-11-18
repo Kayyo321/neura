@@ -1,0 +1,98 @@
+// test-options: --max-steps 400000000
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:DerVectors;
+let.promote _ = import:Std.Core.Result;
+
+// Hostile inputs derived from the recorded certificates: every truncation, single-byte mutations at every
+// position, and huge or overlong lengths spliced in. Each must give a Result (Ok or a Parse error), never a
+// trap; every truncation must fail.
+let DerFuzzTests = module (
+    let certificate = func(index: int) -> uint8[list] => test.assert_ok(hex.decode(vectors.certificates[index * 2 + 1]));
+
+    /// @brief Calls every value reader on every element; each returns a Result, so no outcome traps.
+    let walk = func(e: der.Element) -> int {
+        if (e.constructed) {
+            let count = 1;
+            match (e.children()) {
+                Result.Ok(children) => {
+                    for (let child in children) {
+                        count += walk(child);
+                    }
+                },
+                Result.Err(err) => {
+                    test.fail("children of a parsed element failed");
+                },
+            }
+            return count;
+        }
+        let _ = e.boolean();
+        let _ = e.integer();
+        let _ = e.small_integer(1000);
+        let _ = e.oid();
+        let _ = e.bit_string();
+        let _ = e.octet_string();
+        let _ = e.text();
+        let _ = e.time();
+        let _ = e.null();
+        return 1;
+    };
+
+    let copy_with = func(bytes: uint8[list], at: int, value: uint8) -> uint8[list] {
+        let out = der.copy_range(bytes, 0, bytes.length);
+        out[at] = value;
+        return out;
+    };
+
+    export let test_every_truncation_fails = func {
+        for (let c = 0; c < 3; c++) {
+            last bytes = certificate(c);
+            for (let n = 0; n < bytes.length; n++) {
+                let _ = test.assert_err(der.parse(der.copy_range(bytes, 0, n)));
+            }
+        }
+    };
+
+    export let test_single_byte_mutations = func {
+        last bytes = certificate(2);
+        let accepted = 0;
+        for (let i = 0; i < bytes.length; i++) {
+            for (let mask in [1, 128]) {
+                match (der.parse(copy_with(bytes, i, bytes[i] ^ (mask as uint8)))) {
+                    Result.Ok(top) => {
+                        accepted++;
+                        let _ = walk(top);
+                    },
+                    Result.Err(e) => {},
+                }
+            }
+        }
+        // Content bytes that change only a value still parse; header bytes do not.
+        test.assert(accepted > 0 && accepted < bytes.length * 2);
+    };
+
+    export let test_hostile_lengths = func {
+        last bytes = certificate(0);
+        for (let i = 0; i < 40; i++) {
+            for (let value in [255, 128, 132, 133, 0, 31, 63]) {
+                match (der.parse(copy_with(bytes, i, value as uint8))) {
+                    Result.Ok(top) => {
+                        let _ = walk(top);
+                    },
+                    Result.Err(e) => {},
+                }
+            }
+        }
+        // Lengths claiming 2^31 - 1 and 2^24 bytes inside a valid prefix.
+        let huge: uint8[list] = new([48, 132, 127, 255, 255, 255, 2, 1, 0]);
+        let _ = test.assert_err(der.parse(huge));
+        let mid: uint8[list] = new([48, 131, 255, 255, 255, 2, 1, 0]);
+        let _ = test.assert_err(der.parse(mid));
+    };
+
+    export let test_walk_counts_elements = func {
+        last top = test.assert_ok(der.parse(certificate(2)));
+        test.assert(walk(top) > 50);
+    };
+);

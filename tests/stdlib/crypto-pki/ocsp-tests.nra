@@ -1,0 +1,232 @@
+let certificate = import:Std.Crypto.Pki.Certificate;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let ocsp = import:Std.Crypto.Pki.Ocsp;
+let test = import:Std.Test;
+let vectors = import:OcspVectors;
+let verifiers = import:TestVerifiers;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+
+// OCSP against `openssl ocsp` records, their fields read by `openssl ocsp -req_text` and Python `cryptography`,
+// CertID hashes from hashlib, and the signature truth table (support/ocsp-vectors.nra, gen-pki-ocsp.py).
+let OcspTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let cert = func(name: string) -> Certificate {
+        last rows = vectors.certificates;
+        for (let i = 0; i < rows.length; i += 2) {
+            if (rows[i] == name) {
+                return test.assert_ok(certificate.parse(decode(rows[i + 1])));
+            }
+        }
+        test.fail("no certificate " + name);
+        return cert("root");
+    };
+
+    let row = func(table: string[], width: int, name: string) -> int {
+        for (let i = 0; i < table.length; i += width) {
+            if (table[i] == name) {
+                return i;
+            }
+        }
+        test.fail("no row " + name);
+        return -1;
+    };
+
+    let verifier = func -> verifiers.Table {
+        let keys: string[list] = new;
+        let values: string[list] = new;
+        for (let i = 0; i < vectors.signatures.length; i += 2) {
+            keys.append(vectors.signatures[i]);
+            values.append(vectors.signatures[i + 1]);
+        }
+        return new verifiers.Table(keys, values);
+    };
+
+    let response = func(name: string) -> ocsp.OcspResponse =>
+        test.assert_ok(ocsp.parse_response(decode(vectors.responses[row(vectors.responses, 7, name) + 1])));
+
+    /// @brief The producedAt of the recorded responses plus one minute.
+    let now = func -> instant.Instant {
+        last at = test.assert_ok(int64s.parse(vectors.responses[row(vectors.responses, 7, "resp-good-direct") + 3]));
+        return instant.of_epoch_seconds(at + 60, 0);
+    };
+
+    let code_of = func(e: Error) -> string {
+        match (e) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    /// @brief Hex without leading zeros, as Python formats an integer.
+    let trimmed = func(bytes: uint8[list]) -> string {
+        let text = hex.encode(bytes);
+        while (text.byte_length > 1 && text.byte_at(0) == 48) {
+            text = text.slice(1, text.byte_length);
+        }
+        return text;
+    };
+
+    export let test_requests_parse_and_rebuild = func {
+        last rows = vectors.requests;
+        for (let i = 0; i < rows.length; i += 8) {
+            last bytes = decode(rows[i + 1]);
+            last request = test.assert_ok(ocsp.parse_request(bytes));
+            test.assert_equal_string(rows[i + 7], request.cert_ids.length.to_string());
+            last first = request.cert_ids[0];
+            test.assert_equal_string(rows[i + 2] == "sha1" ? "1.3.14.3.2.26" : "2.16.840.1.101.3.4.2.1", first.hash_algorithm.dotted);
+            test.assert_equal_string(rows[i + 3], hex.encode(first.issuer_name_hash));
+            test.assert_equal_string(rows[i + 4], hex.encode(first.issuer_key_hash));
+            test.assert_equal_string(trimmed(decode(rows[i + 5])), trimmed(first.serial));
+            if (request.cert_ids.length == 1) {
+                test.assert_equal_string(rows[i + 6], hex.encode(request.nonce));
+            }
+            // The same request, built here.
+            test.assert_equal_string(rows[i + 1], hex.encode(ocsp.build_request(request.cert_ids, request.nonce)));
+        }
+        // CertIDs computed from the certificates equal openssl's.
+        last sha1_request = test.assert_ok(ocsp.parse_request(decode(rows[row(rows, 8, "req-sha1-nonce") + 1])));
+        test.assert(ocsp.for_certificate(cert("leaf"), cert("inter"), ocsp.CertIdHash.Sha1).equals(sha1_request.cert_ids[0]));
+        test.assert(sha1_request.cert_ids[0].matches(cert("leaf"), cert("inter")));
+        test.assert(!sha1_request.cert_ids[0].matches(cert("neg-expired"), cert("inter")));
+    };
+
+    export let test_cert_id_hashes_match_hashlib = func {
+        last rows = vectors.cert_ids;
+        for (let i = 0; i < rows.length; i += 5) {
+            last issuer = cert(rows[i]);
+            last one = ocsp.for_certificate(cert("leaf"), issuer, ocsp.CertIdHash.Sha1);
+            test.assert_equal_string(rows[i + 1], hex.encode(one.issuer_name_hash));
+            test.assert_equal_string(rows[i + 2], hex.encode(one.issuer_key_hash));
+            last two = ocsp.for_certificate(cert("leaf"), issuer, ocsp.CertIdHash.Sha256);
+            test.assert_equal_string(rows[i + 3], hex.encode(two.issuer_name_hash));
+            test.assert_equal_string(rows[i + 4], hex.encode(two.issuer_key_hash));
+        }
+    };
+
+    export let test_responses_parse = func {
+        last rows = vectors.responses;
+        for (let i = 0; i < rows.length; i += 7) {
+            last parsed = test.assert_ok(ocsp.parse_response(decode(rows[i + 1])));
+            test.assert(parsed.status == ocsp.ResponseStatus.Successful);
+            last basic = test.assert_some(parsed.basic);
+            match (basic.responder_name) {
+                Optional.Some(n) => {
+                    test.assert_equal_string(rows[i + 2], n.to_string());
+                },
+                Optional.None => {
+                    test.assert_equal_string(rows[i + 2], hex.encode(basic.responder_key_hash));
+                },
+            }
+            test.assert_equal_string(rows[i + 3], basic.produced_at.epoch_seconds.to_string());
+            let singles = "";
+            for (let s in basic.responses) {
+                last status = s.status == ocsp.CertStatus.Good ? "good" : (s.status == ocsp.CertStatus.Revoked ? "revoked" : "unknown");
+                let next = "";
+                match (s.next_update) {
+                    Optional.Some(t) => {
+                        next = t.epoch_seconds.to_string();
+                    },
+                    Optional.None => {},
+                }
+                let revoked = "";
+                match (s.revocation_time) {
+                    Optional.Some(t) => {
+                        revoked = t.epoch_seconds.to_string();
+                    },
+                    Optional.None => {},
+                }
+                last reason = s.revocation_reason == 1 ? "key_compromise" : (s.revocation_reason < 0 ? "" : s.revocation_reason.to_string());
+                singles += (singles.byte_length > 0 ? "|" : "") + trimmed(s.cert_id.serial) + ";" + status + ";"
+                    + s.this_update.epoch_seconds.to_string() + ";" + next + ";" + revoked + ";" + reason;
+            }
+            test.assert_equal_string(rows[i + 4], singles);
+            test.assert_equal_string(rows[i + 5], hex.encode(basic.nonce()));
+            test.assert_equal_string(rows[i + 6], basic.certificates.length.to_string());
+        }
+    };
+
+    export let test_verification_outcomes = func {
+        last at = now();
+        last v = verifier();
+        last good = test.assert_ok(ocsp.verify(response("resp-good-direct"), cert("leaf"), cert("inter"), v, at, 300, new));
+        test.assert(good.status == ocsp.CertStatus.Good);
+        last again = test.assert_ok(ocsp.verify(response("resp-good-direct"), cert("leaf"), cert("inter"), v, at, 300, new));
+        test.assert(good.equals(again) && good.hash_code() == again.hash_code());
+        test.assert(test.assert_some(response("resp-good-direct").basic).equals(test.assert_some(response("resp-good-direct").basic)));
+        last revoked = test.assert_ok(ocsp.verify(response("resp-revoked"), cert("neg-expired"), cert("inter"), v, at, 300, new));
+        test.assert(revoked.status == ocsp.CertStatus.Revoked);
+        test.assert_equal_int32(1, revoked.revocation_reason);
+        last unknown = test.assert_ok(ocsp.verify(response("resp-unknown"), cert("neg-wildcard"), cert("inter"), v, at, 300, new));
+        test.assert(unknown.status == ocsp.CertStatus.Unknown);
+        last second = test.assert_ok(ocsp.verify(response("resp-two"), cert("neg-expired"), cert("inter"), v, at, 300, new));
+        test.assert(second.status == ocsp.CertStatus.Revoked);
+        // Delegated responders, named by Name and by key hash.
+        for (let name in ["resp-delegated", "resp-delegated-bykey"]) {
+            last d = test.assert_ok(ocsp.verify(response(name), cert("leaf"), cert("inter"), v, at, 300, new));
+            test.assert(d.status == ocsp.CertStatus.Good);
+        }
+        // The nonce must be echoed.
+        last request = test.assert_ok(ocsp.parse_request(decode(vectors.requests[row(vectors.requests, 8, "req-sha1-nonce") + 1])));
+        let _ = test.assert_ok(ocsp.verify(response("resp-good-nonce"), cert("leaf"), cert("inter"), v, at, 300, request.nonce));
+        test.assert_equal_string("ocsp.nonce", code_of(test.assert_err(ocsp.verify(response("resp-good-direct"), cert("leaf"),
+            cert("inter"), v, at, 300, request.nonce))));
+    };
+
+    export let test_verification_failures = func {
+        last at = now();
+        last v = verifier();
+        test.assert_equal_string("ocsp.responder", code_of(test.assert_err(ocsp.verify(response("resp-no-eku"), cert("leaf"),
+            cert("inter"), v, at, 300, new))));
+        test.assert_equal_string("ocsp.no_response", code_of(test.assert_err(ocsp.verify(response("resp-good-direct"),
+            cert("neg-expired"), cert("inter"), v, at, 300, new))));
+        // Eight days later the response is past nextUpdate; a day earlier its thisUpdate is in the future.
+        last later = instant.of_epoch_seconds(at.epoch_seconds + 8 * 86400, 0);
+        test.assert_equal_string("ocsp.stale", code_of(test.assert_err(ocsp.verify(response("resp-good-direct"), cert("leaf"),
+            cert("inter"), v, later, 300, new))));
+        last earlier = instant.of_epoch_seconds(at.epoch_seconds - 86400, 0);
+        test.assert_equal_string("ocsp.stale", code_of(test.assert_err(ocsp.verify(response("resp-good-direct"), cert("leaf"),
+            cert("inter"), v, earlier, 300, new))));
+        // A changed signature byte.
+        let bytes = decode(vectors.responses[row(vectors.responses, 7, "resp-good-direct") + 1]);
+        last basic = test.assert_some(response("resp-good-direct").basic);
+        last sig_at = find(bytes, basic.signature);
+        bytes[sig_at + 5] = bytes[sig_at + 5] ^ 1;
+        test.assert_equal_string("ocsp.signature", code_of(test.assert_err(ocsp.verify(test.assert_ok(ocsp.parse_response(bytes)),
+            cert("leaf"), cert("inter"), v, at, 300, new))));
+        // A tryLater answer has no body.
+        last later_status = test.assert_ok(ocsp.parse_response(new([48, 3, 10, 1, 3])));
+        test.assert(later_status.status == ocsp.ResponseStatus.TryLater);
+        test.assert_none(later_status.basic);
+        test.assert_equal_string("ocsp.status", code_of(test.assert_err(ocsp.verify(later_status, cert("leaf"), cert("inter"), v,
+            at, 300, new))));
+        // Malformed: successful without a body, an unknown status, truncation.
+        let _ = test.assert_err(ocsp.parse_response(new([48, 3, 10, 1, 0])));
+        let _ = test.assert_err(ocsp.parse_response(new([48, 3, 10, 1, 4])));
+        let _ = test.assert_err(ocsp.parse_response(der.copy_range(bytes, 0, bytes.length - 3)));
+    };
+
+    let find = func(haystack: uint8[list], needle: uint8[list]) -> int {
+        for (let i = 0; i + needle.length <= haystack.length; i++) {
+            let ok = true;
+            for (let j = 0; j < needle.length && ok; j++) {
+                ok = haystack[i + j] == needle[j];
+            }
+            if (ok) {
+                return i;
+            }
+        }
+        return -1;
+    };
+);

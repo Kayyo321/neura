@@ -1,0 +1,772 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Pki.BitString;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let der_time = import:Std.Crypto.Internal.DerTime;
+let instant = import:Std.Time.Instant;
+let oids = import:Std.Crypto.Pki.Oid;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief A strict DER reader (ITU-T X.690, Distinguished Encoding Rules) over a byte list (Stdlib.md section
+/// 20.9).
+///
+/// `parse` checks the whole tree before it returns: definite lengths in their shortest form, no indefinite
+/// lengths, tag numbers in their shortest form, primitive encodings for the universal primitive types and
+/// constructed ones for SEQUENCE and SET, the elements of a SET in ascending order of their encodings, and a
+/// nesting depth of at most `DefaultMaxDepth` (or the depth given). The value readers then check each value's
+/// own DER rules: BOOLEAN is 0x00 or 0xFF, INTEGER is minimal, BIT STRING unused bits are zero, the string types
+/// hold only their characters, and UTCTime and GeneralizedTime are `YYMMDDHHMMSSZ` and `YYYYMMDDHHMMSSZ`.
+/// Every failure is a `Parse` error whose offset is the position of the offending byte in the input.
+///
+/// Elements are views: an `Element` keeps the input list and its position, and copies bytes only when asked.
+/// The input must not change while elements over it are in use.
+/// @see [Std.Crypto.Pki.Der](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Der)
+#Since("0.3.0")
+export let Der = module (
+    /// @brief Tag class of universal tags.
+    #Since("0.3.0")
+    export const Universal: int = 0;
+    /// @brief Tag class of application tags.
+    #Since("0.3.0")
+    export const Application: int = 1;
+    /// @brief Tag class of context-specific tags ([n] in ASN.1).
+    #Since("0.3.0")
+    export const ContextSpecific: int = 2;
+    /// @brief Tag class of private tags.
+    #Since("0.3.0")
+    export const Private: int = 3;
+
+    #Since("0.3.0")
+    export const TagBoolean: int = 1;
+    #Since("0.3.0")
+    export const TagInteger: int = 2;
+    #Since("0.3.0")
+    export const TagBitString: int = 3;
+    #Since("0.3.0")
+    export const TagOctetString: int = 4;
+    #Since("0.3.0")
+    export const TagNull: int = 5;
+    #Since("0.3.0")
+    export const TagOid: int = 6;
+    #Since("0.3.0")
+    export const TagEnumerated: int = 10;
+    #Since("0.3.0")
+    export const TagUtf8String: int = 12;
+    #Since("0.3.0")
+    export const TagSequence: int = 16;
+    #Since("0.3.0")
+    export const TagSet: int = 17;
+    #Since("0.3.0")
+    export const TagNumericString: int = 18;
+    #Since("0.3.0")
+    export const TagPrintableString: int = 19;
+    #Since("0.3.0")
+    export const TagTeletexString: int = 20;
+    #Since("0.3.0")
+    export const TagIa5String: int = 22;
+    #Since("0.3.0")
+    export const TagUtcTime: int = 23;
+    #Since("0.3.0")
+    export const TagGeneralizedTime: int = 24;
+    #Since("0.3.0")
+    export const TagVisibleString: int = 26;
+    #Since("0.3.0")
+    export const TagUniversalString: int = 28;
+    #Since("0.3.0")
+    export const TagBmpString: int = 30;
+
+    /// @brief The default limit on nesting: the outermost element is depth 0.
+    #Since("0.3.0")
+    export const DefaultMaxDepth: int = 32;
+
+    /// @brief A `Parse` error of the kind at the offset.
+    #[NoDiscard, Since("0.3.0")]
+    export let error_at = func<T>(kind: ParseErrorKind, offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    let truncated = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.UnexpectedEnd, offset: offset, message: message });
+
+    /// @brief One DER element: a view of a tag, a length and contents inside an input list.
+    #[Final, Since("0.3.0")]
+    export let Element = class (
+        /// @brief The whole input. Do not change it.
+        export last data: uint8[list];
+        /// @brief The position of the first identifier byte.
+        export last offset: int;
+        /// @brief The number of identifier and length bytes.
+        export last header_length: int;
+        /// @brief The number of content bytes.
+        export last length: int;
+        /// @brief `Universal`, `Application`, `ContextSpecific` or `Private`.
+        export last tag_class: int;
+        /// @brief Whether the encoding is constructed.
+        export last constructed: bool;
+        /// @brief The tag number.
+        export last tag_number: int;
+        /// @brief The nesting depth: 0 for an element that `parse` returned.
+        export last depth: int;
+        /// @brief The nesting limit that applies below this element.
+        export last max_depth: int;
+
+        /// @brief Records a checked element; `parse` and `Reader` build elements.
+        export let init = func(input: uint8[list], at: int, header: int, content_length: int, class_bits: int,
+                is_constructed: bool, number: int, level: int, limit: int) {
+            data = input;
+            offset = at;
+            header_length = header;
+            length = content_length;
+            tag_class = class_bits;
+            constructed = is_constructed;
+            tag_number = number;
+            depth = level;
+            max_depth = limit;
+        };
+
+        /// @brief The position of the first content byte.
+        export let content_offset = func -> int => offset + header_length;
+
+        /// @brief The position after the last content byte.
+        export let end = func -> int => offset + header_length + length;
+
+        /// @brief A copy of the content bytes.
+        export let content = func -> uint8[list] => copy_range(data, content_offset(), end());
+
+        /// @brief A copy of the whole encoding: identifier, length and content.
+        export let encoded = func -> uint8[list] => copy_range(data, offset, end());
+
+        /// @brief Whether the tag is the universal tag with the number.
+        export let is_universal = func(number: int) -> bool => tag_class == Universal && tag_number == number;
+
+        /// @brief Whether the tag is the context-specific tag [number].
+        export let is_context = func(number: int) -> bool => tag_class == ContextSpecific && tag_number == number;
+
+        /// @brief A reader over the contents of a constructed element.
+        export let reader = func -> Reader => new Reader(data, content_offset(), end(), depth + 1, max_depth, true);
+
+        /// @brief The elements inside a constructed element.
+        #NoDiscard
+        export let children = func -> Result<Element[list]> {
+            if (!constructed) {
+                return fail<Element[list]>(offset, "expected a constructed element");
+            }
+            let r = reader();
+            let out: Element[list] = new;
+            while (r.has_more()) {
+                out.append(r.next()?);
+            }
+            return Result<Element[list]>.Ok(out);
+        };
+
+        /// @brief The single element inside an explicitly tagged element.
+        #NoDiscard
+        export let explicit_inner = func -> Result<Element> {
+            if (!constructed) {
+                return fail<Element>(offset, "explicit tag must be constructed");
+            }
+            let r = reader();
+            last inner = r.next()?;
+            r.finish()?;
+            return Result<Element>.Ok(inner);
+        };
+
+        /// @brief The value of a BOOLEAN: one content byte, 0x00 or 0xFF.
+        #NoDiscard
+        export let boolean = func -> Result<bool> {
+            expect_tag(TagBoolean, "BOOLEAN")?;
+            if (length != 1) {
+                return fail<bool>(offset, "BOOLEAN must have one content byte");
+            }
+            last b = data[content_offset()];
+            if (b == 0) {
+                return Result<bool>.Ok(false);
+            }
+            if (b == 255) {
+                return Result<bool>.Ok(true);
+            }
+            return fail<bool>(content_offset(), "BOOLEAN must be 0x00 or 0xFF");
+        };
+
+        /// @brief The two's-complement content of an INTEGER, checked to be minimal.
+        #NoDiscard
+        export let integer = func -> Result<uint8[list]> {
+            expect_tag(TagInteger, "INTEGER")?;
+            return integer_content();
+        };
+
+        /// @brief The two's-complement content of an implicitly tagged INTEGER, checked to be minimal.
+        #NoDiscard
+        export let integer_content = func -> Result<uint8[list]> {
+            if (constructed) {
+                return fail<uint8[list]>(offset, "INTEGER must be primitive");
+            }
+            if (length == 0) {
+                return fail<uint8[list]>(offset, "INTEGER must have content");
+            }
+            last at = content_offset();
+            if (length > 1 && ((data[at] == 0 && data[at + 1] < 128) || (data[at] == 255 && data[at + 1] >= 128))) {
+                return fail<uint8[list]>(at, "INTEGER is not minimal");
+            }
+            return Result<uint8[list]>.Ok(content());
+        };
+
+        /// @brief Whether an INTEGER (already checked) is negative.
+        export let is_negative = func -> bool => length > 0 && data[content_offset()] >= 128;
+
+        /// @brief The value of an INTEGER or ENUMERATED that must be from 0 to `max`; a negative value or one
+        /// above `max` is an `OutOfRange` error.
+        #NoDiscard
+        export let small_integer = func(max: int64) -> Result<int64> {
+            if (!(is_universal(TagInteger) || is_universal(TagEnumerated))) {
+                return fail<int64>(offset, "expected an INTEGER");
+            }
+            let _ = integer_content()?;
+            if (is_negative()) {
+                return error_at<int64>(ParseErrorKind.OutOfRange, content_offset(), "INTEGER must not be negative");
+            }
+            last at = content_offset();
+            let start = at;
+            while (start < end() - 1 && data[start] == 0) {
+                start++;
+            }
+            if (end() - start > 8 || (end() - start == 8 && data[start] >= 128)) {
+                return error_at<int64>(ParseErrorKind.OutOfRange, at, "INTEGER too large");
+            }
+            let value: int64 = 0;
+            for (let i = start; i < end(); i++) {
+                value = value * 256 + (data[i] as int64);
+            }
+            if (value > max) {
+                return error_at<int64>(ParseErrorKind.OutOfRange, at, "INTEGER too large");
+            }
+            return Result<int64>.Ok(value);
+        };
+
+        /// @brief Checks a NULL: no content.
+        #NoDiscard
+        export let null = func -> Result<Unit> {
+            expect_tag(TagNull, "NULL")?;
+            if (length != 0) {
+                return fail<Unit>(offset, "NULL must be empty");
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief The value of an OBJECT IDENTIFIER.
+        #NoDiscard
+        export let oid = func -> Result<Oid> {
+            expect_tag(TagOid, "OBJECT IDENTIFIER")?;
+            return oids.from_content(content(), content_offset());
+        };
+
+        /// @brief The value of a BIT STRING (or of an implicitly tagged one when `implicit` is true).
+        #NoDiscard
+        export let bit_string = func -> Result<BitString> {
+            expect_tag(TagBitString, "BIT STRING")?;
+            return bit_string_content();
+        };
+
+        /// @brief The value of an implicitly tagged BIT STRING.
+        #NoDiscard
+        export let bit_string_content = func -> Result<BitString> {
+            if (constructed) {
+                return fail<BitString>(offset, "BIT STRING must be primitive");
+            }
+            if (length == 0) {
+                return fail<BitString>(offset, "BIT STRING needs the unused-bits byte");
+            }
+            last at = content_offset();
+            last unused = data[at] as int;
+            if (unused > 7 || (length == 1 && unused != 0)) {
+                return fail<BitString>(at, "invalid BIT STRING unused-bits count");
+            }
+            if (length > 1 && (data[end() - 1] & ((1 << unused) - 1) as uint8) != 0) {
+                return fail<BitString>(end() - 1, "BIT STRING unused bits must be zero");
+            }
+            return Result<BitString>.Ok(new BitString(copy_range(data, at + 1, end()), unused));
+        };
+
+        /// @brief The content of an OCTET STRING.
+        #NoDiscard
+        export let octet_string = func -> Result<uint8[list]> {
+            expect_tag(TagOctetString, "OCTET STRING")?;
+            return Result<uint8[list]>.Ok(content());
+        };
+
+        /// @brief Whether the tag is one of the string types `text` reads.
+        export let is_string = func -> bool => tag_class == Universal && (tag_number == TagUtf8String
+            || tag_number == TagNumericString || tag_number == TagPrintableString || tag_number == TagTeletexString
+            || tag_number == TagIa5String || tag_number == TagVisibleString || tag_number == TagUniversalString
+            || tag_number == TagBmpString);
+
+        /// @brief The text of a string type: UTF8String (valid UTF-8), PrintableString, NumericString,
+        /// IA5String (bytes below 128), VisibleString (32 to 126), TeletexString (read as Latin-1, as most
+        /// software does), BMPString (UCS-2, no surrogates) or UniversalString (UCS-4).
+        #NoDiscard
+        export let text = func -> Result<string> {
+            if (!is_string()) {
+                return fail<string>(offset, "expected a string type");
+            }
+            return string_content(tag_number);
+        };
+
+        /// @brief The content read as the universal string type `kind` (for implicit tags such as dNSName).
+        #NoDiscard
+        export let string_content = func(kind: int) -> Result<string> {
+            if (constructed) {
+                return fail<string>(offset, "string must be primitive");
+            }
+            last at = content_offset();
+            if (kind == TagUtf8String) {
+                match (utf8.decode(content())) {
+                    Result.Ok(s) => {
+                        return Result<string>.Ok(s);
+                    },
+                    Result.Err(e) => {
+                        return fail<string>(at, "invalid UTF8String");
+                    },
+                }
+            }
+            let bytes: uint8[list] = new;
+            if (kind == TagBmpString || kind == TagUniversalString) {
+                last width = kind == TagBmpString ? 2 : 4;
+                if (length % width != 0) {
+                    return fail<string>(at, "string length is not a multiple of its character width");
+                }
+                for (let i = at; i < end(); i += width) {
+                    let cp: uint32 = 0;
+                    for (let j = 0; j < width; j++) {
+                        cp = (cp << 8) | (data[i + j] as uint32);
+                    }
+                    if ((cp >= 55296 && cp <= 57343) || cp > 1114111) {
+                        return fail<string>(i, "invalid character in string");
+                    }
+                    append_utf8(bytes, cp);
+                }
+            } else {
+                for (let i = at; i < end(); i++) {
+                    last c = data[i];
+                    if (!allowed_byte(kind, c)) {
+                        return fail<string>(i, "invalid character in string");
+                    }
+                    append_utf8(bytes, c as uint32);
+                }
+            }
+            match (utf8.decode(bytes)) {
+                Result.Ok(s) => {
+                    return Result<string>.Ok(s);
+                },
+                Result.Err(e) => {
+                    return fail<string>(at, "invalid string");
+                },
+            }
+            return fail<string>(at, "invalid string");
+        };
+
+        /// @brief The instant of a UTCTime (`YYMMDDHHMMSSZ`, years 1950 to 2049) or a GeneralizedTime
+        /// (`YYYYMMDDHHMMSSZ`, no fraction).
+        #NoDiscard
+        export let time = func -> Result<instant.Instant> {
+            if (constructed || tag_class != Universal || (tag_number != TagUtcTime && tag_number != TagGeneralizedTime)) {
+                return fail<instant.Instant>(offset, "expected UTCTime or GeneralizedTime");
+            }
+            last at = content_offset();
+            last utc = tag_number == TagUtcTime;
+            last wanted = utc ? 13 : 15;
+            if (length != wanted) {
+                return fail<instant.Instant>(at, utc ? "UTCTime must be YYMMDDHHMMSSZ" : "GeneralizedTime must be YYYYMMDDHHMMSSZ");
+            }
+            for (let i = 0; i < wanted - 1; i++) {
+                last c = data[at + i];
+                if (c < 48 || c > 57) {
+                    return fail<instant.Instant>(at + i, "time must be digits");
+                }
+            }
+            if (data[at + wanted - 1] != 90) {
+                return fail<instant.Instant>(at + wanted - 1, "time must end in Z");
+            }
+            let year: int64 = 0;
+            let p = at;
+            if (utc) {
+                last yy = digits2(p) as int64;
+                year = yy >= 50 ? 1900 + yy : 2000 + yy;
+                p += 2;
+            } else {
+                year = (digits2(p) * 100 + digits2(p + 2)) as int64;
+                p += 4;
+            }
+            last month = digits2(p);
+            last day = digits2(p + 2);
+            last hour = digits2(p + 4);
+            last minute = digits2(p + 6);
+            last second = digits2(p + 8);
+            if (month < 1 || month > 12) {
+                return fail<instant.Instant>(p, "invalid month");
+            }
+            if (day < 1 || day > der_time.month_length(year, month)) {
+                return fail<instant.Instant>(p + 2, "invalid day");
+            }
+            if (hour > 23) {
+                return fail<instant.Instant>(p + 4, "invalid hour");
+            }
+            if (minute > 59) {
+                return fail<instant.Instant>(p + 6, "invalid minute");
+            }
+            if (second > 59) {
+                return fail<instant.Instant>(p + 8, "invalid second");
+            }
+            last days = der_time.days_from_civil(year, month, day);
+            last seconds = days * 86400 + (hour as int64) * 3600 + (minute as int64) * 60 + (second as int64);
+            return Result<instant.Instant>.Ok(instant.of_epoch_seconds(seconds, 0));
+        };
+
+        let digits2 = func(at: int) -> int => ((data[at] - 48) as int) * 10 + ((data[at + 1] - 48) as int);
+
+        let expect_tag = func(number: int, name: string) -> Result<Unit> {
+            if (tag_class != Universal || tag_number != number) {
+                return fail<Unit>(offset, "expected " + name);
+            }
+            if (constructed) {
+                return fail<Unit>(offset, name + " must be primitive");
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Equal when the encodings are equal.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Element)) {
+                return false;
+            }
+            last that = other as Element;
+            if (that.end() - that.offset != end() - offset) {
+                return false;
+            }
+            for (let i = 0; i < end() - offset; i++) {
+                if (data[offset + i] != that.data[that.offset + i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => hash_range(data, offset, end());
+
+        /// @brief "Element(class <c>, tag <n>, <length> bytes at <offset>)".
+        export let.override to_string = func -> string {
+            last form = constructed ? " constructed" : "";
+            return $"Element(class {tag_class}, tag {tag_number}{form}, {length} bytes at {offset})";
+        };
+    );
+
+    /// @brief Reads consecutive DER elements from a range of an input list.
+    #[Final, Since("0.3.0")]
+    export let Reader = class (
+        last data: uint8[list];
+        /// @brief The position of the next element.
+        export let position: int;
+            | get: position;
+
+        /// @brief The end of the range.
+        export last limit: int;
+        last depth: int;
+        last max_depth: int;
+        /// @brief Whether the range lies inside an element that was already checked in full.
+        last checked: bool;
+
+        /// @brief A reader over input[start, end) at the nesting depth, with the nesting limit. `checked` says
+        /// that the range was already checked in full (as inside a parsed element), so constructed elements
+        /// are not checked again; pass false for any other input.
+        export let init = func(input: uint8[list], start: int, stop: int, level: int, limit_depth: int,
+                inside_checked: bool) {
+            data = input;
+            position = start;
+            limit = stop;
+            depth = level;
+            max_depth = limit_depth;
+            checked = inside_checked;
+        };
+
+        /// @brief Whether bytes remain.
+        export let has_more = func -> bool => position < limit;
+
+        /// @brief Whether the next element has the tag class and number (false at the end).
+        export let peek_is = func(class_bits: int, number: int) -> bool {
+            if (position >= limit) {
+                return false;
+            }
+            last b = data[position];
+            if ((b >> 6) as int != class_bits) {
+                return false;
+            }
+            if ((b & 31) != 31) {
+                return (b & 31) as int == number;
+            }
+            // High tag numbers: compare after reading the header.
+            match (read_header(data, position, limit, depth, max_depth, false)) {
+                Result.Ok(e) => {
+                    return e.tag_number == number;
+                },
+                Result.Err(e) => {
+                    return false;
+                },
+            }
+            return false;
+        };
+
+        /// @brief The next element, fully checked.
+        #NoDiscard
+        export let next = func -> Result<Element> {
+            last e = read_header(data, position, limit, depth, max_depth, !checked)?;
+            position = e.end();
+            return Result<Element>.Ok(e);
+        };
+
+        /// @brief The next element, which must have the universal tag `number`.
+        #NoDiscard
+        export let next_universal = func(number: int, name: string) -> Result<Element> {
+            if (!peek_is(Universal, number)) {
+                if (position >= limit) {
+                    return truncated<Element>(position, "missing " + name);
+                }
+                return fail<Element>(position, "expected " + name);
+            }
+            return next();
+        };
+
+        /// @brief The next element if it has the context tag [number], else None.
+        #NoDiscard
+        export let optional_context = func(number: int) -> Result<Optional<Element>> {
+            if (!peek_is(ContextSpecific, number)) {
+                return Result<Optional<Element>>.Ok(Optional<Element>.None);
+            }
+            last e = next()?;
+            return Result<Optional<Element>>.Ok(Optional<Element>.Some(e));
+        };
+
+        /// @brief The next element if it has the universal tag, else None.
+        #NoDiscard
+        export let optional_universal = func(number: int) -> Result<Optional<Element>> {
+            if (!peek_is(Universal, number)) {
+                return Result<Optional<Element>>.Ok(Optional<Element>.None);
+            }
+            last e = next()?;
+            return Result<Optional<Element>>.Ok(Optional<Element>.Some(e));
+        };
+
+        /// @brief Fails when bytes remain.
+        #NoDiscard
+        export let finish = func -> Result<Unit> {
+            if (position < limit) {
+                return fail<Unit>(position, "unexpected trailing data");
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief "Reader(<position>..<limit>)".
+        export let.override to_string = func -> string => $"Reader({position}..{limit})";
+    );
+
+    /// @brief Parses an input that holds exactly one DER element, with the default nesting limit.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(input: uint8[list]) -> Result<Element> => parse_with_depth(input, DefaultMaxDepth);
+
+    /// @brief Parses an input that holds exactly one DER element; nesting deeper than `max_depth` is an error.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_with_depth = func(input: uint8[list], max_depth: int) -> Result<Element> {
+        let r = new Reader(input, 0, input.length, 0, max_depth, false);
+        if (!r.has_more()) {
+            return truncated<Element>(0, "empty input");
+        }
+        last e = r.next()?;
+        r.finish()?;
+        return Result<Element>.Ok(e);
+    };
+
+    /// @brief Reads and checks one element at `at`, not past `limit`; with `deep`, also checks the contents of
+    /// constructed elements.
+    let read_header = func(data: uint8[list], at: int, limit: int, depth: int, max_depth: int, deep: bool)
+            -> Result<Element> {
+        if (depth > max_depth) {
+            return error_at<Element>(ParseErrorKind.OutOfRange, at, "DER nesting too deep");
+        }
+        if (at >= limit) {
+            return truncated<Element>(at, "missing DER element");
+        }
+        last b0 = data[at];
+        last class_bits = (b0 >> 6) as int;
+        last is_constructed = (b0 & 32) != 0;
+        let number = (b0 & 31) as int;
+        let p = at + 1;
+        if (number == 31) {
+            number = 0;
+            let count = 0;
+            while (true) {
+                if (p >= limit) {
+                    return truncated<Element>(p, "truncated tag number");
+                }
+                last b = data[p];
+                if (count == 0 && b == 128) {
+                    return fail<Element>(p, "tag number is not minimal");
+                }
+                count++;
+                if (count > 3) {
+                    return error_at<Element>(ParseErrorKind.OutOfRange, p, "tag number too large");
+                }
+                number = number * 128 + (b & 127) as int;
+                p++;
+                if ((b & 128) == 0) {
+                    break;
+                }
+            }
+            if (number < 31) {
+                return fail<Element>(at, "tag number is not minimal");
+            }
+        }
+        if (class_bits == Universal && number == 0) {
+            return fail<Element>(at, "end-of-contents tag is not DER");
+        }
+        if (p >= limit) {
+            return truncated<Element>(p, "missing length");
+        }
+        last l0 = data[p];
+        p++;
+        let content_length = 0;
+        if (l0 < 128) {
+            content_length = l0 as int;
+        } else if (l0 == 128) {
+            return fail<Element>(p - 1, "indefinite length is not DER");
+        } else {
+            last count = (l0 & 127) as int;
+            if (count > 4 || l0 == 255) {
+                return error_at<Element>(ParseErrorKind.OutOfRange, p - 1, "length too large");
+            }
+            if (limit - p < count) {
+                return truncated<Element>(p, "truncated length");
+            }
+            if (data[p] == 0) {
+                return fail<Element>(p, "length is not minimal");
+            }
+            if (count == 4 && data[p] >= 128) {
+                return error_at<Element>(ParseErrorKind.OutOfRange, p, "length too large");
+            }
+            for (let i = 0; i < count; i++) {
+                content_length = content_length * 256 + (data[p + i] as int);
+            }
+            if (content_length < 128) {
+                return fail<Element>(p, "length is not minimal");
+            }
+            p += count;
+        }
+        if (content_length > limit - p) {
+            return truncated<Element>(p, "content runs past the end of the input");
+        }
+        if (class_bits == Universal) {
+            if ((number == TagSequence || number == TagSet) && !is_constructed) {
+                return fail<Element>(at, "SEQUENCE and SET must be constructed");
+            }
+            if (number != TagSequence && number != TagSet && number != 8 && number != 11 && is_constructed) {
+                return fail<Element>(at, "constructed encoding of a primitive type is not DER");
+            }
+        }
+        last e = new Element(data, at, p - at, content_length, class_bits, is_constructed, number, depth, max_depth);
+        if (deep && is_constructed) {
+            check_contents(e)?;
+        }
+        return Result<Element>.Ok(e);
+    };
+
+    /// @brief Checks every element inside a constructed one, and the DER order of a SET.
+    let check_contents = func(e: Element) -> Result<Unit> {
+        let r = new Reader(e.data, e.content_offset(), e.end(), e.depth + 1, e.max_depth, false);
+        let previous_start = -1;
+        let previous_end = -1;
+        while (r.has_more()) {
+            last start = r.position;
+            last child = r.next()?;
+            if (e.tag_class == Universal && e.tag_number == TagSet && previous_start >= 0) {
+                if (compare_ranges(e.data, previous_start, previous_end, start, child.end()) > 0) {
+                    return fail<Unit>(start, "SET elements are not in DER order");
+                }
+            }
+            previous_start = start;
+            previous_end = child.end();
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Compares data[a0, a1) with data[b0, b1) as octet strings, the shorter padded with zeros.
+    let compare_ranges = func(data: uint8[list], a0: int, a1: int, b0: int, b1: int) -> int {
+        last n = a1 - a0 > b1 - b0 ? a1 - a0 : b1 - b0;
+        for (let i = 0; i < n; i++) {
+            last x = a0 + i < a1 ? data[a0 + i] as int : 0;
+            last y = b0 + i < b1 ? data[b0 + i] as int : 0;
+            if (x != y) {
+                return x < y ? -1 : 1;
+            }
+        }
+        return 0;
+    };
+
+    let allowed_byte = func(kind: int, c: uint8) -> bool {
+        if (kind == TagPrintableString) {
+            return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
+                || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58 || c == 61
+                || c == 63;
+        }
+        if (kind == TagNumericString) {
+            return (c >= 48 && c <= 57) || c == 32;
+        }
+        if (kind == TagIa5String) {
+            return c < 128;
+        }
+        if (kind == TagVisibleString) {
+            return c >= 32 && c <= 126;
+        }
+        // TeletexString: every byte, read as Latin-1.
+        return true;
+    };
+
+    /// @brief Appends the UTF-8 encoding of a scalar value.
+    let append_utf8 = func(out: uint8[list], cp: uint32) {
+        if (cp < 128) {
+            out.append(cp as uint8);
+        } else if (cp < 2048) {
+            out.append((192 | (cp >> 6)) as uint8);
+            out.append((128 | (cp & 63)) as uint8);
+        } else if (cp < 65536) {
+            out.append((224 | (cp >> 12)) as uint8);
+            out.append((128 | ((cp >> 6) & 63)) as uint8);
+            out.append((128 | (cp & 63)) as uint8);
+        } else {
+            out.append((240 | (cp >> 18)) as uint8);
+            out.append((128 | ((cp >> 12) & 63)) as uint8);
+            out.append((128 | ((cp >> 6) & 63)) as uint8);
+            out.append((128 | (cp & 63)) as uint8);
+        }
+    };
+
+    /// @brief A copy of input[start, end).
+    #[NoDiscard, Since("0.3.0")]
+    export let copy_range = func(input: uint8[list], start: int, stop: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = start; i < stop; i++) {
+            out.append(input[i]);
+        }
+        return out;
+    };
+
+    /// @brief A hash of input[start, end).
+    #[NoDiscard, Since("0.3.0")]
+    export let hash_range = func(input: uint8[list], start: int, stop: int) -> uint32 {
+        let h: uint32 = 17;
+        for (let i = start; i < stop; i++) {
+            h = ((((h as uint64) * 31) + (input[i] as uint64)) & 4294967295) as uint32;
+        }
+        return h;
+    };
+);

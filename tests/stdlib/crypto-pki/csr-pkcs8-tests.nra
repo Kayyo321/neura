@@ -1,0 +1,192 @@
+// test-options: --max-steps 400000000
+let csr = import:Std.Crypto.Pki.Csr;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let keys = import:Std.Crypto.Pki.PrivateKeyInfo;
+let oid = import:Std.Crypto.Pki.Oid;
+let pem = import:Std.Crypto.Pki.Pem;
+let pkcs8_vectors = import:Pkcs8Vectors;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:CertVectors;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+// PKCS #10 requests against Python `cryptography`'s reading of the recorded openssl CSRs; PKCS #8 and PBES2
+// against `openssl pkey`/`openssl pkcs8 -v2` records and PBES2 built with hashlib and cryptography
+// (support/cert-vectors.nra, support/pkcs8-vectors.nra, scripts/crypto-vectors/gen-pki.py).
+let CsrPkcs8Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let csr_field = func(name: string, field: string) -> string {
+        last rows = vectors.csrs;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i] == name && rows[i + 1] == field) {
+                return rows[i + 2];
+            }
+        }
+        test.fail("no CSR field " + name + " " + field);
+        return "";
+    };
+
+    let custom_code = func(e: Error) -> string {
+        match (e) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    export let test_csr_fields = func {
+        for (let name in ["csr-p256", "csr-ed25519"]) {
+            last request = test.assert_ok(csr.parse(decode(csr_field(name, "der"))));
+            test.assert_equal_string(csr_field(name, "info"), hex.encode(request.info_bytes));
+            test.assert_equal_string(csr_field(name, "subject"), request.subject.to_string());
+            test.assert_equal_string(csr_field(name, "spki"), hex.encode(request.public_key.der_bytes));
+            test.assert_equal_string(csr_field(name, "signature_algorithm"), request.signature_algorithm.oid.dotted);
+            test.assert_equal_string(csr_field(name, "signature"), hex.encode(request.signature));
+            test.assert_equal_string(csr_field(name, "extension_count"), request.extensions.length.to_string());
+            match (test.assert_ok(request.subject_alt_names())) {
+                Optional.Some(names) => {
+                    let text = "";
+                    for (let n in names) {
+                        text += (text.byte_length > 0 ? "|" : "") + n.to_string();
+                    }
+                    test.assert_equal_string(csr_field(name, "subject_alt_names"), text);
+                },
+                Optional.None => {
+                    test.assert_equal_string("", csr_field(name, "subject_alt_names"));
+                },
+            }
+            match (request.challenge_password) {
+                Optional.Some(p) => {
+                    test.assert_equal_string(csr_field(name, "challenge_password"), p);
+                },
+                Optional.None => {
+                    test.assert_equal_string("", csr_field(name, "challenge_password"));
+                },
+            }
+            test.assert_equal_string("CertificationRequest(" + request.subject.to_string() + ")", request.to_string());
+            last again = test.assert_ok(csr.parse_pem(pem.encode("CERTIFICATE REQUEST", request.der_bytes)));
+            test.assert(again.equals(request) && again.hash_code() == request.hash_code());
+        }
+    };
+
+    export let test_csr_build_reproduces_openssl = func {
+        for (let name in ["csr-p256", "csr-ed25519"]) {
+            last request = test.assert_ok(csr.parse(decode(csr_field(name, "der"))));
+            last signature = request.signature;
+            let seen: uint8[list] = new;
+            last built = csr.build(request.subject, request.public_key, request.attributes, request.signature_algorithm,
+                func(info: uint8[list]) -> uint8[list] {
+                    for (let b in info) {
+                        seen.append(b);
+                    }
+                    return signature;
+                });
+            test.assert_equal_string(csr_field(name, "der"), hex.encode(built));
+            test.assert_equal_string(csr_field(name, "info"), hex.encode(seen));
+        }
+        last p256 = test.assert_ok(csr.parse(decode(csr_field("csr-p256", "der"))));
+        test.assert(csr.extension_request(p256.extensions).equals(p256.attributes[0]));
+        last password = csr.challenge_password("neura secret");
+        test.assert_equal_string("1.2.840.113549.1.9.7", password.type.dotted);
+    };
+
+    export let test_csr_rejections = func {
+        last bytes = decode(csr_field("csr-p256", "der"));
+        // Version 1 instead of 0: the INTEGER after the two SEQUENCE headers.
+        let wrong = der.copy_range(bytes, 0, bytes.length);
+        last info = test.assert_ok(test.assert_ok(der.parse(bytes)).children())[0];
+        last version_at = info.content_offset() + 2;
+        test.assert_equal_int32(0, wrong[version_at] as int32);
+        wrong[version_at] = 1;
+        let _ = test.assert_err(csr.parse(wrong));
+        let _ = test.assert_err(csr.parse(der.copy_range(bytes, 0, bytes.length - 1)));
+    };
+
+    export let test_one_asymmetric_keys = func {
+        last rows = pkcs8_vectors.private_keys;
+        for (let i = 0; i < rows.length; i += 6) {
+            last info = test.assert_ok(keys.parse(decode(rows[i + 1])));
+            test.assert_equal_string(rows[i + 2], info.version.to_string());
+            test.assert_equal_string(rows[i + 3], hex.encode(oid_der(info.algorithm.oid)));
+            test.assert_equal_string(rows[i + 4], hex.encode(info.private_key.expose()));
+            match (info.public_key) {
+                Optional.Some(p) => {
+                    test.assert_equal_string(rows[i + 5], hex.encode(p));
+                },
+                Optional.None => {
+                    test.assert_equal_string("", rows[i + 5]);
+                },
+            }
+            last encoded = info.encode();
+            test.assert_equal_string(rows[i + 1], hex.encode(encoded.expose()));
+            test.assert_equal_string("PrivateKeyInfo(" + oid_name(info) + ", <redacted>)", info.to_string());
+            info.wipe();
+        }
+        test.assert_equal_int32(18 * 6, rows.length);
+    };
+
+    let oid_name = func(info: keys.PrivateKeyInfo) -> string {
+        last text = info.to_string();
+        return text.slice(15, text.byte_length - 13);
+    };
+
+    let oid_der = func(value: oid.Oid) -> uint8[list] {
+        let out: uint8[list] = new([6, value.content.length as uint8]);
+        for (let b in value.content) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    export let test_pbes2_decrypts_every_record = func {
+        last rows = pkcs8_vectors.encrypted;
+        for (let i = 0; i < rows.length; i += 4) {
+            last encrypted = test.assert_ok(keys.parse_encrypted(decode(rows[i + 1])));
+            last password = utf8.encode(rows[i + 2]);
+            if (rows[i + 3].byte_length == 0) {
+                test.assert_equal_string("crypto.unsupported", custom_code(test.assert_err(encrypted.decrypt(password))));
+                continue;
+            }
+            last info = test.assert_ok(encrypted.decrypt(password));
+            test.assert_equal_string(rows[i + 3], hex.encode(info.encode().expose()));
+            if (rows[i].slice(0, 6) == "python") {
+                last wrong = test.assert_err(encrypted.decrypt(utf8.encode("wrong horse")));
+                test.assert_equal_string("crypto.authentication", custom_code(wrong));
+            }
+        }
+    };
+
+    export let test_pbes2_encrypt_matches_reference = func {
+        last rows = pkcs8_vectors.built;
+        for (let i = 0; i < rows.length; i += 8) {
+            last info = test.assert_ok(keys.parse(decode(rows[i + 6])));
+            last iterations = test.assert_ok(int64s.parse(rows[i + 4])) as int;
+            last encrypted = keys.encrypt(info, utf8.encode(rows[i + 5]), decode(rows[i + 2]), iterations, rows[i + 1],
+                rows[i], decode(rows[i + 3]));
+            test.assert_equal_string(rows[i + 7], hex.encode(encrypted.der_bytes));
+            test.assert(encrypted.equals(test.assert_ok(keys.parse_encrypted(decode(rows[i + 7])))));
+        }
+    };
+
+    export let test_pbes2_tampering_fails = func {
+        last rows = pkcs8_vectors.built;
+        last bytes = decode(rows[7]);
+        last encrypted = test.assert_ok(keys.parse_encrypted(bytes));
+        // Flip one ciphertext bit: GCM's tag fails.
+        let altered = der.copy_range(bytes, 0, bytes.length);
+        altered[altered.length - 20] = altered[altered.length - 20] ^ 1;
+        last broken = test.assert_ok(keys.parse_encrypted(altered));
+        test.assert_equal_string("crypto.authentication", custom_code(test.assert_err(broken.decrypt(utf8.encode(rows[5])))));
+        let _ = test.assert_ok(encrypted.decrypt(utf8.encode(rows[5])));
+        let _ = test.assert_err(keys.parse_encrypted(der.copy_range(bytes, 0, bytes.length - 1)));
+    };
+);

@@ -1,0 +1,785 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.BitString;
+let.promote _ = import:Std.Crypto.Pki.GeneralName;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let der = import:Std.Crypto.Pki.Der;
+let general_names = import:Std.Crypto.Pki.GeneralName;
+let hex = import:Std.Encoding.Hex;
+let oids = import:Std.Crypto.Pki.Oids;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+/// @brief The X.509 v3 extensions of RFC 5280, section 4.2, as typed values (Stdlib.md section 20.9).
+///
+/// Every typed value keeps the DER of the extension's value (`der_bytes`), which `equals` and `hash_code`
+/// compare. Each `parse_<name>` reads the extnValue contents and fails with a `Parse` error on a value that
+/// breaks the extension's ASN.1, or a constraint of RFC 5280 that a certificate user must check.
+/// @see [Std.Crypto.Pki.Extensions](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Extensions)
+#Since("0.3.0")
+export let Extensions = module (
+    // KeyUsage bits (RFC 5280, section 4.2.1.3).
+    export const DigitalSignature: int = 0;
+    export const NonRepudiation: int = 1;
+    export const KeyEncipherment: int = 2;
+    export const DataEncipherment: int = 3;
+    export const KeyAgreement: int = 4;
+    export const KeyCertSign: int = 5;
+    export const CrlSign: int = 6;
+    export const EncipherOnly: int = 7;
+    export const DecipherOnly: int = 8;
+
+    /// @brief One extension as encoded: its OID, criticality and the contents of extnValue.
+    #[Final, Since("0.3.0")]
+    export let Extension = class (
+        export last oid: Oid;
+        export last critical: bool;
+        /// @brief The contents of the extnValue OCTET STRING (the DER of the extension's own value).
+        export last value: uint8[list];
+
+        export let init = func(id: Oid, is_critical: bool, value_bytes: uint8[list]) {
+            oid = id;
+            critical = is_critical;
+            value = value_bytes;
+        };
+
+        /// @brief The DER of the Extension SEQUENCE (criticality omitted when false, as DER requires).
+        export let encode = func -> uint8[list] {
+            let items: uint8[list][list] = new([writer.oid(oid)]);
+            if (critical) {
+                items.append(writer.boolean(true));
+            }
+            items.append(writer.octet_string(value));
+            return writer.sequence(items);
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Extension)) {
+                return false;
+            }
+            last that = other as Extension;
+            return that.oid.equals(oid) && that.critical == critical && same(that.value, value);
+        };
+
+        export let.override hash_code = func -> uint32 =>
+            ((oid.hash_code() as uint64 * 31 + der.hash_range(value, 0, value.length) as uint64) & 4294967295) as uint32;
+
+        /// @brief "Extension(<oid>[, critical], <n> bytes)".
+        export let.override to_string = func -> string {
+            last mark = critical ? ", critical" : "";
+            return $"Extension({oid.dotted}{mark}, {value.length} bytes)";
+        };
+    );
+
+    /// @brief basicConstraints: cA and pathLenConstraint (-1 when absent).
+    #[Final, Since("0.3.0")]
+    export let BasicConstraints = class (
+        export last ca: bool;
+        export last path_length: int;
+        export last der_bytes: uint8[list];
+
+        export let init = func(is_ca: bool, path_len: int, encoded: uint8[list]) {
+            ca = is_ca;
+            path_length = path_len;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is BasicConstraints
+            && same((other as BasicConstraints).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string => $"BasicConstraints(ca {ca}, path length {path_length})";
+    );
+
+    /// @brief keyUsage: a named bit list; `has(KeyCertSign)` and so on.
+    #[Final, Since("0.3.0")]
+    export let KeyUsage = class (
+        export last bits: BitString;
+        export last der_bytes: uint8[list];
+
+        export let init = func(value: BitString, encoded: uint8[list]) {
+            bits = value;
+            der_bytes = encoded;
+        };
+
+        /// @brief Whether the bit (DigitalSignature to DecipherOnly) is set.
+        export let has = func(bit: int) -> bool => bits.bit(bit);
+
+        export let.override equals = func(other: class) -> bool => other is KeyUsage
+            && same((other as KeyUsage).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string {
+            let names = "";
+            last labels: string[] = ["digitalSignature", "nonRepudiation", "keyEncipherment", "dataEncipherment",
+                "keyAgreement", "keyCertSign", "cRLSign", "encipherOnly", "decipherOnly"];
+            for (let i = 0; i < 9; i++) {
+                if (bits.bit(i)) {
+                    names += (names.byte_length > 0 ? ", " : "") + labels[i];
+                }
+            }
+            return "KeyUsage(" + names + ")";
+        };
+    );
+
+    /// @brief extKeyUsage: the key purpose OIDs.
+    #[Final, Since("0.3.0")]
+    export let ExtendedKeyUsage = class (
+        export last purposes: Oid[list];
+        export last der_bytes: uint8[list];
+
+        export let init = func(values: Oid[list], encoded: uint8[list]) {
+            purposes = values;
+            der_bytes = encoded;
+        };
+
+        /// @brief Whether the purpose (dotted) is listed.
+        export let has = func(dotted: string) -> bool {
+            for (let p in purposes) {
+                if (p.dotted == dotted) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is ExtendedKeyUsage
+            && same((other as ExtendedKeyUsage).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string => "ExtendedKeyUsage(" + oid_list(purposes) + ")";
+    );
+
+    /// @brief A GeneralSubtree of nameConstraints: the base name (minimum 0, maximum absent, as RFC 5280
+    /// requires).
+    #[Final, Since("0.3.0")]
+    export let GeneralSubtree = class (
+        export last base: GeneralName;
+
+        export let init = func(name: GeneralName) {
+            base = name;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is GeneralSubtree
+            && (other as GeneralSubtree).base.equals(base);
+        export let.override hash_code = func -> uint32 => base.hash_code();
+        export let.override to_string = func -> string => "GeneralSubtree(" + base.to_string() + ")";
+    );
+
+    /// @brief nameConstraints: permitted and excluded subtrees. `has_permitted` and `has_excluded` say
+    /// whether each field was present.
+    #[Final, Since("0.3.0")]
+    export let NameConstraints = class (
+        export last permitted: GeneralSubtree[list];
+        export last excluded: GeneralSubtree[list];
+        export last has_permitted: bool;
+        export last has_excluded: bool;
+        export last der_bytes: uint8[list];
+
+        export let init = func(allowed: GeneralSubtree[list], denied: GeneralSubtree[list], allowed_present: bool,
+                denied_present: bool, encoded: uint8[list]) {
+            permitted = allowed;
+            excluded = denied;
+            has_permitted = allowed_present;
+            has_excluded = denied_present;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is NameConstraints
+            && same((other as NameConstraints).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string =>
+            $"NameConstraints({permitted.length} permitted, {excluded.length} excluded)";
+    );
+
+    /// @brief authorityKeyIdentifier: keyIdentifier, authorityCertIssuer and authorityCertSerialNumber, each
+    /// possibly empty.
+    #[Final, Since("0.3.0")]
+    export let AuthorityKeyIdentifier = class (
+        export last key_identifier: uint8[list];
+        export last has_key_identifier: bool;
+        export last issuer: GeneralName[list];
+        export last serial: uint8[list];
+        export last der_bytes: uint8[list];
+
+        export let init = func(id: uint8[list], id_present: bool, names: GeneralName[list], serial_number: uint8[list],
+                encoded: uint8[list]) {
+            key_identifier = id;
+            has_key_identifier = id_present;
+            issuer = names;
+            serial = serial_number;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is AuthorityKeyIdentifier
+            && same((other as AuthorityKeyIdentifier).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string => "AuthorityKeyIdentifier(" + hex.encode(key_identifier) + ")";
+    );
+
+    /// @brief A policy qualifier: CPS pointer (`text` is the URI), user notice (`text` is the explicit text,
+    /// if any), or another qualifier kept raw.
+    #[Final, Since("0.3.0")]
+    export let PolicyQualifier = class (
+        export last id: Oid;
+        export last text: string;
+        export last der_bytes: uint8[list];
+
+        export let init = func(qualifier: Oid, value_text: string, encoded: uint8[list]) {
+            id = qualifier;
+            text = value_text;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is PolicyQualifier
+            && same((other as PolicyQualifier).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string => $"PolicyQualifier({id.dotted}, {text})";
+    );
+
+    /// @brief One PolicyInformation of certificatePolicies.
+    #[Final, Since("0.3.0")]
+    export let PolicyInformation = class (
+        export last policy: Oid;
+        export last qualifiers: PolicyQualifier[list];
+        export last der_bytes: uint8[list];
+
+        export let init = func(id: Oid, items: PolicyQualifier[list], encoded: uint8[list]) {
+            policy = id;
+            qualifiers = items;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is PolicyInformation
+            && same((other as PolicyInformation).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string => $"PolicyInformation({policy.dotted}, {qualifiers.length} qualifiers)";
+    );
+
+    /// @brief One pair of policyMappings.
+    #[Final, Since("0.3.0")]
+    export let PolicyMapping = class (
+        export last issuer_domain: Oid;
+        export last subject_domain: Oid;
+
+        export let init = func(issuer_policy: Oid, subject_policy: Oid) {
+            issuer_domain = issuer_policy;
+            subject_domain = subject_policy;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is PolicyMapping
+            && (other as PolicyMapping).issuer_domain.equals(issuer_domain)
+            && (other as PolicyMapping).subject_domain.equals(subject_domain);
+        export let.override hash_code = func -> uint32 =>
+            ((issuer_domain.hash_code() as uint64 * 31 + subject_domain.hash_code() as uint64) & 4294967295) as uint32;
+        export let.override to_string = func -> string => $"PolicyMapping({issuer_domain.dotted} -> {subject_domain.dotted})";
+    );
+
+    /// @brief policyConstraints: requireExplicitPolicy and inhibitPolicyMapping skip counts (-1 when absent).
+    #[Final, Since("0.3.0")]
+    export let PolicyConstraints = class (
+        export last require_explicit_policy: int;
+        export last inhibit_policy_mapping: int;
+        export last der_bytes: uint8[list];
+
+        export let init = func(require_skip: int, inhibit_skip: int, encoded: uint8[list]) {
+            require_explicit_policy = require_skip;
+            inhibit_policy_mapping = inhibit_skip;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is PolicyConstraints
+            && same((other as PolicyConstraints).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string =>
+            $"PolicyConstraints(require explicit {require_explicit_policy}, inhibit mapping {inhibit_policy_mapping})";
+    );
+
+    /// @brief One DistributionPoint of cRLDistributionPoints. `full_name` holds the fullName alternative (or
+    /// is empty); `relative_name` keeps nameRelativeToCRLIssuer's DER; `reasons` is empty when absent.
+    #[Final, Since("0.3.0")]
+    export let DistributionPoint = class (
+        export last full_name: GeneralName[list];
+        export last relative_name: uint8[list];
+        export last reasons: uint8[list];
+        export last crl_issuer: GeneralName[list];
+        export last der_bytes: uint8[list];
+
+        export let init = func(full: GeneralName[list], relative: uint8[list], reason_bits: uint8[list],
+                issuer: GeneralName[list], encoded: uint8[list]) {
+            full_name = full;
+            relative_name = relative;
+            reasons = reason_bits;
+            crl_issuer = issuer;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is DistributionPoint
+            && same((other as DistributionPoint).der_bytes, der_bytes);
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+        export let.override to_string = func -> string => $"DistributionPoint({full_name.length} names)";
+    );
+
+    /// @brief One AccessDescription of authorityInfoAccess or subjectInfoAccess.
+    #[Final, Since("0.3.0")]
+    export let AccessDescription = class (
+        export last method: Oid;
+        export last location: GeneralName;
+
+        export let init = func(access_method: Oid, where: GeneralName) {
+            method = access_method;
+            location = where;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is AccessDescription
+            && (other as AccessDescription).method.equals(method) && (other as AccessDescription).location.equals(location);
+        export let.override hash_code = func -> uint32 =>
+            ((method.hash_code() as uint64 * 31 + location.hash_code() as uint64) & 4294967295) as uint32;
+        export let.override to_string = func -> string => "AccessDescription(" + method.dotted + ", " + location.to_string() + ")";
+    );
+
+    let same = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let oid_list = func(items: Oid[list]) -> string {
+        let text = "";
+        for (let item in items) {
+            text += (text.byte_length > 0 ? ", " : "") + item.dotted;
+        }
+        return text;
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    let sequence_of = func(value: uint8[list], what: string) -> Result<der.Element> {
+        last e = der.parse(value)?;
+        if (!e.is_universal(der.TagSequence)) {
+            return fail<der.Element>(0, what + " must be a SEQUENCE");
+        }
+        return Result<der.Element>.Ok(e);
+    };
+
+    /// @brief Reads an Extension SEQUENCE { extnID, critical BOOLEAN DEFAULT FALSE, extnValue OCTET STRING }.
+    /// An explicit FALSE is not DER and is refused.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_extension = func(e: der.Element) -> Result<Extension> {
+        if (!e.is_universal(der.TagSequence)) {
+            return fail<Extension>(e.offset, "Extension must be a SEQUENCE");
+        }
+        let r = e.reader();
+        last id = (r.next_universal(der.TagOid, "extnID")?).oid()?;
+        let critical = false;
+        match (r.optional_universal(der.TagBoolean)?) {
+            Optional.Some(b) => {
+                critical = b.boolean()?;
+                if (!critical) {
+                    return fail<Extension>(b.offset, "critical FALSE must be omitted in DER");
+                }
+            },
+            Optional.None => {},
+        }
+        last value = (r.next_universal(der.TagOctetString, "extnValue")?).octet_string()?;
+        r.finish()?;
+        return Result<Extension>.Ok(new Extension(id, critical, value));
+    };
+
+    /// @brief basicConstraints: SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER (0..MAX) OPTIONAL }.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_basic_constraints = func(value: uint8[list]) -> Result<BasicConstraints> {
+        last e = sequence_of(value, "BasicConstraints")?;
+        let r = e.reader();
+        let ca = false;
+        match (r.optional_universal(der.TagBoolean)?) {
+            Optional.Some(b) => {
+                ca = b.boolean()?;
+                if (!ca) {
+                    return fail<BasicConstraints>(b.offset, "cA FALSE must be omitted in DER");
+                }
+            },
+            Optional.None => {},
+        }
+        let path_length = -1;
+        match (r.optional_universal(der.TagInteger)?) {
+            Optional.Some(n) => {
+                path_length = n.small_integer(1000000)? as int;
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        return Result<BasicConstraints>.Ok(new BasicConstraints(ca, path_length, value));
+    };
+
+    /// @brief keyUsage: a non-empty named BIT STRING without trailing zero bits (DER).
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_key_usage = func(value: uint8[list]) -> Result<KeyUsage> {
+        last e = der.parse(value)?;
+        last bits = e.bit_string()?;
+        if (bits.bit_length() == 0) {
+            return fail<KeyUsage>(0, "keyUsage must have a bit set");
+        }
+        if (!bits.bit(bits.bit_length() - 1)) {
+            return fail<KeyUsage>(0, "keyUsage has trailing zero bits");
+        }
+        return Result<KeyUsage>.Ok(new KeyUsage(bits, value));
+    };
+
+    /// @brief extKeyUsage: SEQUENCE SIZE (1..MAX) OF KeyPurposeId.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_extended_key_usage = func(value: uint8[list]) -> Result<ExtendedKeyUsage> {
+        last e = sequence_of(value, "ExtKeyUsageSyntax")?;
+        let purposes: Oid[list] = new;
+        for (let child in e.children()?) {
+            purposes.append(child.oid()?);
+        }
+        if (purposes.length == 0) {
+            return fail<ExtendedKeyUsage>(0, "extKeyUsage must not be empty");
+        }
+        return Result<ExtendedKeyUsage>.Ok(new ExtendedKeyUsage(purposes, value));
+    };
+
+    /// @brief subjectAltName or issuerAltName: GeneralNames.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_general_names = func(value: uint8[list]) -> Result<GeneralName[list]> =>
+        general_names.parse_names(der.parse(value)?);
+
+    /// @brief subjectKeyIdentifier: OCTET STRING.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_subject_key_identifier = func(value: uint8[list]) -> Result<uint8[list]> =>
+        (der.parse(value)?).octet_string();
+
+    /// @brief authorityKeyIdentifier: SEQUENCE { [0] keyIdentifier, [1] authorityCertIssuer,
+    /// [2] authorityCertSerialNumber }, the last two together or not at all.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_authority_key_identifier = func(value: uint8[list]) -> Result<AuthorityKeyIdentifier> {
+        last e = sequence_of(value, "AuthorityKeyIdentifier")?;
+        let r = e.reader();
+        let id: uint8[list] = new;
+        let id_present = false;
+        match (r.optional_context(0)?) {
+            Optional.Some(k) => {
+                if (k.constructed) {
+                    return fail<AuthorityKeyIdentifier>(k.offset, "keyIdentifier must be primitive");
+                }
+                id = k.content();
+                id_present = true;
+            },
+            Optional.None => {},
+        }
+        let issuer: GeneralName[list] = new;
+        match (r.optional_context(1)?) {
+            Optional.Some(n) => {
+                if (!n.constructed) {
+                    return fail<AuthorityKeyIdentifier>(n.offset, "authorityCertIssuer must be constructed");
+                }
+                for (let child in n.children()?) {
+                    issuer.append(general_names.parse(child)?);
+                }
+            },
+            Optional.None => {},
+        }
+        let serial: uint8[list] = new;
+        match (r.optional_context(2)?) {
+            Optional.Some(s) => {
+                serial = s.integer_content()?;
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        if ((issuer.length == 0) != (serial.length == 0)) {
+            return fail<AuthorityKeyIdentifier>(0, "authorityCertIssuer and authorityCertSerialNumber go together");
+        }
+        return Result<AuthorityKeyIdentifier>.Ok(new AuthorityKeyIdentifier(id, id_present, issuer, serial, value));
+    };
+
+    /// @brief nameConstraints: SEQUENCE { permittedSubtrees [0], excludedSubtrees [1] }, at least one present
+    /// and none empty; each subtree's minimum must be 0 and its maximum absent.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_name_constraints = func(value: uint8[list]) -> Result<NameConstraints> {
+        last e = sequence_of(value, "NameConstraints")?;
+        let r = e.reader();
+        let permitted: GeneralSubtree[list] = new;
+        let excluded: GeneralSubtree[list] = new;
+        let has_permitted = false;
+        let has_excluded = false;
+        match (r.optional_context(0)?) {
+            Optional.Some(p) => {
+                permitted = subtrees(p)?;
+                has_permitted = true;
+            },
+            Optional.None => {},
+        }
+        match (r.optional_context(1)?) {
+            Optional.Some(x) => {
+                excluded = subtrees(x)?;
+                has_excluded = true;
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        if (!has_permitted && !has_excluded) {
+            return fail<NameConstraints>(0, "nameConstraints must have permitted or excluded subtrees");
+        }
+        return Result<NameConstraints>.Ok(new NameConstraints(permitted, excluded, has_permitted, has_excluded, value));
+    };
+
+    let subtrees = func(e: der.Element) -> Result<GeneralSubtree[list]> {
+        if (!e.constructed) {
+            return fail<GeneralSubtree[list]>(e.offset, "GeneralSubtrees must be constructed");
+        }
+        let out: GeneralSubtree[list] = new;
+        for (let child in e.children()?) {
+            if (!child.is_universal(der.TagSequence)) {
+                return fail<GeneralSubtree[list]>(child.offset, "GeneralSubtree must be a SEQUENCE");
+            }
+            let r = child.reader();
+            last base = general_names.parse(r.next()?)?;
+            match (r.optional_context(0)?) {
+                Optional.Some(m) => {
+                    return fail<GeneralSubtree[list]>(m.offset, "GeneralSubtree minimum must be omitted (0)");
+                },
+                Optional.None => {},
+            }
+            match (r.optional_context(1)?) {
+                Optional.Some(m) => {
+                    return fail<GeneralSubtree[list]>(m.offset, "GeneralSubtree maximum must be absent");
+                },
+                Optional.None => {},
+            }
+            r.finish()?;
+            out.append(new GeneralSubtree(base));
+        }
+        if (out.length == 0) {
+            return fail<GeneralSubtree[list]>(e.offset, "GeneralSubtrees must not be empty");
+        }
+        return Result<GeneralSubtree[list]>.Ok(out);
+    };
+
+    /// @brief certificatePolicies: SEQUENCE SIZE (1..MAX) OF PolicyInformation, each policy at most once.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_certificate_policies = func(value: uint8[list]) -> Result<PolicyInformation[list]> {
+        last e = sequence_of(value, "certificatePolicies")?;
+        let out: PolicyInformation[list] = new;
+        for (let info in e.children()?) {
+            if (!info.is_universal(der.TagSequence)) {
+                return fail<PolicyInformation[list]>(info.offset, "PolicyInformation must be a SEQUENCE");
+            }
+            let r = info.reader();
+            last policy = (r.next_universal(der.TagOid, "policyIdentifier")?).oid()?;
+            for (let seen in out) {
+                if (seen.policy.equals(policy)) {
+                    return fail<PolicyInformation[list]>(info.offset, "policy listed twice");
+                }
+            }
+            let qualifiers: PolicyQualifier[list] = new;
+            match (r.optional_universal(der.TagSequence)?) {
+                Optional.Some(list) => {
+                    for (let q in list.children()?) {
+                        qualifiers.append(qualifier(q)?);
+                    }
+                    if (qualifiers.length == 0) {
+                        return fail<PolicyInformation[list]>(list.offset, "policyQualifiers must not be empty");
+                    }
+                },
+                Optional.None => {},
+            }
+            r.finish()?;
+            out.append(new PolicyInformation(policy, qualifiers, info.encoded()));
+        }
+        if (out.length == 0) {
+            return fail<PolicyInformation[list]>(0, "certificatePolicies must not be empty");
+        }
+        return Result<PolicyInformation[list]>.Ok(out);
+    };
+
+    let qualifier = func(q: der.Element) -> Result<PolicyQualifier> {
+        if (!q.is_universal(der.TagSequence)) {
+            return fail<PolicyQualifier>(q.offset, "PolicyQualifierInfo must be a SEQUENCE");
+        }
+        let r = q.reader();
+        last id = (r.next_universal(der.TagOid, "policyQualifierId")?).oid()?;
+        last body = r.next()?;
+        r.finish()?;
+        let text = "";
+        if (id.matches(oids.QualifierCps)) {
+            if (!body.is_universal(der.TagIa5String)) {
+                return fail<PolicyQualifier>(body.offset, "CPS pointer must be an IA5String");
+            }
+            text = body.text()?;
+        } else if (id.matches(oids.QualifierUserNotice)) {
+            if (!body.is_universal(der.TagSequence)) {
+                return fail<PolicyQualifier>(body.offset, "UserNotice must be a SEQUENCE");
+            }
+            let notice = body.reader();
+            let _ = notice.optional_universal(der.TagSequence)?;
+            if (notice.has_more()) {
+                last explicit = notice.next()?;
+                text = explicit.text()?;
+            }
+            notice.finish()?;
+        }
+        return Result<PolicyQualifier>.Ok(new PolicyQualifier(id, text, q.encoded()));
+    };
+
+    /// @brief policyMappings: SEQUENCE SIZE (1..MAX) OF SEQUENCE { issuerDomainPolicy, subjectDomainPolicy }.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_policy_mappings = func(value: uint8[list]) -> Result<PolicyMapping[list]> {
+        last e = sequence_of(value, "PolicyMappings")?;
+        let out: PolicyMapping[list] = new;
+        for (let pair in e.children()?) {
+            if (!pair.is_universal(der.TagSequence)) {
+                return fail<PolicyMapping[list]>(pair.offset, "policy mapping must be a SEQUENCE");
+            }
+            let r = pair.reader();
+            last issuer = (r.next_universal(der.TagOid, "issuerDomainPolicy")?).oid()?;
+            last subject = (r.next_universal(der.TagOid, "subjectDomainPolicy")?).oid()?;
+            r.finish()?;
+            out.append(new PolicyMapping(issuer, subject));
+        }
+        if (out.length == 0) {
+            return fail<PolicyMapping[list]>(0, "policyMappings must not be empty");
+        }
+        return Result<PolicyMapping[list]>.Ok(out);
+    };
+
+    /// @brief policyConstraints: SEQUENCE { requireExplicitPolicy [0], inhibitPolicyMapping [1] }, at least one.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_policy_constraints = func(value: uint8[list]) -> Result<PolicyConstraints> {
+        last e = sequence_of(value, "PolicyConstraints")?;
+        let r = e.reader();
+        let require = -1;
+        let inhibit = -1;
+        match (r.optional_context(0)?) {
+            Optional.Some(x) => {
+                require = skip_count(x)?;
+            },
+            Optional.None => {},
+        }
+        match (r.optional_context(1)?) {
+            Optional.Some(x) => {
+                inhibit = skip_count(x)?;
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        if (require < 0 && inhibit < 0) {
+            return fail<PolicyConstraints>(0, "policyConstraints must not be empty");
+        }
+        return Result<PolicyConstraints>.Ok(new PolicyConstraints(require, inhibit, value));
+    };
+
+    /// @brief An implicitly tagged SkipCerts INTEGER (0..MAX), capped at 1000000.
+    let skip_count = func(x: der.Element) -> Result<int> {
+        let _ = x.integer_content()?;
+        if (x.is_negative()) {
+            return fail<int>(x.offset, "SkipCerts must not be negative");
+        }
+        let v = 0;
+        for (let b in x.content()) {
+            if (v > 1000000) {
+                return Result<int>.Ok(1000001);
+            }
+            v = v * 256 + (b as int);
+        }
+        return Result<int>.Ok(v > 1000001 ? 1000001 : v);
+    };
+
+    /// @brief inhibitAnyPolicy: SkipCerts INTEGER (0..MAX).
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_inhibit_any_policy = func(value: uint8[list]) -> Result<int> {
+        last e = der.parse(value)?;
+        return Result<int>.Ok(e.small_integer(1000000)? as int);
+    };
+
+    /// @brief cRLDistributionPoints: SEQUENCE SIZE (1..MAX) OF DistributionPoint.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_crl_distribution_points = func(value: uint8[list]) -> Result<DistributionPoint[list]> {
+        last e = sequence_of(value, "CRLDistributionPoints")?;
+        let out: DistributionPoint[list] = new;
+        for (let point in e.children()?) {
+            if (!point.is_universal(der.TagSequence)) {
+                return fail<DistributionPoint[list]>(point.offset, "DistributionPoint must be a SEQUENCE");
+            }
+            let r = point.reader();
+            let full: GeneralName[list] = new;
+            let relative: uint8[list] = new;
+            match (r.optional_context(0)?) {
+                Optional.Some(name) => {
+                    last inner = name.explicit_inner()?;
+                    if (inner.is_context(0)) {
+                        if (!inner.constructed) {
+                            return fail<DistributionPoint[list]>(inner.offset, "fullName must be constructed");
+                        }
+                        for (let child in inner.children()?) {
+                            full.append(general_names.parse(child)?);
+                        }
+                    } else if (inner.is_context(1)) {
+                        relative = inner.encoded();
+                    } else {
+                        return fail<DistributionPoint[list]>(inner.offset, "invalid DistributionPointName");
+                    }
+                },
+                Optional.None => {},
+            }
+            let reasons: uint8[list] = new;
+            match (r.optional_context(1)?) {
+                Optional.Some(bits) => {
+                    reasons = (bits.bit_string_content()?).bytes;
+                },
+                Optional.None => {},
+            }
+            let issuer: GeneralName[list] = new;
+            match (r.optional_context(2)?) {
+                Optional.Some(names) => {
+                    if (!names.constructed) {
+                        return fail<DistributionPoint[list]>(names.offset, "cRLIssuer must be constructed");
+                    }
+                    for (let child in names.children()?) {
+                        issuer.append(general_names.parse(child)?);
+                    }
+                },
+                Optional.None => {},
+            }
+            r.finish()?;
+            if (full.length == 0 && relative.length == 0 && issuer.length == 0) {
+                return fail<DistributionPoint[list]>(point.offset, "DistributionPoint needs a name or cRLIssuer");
+            }
+            out.append(new DistributionPoint(full, relative, reasons, issuer, point.encoded()));
+        }
+        if (out.length == 0) {
+            return fail<DistributionPoint[list]>(0, "cRLDistributionPoints must not be empty");
+        }
+        return Result<DistributionPoint[list]>.Ok(out);
+    };
+
+    /// @brief authorityInfoAccess or subjectInfoAccess: SEQUENCE SIZE (1..MAX) OF AccessDescription.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_info_access = func(value: uint8[list]) -> Result<AccessDescription[list]> {
+        last e = sequence_of(value, "AuthorityInfoAccessSyntax")?;
+        let out: AccessDescription[list] = new;
+        for (let item in e.children()?) {
+            if (!item.is_universal(der.TagSequence)) {
+                return fail<AccessDescription[list]>(item.offset, "AccessDescription must be a SEQUENCE");
+            }
+            let r = item.reader();
+            last method = (r.next_universal(der.TagOid, "accessMethod")?).oid()?;
+            last location = general_names.parse(r.next()?)?;
+            r.finish()?;
+            out.append(new AccessDescription(method, location));
+        }
+        if (out.length == 0) {
+            return fail<AccessDescription[list]>(0, "info access must not be empty");
+        }
+        return Result<AccessDescription[list]>.Ok(out);
+    };
+
+    /// @brief The RFC 6962 SCT list extension: an OCTET STRING holding the TLS-encoded list.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_sct_list = func(value: uint8[list]) -> Result<uint8[list]> => (der.parse(value)?).octet_string();
+);

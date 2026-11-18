@@ -1,0 +1,79 @@
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief SHA-1 (FIPS 180-4, section 6.1) for identification only. Internal: only library source may import it.
+///
+/// Std.Crypto offers no public SHA-1, and the policy denies it (`Algorithm.Sha1`). Std.Crypto.Pki uses this
+/// module only where a standard fixes SHA-1 as a name and not as a security function: OCSP CertIDs and
+/// responder key hashes (RFC 6960 and the lightweight profile of RFC 5019, which most responders require). It
+/// never computes or checks a signature digest with it.
+#Since("0.3.0")
+export let PkiSha1 = module (
+    /// @brief The 20-byte SHA-1 digest of the bytes.
+    export let digest = func(message: uint8[list]) -> uint8[list] {
+        let h0: uint32 = 1732584193;
+        let h1: uint32 = 4023233417;
+        let h2: uint32 = 2562383102;
+        let h3: uint32 = 271733878;
+        let h4: uint32 = 3285377520;
+        let padded = words.copy(message);
+        padded.append(128);
+        while (padded.length % 64 != 56) {
+            padded.append(0);
+        }
+        words.append64_be(padded, (message.length as uint64) * 8);
+        let w: uint32[list] = new;
+        for (let i = 0; i < 80; i++) {
+            w.append(0);
+        }
+        for (let block = 0; block < padded.length; block += 64) {
+            for (let t = 0; t < 16; t++) {
+                w[t] = words.load32_be(padded, block + 4 * t);
+            }
+            for (let t = 16; t < 80; t++) {
+                w[t] = rotl(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1);
+            }
+            let a = h0;
+            let b = h1;
+            let c = h2;
+            let d = h3;
+            let e = h4;
+            for (let t = 0; t < 80; t++) {
+                let f: uint32 = 0;
+                let k: uint32 = 0;
+                if (t < 20) {
+                    f = (b & c) | ((b ^ 4294967295) & d);
+                    k = 1518500249;
+                } else if (t < 40) {
+                    f = b ^ c ^ d;
+                    k = 1859775393;
+                } else if (t < 60) {
+                    f = (b & c) | (b & d) | (c & d);
+                    k = 2400959708;
+                } else {
+                    f = b ^ c ^ d;
+                    k = 3395469782;
+                }
+                last temp = words.add32(words.add32(words.add32(rotl(a, 5), f), words.add32(e, k)), w[t]);
+                e = d;
+                d = c;
+                c = rotl(b, 30);
+                b = a;
+                a = temp;
+            }
+            h0 = words.add32(h0, a);
+            h1 = words.add32(h1, b);
+            h2 = words.add32(h2, c);
+            h3 = words.add32(h3, d);
+            h4 = words.add32(h4, e);
+        }
+        let out: uint8[list] = new;
+        words.append32_be(out, h0);
+        words.append32_be(out, h1);
+        words.append32_be(out, h2);
+        words.append32_be(out, h3);
+        words.append32_be(out, h4);
+        return out;
+    };
+
+    let rotl = func(x: uint32, n: int) -> uint32 => (x << n) | (x >> (32 - n));
+);

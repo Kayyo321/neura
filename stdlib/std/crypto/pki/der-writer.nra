@@ -1,0 +1,285 @@
+let.promote _ = import:Std.Crypto.Pki.BitString;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let der_time = import:Std.Crypto.Internal.DerTime;
+let instant = import:Std.Time.Instant;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief A DER writer: each function returns one complete encoding (Stdlib.md section 20.9).
+///
+/// Lengths are always in their shortest form and integers are minimal, so the output is DER. A SET's
+/// elements are sorted. Values outside a type's rules (a PrintableString character, a time before 1950 for
+/// UTCTime) trap with "invalid argument: ...", because they are programming errors.
+/// @see [Std.Crypto.Pki.DerWriter](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-DerWriter)
+#Since("0.3.0")
+export let DerWriter = module (
+    /// @brief The element with the tag class (0 to 3), construction, tag number and content.
+    #[NoDiscard, Since("0.3.0")]
+    export let tlv = func(tag_class: int, constructed: bool, number: int, content: uint8[list]) -> uint8[list] {
+        if (tag_class < 0 || tag_class > 3 || number < 0 || number >= 2097152) {
+            trap_with_message("invalid argument: DER tag");
+        }
+        let out: uint8[list] = new;
+        last first = ((tag_class << 6) | (constructed ? 32 : 0)) as int;
+        if (number < 31) {
+            out.append((first | number) as uint8);
+        } else {
+            out.append((first | 31) as uint8);
+            if (number >= 16384) {
+                out.append((128 | (number >> 14)) as uint8);
+            }
+            if (number >= 128) {
+                out.append((128 | ((number >> 7) & 127)) as uint8);
+            }
+            out.append((number & 127) as uint8);
+        }
+        append_length(out, content.length);
+        for (let b in content) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    let append_length = func(out: uint8[list], length: int) {
+        if (length < 128) {
+            out.append(length as uint8);
+            return;
+        }
+        let bytes: uint8[list] = new;
+        let n = length;
+        while (n > 0) {
+            bytes.append((n & 255) as uint8);
+            n = n >> 8;
+        }
+        out.append((128 | bytes.length) as uint8);
+        for (let i = bytes.length - 1; i >= 0; i--) {
+            out.append(bytes[i]);
+        }
+    };
+
+    let joined = func(items: uint8[list][list]) -> uint8[list] {
+        let content: uint8[list] = new;
+        for (let item in items) {
+            for (let b in item) {
+                content.append(b);
+            }
+        }
+        return content;
+    };
+
+    /// @brief SEQUENCE of the encoded items, in order.
+    #[NoDiscard, Since("0.3.0")]
+    export let sequence = func(items: uint8[list][list]) -> uint8[list] => tlv(0, true, 16, joined(items));
+
+    /// @brief SET of the encoded items, sorted into DER order.
+    #[NoDiscard, Since("0.3.0")]
+    export let set = func(items: uint8[list][list]) -> uint8[list] {
+        let sorted: uint8[list][list] = new;
+        for (let item in items) {
+            let at = sorted.length;
+            while (at > 0 && compare(sorted[at - 1], item) > 0) {
+                at--;
+            }
+            sorted.append(item);
+            for (let i = sorted.length - 1; i > at; i--) {
+                sorted[i] = sorted[i - 1];
+            }
+            sorted[at] = item;
+        }
+        return tlv(0, true, 17, joined(sorted));
+    };
+
+    let compare = func(a: uint8[list], b: uint8[list]) -> int {
+        last n = a.length > b.length ? a.length : b.length;
+        for (let i = 0; i < n; i++) {
+            last x = i < a.length ? a[i] as int : 0;
+            last y = i < b.length ? b[i] as int : 0;
+            if (x != y) {
+                return x < y ? -1 : 1;
+            }
+        }
+        return 0;
+    };
+
+    /// @brief [number] EXPLICIT around an encoded element.
+    #[NoDiscard, Since("0.3.0")]
+    export let explicit = func(number: int, inner: uint8[list]) -> uint8[list] => tlv(2, true, number, inner);
+
+    /// @brief [number] IMPLICIT with the content (primitive unless `constructed`).
+    #[NoDiscard, Since("0.3.0")]
+    export let implicit = func(number: int, constructed: bool, content: uint8[list]) -> uint8[list] =>
+        tlv(2, constructed, number, content);
+
+    /// @brief BOOLEAN (0xFF for true).
+    #[NoDiscard, Since("0.3.0")]
+    export let boolean = func(value: bool) -> uint8[list] => tlv(0, false, 1, new([value ? 255 : 0]));
+
+    /// @brief NULL.
+    #[NoDiscard, Since("0.3.0")]
+    export let null = func -> uint8[list] => tlv(0, false, 5, new);
+
+    /// @brief INTEGER with the value.
+    #[NoDiscard, Since("0.3.0")]
+    export let integer = func(value: int64) -> uint8[list] {
+        let bytes: uint8[list] = new;
+        if (value >= 0) {
+            let n = value;
+            while (n > 0) {
+                bytes.append((n % 256) as uint8);
+                n = n / 256;
+            }
+        } else {
+            // -1 - value is non-negative; its bytes inverted give the two's complement.
+            let n = -1 - value;
+            while (n > 0) {
+                bytes.append((255 - (n % 256)) as uint8);
+                n = n / 256;
+            }
+            if (bytes.length == 0 || bytes[bytes.length - 1] < 128) {
+                bytes.append(255);
+            }
+            let content: uint8[list] = new;
+            for (let i = bytes.length - 1; i >= 0; i--) {
+                content.append(bytes[i]);
+            }
+            return tlv(0, false, 2, content);
+        }
+        if (bytes.length == 0 || bytes[bytes.length - 1] >= 128) {
+            bytes.append(0);
+        }
+        let content: uint8[list] = new;
+        for (let i = bytes.length - 1; i >= 0; i--) {
+            content.append(bytes[i]);
+        }
+        return tlv(0, false, 2, content);
+    };
+
+    /// @brief INTEGER with the non-negative big-endian magnitude (leading zeros are removed, and a zero byte is
+    /// added before a high bit).
+    #[NoDiscard, Since("0.3.0")]
+    export let unsigned_integer = func(magnitude: uint8[list]) -> uint8[list] {
+        let start = 0;
+        while (start < magnitude.length - 1 && magnitude[start] == 0) {
+            start++;
+        }
+        let content: uint8[list] = new;
+        if (magnitude.length == 0) {
+            content.append(0);
+        } else {
+            if (magnitude[start] >= 128) {
+                content.append(0);
+            }
+            for (let i = start; i < magnitude.length; i++) {
+                content.append(magnitude[i]);
+            }
+        }
+        return tlv(0, false, 2, content);
+    };
+
+    /// @brief OBJECT IDENTIFIER.
+    #[NoDiscard, Since("0.3.0")]
+    export let oid = func(value: Oid) -> uint8[list] => tlv(0, false, 6, value.content);
+
+    /// @brief BIT STRING.
+    #[NoDiscard, Since("0.3.0")]
+    export let bit_string = func(value: BitString) -> uint8[list] {
+        let content: uint8[list] = new([value.unused_bits as uint8]);
+        for (let b in value.bytes) {
+            content.append(b);
+        }
+        return tlv(0, false, 3, content);
+    };
+
+    /// @brief BIT STRING of whole bytes (no unused bits), as for keys and signatures.
+    #[NoDiscard, Since("0.3.0")]
+    export let bit_string_bytes = func(bytes: uint8[list]) -> uint8[list] => bit_string(new BitString(bytes, 0));
+
+    /// @brief OCTET STRING.
+    #[NoDiscard, Since("0.3.0")]
+    export let octet_string = func(bytes: uint8[list]) -> uint8[list] => tlv(0, false, 4, bytes);
+
+    /// @brief UTF8String.
+    #[NoDiscard, Since("0.3.0")]
+    export let utf8_string = func(text: string) -> uint8[list] => tlv(0, false, 12, utf8.encode(text));
+
+    /// @brief PrintableString; a character outside its set traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let printable_string = func(text: string) -> uint8[list] {
+        last bytes = utf8.encode(text);
+        for (let c in bytes) {
+            if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 32 || c == 39
+                    || c == 40 || c == 41 || c == 43 || c == 44 || c == 45 || c == 46 || c == 47 || c == 58
+                    || c == 61 || c == 63)) {
+                trap_with_message("invalid argument: PrintableString character");
+            }
+        }
+        return tlv(0, false, 19, bytes);
+    };
+
+    /// @brief IA5String; a byte of 128 or more traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let ia5_string = func(text: string) -> uint8[list] {
+        last bytes = utf8.encode(text);
+        for (let c in bytes) {
+            if (c >= 128) {
+                trap_with_message("invalid argument: IA5String character");
+            }
+        }
+        return tlv(0, false, 22, bytes);
+    };
+
+    /// @brief UTCTime `YYMMDDHHMMSSZ` for an instant in 1950 to 2049 (fractions of a second are dropped).
+    #[NoDiscard, Since("0.3.0")]
+    export let utc_time = func(at: instant.Instant) -> uint8[list] {
+        last text = time_digits(at);
+        last year = parse_year(text);
+        if (year < 1950 || year > 2049) {
+            trap_with_message("invalid argument: UTCTime year out of range");
+        }
+        return tlv(0, false, 23, utf8.encode(text.slice(2, text.byte_length) + "Z"));
+    };
+
+    /// @brief GeneralizedTime `YYYYMMDDHHMMSSZ` for an instant in years 0 to 9999.
+    #[NoDiscard, Since("0.3.0")]
+    export let generalized_time = func(at: instant.Instant) -> uint8[list] =>
+        tlv(0, false, 24, utf8.encode(time_digits(at) + "Z"));
+
+    /// @brief The RFC 5280 choice: UTCTime through 2049, GeneralizedTime from 2050.
+    #[NoDiscard, Since("0.3.0")]
+    export let time = func(at: instant.Instant) -> uint8[list] {
+        last year = parse_year(time_digits(at));
+        return year < 2050 && year >= 1950 ? utc_time(at) : generalized_time(at);
+    };
+
+    let parse_year = func(text: string) -> int {
+        let y = 0;
+        for (let i = 0; i < 4; i++) {
+            y = y * 10 + (text.byte_at(i) - 48) as int;
+        }
+        return y;
+    };
+
+    /// @brief YYYYMMDDHHMMSS of the instant.
+    let time_digits = func(at: instant.Instant) -> string {
+        let seconds = at.epoch_seconds;
+        let days = seconds / 86400;
+        let rest = seconds % 86400;
+        if (rest < 0) {
+            rest += 86400;
+            days -= 1;
+        }
+        last civil = der_time.civil_from_days(days);
+        if (civil[0] < 0 || civil[0] > 9999) {
+            trap_with_message("invalid argument: year out of range for DER time");
+        }
+        return pad(civil[0], 4) + pad(civil[1], 2) + pad(civil[2], 2) + pad(rest / 3600, 2)
+            + pad(rest % 3600 / 60, 2) + pad(rest % 60, 2);
+    };
+
+    let pad = func(value: int64, width: int) -> string {
+        let text = value.to_string();
+        while (text.byte_length < width) {
+            text = "0" + text;
+        }
+        return text;
+    };
+);

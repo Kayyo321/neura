@@ -1,0 +1,737 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+let.promote _ = import:Std.Crypto.Pki.Extensions;
+let.promote _ = import:Std.Crypto.Pki.Name;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let certificates = import:Std.Crypto.Pki.Certificate;
+let der = import:Std.Crypto.Pki.Der;
+let error = import:Std.Core.Error;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let identifiers = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let instant = import:Std.Time.Instant;
+let names = import:Std.Crypto.Pki.Name;
+let oid_module = import:Std.Crypto.Pki.Oid;
+let oids = import:Std.Crypto.Pki.Oids;
+let sha1 = import:Std.Crypto.Internal.PkiSha1;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+/// @brief OCSP (RFC 6960): request building, response parsing and response verification (Stdlib.md section 20.9).
+///
+/// CertIDs are built with SHA-256 by default. SHA-1 CertIDs (RFC 5019's profile, which many responders still
+/// require) are built and matched with an internal SHA-1 used only to name certificates, never for a signature;
+/// SHA-384 and SHA-512 are matched too. A response is accepted only when its signature verifies (through a
+/// SignatureVerifier) under the issuer's key or under a delegated responder certificate that the issuer signed,
+/// that carries id-kp-OCSPSigning, and that is valid at the time of the check; when thisUpdate is not in the
+/// future (beyond the allowed skew) and nextUpdate, if present, has not passed; and, when a nonce was sent, when
+/// the response echoes it. Errors are `Custom` with codes ocsp.status, ocsp.no_response, ocsp.responder,
+/// ocsp.signature, ocsp.stale, ocsp.nonce; malformed DER is a `Parse` error.
+/// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ocsp)
+#Since("0.3.0")
+export let Ocsp = module (
+    /// @brief The CertID hash.
+    #Since("0.3.0")
+    export let CertIdHash = enum (Sha1, Sha256, Sha384, Sha512);
+
+    /// @brief The responseStatus values of RFC 6960, section 4.2.1 (4 is unused).
+    #Since("0.3.0")
+    export let ResponseStatus = enum (Successful, MalformedRequest, InternalError, TryLater, SigRequired, Unauthorized);
+
+    /// @brief The certStatus of a SingleResponse.
+    #Since("0.3.0")
+    export let CertStatus = enum (Good, Revoked, Unknown);
+
+    /// @brief A CertID: hash algorithm, issuer name hash, issuer key hash and serial number. Compared by value.
+    #[Final, Since("0.3.0")]
+    export let CertId = class (
+        export last hash_algorithm: Oid;
+        export last issuer_name_hash: uint8[list];
+        export last issuer_key_hash: uint8[list];
+        /// @brief The serial number's two's-complement content bytes.
+        export last serial: uint8[list];
+
+        export let init = func(algorithm: Oid, name_hash: uint8[list], key_hash: uint8[list], serial_number: uint8[list]) {
+            hash_algorithm = algorithm;
+            issuer_name_hash = name_hash;
+            issuer_key_hash = key_hash;
+            serial = serial_number;
+        };
+
+        /// @brief The DER of the CertID (hash parameters NULL, as openssl and RFC 6960 examples write them).
+        export let encode = func -> uint8[list] => writer.sequence(new([writer.sequence(new([writer.oid(hash_algorithm),
+            writer.null()])), writer.octet_string(issuer_name_hash), writer.octet_string(issuer_key_hash),
+            writer.tlv(0, false, 2, serial)]));
+
+        /// @brief Whether this CertID names the certificate issued by the issuer (with this CertID's hash).
+        export let matches = func(certificate: Certificate, issuer: Certificate) -> bool {
+            last hash = hash_of(hash_algorithm.dotted);
+            match (hash) {
+                Optional.Some(h) => {
+                    last other = for_certificate(certificate, issuer, h);
+                    return equals(other);
+                },
+                Optional.None => {
+                    return false;
+                },
+            }
+            return false;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is CertId)) {
+                return false;
+            }
+            last that = other as CertId;
+            return that.hash_algorithm.equals(hash_algorithm) && same(that.issuer_name_hash, issuer_name_hash)
+                && same(that.issuer_key_hash, issuer_key_hash) && same(that.serial, serial);
+        };
+
+        export let.override hash_code = func -> uint32 => der.hash_range(issuer_key_hash, 0, issuer_key_hash.length)
+            ^ der.hash_range(serial, 0, serial.length);
+
+        export let.override to_string = func -> string => "CertId(" + oids.name_of(hash_algorithm.dotted) + ", serial "
+            + hex_of(serial) + ")";
+    );
+
+    /// @brief One SingleResponse.
+    #[Final, Since("0.3.0")]
+    export let SingleResponse = class (
+        export last cert_id: CertId;
+        export last status: CertStatus;
+        /// @brief The revocationTime of a revoked certificate.
+        export last revocation_time: Optional<instant.Instant>;
+        /// @brief The CRLReason code (RFC 5280, section 5.3.1), or -1 when absent.
+        export last revocation_reason: int;
+        export last this_update: instant.Instant;
+        export last next_update: Optional<instant.Instant>;
+
+        export let init = func(id: CertId, cert_status: CertStatus, revoked_at: Optional<instant.Instant>, reason: int,
+                this_time: instant.Instant, next_time: Optional<instant.Instant>) {
+            cert_id = id;
+            status = cert_status;
+            revocation_time = revoked_at;
+            revocation_reason = reason;
+            this_update = this_time;
+            next_update = next_time;
+        };
+
+        /// @brief Equal when the CertID, status, reason and times are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SingleResponse)) {
+                return false;
+            }
+            last that = other as SingleResponse;
+            return that.cert_id.equals(cert_id) && that.status == status && that.revocation_reason == revocation_reason
+                && that.this_update.equals(this_update) && same_time(that.next_update, next_update)
+                && same_time(that.revocation_time, revocation_time);
+        };
+
+        export let.override hash_code = func -> uint32 => cert_id.hash_code() ^ this_update.hash_code();
+
+        export let.override to_string = func -> string {
+            last word = status == CertStatus.Good ? "good" : (status == CertStatus.Revoked ? "revoked" : "unknown");
+            return "SingleResponse(" + word + ", " + this_update.to_string() + ")";
+        };
+    );
+
+    /// @brief A BasicOCSPResponse.
+    #[Final, Since("0.3.0")]
+    export let BasicResponse = class (
+        /// @brief The DER of ResponseData, which the signature covers.
+        export last tbs_bytes: uint8[list];
+        /// @brief The responder by name, or None when it is named by key hash.
+        export last responder_name: Optional<Name>;
+        /// @brief The responder's KeyHash (SHA-1 of its public key bits), or empty.
+        export last responder_key_hash: uint8[list];
+        export last produced_at: instant.Instant;
+        export last responses: SingleResponse[list];
+        /// @brief The response extensions.
+        export last extensions: Extension[list];
+        export last signature_algorithm: AlgorithmIdentifier;
+        export last signature: uint8[list];
+        /// @brief The certificates sent with the response (such as a delegated responder's).
+        export last certificates: Certificate[list];
+
+        export let init = func(tbs: uint8[list], by_name: Optional<Name>, by_key: uint8[list], produced: instant.Instant,
+                items: SingleResponse[list], exts: Extension[list], algorithm: AlgorithmIdentifier, signature_bytes: uint8[list],
+                certs: Certificate[list]) {
+            tbs_bytes = tbs;
+            responder_name = by_name;
+            responder_key_hash = by_key;
+            produced_at = produced;
+            responses = items;
+            extensions = exts;
+            signature_algorithm = algorithm;
+            signature = signature_bytes;
+            certificates = certs;
+        };
+
+        /// @brief The nonce extension's value (the OCTET STRING contents), or empty.
+        export let nonce = func -> uint8[list] {
+            for (let e in extensions) {
+                if (e.oid.matches(oids.OcspNonce)) {
+                    match (der.parse(e.value)) {
+                        Result.Ok(inner) => {
+                            if (inner.is_universal(der.TagOctetString)) {
+                                return inner.content();
+                            }
+                        },
+                        Result.Err(err) => {},
+                    }
+                    return e.value;
+                }
+            }
+            return new;
+        };
+
+        /// @brief Equal when the signed data and the signature are.
+        export let.override equals = func(other: class) -> bool => other is BasicResponse
+            && same((other as BasicResponse).tbs_bytes, tbs_bytes) && same((other as BasicResponse).signature, signature);
+
+        export let.override hash_code = func -> uint32 => der.hash_range(tbs_bytes, 0, tbs_bytes.length);
+
+        export let.override to_string = func -> string => $"BasicResponse({responses.length} responses)";
+    );
+
+    /// @brief An OCSPResponse: the status and, when successful, the basic response.
+    #[Final, Since("0.3.0")]
+    export let OcspResponse = class (
+        export last status: ResponseStatus;
+        export last basic: Optional<BasicResponse>;
+        export last der_bytes: uint8[list];
+
+        export let init = func(response_status: ResponseStatus, body: Optional<BasicResponse>, encoded: uint8[list]) {
+            status = response_status;
+            basic = body;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is OcspResponse
+            && same((other as OcspResponse).der_bytes, der_bytes);
+
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+
+        export let.override to_string = func -> string => $"OcspResponse({der_bytes.length} bytes)";
+    );
+
+    /// @brief A parsed OCSPRequest (unsigned requests; a signature is kept but not checked).
+    #[Final, Since("0.3.0")]
+    export let OcspRequest = class (
+        export last cert_ids: CertId[list];
+        /// @brief The nonce, or empty.
+        export last nonce: uint8[list];
+        export last der_bytes: uint8[list];
+
+        export let init = func(ids: CertId[list], nonce_bytes: uint8[list], encoded: uint8[list]) {
+            cert_ids = ids;
+            nonce = nonce_bytes;
+            der_bytes = encoded;
+        };
+
+        export let.override equals = func(other: class) -> bool => other is OcspRequest
+            && same((other as OcspRequest).der_bytes, der_bytes);
+
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+
+        export let.override to_string = func -> string => $"OcspRequest({cert_ids.length} certificates)";
+    );
+
+    let same = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let same_time = func(a: Optional<instant.Instant>, b: Optional<instant.Instant>) -> bool {
+        match (a) {
+            Optional.Some(x) => {
+                match (b) {
+                    Optional.Some(y) => {
+                        return x.equals(y);
+                    },
+                    Optional.None => {
+                        return false;
+                    },
+                }
+            },
+            Optional.None => {
+                match (b) {
+                    Optional.Some(y) => {
+                        return false;
+                    },
+                    Optional.None => {
+                        return true;
+                    },
+                }
+            },
+        }
+        return false;
+    };
+
+    let hex_of = func(bytes: uint8[list]) -> string {
+        last digits = "0123456789abcdef";
+        let text = "";
+        for (let b in bytes) {
+            text += digits.slice((b >> 4) as int, ((b >> 4) as int) + 1) + digits.slice((b & 15) as int, ((b & 15) as int) + 1);
+        }
+        return text;
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+
+    let hash_of = func(dotted: string) -> Optional<CertIdHash> {
+        if (dotted == oids.Sha1) {
+            return Optional<CertIdHash>.Some(CertIdHash.Sha1);
+        }
+        if (dotted == oids.Sha256) {
+            return Optional<CertIdHash>.Some(CertIdHash.Sha256);
+        }
+        if (dotted == oids.Sha384) {
+            return Optional<CertIdHash>.Some(CertIdHash.Sha384);
+        }
+        if (dotted == oids.Sha512) {
+            return Optional<CertIdHash>.Some(CertIdHash.Sha512);
+        }
+        return Optional<CertIdHash>.None;
+    };
+
+    let digest = func(hash: CertIdHash, bytes: uint8[list]) -> uint8[list] {
+        match (hash) {
+            CertIdHash.Sha1 => {
+                return sha1.digest(bytes);
+            },
+            CertIdHash.Sha256 => {
+                return sha2.sha256(bytes);
+            },
+            CertIdHash.Sha384 => {
+                return sha2.sha384(bytes);
+            },
+            CertIdHash.Sha512 => {
+                return sha2.sha512(bytes);
+            },
+        }
+        return new;
+    };
+
+    let hash_oid = func(hash: CertIdHash) -> string {
+        match (hash) {
+            CertIdHash.Sha1 => {
+                return oids.Sha1;
+            },
+            CertIdHash.Sha256 => {
+                return oids.Sha256;
+            },
+            CertIdHash.Sha384 => {
+                return oids.Sha384;
+            },
+            CertIdHash.Sha512 => {
+                return oids.Sha512;
+            },
+        }
+        return oids.Sha256;
+    };
+
+    /// @brief The CertID of the certificate issued by the issuer: hashes of the issuer's DER Name and of its public
+    /// key's BIT STRING value (RFC 6960, section 4.1.1).
+    #[NoDiscard, Since("0.3.0")]
+    export let for_certificate = func(certificate: Certificate, issuer: Certificate, hash: CertIdHash) -> CertId =>
+        new CertId(oid_module.of(hash_oid(hash)), digest(hash, issuer.subject.der_bytes),
+            digest(hash, issuer.public_key.key), certificate.serial);
+
+    /// @brief The DER of an unsigned OCSPRequest for the CertIDs, with the nonce extension (RFC 8954: 1 to 32
+    /// bytes) when `nonce` is not empty. No CertID, or a nonce over 32 bytes, traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let build_request = func(ids: CertId[list], nonce: uint8[list]) -> uint8[list] {
+        if (ids.length == 0 || nonce.length > 32) {
+            trap_with_message("invalid argument: an OCSP request needs a CertID and a nonce of at most 32 bytes");
+        }
+        let requests: uint8[list][list] = new;
+        for (let id in ids) {
+            requests.append(writer.sequence(new([id.encode()])));
+        }
+        let fields: uint8[list][list] = new([writer.sequence(requests)]);
+        if (nonce.length > 0) {
+            last ext = new Extension(oid_module.of(oids.OcspNonce), false, writer.octet_string(nonce));
+            fields.append(writer.explicit(2, writer.sequence(new([ext.encode()]))));
+        }
+        return writer.sequence(new([writer.sequence(fields)]));
+    };
+
+    let parse_cert_id = func(e: der.Element) -> Result<CertId> {
+        if (!e.is_universal(der.TagSequence)) {
+            return fail<CertId>(e.offset, "CertID must be a SEQUENCE");
+        }
+        let r = e.reader();
+        last algorithm = identifiers.parse(r.next_universal(der.TagSequence, "hashAlgorithm")?)?;
+        last name_hash = (r.next_universal(der.TagOctetString, "issuerNameHash")?).octet_string()?;
+        last key_hash = (r.next_universal(der.TagOctetString, "issuerKeyHash")?).octet_string()?;
+        last serial = (r.next_universal(der.TagInteger, "serialNumber")?).integer()?;
+        r.finish()?;
+        return Result<CertId>.Ok(new CertId(algorithm.oid, name_hash, key_hash, serial));
+    };
+
+    let parse_extensions = func(e: der.Element) -> Result<Extension[list]> {
+        last list = e.explicit_inner()?;
+        if (!list.is_universal(der.TagSequence)) {
+            return fail<Extension[list]>(list.offset, "Extensions must be a SEQUENCE");
+        }
+        let out: Extension[list] = new;
+        for (let item in list.children()?) {
+            out.append(extensions.parse_extension(item)?);
+        }
+        return Result<Extension[list]>.Ok(out);
+    };
+
+    /// @brief Parses an OCSPRequest.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_request = func(bytes: uint8[list]) -> Result<OcspRequest> {
+        last top = der.parse(bytes)?;
+        if (!top.is_universal(der.TagSequence)) {
+            return fail<OcspRequest>(0, "OCSPRequest must be a SEQUENCE");
+        }
+        let r = top.reader();
+        last tbs = r.next_universal(der.TagSequence, "tbsRequest")?;
+        let _ = r.optional_context(0)?;
+        r.finish()?;
+        let tr = tbs.reader();
+        match (tr.optional_context(0)?) {
+            Optional.Some(v) => {
+                if ((v.explicit_inner()?).small_integer(0)? != 0) {
+                    return fail<OcspRequest>(v.offset, "OCSP version must be v1");
+                }
+                return fail<OcspRequest>(v.offset, "version v1 must be omitted in DER");
+            },
+            Optional.None => {},
+        }
+        let _ = tr.optional_context(1)?;
+        last list = tr.next_universal(der.TagSequence, "requestList")?;
+        let ids: CertId[list] = new;
+        for (let request in list.children()?) {
+            if (!request.is_universal(der.TagSequence)) {
+                return fail<OcspRequest>(request.offset, "Request must be a SEQUENCE");
+            }
+            let rr = request.reader();
+            ids.append(parse_cert_id(rr.next()?)?);
+            let _ = rr.optional_context(0)?;
+            rr.finish()?;
+        }
+        let nonce: uint8[list] = new;
+        match (tr.optional_context(2)?) {
+            Optional.Some(x) => {
+                for (let e in parse_extensions(x)?) {
+                    if (e.oid.matches(oids.OcspNonce)) {
+                        nonce = (der.parse(e.value)?).octet_string()?;
+                    }
+                }
+            },
+            Optional.None => {},
+        }
+        tr.finish()?;
+        if (ids.length == 0) {
+            return fail<OcspRequest>(list.offset, "requestList must not be empty");
+        }
+        return Result<OcspRequest>.Ok(new OcspRequest(ids, nonce, top.encoded()));
+    };
+
+    /// @brief Parses an OCSPResponse; a successful one must carry a BasicOCSPResponse.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_response = func(bytes: uint8[list]) -> Result<OcspResponse> {
+        last top = der.parse(bytes)?;
+        if (!top.is_universal(der.TagSequence)) {
+            return fail<OcspResponse>(0, "OCSPResponse must be a SEQUENCE");
+        }
+        let r = top.reader();
+        last status_element = r.next_universal(der.TagEnumerated, "responseStatus")?;
+        last code = status_element.small_integer(6)?;
+        let status = ResponseStatus.Successful;
+        if (code == 1) {
+            status = ResponseStatus.MalformedRequest;
+        } else if (code == 2) {
+            status = ResponseStatus.InternalError;
+        } else if (code == 3) {
+            status = ResponseStatus.TryLater;
+        } else if (code == 5) {
+            status = ResponseStatus.SigRequired;
+        } else if (code == 6) {
+            status = ResponseStatus.Unauthorized;
+        } else if (code != 0) {
+            return fail<OcspResponse>(status_element.offset, "unknown OCSP response status");
+        }
+        let basic = Optional<BasicResponse>.None;
+        match (r.optional_context(0)?) {
+            Optional.Some(x) => {
+                last body = x.explicit_inner()?;
+                if (!body.is_universal(der.TagSequence)) {
+                    return fail<OcspResponse>(body.offset, "ResponseBytes must be a SEQUENCE");
+                }
+                let br = body.reader();
+                last type = (br.next_universal(der.TagOid, "responseType")?).oid()?;
+                last inner = (br.next_universal(der.TagOctetString, "response")?).octet_string()?;
+                br.finish()?;
+                if (!type.matches(oids.OcspBasic)) {
+                    return failure<OcspResponse>("ocsp.status", "unsupported OCSP response type " + type.dotted);
+                }
+                basic = Optional<BasicResponse>.Some(parse_basic(inner)?);
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        if (status == ResponseStatus.Successful && !is_some(basic)) {
+            return fail<OcspResponse>(0, "a successful response needs responseBytes");
+        }
+        return Result<OcspResponse>.Ok(new OcspResponse(status, basic, top.encoded()));
+    };
+
+    let is_some = func(value: Optional<BasicResponse>) -> bool {
+        match (value) {
+            Optional.Some(v) => {
+                return true;
+            },
+            Optional.None => {
+                return false;
+            },
+        }
+        return false;
+    };
+
+    let generalized_time = func(e: der.Element) -> Result<instant.Instant> {
+        if (!e.is_universal(der.TagGeneralizedTime)) {
+            return fail<instant.Instant>(e.offset, "expected GeneralizedTime");
+        }
+        return e.time();
+    };
+
+    let parse_basic = func(bytes: uint8[list]) -> Result<BasicResponse> {
+        last top = der.parse(bytes)?;
+        if (!top.is_universal(der.TagSequence)) {
+            return fail<BasicResponse>(0, "BasicOCSPResponse must be a SEQUENCE");
+        }
+        let r = top.reader();
+        last tbs = r.next_universal(der.TagSequence, "tbsResponseData")?;
+        last algorithm = identifiers.parse(r.next_universal(der.TagSequence, "signatureAlgorithm")?)?;
+        last bits = (r.next_universal(der.TagBitString, "signature")?).bit_string()?;
+        let certs: Certificate[list] = new;
+        match (r.optional_context(0)?) {
+            Optional.Some(x) => {
+                last list = x.explicit_inner()?;
+                for (let c in list.children()?) {
+                    certs.append(certificates.parse(c.encoded())?);
+                }
+            },
+            Optional.None => {},
+        }
+        r.finish()?;
+        let tr = tbs.reader();
+        match (tr.optional_context(0)?) {
+            Optional.Some(v) => {
+                return fail<BasicResponse>(v.offset, "version v1 must be omitted in DER");
+            },
+            Optional.None => {},
+        }
+        last responder = tr.next()?;
+        let by_name = Optional<Name>.None;
+        let by_key: uint8[list] = new;
+        if (responder.is_context(1)) {
+            by_name = Optional<Name>.Some(names.parse(responder.explicit_inner()?)?);
+        } else if (responder.is_context(2)) {
+            by_key = (responder.explicit_inner()?).octet_string()?;
+        } else {
+            return fail<BasicResponse>(responder.offset, "invalid ResponderID");
+        }
+        last produced = generalized_time(tr.next()?)?;
+        last list = tr.next_universal(der.TagSequence, "responses")?;
+        let items: SingleResponse[list] = new;
+        for (let single in list.children()?) {
+            items.append(parse_single(single)?);
+        }
+        let exts: Extension[list] = new;
+        match (tr.optional_context(1)?) {
+            Optional.Some(x) => {
+                exts = parse_extensions(x)?;
+            },
+            Optional.None => {},
+        }
+        tr.finish()?;
+        return Result<BasicResponse>.Ok(new BasicResponse(tbs.encoded(), by_name, by_key, produced, items, exts, algorithm,
+            bits.bytes, certs));
+    };
+
+    let parse_single = func(e: der.Element) -> Result<SingleResponse> {
+        if (!e.is_universal(der.TagSequence)) {
+            return fail<SingleResponse>(e.offset, "SingleResponse must be a SEQUENCE");
+        }
+        let r = e.reader();
+        last id = parse_cert_id(r.next()?)?;
+        last status_element = r.next()?;
+        let status = CertStatus.Good;
+        let revoked_at = Optional<instant.Instant>.None;
+        let reason = -1;
+        if (status_element.is_context(0)) {
+            if (status_element.constructed || status_element.length != 0) {
+                return fail<SingleResponse>(status_element.offset, "good must be an empty [0]");
+            }
+        } else if (status_element.is_context(1)) {
+            status = CertStatus.Revoked;
+            if (!status_element.constructed) {
+                return fail<SingleResponse>(status_element.offset, "RevokedInfo must be constructed");
+            }
+            let rr = status_element.reader();
+            revoked_at = Optional<instant.Instant>.Some(generalized_time(rr.next()?)?);
+            match (rr.optional_context(0)?) {
+                Optional.Some(x) => {
+                    reason = (x.explicit_inner()?).small_integer(10)? as int;
+                },
+                Optional.None => {},
+            }
+            rr.finish()?;
+        } else if (status_element.is_context(2)) {
+            status = CertStatus.Unknown;
+            if (status_element.constructed || status_element.length != 0) {
+                return fail<SingleResponse>(status_element.offset, "unknown must be an empty [2]");
+            }
+        } else {
+            return fail<SingleResponse>(status_element.offset, "invalid CertStatus");
+        }
+        last this_update = generalized_time(r.next()?)?;
+        let next_update = Optional<instant.Instant>.None;
+        match (r.optional_context(0)?) {
+            Optional.Some(x) => {
+                next_update = Optional<instant.Instant>.Some(generalized_time(x.explicit_inner()?)?);
+            },
+            Optional.None => {},
+        }
+        let _ = r.optional_context(1)?;
+        r.finish()?;
+        return Result<SingleResponse>.Ok(new SingleResponse(id, status, revoked_at, reason, this_update, next_update));
+    };
+
+    /// @brief The SingleResponse for the certificate (issued by `issuer`) after checking the response as the
+    /// module describes, at the instant `at` with `skew_seconds` of allowed clock skew. `nonce` is the nonce sent,
+    /// or empty when none was. A revoked or unknown status is returned, not an error: the caller decides.
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(response: OcspResponse, certificate: Certificate, issuer: Certificate,
+            verifier: SignatureVerifier, at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
+        if (response.status != ResponseStatus.Successful) {
+            return failure<SingleResponse>("ocsp.status", "the responder did not answer successfully");
+        }
+        let basic = must(response.basic);
+        let found = Optional<SingleResponse>.None;
+        for (let single in basic.responses) {
+            if (single.cert_id.matches(certificate, issuer)) {
+                found = Optional<SingleResponse>.Some(single);
+                break;
+            }
+        }
+        last single = to_result(found)?;
+        last signer = responder(basic, issuer, verifier, at)?;
+        last check = verifier.verify_signature(basic.signature_algorithm, signer.public_key, basic.tbs_bytes, basic.signature);
+        if (check != SignatureCheck.Valid) {
+            return failure<SingleResponse>("ocsp.signature", "the OCSP response signature does not verify");
+        }
+        last late = instant.of_epoch_seconds(at.epoch_seconds + skew_seconds, 0);
+        last early = instant.of_epoch_seconds(at.epoch_seconds - skew_seconds, 0);
+        if (single.this_update.compare_to(late) == Ordering.Greater) {
+            return failure<SingleResponse>("ocsp.stale", "thisUpdate is in the future");
+        }
+        match (single.next_update) {
+            Optional.Some(next) => {
+                if (next.compare_to(early) == Ordering.Less) {
+                    return failure<SingleResponse>("ocsp.stale", "nextUpdate has passed");
+                }
+            },
+            Optional.None => {},
+        }
+        if (nonce.length > 0 && !same(basic.nonce(), nonce)) {
+            return failure<SingleResponse>("ocsp.nonce", "the response does not echo the request's nonce");
+        }
+        return Result<SingleResponse>.Ok(single);
+    };
+
+    let to_result = func(found: Optional<SingleResponse>) -> Result<SingleResponse> {
+        match (found) {
+            Optional.Some(s) => {
+                return Result<SingleResponse>.Ok(s);
+            },
+            Optional.None => {
+                return failure<SingleResponse>("ocsp.no_response", "the response has no status for the certificate");
+            },
+        }
+        return failure<SingleResponse>("ocsp.no_response", "the response has no status for the certificate");
+    };
+
+    let must = func(value: Optional<BasicResponse>) -> BasicResponse {
+        match (value) {
+            Optional.Some(v) => {
+                return v;
+            },
+            Optional.None => {
+                trap_with_message("invalid state: missing OCSP basic response");
+            },
+        }
+        trap_with_message("invalid state: missing OCSP basic response");
+    };
+
+    /// @brief Whether the ResponderID names the certificate: by Name, or by the SHA-1 of its key bits.
+    let names_responder = func(basic: BasicResponse, candidate: Certificate) -> bool {
+        match (basic.responder_name) {
+            Optional.Some(n) => {
+                return n.equals(candidate.subject);
+            },
+            Optional.None => {
+                return same(basic.responder_key_hash, sha1.digest(candidate.public_key.key));
+            },
+        }
+        return false;
+    };
+
+    /// @brief The certificate whose key signs the response: the issuer itself, or a delegated responder (RFC 6960,
+    /// section 4.2.2.2).
+    let responder = func(basic: BasicResponse, issuer: Certificate, verifier: SignatureVerifier, at: instant.Instant)
+            -> Result<Certificate> {
+        if (names_responder(basic, issuer)) {
+            return Result<Certificate>.Ok(issuer);
+        }
+        for (let candidate in basic.certificates) {
+            if (!names_responder(basic, candidate)) {
+                continue;
+            }
+            if (!candidate.issuer.equals(issuer.subject)) {
+                return failure<Certificate>("ocsp.responder", "the delegated responder was not issued by the CA");
+            }
+            match (candidate.extended_key_usage) {
+                Optional.Some(eku) => {
+                    if (!eku.has(oids.OcspSigning)) {
+                        return failure<Certificate>("ocsp.responder", "the delegated responder lacks id-kp-OCSPSigning");
+                    }
+                },
+                Optional.None => {
+                    return failure<Certificate>("ocsp.responder", "the delegated responder lacks id-kp-OCSPSigning");
+                },
+            }
+            if (!candidate.is_valid_at(at)) {
+                return failure<Certificate>("ocsp.responder", "the delegated responder certificate is not valid now");
+            }
+            last check = verifier.verify_signature(candidate.signature_algorithm, issuer.public_key, candidate.tbs_bytes,
+                candidate.signature);
+            if (check != SignatureCheck.Valid) {
+                return failure<Certificate>("ocsp.responder", "the delegated responder certificate's signature does not verify");
+            }
+            return Result<Certificate>.Ok(candidate);
+        }
+        return failure<Certificate>("ocsp.responder", "no authorized responder signed the response");
+    };
+);

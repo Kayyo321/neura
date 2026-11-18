@@ -1,0 +1,145 @@
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let pem = import:Std.Crypto.Pki.Pem;
+let test = import:Std.Test;
+let vectors = import:DerVectors;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+// Strict RFC 7468 PEM against `openssl x509 -outform PEM` output (support/der-vectors.nra).
+let PemTests = module (
+    /// @brief The openssl PEM text: the vector keeps '|' for each line feed.
+    let openssl_text = func(cell: string) -> string {
+        let text = "";
+        let start = 0;
+        for (let i = 0; i < cell.byte_length; i++) {
+            if (cell.byte_at(i) == 124) {
+                text += cell.slice(start, i) + "\n";
+                start = i + 1;
+            }
+        }
+        return text + cell.slice(start, cell.byte_length);
+    };
+
+    let der_of = func(name: string) -> uint8[list] {
+        last rows = vectors.certificates;
+        for (let i = 0; i < rows.length; i += 2) {
+            if (rows[i] == name) {
+                return test.assert_ok(hex.decode(rows[i + 1]));
+            }
+        }
+        test.fail("no certificate " + name);
+        return new;
+    };
+
+    let error_offset = func(e: Error) -> int {
+        match (e) {
+            Error.Parse { kind, offset, message } => {
+                return offset;
+            },
+            _ => {
+                test.fail("expected a Parse error");
+            },
+        }
+        return -1;
+    };
+
+    export let test_decode_and_encode_match_openssl = func {
+        last rows = vectors.pem;
+        for (let i = 0; i < rows.length; i += 2) {
+            last text = openssl_text(rows[i + 1]);
+            last bytes = der_of(rows[i]);
+            last decoded = test.assert_ok(pem.decode(text, "CERTIFICATE"));
+            test.assert_equal_string(hex.encode(bytes), hex.encode(decoded));
+            test.assert_equal_string(text, pem.encode("CERTIFICATE", bytes));
+        }
+    };
+
+    export let test_several_blocks_with_text_between = func {
+        last rows = vectors.pem;
+        let text = "Explanatory text is ignored.\r\n";
+        for (let i = 0; i < rows.length; i += 2) {
+            text += openssl_text(rows[i + 1]) + "\n";
+        }
+        text += pem.encode("PRIVATE KEY", new([1, 2, 3]));
+        last blocks = test.assert_ok(pem.decode_all(text));
+        test.assert_equal_int32(4, blocks.length);
+        test.assert_equal_string("CERTIFICATE", blocks[0].label);
+        test.assert_equal_string("PRIVATE KEY", blocks[3].label);
+        test.assert_equal_string("PemBlock(PRIVATE KEY, 3 bytes)", blocks[3].to_string());
+        test.assert(blocks[0].equals(new pem.PemBlock("CERTIFICATE", der_of("root"))));
+        // Two certificates: `decode` wants exactly one block with the label.
+        let _ = test.assert_err(pem.decode(text, "CERTIFICATE"));
+        let _ = test.assert_err(pem.decode(text, "CERTIFICATE REQUEST"));
+        test.assert_equal_string("010203", hex.encode(test.assert_ok(pem.decode(text, "PRIVATE KEY"))));
+    };
+
+    export let test_crlf_lines = func {
+        last bytes = der_of("root");
+        let text = "";
+        last plain = pem.encode("CERTIFICATE", bytes);
+        for (let i = 0; i < plain.byte_length; i++) {
+            if (plain.byte_at(i) == 10) {
+                text += "\r\n";
+            } else {
+                text += plain.slice(i, i + 1);
+            }
+        }
+        test.assert_equal_string(hex.encode(bytes), hex.encode(test.assert_ok(pem.decode(text, "CERTIFICATE"))));
+    };
+
+    export let test_strict_rejections = func {
+        last good = pem.encode("CERTIFICATE", der_of("root"));
+        last lines = split(good);
+        // A line of 65 characters (joining the first two lines' characters).
+        let long_line = lines[0] + "\n" + lines[1] + lines[2].slice(0, 1) + "\n";
+        for (let i = 2; i < lines.length; i++) {
+            long_line += (i == 2 ? lines[2].slice(1, lines[2].byte_length) : lines[i]) + "\n";
+        }
+        last e1 = test.assert_err(pem.decode_all(long_line));
+        test.assert_equal_int32(lines[0].byte_length + 1, error_offset(e1) as int32);
+        // A mismatched END label.
+        let wrong_end = "";
+        for (let i = 0; i < lines.length - 1; i++) {
+            wrong_end += lines[i] + "\n";
+        }
+        let _ = test.assert_err(pem.decode_all(wrong_end + "-----END X509 CRL-----\n"));
+        // No END line.
+        let _ = test.assert_err(pem.decode_all(wrong_end));
+        // RFC 1421 headers, a blank line, a space, and a short line before a full one.
+        let _ = test.assert_err(pem.decode_all(lines[0] + "\nProc-Type: 4,ENCRYPTED\n" + rest(lines, 1)));
+        let _ = test.assert_err(pem.decode_all(lines[0] + "\n\n" + rest(lines, 1)));
+        let _ = test.assert_err(pem.decode_all(lines[0] + "\n " + rest(lines, 1)));
+        let _ = test.assert_err(pem.decode_all(lines[0] + "\nAAAA\n" + rest(lines, 1)));
+        // Bad labels, an empty block, and Base64 that is not canonical.
+        let _ = test.assert_err(pem.decode_all("-----BEGIN -CERT-----\nAAAA\n-----END -CERT-----\n"));
+        let _ = test.assert_err(pem.decode_all("-----BEGIN X-----\n-----END X-----\n"));
+        let _ = test.assert_err(pem.decode_all("-----BEGIN X-----\nAAB=\n-----END X-----\n"));
+        let _ = test.assert_err(pem.decode_all("-----BEGIN X-----\nAA\n-----END X-----\n"));
+        test.assert_equal_string("0000", hex.encode(test.assert_ok(pem.decode("-----BEGIN X-----\nAAA=\n-----END X-----\n", "X"))));
+        // A malformed BEGIN line is not skipped as text.
+        let _ = test.assert_err(pem.decode_all("-----BEGIN X----\nAAA=\n-----END X-----\n"));
+        // No blocks at all is an empty list.
+        test.assert_equal_int32(0, test.assert_ok(pem.decode_all("just text\n")).length);
+    };
+
+    let split = func(text: string) -> string[list] {
+        let out: string[list] = new;
+        let start = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 10) {
+                out.append(text.slice(start, i));
+                start = i + 1;
+            }
+        }
+        return out;
+    };
+
+    let rest = func(lines: string[list], from: int) -> string {
+        let text = "";
+        for (let i = from; i < lines.length; i++) {
+            text += lines[i] + "\n";
+        }
+        return text;
+    };
+);

@@ -1,0 +1,355 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let oid_module = import:Std.Crypto.Pki.Oid;
+let oids = import:Std.Crypto.Pki.Oids;
+let text_case = import:Std.Core.String;
+let utf8 = import:Std.Encoding.Utf8;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+/// @brief X.500 distinguished names as X.509 uses them (RFC 5280, section 4.1.2.4) (Stdlib.md section 20.9).
+///
+/// A `Name` is a sequence of relative distinguished names, each a set of attribute type-and-value pairs.
+/// `equals` follows RFC 5280, section 7.1: values of the string types compare after case folding and after
+/// removing leading and trailing white space and collapsing inner runs of it to one space (the parts of LDAP
+/// StringPrep this library applies); other values compare by their encodings; the pairs of a multi-valued RDN
+/// compare as sets. `to_string` is RFC 4514 text, most specific RDN first.
+/// @see [Std.Crypto.Pki.Name](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Name)
+#Since("0.3.0")
+export let Name = module (
+    /// @brief One attribute type and value.
+    #[Final, Since("0.3.0")]
+    export let AttributeTypeAndValue = class (
+        /// @brief The attribute type, such as 2.5.4.3 (commonName).
+        export last type: Oid;
+        /// @brief The DER encoding of the value.
+        export last value_der: uint8[list];
+        /// @brief The universal tag number of the value.
+        export last value_tag: int;
+        /// @brief The value as text when it is a string type, else empty.
+        export last text: string;
+        /// @brief Whether the value is a string type.
+        export last is_text: bool;
+        /// @brief The comparison form of a string value (case folded, white space collapsed).
+        last normalized: string;
+
+        /// @brief Records a checked pair; `parse` and `of` build pairs.
+        export let init = func(attribute: Oid, encoded: uint8[list], tag: int, value_text: string, string_valued: bool) {
+            type = attribute;
+            value_der = encoded;
+            value_tag = tag;
+            text = value_text;
+            is_text = string_valued;
+            normalized = string_valued ? normalize(value_text) : "";
+        };
+
+        /// @brief RFC 5280 section 7.1 comparison.
+        export let matches = func(other: AttributeTypeAndValue) -> bool {
+            if (!type.equals(other.type)) {
+                return false;
+            }
+            if (is_text && other.is_text) {
+                return normalized == other.normalized;
+            }
+            return same_bytes(value_der, other.value_der);
+        };
+
+        export let.override equals = func(other: class) -> bool => other is AttributeTypeAndValue
+            && matches(other as AttributeTypeAndValue);
+
+        export let.override hash_code = func -> uint32 =>
+            ((type.hash_code() as uint64) * 31 + ((is_text ? normalized.hash_code() : der.hash_range(value_der, 0,
+                value_der.length)) as uint64) & 4294967295) as uint32;
+
+        /// @brief `<type>=<value>` in RFC 4514 form.
+        export let.override to_string = func -> string {
+            last label = short_name(type.dotted);
+            if (!is_text) {
+                return label + "=#" + hex.encode(value_der);
+            }
+            return label + "=" + escape(text);
+        };
+    );
+
+    /// @brief A distinguished name: RDNs from the most general (such as C) to the most specific (such as CN).
+    #[Final, Since("0.3.0")]
+    export let Name = class (
+        /// @brief The RDNs in encoding order; each holds one or more pairs.
+        export last rdns: AttributeTypeAndValue[list][list];
+        /// @brief The DER encoding of the whole Name.
+        export last der_bytes: uint8[list];
+
+        /// @brief Records a checked name; `parse` and `of` build names.
+        export let init = func(parts: AttributeTypeAndValue[list][list], encoded: uint8[list]) {
+            rdns = parts;
+            der_bytes = encoded;
+        };
+
+        /// @brief Whether the name has no RDNs.
+        export let is_empty = func -> bool => rdns.length == 0;
+
+        /// @brief The text values of every pair with the attribute type, in order.
+        export let values_of = func(dotted: string) -> string[list] {
+            let out: string[list] = new;
+            for (let rdn in rdns) {
+                for (let pair in rdn) {
+                    if (pair.type.dotted == dotted && pair.is_text) {
+                        out.append(pair.text);
+                    }
+                }
+            }
+            return out;
+        };
+
+        /// @brief The commonName values.
+        export let common_names = func -> string[list] => values_of(oids.CommonName);
+
+        /// @brief The PKCS #9 emailAddress values (legacy e-mail in the subject).
+        export let email_addresses = func -> string[list] => values_of(oids.EmailAddress);
+
+        /// @brief Whether this name's RDNs begin with all of `prefix`'s RDNs (directoryName subtree match,
+        /// RFC 5280 section 7.1).
+        export let starts_with = func(prefix: Name) -> bool {
+            if (prefix.rdns.length > rdns.length) {
+                return false;
+            }
+            for (let i = 0; i < prefix.rdns.length; i++) {
+                if (!rdn_matches(rdns[i], prefix.rdns[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Name)) {
+                return false;
+            }
+            last that = other as Name;
+            return that.rdns.length == rdns.length && starts_with(that);
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint64 = 17;
+            for (let rdn in rdns) {
+                // Pairs of one RDN are a set: combine them with a sum, which ignores order.
+                let sum: uint64 = 0;
+                for (let pair in rdn) {
+                    sum = (sum + (pair.hash_code() as uint64)) & 4294967295;
+                }
+                h = (h * 31 + sum) & 4294967295;
+            }
+            return h as uint32;
+        };
+
+        /// @brief RFC 4514 text: the most specific RDN first, RDNs joined by ',' and the pairs of one RDN by '+'.
+        export let.override to_string = func -> string {
+            // Bytes are gathered in one list, so a long name costs time in proportion to its length.
+            let out: uint8[list] = new;
+            for (let i = rdns.length - 1; i >= 0; i--) {
+                if (i < rdns.length - 1) {
+                    out.append(44);
+                }
+                for (let j = 0; j < rdns[i].length; j++) {
+                    if (j > 0) {
+                        out.append(43);
+                    }
+                    for (let b in utf8.encode(rdns[i][j].to_string())) {
+                        out.append(b);
+                    }
+                }
+            }
+            return utf8.decode_lossy(out);
+        };
+    );
+
+    let rdn_matches = func(a: AttributeTypeAndValue[list], b: AttributeTypeAndValue[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let x in a) {
+            let found = false;
+            for (let y in b) {
+                if (x.matches(y)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let same_bytes = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Case folding, with leading and trailing white space removed and inner runs collapsed to one space.
+    let normalize = func(value: string) -> string {
+        last folded = utf8.encode(text_case.case_fold(value));
+        let out: uint8[list] = new;
+        let pending_space = false;
+        for (let c in folded) {
+            if (c == 32 || c == 9 || c == 10 || c == 13) {
+                pending_space = out.length > 0;
+            } else {
+                if (pending_space) {
+                    out.append(32);
+                    pending_space = false;
+                }
+                out.append(c);
+            }
+        }
+        return utf8.decode_lossy(out);
+    };
+
+    let short_name = func(dotted: string) -> string {
+        last name = oids.name_of(dotted);
+        if (name == "CN" || name == "C" || name == "O" || name == "OU" || name == "L" || name == "ST" || name == "DC"
+                || name == "UID") {
+            return name;
+        }
+        return dotted;
+    };
+
+    /// @brief RFC 4514 section 2.4 escaping.
+    let escape = func(value: string) -> string {
+        last bytes = utf8.encode(value);
+        let out: uint8[list] = new;
+        last n = bytes.length;
+        for (let i = 0; i < n; i++) {
+            last c = bytes[i];
+            if (c == 44 || c == 43 || c == 34 || c == 92 || c == 60 || c == 62 || c == 59
+                    || (i == 0 && (c == 35 || c == 32)) || (i == n - 1 && c == 32)) {
+                out.append(92);
+            }
+            out.append(c);
+        }
+        return utf8.decode_lossy(out);
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Reads a Name (an RDNSequence) from its element. An empty RDN, a non-SET RDN or a pair that is not
+    /// SEQUENCE { OBJECT IDENTIFIER, value } is a `Parse` error; a string value must be valid for its type.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(element: der.Element) -> Result<Name> {
+        if (!element.is_universal(der.TagSequence)) {
+            return fail<Name>(element.offset, "Name must be a SEQUENCE");
+        }
+        let rdns: AttributeTypeAndValue[list][list] = new;
+        for (let rdn in element.children()?) {
+            if (!rdn.is_universal(der.TagSet)) {
+                return fail<Name>(rdn.offset, "RDN must be a SET");
+            }
+            let pairs: AttributeTypeAndValue[list] = new;
+            for (let pair in rdn.children()?) {
+                if (!pair.is_universal(der.TagSequence)) {
+                    return fail<Name>(pair.offset, "attribute must be a SEQUENCE");
+                }
+                let r = pair.reader();
+                last type = (r.next_universal(der.TagOid, "attribute type")?).oid()?;
+                last value = r.next()?;
+                r.finish()?;
+                if (value.is_string()) {
+                    pairs.append(new AttributeTypeAndValue(type, value.encoded(), value.tag_number, value.text()?, true));
+                } else {
+                    pairs.append(new AttributeTypeAndValue(type, value.encoded(), value.tag_number, "", false));
+                }
+            }
+            if (pairs.length == 0) {
+                return fail<Name>(rdn.offset, "empty RDN");
+            }
+            rdns.append(pairs);
+        }
+        return Result<Name>.Ok(new Name(rdns, element.encoded()));
+    };
+
+    /// @brief Parses the DER encoding of a Name.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_der = func(bytes: uint8[list]) -> Result<Name> => parse(der.parse(bytes)?);
+
+    /// @brief A name of single-valued RDNs in the order given, such as `of(["C", "O", "CN"], ["US", "Example",
+    /// "host"])` with attribute types given by short name (C, O, OU, L, ST, CN, DC, UID, serialNumber,
+    /// emailAddress) or dotted OID. Country and serialNumber are PrintableString, emailAddress and DC are
+    /// IA5String, the others UTF8String. An unknown short name traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let of = func(types: string[], values: string[]) -> Name {
+        if (types.length != values.length) {
+            trap_with_message("invalid argument: Name types and values differ in length");
+        }
+        let encoded_rdns: uint8[list][list] = new;
+        for (let i = 0; i < types.length; i++) {
+            last dotted = dotted_of(types[i]);
+            last type = oid_module.of(dotted);
+            last value = dotted == oids.Country || dotted == oids.SerialNumber ? writer.printable_string(values[i])
+                : (dotted == oids.EmailAddress || dotted == oids.DomainComponent ? writer.ia5_string(values[i])
+                : writer.utf8_string(values[i]));
+            encoded_rdns.append(writer.set(new([writer.sequence(new([writer.oid(type), value]))])));
+        }
+        match (parse_der(writer.sequence(encoded_rdns))) {
+            Result.Ok(name) => {
+                return name;
+            },
+            Result.Err(e) => {
+                trap_with_message("invalid argument: Name value");
+            },
+        }
+        trap_with_message("invalid argument: Name value");
+    };
+
+    let dotted_of = func(short: string) -> string {
+        if (short == "C") {
+            return oids.Country;
+        }
+        if (short == "O") {
+            return oids.Organization;
+        }
+        if (short == "OU") {
+            return oids.OrganizationalUnit;
+        }
+        if (short == "L") {
+            return oids.Locality;
+        }
+        if (short == "ST") {
+            return oids.StateOrProvince;
+        }
+        if (short == "CN") {
+            return oids.CommonName;
+        }
+        if (short == "DC") {
+            return oids.DomainComponent;
+        }
+        if (short == "UID") {
+            return oids.UserId;
+        }
+        if (short == "serialNumber") {
+            return oids.SerialNumber;
+        }
+        if (short == "emailAddress") {
+            return oids.EmailAddress;
+        }
+        match (oid_module.parse(short)) {
+            Result.Ok(value) => {
+                return value.dotted;
+            },
+            Result.Err(e) => {
+                trap_with_message("invalid argument: unknown attribute type " + short);
+            },
+        }
+        trap_with_message("invalid argument: unknown attribute type " + short);
+    };
+);

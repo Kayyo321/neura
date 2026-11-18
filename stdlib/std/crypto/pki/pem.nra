@@ -1,0 +1,241 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let base64 = import:Std.Encoding.Base64;
+
+/// @brief Strict PEM, the textual encoding of RFC 7468 (Stdlib.md section 20.9).
+///
+/// A block is `-----BEGIN <label>-----`, lines of standard Base64 with padding, and `-----END <label>-----`
+/// with the same label. The strict grammar of RFC 7468, section 3 applies inside a block: every Base64 line
+/// but the last has exactly 64 characters, the last has 1 to 64, and there are no headers, blank lines or
+/// spaces. Lines end in LF or CRLF. Text outside blocks is ignored, as the RFC allows.
+/// @see [Std.Crypto.Pki.Pem](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pem)
+#Since("0.3.0")
+export let Pem = module (
+    /// @brief One PEM block: a label and the DER bytes.
+    #[Final, Since("0.3.0")]
+    export let PemBlock = class (
+        /// @brief The label, such as "CERTIFICATE" or "PRIVATE KEY".
+        export last label: string;
+        /// @brief The decoded bytes.
+        export last der: uint8[list];
+
+        /// @brief A block; a label outside RFC 7468's grammar traps with "invalid argument: PEM label".
+        export let init = func(block_label: string, bytes: uint8[list]) {
+            if (!valid_label(block_label)) {
+                trap_with_message("invalid argument: PEM label");
+            }
+            label = block_label;
+            der = bytes;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is PemBlock)) {
+                return false;
+            }
+            last that = other as PemBlock;
+            if (that.label != label || that.der.length != der.length) {
+                return false;
+            }
+            for (let i = 0; i < der.length; i++) {
+                if (der[i] != that.der[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h = label.hash_code();
+            for (let b in der) {
+                h = ((((h as uint64) * 31) + (b as uint64)) & 4294967295) as uint32;
+            }
+            return h;
+        };
+
+        /// @brief "PemBlock(<label>, <n> bytes)". A private key's bytes are never shown.
+        export let.override to_string = func -> string => $"PemBlock({label}, {der.length} bytes)";
+    );
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief labelchar = %x21-2C / %x2E-7E; label = [ labelchar *( ["-" / SP] labelchar ) ].
+    let valid_label = func(label: string) -> bool {
+        last n = label.byte_length;
+        for (let i = 0; i < n; i++) {
+            last c = label.byte_at(i);
+            if (c == 45 || c == 32) {
+                if (i == 0 || i == n - 1) {
+                    return false;
+                }
+                last prev = label.byte_at(i - 1);
+                if (prev == 45 || prev == 32) {
+                    return false;
+                }
+            } else if (c < 33 || c > 126) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Every block in the text, in order. A BEGIN line without its END line, a mismatched label, or a
+    /// line inside a block that breaks the strict grammar is a `Parse` error at the offset of the line.
+    #[NoDiscard, Since("0.3.0")]
+    export let decode_all = func(text: string) -> Result<PemBlock[list]> {
+        let blocks: PemBlock[list] = new;
+        let lines: string[list] = new;
+        let starts: int[list] = new;
+        let start = 0;
+        last n = text.byte_length;
+        for (let i = 0; i <= n; i++) {
+            if (i == n || text.byte_at(i) == 10) {
+                let stop = i;
+                if (stop > start && text.byte_at(stop - 1) == 13) {
+                    stop--;
+                }
+                if (i < n || stop > start) {
+                    lines.append(text.slice(start, stop));
+                    starts.append(start);
+                }
+                start = i + 1;
+            }
+        }
+        let index = 0;
+        while (index < lines.length) {
+            last line = lines[index];
+            if (!is_ascii(line)) {
+                // Explanatory text may hold any characters; a BEGIN line never does.
+                if (contains(line, "-----BEGIN")) {
+                    return fail<PemBlock[list]>(starts[index], "malformed PEM BEGIN line");
+                }
+                index++;
+                continue;
+            }
+            if (!(line.byte_length >= 16 && line.slice(0, 11) == "-----BEGIN " && ends_with_dashes(line))) {
+                if (contains(line, "-----BEGIN")) {
+                    return fail<PemBlock[list]>(starts[index], "malformed PEM BEGIN line");
+                }
+                index++;
+                continue;
+            }
+            last label = line.slice(11, line.byte_length - 5);
+            if (!valid_label(label)) {
+                return fail<PemBlock[list]>(starts[index] + 11, "invalid PEM label");
+            }
+            last begin = index;
+            index++;
+            let body = "";
+            let short_seen = false;
+            let ended = false;
+            while (index < lines.length) {
+                last body_line = lines[index];
+                if (!is_ascii(body_line)) {
+                    return fail<PemBlock[list]>(starts[index], "invalid character in PEM line");
+                }
+                if (body_line.byte_length >= 9 && body_line.slice(0, 9) == "-----END ") {
+                    if (body_line != "-----END " + label + "-----") {
+                        return fail<PemBlock[list]>(starts[index], "PEM END label does not match BEGIN");
+                    }
+                    ended = true;
+                    break;
+                }
+                if (short_seen) {
+                    return fail<PemBlock[list]>(starts[index], "PEM line after a short line");
+                }
+                if (body_line.byte_length == 0 || body_line.byte_length > 64) {
+                    return fail<PemBlock[list]>(starts[index], "PEM line must have 1 to 64 characters");
+                }
+                for (let i = 0; i < body_line.byte_length; i++) {
+                    last c = body_line.byte_at(i);
+                    if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 43 || c == 47
+                            || c == 61)) {
+                        return fail<PemBlock[list]>(starts[index] + i, "invalid character in PEM line");
+                    }
+                }
+                if (body_line.byte_length < 64) {
+                    short_seen = true;
+                }
+                body += body_line;
+                index++;
+            }
+            if (!ended) {
+                return fail<PemBlock[list]>(starts[begin], "PEM block has no END line");
+            }
+            if (body.byte_length == 0) {
+                return fail<PemBlock[list]>(starts[begin], "empty PEM block");
+            }
+            match (base64.decode(body)) {
+                Result.Ok(bytes) => {
+                    if (base64.encode(bytes) != body) {
+                        return fail<PemBlock[list]>(starts[begin + 1], "PEM Base64 is not canonical");
+                    }
+                    blocks.append(new PemBlock(label, bytes));
+                },
+                Result.Err(e) => {
+                    return fail<PemBlock[list]>(starts[begin + 1], "invalid PEM Base64");
+                },
+            }
+            index++;
+        }
+        return Result<PemBlock[list]>.Ok(blocks);
+    };
+
+    /// @brief The bytes of the only block with the label. No such block, or more than one, is a `Parse` error.
+    #[NoDiscard, Since("0.3.0")]
+    export let decode = func(text: string, label: string) -> Result<uint8[list]> {
+        last blocks = decode_all(text)?;
+        let found: uint8[list] = new;
+        let count = 0;
+        for (let block in blocks) {
+            if (block.label == label) {
+                found = block.der;
+                count++;
+            }
+        }
+        if (count != 1) {
+            return fail<uint8[list]>(0, count == 0 ? "no PEM block labelled " + label : "more than one PEM block labelled " + label);
+        }
+        return Result<uint8[list]>.Ok(found);
+    };
+
+    /// @brief The PEM text of a block: BEGIN line, Base64 in lines of 64, END line, each ending in LF.
+    #[NoDiscard, Since("0.3.0")]
+    export let encode = func(label: string, der: uint8[list]) -> string {
+        if (!valid_label(label)) {
+            trap_with_message("invalid argument: PEM label");
+        }
+        last body = base64.encode(der);
+        let text = "-----BEGIN " + label + "-----\n";
+        for (let i = 0; i < body.byte_length; i += 64) {
+            last stop = i + 64 < body.byte_length ? i + 64 : body.byte_length;
+            text += body.slice(i, stop) + "\n";
+        }
+        return text + "-----END " + label + "-----\n";
+    };
+
+    let is_ascii = func(line: string) -> bool {
+        for (let i = 0; i < line.byte_length; i++) {
+            if (line.byte_at(i) >= 128) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let ends_with_dashes = func(line: string) -> bool => line.slice(line.byte_length - 5, line.byte_length) == "-----";
+
+    /// @brief Whether the bytes of `needle` occur in `line` (compared byte by byte, so any text is safe).
+    let contains = func(line: string, needle: string) -> bool {
+        for (let i = 0; i + needle.byte_length <= line.byte_length; i++) {
+            let found = true;
+            for (let j = 0; j < needle.byte_length && found; j++) {
+                found = line.byte_at(i + j) == needle.byte_at(j);
+            }
+            if (found) {
+                return true;
+            }
+        }
+        return false;
+    };
+);

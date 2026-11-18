@@ -1,0 +1,17 @@
+// test-options: --max-steps 400000000
+let console = import:Std.Io.Console;
+let runner = import:LimboRunner;
+let test = import:Std.Test;
+let vectors = import:LimboFourVectors;
+
+// C2SP x509-limbo cases, part four (support/limbo-four-vectors.nra; scripts/crypto-vectors/gen-pki-paths.py records the
+// limbo commit and the cases where this library's documented rules give another result).
+let LimboFourTests = module (
+    export let test_limbo_cases = func {
+        last mismatches = runner.run(vectors.cases, vectors.certificates, vectors.signatures);
+        for (let m in mismatches) {
+            console.print_line(m);
+        }
+        test.assert_equal_int32(0, mismatches.length);
+    };
+);

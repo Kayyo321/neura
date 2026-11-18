@@ -1,0 +1,129 @@
+// test-options: --max-steps 400000000
+let cert_vectors = import:CertVectors;
+let certificate = import:Std.Crypto.Pki.Certificate;
+let crlite = import:Std.Crypto.Pki.CrLite;
+let crlite_vectors = import:CrliteVectors;
+let csr = import:Std.Crypto.Pki.Csr;
+let ct_vectors = import:CtVectors;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let host_name = import:Std.Crypto.Pki.HostName;
+let instant = import:Std.Time.Instant;
+let keys = import:Std.Crypto.Pki.PrivateKeyInfo;
+let ocsp = import:Std.Crypto.Pki.Ocsp;
+let ocsp_vectors = import:OcspVectors;
+let paths = import:Std.Crypto.Pki.PathValidation;
+let pem = import:Std.Crypto.Pki.Pem;
+let pkcs8_vectors = import:Pkcs8Vectors;
+let test = import:Std.Test;
+let transparency = import:Std.Crypto.Pki.Transparency;
+let utf8 = import:Std.Encoding.Utf8;
+let verifiers = import:TestVerifiers;
+let results = import:Std.Core.Result;
+
+// Hostile inputs for every typed parser: each truncation and two single-byte mutations per byte of a recorded
+// input must give a Result, never a trap (support/*-vectors.nra). Inputs are the recorded certificates, CSRs,
+// keys, OCSP messages, SCT lists and filter cascades.
+let ParserFuzzTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let mutated = func(bytes: uint8[list], at: int, mask: uint8) -> uint8[list] {
+        let out = der.copy_range(bytes, 0, bytes.length);
+        out[at] = out[at] ^ mask;
+        return out;
+    };
+
+    /// @brief Runs the parser on every truncation (which must fail when `strict_prefix`) and on two mutations of
+    /// every `stride`-th byte; returns how many mutations still parsed.
+    let fuzz = func(bytes: uint8[list], parse: func(uint8[list]) -> bool, strict_prefix: bool, stride: int) -> int {
+        for (let n = 0; n < bytes.length; n++) {
+            last ok = parse(der.copy_range(bytes, 0, n));
+            if (strict_prefix) {
+                test.assert(!ok);
+            }
+        }
+        let accepted = 0;
+        for (let i = 0; i < bytes.length; i += stride) {
+            if (parse(mutated(bytes, i, 1))) {
+                accepted++;
+            }
+            if (parse(mutated(bytes, i, 128))) {
+                accepted++;
+            }
+        }
+        return accepted;
+    };
+
+    let certificate_der = func(name: string) -> uint8[list] {
+        last rows = cert_vectors.certificates;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i] == name && rows[i + 1] == "der") {
+                return decode(rows[i + 2]);
+            }
+        }
+        return new;
+    };
+
+    export let test_certificates = func {
+        let _ = fuzz(certificate_der("inter"), func(b: uint8[list]) -> bool => results.is_ok(certificate.parse(b)), true, 1);
+    };
+
+    export let test_csrs_and_keys = func {
+        last rows = cert_vectors.csrs;
+        let _ = fuzz(decode(rows[2]), func(b: uint8[list]) -> bool => results.is_ok(csr.parse(b)), true, 1);
+        last private_keys = pkcs8_vectors.private_keys;
+        // The P-256 key (with its public key and parameters).
+        for (let i = 0; i < private_keys.length; i += 6) {
+            if (private_keys[i] == "p256") {
+                let _ = fuzz(decode(private_keys[i + 1]), func(b: uint8[list]) -> bool => results.is_ok(keys.parse(b)), true, 1);
+            }
+        }
+        last encrypted = decode(pkcs8_vectors.encrypted[1]);
+        // Parsing only: decryption of each mutation would cost a PBKDF2 run.
+        let _ = fuzz(encrypted, func(b: uint8[list]) -> bool => results.is_ok(keys.parse_encrypted(b)), true, 1);
+    };
+
+    export let test_ocsp_requests = func {
+        last request = decode(ocsp_vectors.requests[1]);
+        let _ = fuzz(request, func(b: uint8[list]) -> bool => results.is_ok(ocsp.parse_request(b)), true, 1);
+    };
+
+    export let test_ocsp_responses = func {
+        // Every third byte: the response embeds a certificate, and each parse reads it.
+        last response = decode(ocsp_vectors.responses[7 * 2 + 1]);
+        let _ = fuzz(response, func(b: uint8[list]) -> bool => results.is_ok(ocsp.parse_response(b)), true, 3);
+    };
+
+    export let test_sct_lists_and_cascades = func {
+        last list = decode(ct_vectors.generated[1]);
+        let _ = fuzz(list, func(b: uint8[list]) -> bool => results.is_ok(transparency.parse_list(b)), true, 1);
+        last cascade = decode(crlite_vectors.cascades[1]);
+        // A cascade's bits are data, so most mutations still parse; none may trap.
+        let _ = fuzz(cascade, func(b: uint8[list]) -> bool => results.is_ok(crlite.parse(b)), false, 1);
+    };
+
+    export let test_text_inputs_with_non_ascii = func {
+        last block = pem.encode("CERTIFICATE", certificate_der("root"));
+        last text = "Issuer: Réseau ñ 世界\n" + block + "Trailer ✓\n";
+        last blocks = test.assert_ok(pem.decode_all(text));
+        test.assert_equal_int32(1, blocks.length);
+        // Non-ASCII inside a block is an error, not a trap.
+        let _ = test.assert_err(pem.decode_all("-----BEGIN X-----\nAAé=\n-----END X-----\n"));
+        let _ = test.assert_err(pem.decode_all("-----BEGIN é-----\nAAA=\n-----END é-----\n"));
+        // Host names and e-mail addresses that are not ASCII match nothing.
+        last leaf = test.assert_ok(certificate.parse(certificate_der("leaf")));
+        test.assert(!host_name.matches_dns(leaf, "wwé.example.com"));
+        test.assert(!host_name.matches_email(leaf, "admïn@example.com"));
+        let options = new paths.ValidationOptions(instant.of_epoch_seconds(1780000000, 0), new verifiers.AcceptAll());
+        options.dns_name = "ñ.example.com";
+        let _ = test.assert_err(paths.validate(leaf, new([test.assert_ok(certificate.parse(certificate_der("inter")))]),
+            new([test.assert_ok(certificate.parse(certificate_der("root")))]), options));
+        test.assert_none(host_name.parse_ip("1.2.3.é"));
+        // Every byte value as a one-line PEM body, and as explanatory text.
+        for (let b = 0; b < 256; b += 7) {
+            let bytes: uint8[list] = new([65, 65, b as uint8, 61]);
+            let _ = pem.decode_all("-----BEGIN X-----\n" + utf8.decode_lossy(bytes) + "\n-----END X-----\n");
+            let _ = pem.decode_all(utf8.decode_lossy(bytes) + "\n");
+        }
+    };
+);

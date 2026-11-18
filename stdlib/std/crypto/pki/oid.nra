@@ -1,0 +1,262 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief ASN.1 object identifiers (Stdlib.md section 20.9).
+///
+/// An `Oid` holds the DER content octets of an OBJECT IDENTIFIER and its dotted-decimal text. Arcs of any size
+/// are kept exactly, including the 128-bit arcs under 2.25. Two OIDs are equal when their encodings are.
+/// @see [Std.Crypto.Pki.Oid](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Oid)
+#Since("0.3.0")
+export let Oid = module (
+    /// @brief The longest OID content this library accepts, in bytes.
+    #Since("0.3.0")
+    export const MaxContentLength: int = 1024;
+
+    /// @brief An object identifier: an immutable value compared by its DER content octets.
+    #[Final, Since("0.3.0")]
+    export let Oid = class (
+        /// @brief The DER content octets (no tag or length). Do not change the list.
+        export last content: uint8[list];
+        /// @brief The dotted-decimal form, such as "1.2.840.10045.2.1".
+        export last dotted: string;
+
+        /// @brief Stores already-validated content and its dotted text; use `of`, `parse` or `from_content`.
+        export let init = func(content_bytes: uint8[list], text: string) {
+            content = content_bytes;
+            dotted = text;
+        };
+
+        /// @brief Whether the dotted form equals the text.
+        export let matches = func(text: string) -> bool => dotted == text;
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Oid)) {
+                return false;
+            }
+            return dotted == (other as Oid).dotted;
+        };
+
+        export let.override hash_code = func -> uint32 => dotted.hash_code();
+
+        /// @brief The dotted-decimal form.
+        export let.override to_string = func -> string => dotted;
+    );
+
+    let fail = func(offset: int, message: string) -> Result<Oid> =>
+        Result<Oid>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Validates DER content octets and builds the OID. `offset` is the position of the content in the
+    /// enclosing input, used in error offsets. Empty content, a subidentifier with a leading 0x80 byte (not
+    /// minimal), a truncated last subidentifier, or content over `MaxContentLength` bytes is a `Parse` error.
+    #[NoDiscard, Since("0.3.0")]
+    export let from_content = func(bytes: uint8[list], offset: int) -> Result<Oid> {
+        if (bytes.length == 0) {
+            return fail(offset, "empty OBJECT IDENTIFIER");
+        }
+        if (bytes.length > MaxContentLength) {
+            return fail(offset, "OBJECT IDENTIFIER too long");
+        }
+        let text = "";
+        let digits: int[list] = new;
+        let first = true;
+        let group_start = true;
+        for (let i = 0; i < bytes.length; i++) {
+            last b = bytes[i];
+            if (group_start && b == 128) {
+                return fail(offset + i, "OBJECT IDENTIFIER subidentifier is not minimal");
+            }
+            group_start = false;
+            decimal_multiply_add(digits, 128, (b & 127) as int);
+            if ((b & 128) == 0) {
+                if (first) {
+                    text = first_arcs(digits);
+                    first = false;
+                } else {
+                    text += "." + decimal_text(digits);
+                }
+                digits = new;
+                group_start = true;
+            }
+        }
+        if (!group_start) {
+            return fail(offset + bytes.length - 1, "truncated OBJECT IDENTIFIER subidentifier");
+        }
+        let copy: uint8[list] = new;
+        for (let b in bytes) {
+            copy.append(b);
+        }
+        return Result<Oid>.Ok(new Oid(copy, text));
+    };
+
+    /// @brief Parses dotted-decimal text: at least two arcs, the first 0, 1 or 2, the second at most 39 under
+    /// 0 and 1, decimal arcs without leading zeros. Anything else is a `Parse` error at the offending offset.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(text: string) -> Result<Oid> {
+        let arcs: string[list] = new;
+        let starts: int[list] = new;
+        let start = 0;
+        for (let i = 0; i <= text.byte_length; i++) {
+            if (i == text.byte_length || text.byte_at(i) == 46) {
+                last arc = text.slice(start, i);
+                if (arc.byte_length == 0 || arc.byte_length > 64) {
+                    return fail(start, "invalid OID arc");
+                }
+                for (let j = 0; j < arc.byte_length; j++) {
+                    last c = arc.byte_at(j);
+                    if (c < 48 || c > 57) {
+                        return fail(start + j, "invalid OID arc");
+                    }
+                }
+                if (arc.byte_length > 1 && arc.byte_at(0) == 48) {
+                    return fail(start, "OID arc has a leading zero");
+                }
+                arcs.append(arc);
+                starts.append(start);
+                start = i + 1;
+            }
+        }
+        if (arcs.length < 2) {
+            return fail(0, "OID needs at least two arcs");
+        }
+        if (arcs[0].byte_length != 1 || arcs[0].byte_at(0) > 50) {
+            return fail(0, "first OID arc must be 0, 1 or 2");
+        }
+        last top = (arcs[0].byte_at(0) - 48) as int;
+        let first_value = decimal_of(arcs[1]);
+        if (top < 2) {
+            if (arcs[1].byte_length > 2 || small_value(first_value) > 39) {
+                return fail(starts[1], "second OID arc must be at most 39");
+            }
+        }
+        decimal_add_small(first_value, top * 40);
+        let content: uint8[list] = new;
+        append_base128(content, first_value);
+        for (let i = 2; i < arcs.length; i++) {
+            append_base128(content, decimal_of(arcs[i]));
+        }
+        if (content.length > MaxContentLength) {
+            return fail(0, "OBJECT IDENTIFIER too long");
+        }
+        return from_content(content, 0);
+    };
+
+    /// @brief The OID with the dotted text; malformed text traps with "invalid argument: OID <text>", because a
+    /// literal OID in a program is not data.
+    #[NoDiscard, Since("0.3.0")]
+    export let of = func(text: string) -> Oid {
+        match (parse(text)) {
+            Result.Ok(value) => {
+                return value;
+            },
+            Result.Err(e) => {
+                trap_with_message("invalid argument: OID " + text);
+            },
+        }
+        trap_with_message("invalid argument: OID " + text);
+    };
+
+    // Decimal numbers as little-endian lists of digits 0..9, so that arcs of any size are exact.
+
+    let decimal_multiply_add = func(digits: int[list], factor: int, addend: int) {
+        let carry = addend;
+        for (let i = 0; i < digits.length; i++) {
+            last v = digits[i] * factor + carry;
+            digits[i] = v % 10;
+            carry = v / 10;
+        }
+        while (carry > 0) {
+            digits.append(carry % 10);
+            carry = carry / 10;
+        }
+    };
+
+    let decimal_add_small = func(digits: int[list], addend: int) => decimal_multiply_add(digits, 1, addend);
+
+    let decimal_text = func(digits: int[list]) -> string {
+        if (digits.length == 0) {
+            return "0";
+        }
+        let text = "";
+        for (let i = digits.length - 1; i >= 0; i--) {
+            text += digits[i].to_string();
+        }
+        return text;
+    };
+
+    /// @brief The value when it has at most 9 digits, else a large sentinel.
+    let small_value = func(digits: int[list]) -> int {
+        if (digits.length > 9) {
+            return 1000000000;
+        }
+        let v = 0;
+        for (let i = digits.length - 1; i >= 0; i--) {
+            v = v * 10 + digits[i];
+        }
+        return v;
+    };
+
+    /// @brief "X.Y" from the first subidentifier X * 40 + Y.
+    let first_arcs = func(digits: int[list]) -> string {
+        last v = small_value(digits);
+        if (v < 40) {
+            return "0." + v.to_string();
+        }
+        if (v < 80) {
+            return "1." + (v - 40).to_string();
+        }
+        // 2.(v - 80): subtract 80 in decimal.
+        let rest: int[list] = new;
+        for (let d in digits) {
+            rest.append(d);
+        }
+        let borrow = 80;
+        for (let i = 0; i < rest.length && borrow > 0; i++) {
+            let v2 = rest[i] - borrow % 10;
+            borrow = borrow / 10;
+            if (v2 < 0) {
+                v2 += 10;
+                borrow += 1;
+            }
+            rest[i] = v2;
+        }
+        while (rest.length > 0 && rest[rest.length - 1] == 0) {
+            rest.remove_at(rest.length - 1);
+        }
+        return "2." + decimal_text(rest);
+    };
+
+    let decimal_of = func(text: string) -> int[list] {
+        let digits: int[list] = new;
+        for (let i = text.byte_length - 1; i >= 0; i--) {
+            digits.append((text.byte_at(i) - 48) as int);
+        }
+        while (digits.length > 0 && digits[digits.length - 1] == 0) {
+            digits.remove_at(digits.length - 1);
+        }
+        return digits;
+    };
+
+    /// @brief Appends the base-128 encoding of a decimal number (destroys `digits`).
+    let append_base128 = func(out: uint8[list], digits: int[list]) {
+        let groups: int[list] = new;
+        while (digits.length > 0) {
+            // Divide by 128, most significant digit first.
+            let remainder = 0;
+            for (let i = digits.length - 1; i >= 0; i--) {
+                last v = remainder * 10 + digits[i];
+                digits[i] = v / 128;
+                remainder = v % 128;
+            }
+            while (digits.length > 0 && digits[digits.length - 1] == 0) {
+                digits.remove_at(digits.length - 1);
+            }
+            groups.append(remainder);
+        }
+        if (groups.length == 0) {
+            groups.append(0);
+        }
+        for (let i = groups.length - 1; i >= 0; i--) {
+            out.append((i > 0 ? groups[i] | 128 : groups[i]) as uint8);
+        }
+    };
+);

@@ -1,0 +1,316 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.Oid;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let names = import:Std.Crypto.Pki.Name;
+let oid_module = import:Std.Crypto.Pki.Oid;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+/// @brief The GeneralName CHOICE of RFC 5280, section 4.2.1.6 (Stdlib.md section 20.9).
+/// @see [Std.Crypto.Pki.GeneralName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-GeneralName)
+#Since("0.3.0")
+export let GeneralName = module (
+    /// @brief The alternatives, in the order of their context tags [0] to [8].
+    #Since("0.3.0")
+    export let GeneralNameKind = enum (OtherName, Rfc822Name, DnsName, X400Address, DirectoryName, EdiPartyName, Uri,
+        IpAddress, RegisteredId);
+
+    /// @brief One general name. `text` holds rfc822Name, dNSName and uniformResourceIdentifier (IA5String);
+    /// `bytes` holds iPAddress (4 or 16 bytes, or 8 or 32 with a mask in name constraints) and the content of
+    /// the other alternatives; `directory` holds directoryName; `oid` holds registeredID and otherName's type.
+    #[Final, Since("0.3.0")]
+    export let GeneralName = class (
+        export last kind: GeneralNameKind;
+        export last text: string;
+        export last bytes: uint8[list];
+        export last directory: Optional<names.Name>;
+        export last oid: Optional<Oid>;
+        /// @brief The DER encoding of the alternative, with its context tag.
+        export last der_bytes: uint8[list];
+
+        /// @brief Records a checked name; `parse` and the `dns`, `ip`, `email`, `uri` and `directory_name`
+        /// functions build names.
+        export let init = func(which: GeneralNameKind, value_text: string, value_bytes: uint8[list],
+                dir: Optional<names.Name>, id: Optional<Oid>, encoded: uint8[list]) {
+            kind = which;
+            text = value_text;
+            bytes = value_bytes;
+            directory = dir;
+            oid = id;
+            der_bytes = encoded;
+        };
+
+        /// @brief Equal when the encodings are equal.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is GeneralName)) {
+                return false;
+            }
+            last that = other as GeneralName;
+            if (that.der_bytes.length != der_bytes.length) {
+                return false;
+            }
+            for (let i = 0; i < der_bytes.length; i++) {
+                if (der_bytes[i] != that.der_bytes[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => der.hash_range(der_bytes, 0, der_bytes.length);
+
+        /// @brief "DNS:<name>", "email:<address>", "URI:<uri>", "IP:<address>[/<mask>]", "DirName:<name>",
+        /// "RID:<oid>", "othername:<oid>", or "<kind>:<hex>" for the rest.
+        export let.override to_string = func -> string {
+            match (kind) {
+                GeneralNameKind.DnsName => {
+                    return "DNS:" + text;
+                },
+                GeneralNameKind.Rfc822Name => {
+                    return "email:" + text;
+                },
+                GeneralNameKind.Uri => {
+                    return "URI:" + text;
+                },
+                GeneralNameKind.IpAddress => {
+                    return "IP:" + ip_text(bytes);
+                },
+                GeneralNameKind.DirectoryName => {
+                    match (directory) {
+                        Optional.Some(n) => {
+                            return "DirName:" + n.to_string();
+                        },
+                        Optional.None => {
+                            return "DirName:";
+                        },
+                    }
+                },
+                GeneralNameKind.RegisteredId => {
+                    return "RID:" + oid_text(oid);
+                },
+                GeneralNameKind.OtherName => {
+                    return "othername:" + oid_text(oid);
+                },
+                _ => {
+                    return "other:" + hex.encode(bytes);
+                },
+            }
+            return "";
+        };
+    );
+
+    let oid_text = func(value: Optional<Oid>) -> string {
+        match (value) {
+            Optional.Some(o) => {
+                return o.dotted;
+            },
+            Optional.None => {
+                return "";
+            },
+        }
+        return "";
+    };
+
+    /// @brief Dotted IPv4, RFC 5952 IPv6 text, or either followed by "/" and the mask for 8 or 32 bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let ip_text = func(bytes: uint8[list]) -> string {
+        if (bytes.length == 4 || bytes.length == 16) {
+            return address_text(bytes, 0, bytes.length);
+        }
+        if (bytes.length == 8 || bytes.length == 32) {
+            last half = bytes.length / 2;
+            return address_text(bytes, 0, half) + "/" + address_text(bytes, half, half);
+        }
+        return hex.encode(bytes);
+    };
+
+    let address_text = func(bytes: uint8[list], start: int, count: int) -> string {
+        if (count == 4) {
+            return $"{bytes[start]}.{bytes[start + 1]}.{bytes[start + 2]}.{bytes[start + 3]}";
+        }
+        // RFC 5952: lowercase hex, no leading zeros, the longest run of two or more zero groups as "::".
+        let groups: int[list] = new;
+        for (let i = 0; i < 8; i++) {
+            groups.append(((bytes[start + 2 * i] as int) << 8) | (bytes[start + 2 * i + 1] as int));
+        }
+        let best_start = -1;
+        let best_length = 1;
+        let i = 0;
+        while (i < 8) {
+            if (groups[i] == 0) {
+                let j = i;
+                while (j < 8 && groups[j] == 0) {
+                    j++;
+                }
+                if (j - i > best_length) {
+                    best_start = i;
+                    best_length = j - i;
+                }
+                i = j;
+            } else {
+                i++;
+            }
+        }
+        let text = "";
+        for (let g = 0; g < 8; g++) {
+            if (g == best_start) {
+                text += "::";
+                g += best_length - 1;
+                continue;
+            }
+            if (text.byte_length > 0 && text.byte_at(text.byte_length - 1) != 58) {
+                text += ":";
+            }
+            text += hex_group(groups[g]);
+        }
+        return text;
+    };
+
+    let hex_group = func(value: int) -> string {
+        last digits = "0123456789abcdef";
+        let text = "";
+        let v = value;
+        if (v == 0) {
+            return "0";
+        }
+        while (v > 0) {
+            text = digits.slice(v % 16, v % 16 + 1) + text;
+            v = v / 16;
+        }
+        return text;
+    };
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Reads one GeneralName. The IA5String alternatives must hold only ASCII; an iPAddress must have
+    /// 4, 8, 16 or 32 bytes; otherName and directoryName must be well formed.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(e: der.Element) -> Result<GeneralName> {
+        if (e.tag_class != der.ContextSpecific || e.tag_number > 8) {
+            return fail<GeneralName>(e.offset, "expected a GeneralName");
+        }
+        last none_name = Optional<names.Name>.None;
+        last none_oid = Optional<Oid>.None;
+        last n = e.tag_number;
+        if (n == 1 || n == 2 || n == 6) {
+            if (e.constructed) {
+                return fail<GeneralName>(e.offset, "IA5String name must be primitive");
+            }
+            last kind = n == 1 ? GeneralNameKind.Rfc822Name : (n == 2 ? GeneralNameKind.DnsName : GeneralNameKind.Uri);
+            return Result<GeneralName>.Ok(new GeneralName(kind, e.string_content(der.TagIa5String)?, e.content(),
+                none_name, none_oid, e.encoded()));
+        }
+        if (n == 7) {
+            if (e.constructed || !(e.length == 4 || e.length == 8 || e.length == 16 || e.length == 32)) {
+                return fail<GeneralName>(e.offset, "iPAddress must have 4, 8, 16 or 32 bytes");
+            }
+            return Result<GeneralName>.Ok(new GeneralName(GeneralNameKind.IpAddress, "", e.content(), none_name,
+                none_oid, e.encoded()));
+        }
+        if (n == 4) {
+            last inner = e.explicit_inner()?;
+            last dir = names.parse(inner)?;
+            return Result<GeneralName>.Ok(new GeneralName(GeneralNameKind.DirectoryName, "", inner.encoded(),
+                Optional<names.Name>.Some(dir), none_oid, e.encoded()));
+        }
+        if (n == 8) {
+            if (e.constructed) {
+                return fail<GeneralName>(e.offset, "registeredID must be primitive");
+            }
+            last id = oid_content(e)?;
+            return Result<GeneralName>.Ok(new GeneralName(GeneralNameKind.RegisteredId, "", e.content(), none_name,
+                Optional<Oid>.Some(id), e.encoded()));
+        }
+        if (n == 0) {
+            if (!e.constructed) {
+                return fail<GeneralName>(e.offset, "otherName must be constructed");
+            }
+            let r = e.reader();
+            last type = (r.next_universal(der.TagOid, "otherName type")?).oid()?;
+            last value = r.next()?;
+            if (!value.is_context(0)) {
+                return fail<GeneralName>(value.offset, "otherName value must be [0]");
+            }
+            r.finish()?;
+            return Result<GeneralName>.Ok(new GeneralName(GeneralNameKind.OtherName, "", value.content(), none_name,
+                Optional<Oid>.Some(type), e.encoded()));
+        }
+        last kind = n == 3 ? GeneralNameKind.X400Address : GeneralNameKind.EdiPartyName;
+        return Result<GeneralName>.Ok(new GeneralName(kind, "", e.content(), none_name, none_oid, e.encoded()));
+    };
+
+    let oid_content = func(e: der.Element) -> Result<Oid> {
+        // registeredID [8] IMPLICIT OBJECT IDENTIFIER.
+        return oid_module.from_content(e.content(), e.content_offset());
+    };
+
+    /// @brief Reads GeneralNames: a non-empty SEQUENCE of GeneralName.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_names = func(e: der.Element) -> Result<GeneralName[list]> {
+        if (!e.is_universal(der.TagSequence)) {
+            return fail<GeneralName[list]>(e.offset, "GeneralNames must be a SEQUENCE");
+        }
+        let out: GeneralName[list] = new;
+        for (let child in e.children()?) {
+            out.append(parse(child)?);
+        }
+        if (out.length == 0) {
+            return fail<GeneralName[list]>(e.offset, "GeneralNames must not be empty");
+        }
+        return Result<GeneralName[list]>.Ok(out);
+    };
+
+    let built = func(encoded: uint8[list]) -> GeneralName {
+        match (der.parse(encoded)) {
+            Result.Ok(e) => {
+                match (parse(e)) {
+                    Result.Ok(name) => {
+                        return name;
+                    },
+                    Result.Err(err) => {
+                        trap_with_message("invalid argument: GeneralName");
+                    },
+                }
+            },
+            Result.Err(err) => {
+                trap_with_message("invalid argument: GeneralName");
+            },
+        }
+        trap_with_message("invalid argument: GeneralName");
+    };
+
+    /// @brief dNSName; a non-ASCII name traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let dns = func(name: string) -> GeneralName => built(writer.implicit(2, false, ascii(name)));
+
+    /// @brief rfc822Name; a non-ASCII address traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let email = func(address: string) -> GeneralName => built(writer.implicit(1, false, ascii(address)));
+
+    /// @brief uniformResourceIdentifier; a non-ASCII URI traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let uri = func(text: string) -> GeneralName => built(writer.implicit(6, false, ascii(text)));
+
+    /// @brief iPAddress of 4 or 16 bytes (8 or 32 with a mask); another length traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let ip = func(address: uint8[list]) -> GeneralName => built(writer.implicit(7, false, address));
+
+    /// @brief directoryName.
+    #[NoDiscard, Since("0.3.0")]
+    export let directory_name = func(name: names.Name) -> GeneralName =>
+        built(writer.tlv(2, true, 4, name.der_bytes));
+
+    let ascii = func(text: string) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) >= 128) {
+                trap_with_message("invalid argument: GeneralName text must be ASCII");
+            }
+            out.append(text.byte_at(i));
+        }
+        return out;
+    };
+);

@@ -1,0 +1,336 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+let der = import:Std.Crypto.Pki.Der;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief CRLite revocation checking with Bloom-filter cascades in Mozilla's filter-cascade format (Stdlib.md
+/// section 20.9).
+///
+/// The format is the one mozilla/filter-cascade writes and mozilla/rust-cascade (Firefox) reads: a little-endian
+/// version (1 or 2); for version 2 an inverted flag and a salt of up to 255 bytes; then layers, each with a hash
+/// algorithm byte (1 MurmurHash3, 2 SHA-256 low 32 bits, 3 SHA-256 counter mode), the bit count, the number of hash
+/// functions, the layer number (1, 2, ...) and the bits, least significant bit first. Every layer must use the
+/// same algorithm. A key is in the cascade when it is in layers 1 to k and not in layer k + 1 with k odd (or in all
+/// of them with their count odd), with the answer inverted for an inverted cascade.
+///
+/// A CRLite key is SHA-256 of the issuer's SubjectPublicKeyInfo followed by the serial number's content bytes.
+/// A cascade answers exactly only for the certificates it was built over; `check` therefore takes the issuers the
+/// filter covers, and a certificate outside them is `NotCovered`, never `NotRevoked`. Checking that the
+/// certificate was logged before the filter was built (its SCT timestamps) is the caller's part.
+/// @see [Std.Crypto.Pki.CrLite](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-CrLite)
+#Since("0.3.0")
+export let CrLite = module (
+    /// @brief The hash of a cascade's layers.
+    #Since("0.3.0")
+    export let CascadeHash = enum (MurmurHash3, Sha256Low32, Sha256Counter);
+
+    /// @brief The revocation decision for one certificate.
+    #Since("0.3.0")
+    export let Decision = enum (Revoked, NotRevoked, NotCovered);
+
+    /// @brief One Bloom filter layer.
+    #[Final, Since("0.3.0")]
+    export let BloomLayer = class (
+        /// @brief The number of bits.
+        export last size: uint32;
+        export last hash_count: uint32;
+        export last bits: uint8[list];
+
+        export let init = func(bit_count: uint32, hashes: uint32, data: uint8[list]) {
+            size = bit_count;
+            hash_count = hashes;
+            bits = data;
+        };
+
+        export let.override to_string = func -> string => $"BloomLayer({size} bits, {hash_count} hashes)";
+    );
+
+    /// @brief A parsed filter cascade. Compared by its encoding.
+    #[Final, Since("0.3.0")]
+    export let FilterCascade = class (
+        export last version: int;
+        export last inverted: bool;
+        export last salt: uint8[list];
+        export last hash: CascadeHash;
+        export last layers: BloomLayer[list];
+        export last encoded: uint8[list];
+
+        export let init = func(format_version: int, is_inverted: bool, salt_bytes: uint8[list], algorithm: CascadeHash,
+                filters: BloomLayer[list], bytes: uint8[list]) {
+            version = format_version;
+            inverted = is_inverted;
+            salt = salt_bytes;
+            hash = algorithm;
+            layers = filters;
+            encoded = bytes;
+        };
+
+        /// @brief Whether the key is in the cascade.
+        export let has = func(key: uint8[list]) -> bool {
+            let state = new IndexState(hash, key, salt);
+            let result = false;
+            for (let layer in layers) {
+                let present = true;
+                for (let i: uint32 = 0; i < layer.hash_count; i++) {
+                    last index = state.next(layer.size);
+                    if ((layer.bits[(index / 8) as int] & ((1 << (index % 8)) as uint8)) == 0) {
+                        present = false;
+                        break;
+                    }
+                }
+                if (!present) {
+                    break;
+                }
+                result = !result;
+                state.next_layer();
+            }
+            return inverted ? !result : result;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is FilterCascade)) {
+                return false;
+            }
+            last that = other as FilterCascade;
+            if (that.encoded.length != encoded.length) {
+                return false;
+            }
+            for (let i = 0; i < encoded.length; i++) {
+                if (encoded[i] != that.encoded[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => der.hash_range(encoded, 0, encoded.length);
+
+        export let.override to_string = func -> string => $"FilterCascade({layers.length} layers, {encoded.length} bytes)";
+    );
+
+    /// @brief The index generator of rust-cascade's CascadeIndexGenerator, one per lookup.
+    #Final
+    let IndexState = class (
+        last algorithm: CascadeHash;
+        last key: uint8[list];
+        last salt: uint8[list];
+        let counter: uint32 = 0;
+        let depth: uint32 = 1;
+        let state: uint8[list] = new;
+        let available: int = 0;
+
+        export let init = func(which: CascadeHash, key_bytes: uint8[list], salt_bytes: uint8[list]) {
+            algorithm = which;
+            key = key_bytes;
+            salt = salt_bytes;
+        };
+
+        export let next_layer = func {
+            if (algorithm != CascadeHash.Sha256Counter) {
+                counter = 0;
+                depth = depth + 1;
+            }
+        };
+
+        export let next = func(range: uint32) -> uint32 {
+            let value: uint32 = 0;
+            if (algorithm == CascadeHash.MurmurHash3) {
+                value = murmur3(key, ((counter << 16) + depth));
+                counter = counter + 1;
+            } else if (algorithm == CascadeHash.Sha256Low32) {
+                let h = new sha2.Sha256();
+                h.update(salt);
+                let prefix: uint8[list] = new;
+                words.append32_le(prefix, counter);
+                prefix.append((depth & 255) as uint8);
+                h.update(prefix);
+                h.update(key);
+                value = words.load32_le(h.finish(), 0);
+                counter = counter + 1;
+            } else {
+                // Bytes needed: ceil(log2(next power of two of range) / 8).
+                let power: uint64 = 1;
+                let log2 = 0;
+                while (power < (range as uint64)) {
+                    power = power * 2;
+                    log2++;
+                }
+                last needed = (log2 + 7) / 8;
+                let index_bytes: uint8[list] = new([0, 0, 0, 0]);
+                for (let i = 0; i < needed; i++) {
+                    if (available == 0) {
+                        let h = new sha2.Sha256();
+                        let prefix: uint8[list] = new;
+                        words.append32_le(prefix, counter);
+                        h.update(prefix);
+                        h.update(salt);
+                        h.update(key);
+                        state = h.finish();
+                        available = 32;
+                        counter = counter + 1;
+                    }
+                    index_bytes[i] = state[32 - available];
+                    available--;
+                }
+                value = words.load32_le(index_bytes, 0);
+            }
+            return value % range;
+        };
+
+        export let.override to_string = func -> string => "IndexState";
+    );
+
+    /// @brief MurmurHash3 x86 32-bit of the key with the seed.
+    let murmur3 = func(data: uint8[list], seed: uint32) -> uint32 {
+        last c1: uint64 = 3432918353;
+        last c2: uint64 = 461845907;
+        let h = seed;
+        last blocks = data.length / 4;
+        for (let b = 0; b < blocks; b++) {
+            let k = words.load32_le(data, b * 4);
+            k = mul32(k, c1);
+            k = rotl(k, 15);
+            k = mul32(k, c2);
+            h = h ^ k;
+            h = rotl(h, 13);
+            h = words.add32(mul32(h, 5), 3864292196);
+        }
+        let k1: uint32 = 0;
+        last tail = blocks * 4;
+        last rest = data.length & 3;
+        if (rest >= 3) {
+            k1 = k1 ^ ((data[tail + 2] as uint32) << 16);
+        }
+        if (rest >= 2) {
+            k1 = k1 ^ ((data[tail + 1] as uint32) << 8);
+        }
+        if (rest >= 1) {
+            k1 = k1 ^ (data[tail] as uint32);
+            k1 = mul32(k1, c1);
+            k1 = rotl(k1, 15);
+            k1 = mul32(k1, c2);
+            h = h ^ k1;
+        }
+        h = h ^ (data.length as uint32);
+        h = h ^ (h >> 16);
+        h = mul32(h, 2246822507);
+        h = h ^ (h >> 13);
+        h = mul32(h, 3266489909);
+        return h ^ (h >> 16);
+    };
+
+    let mul32 = func(a: uint32, b: uint64) -> uint32 => (((a as uint64) * b) & 4294967295) as uint32;
+
+    let rotl = func(x: uint32, n: int) -> uint32 => (x << n) | (x >> (32 - n));
+
+    let fail = func<T>(offset: int, message: string) -> Result<T> =>
+        Result<T>.Err(Error.Parse { kind: ParseErrorKind.Syntax, offset: offset, message: message });
+
+    /// @brief Parses a cascade. A version other than 1 or 2, an inverted flag other than 0 or 1, a layer whose bits
+    /// run past the input, a layer of 0 bits, irregular layer numbers, mixed hash algorithms, an unknown algorithm,
+    /// or no layer at all is a `Parse` error.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(bytes: uint8[list]) -> Result<FilterCascade> {
+        if (bytes.length < 2) {
+            return fail<FilterCascade>(0, "truncated at version");
+        }
+        last version = (bytes[0] as int) | ((bytes[1] as int) << 8);
+        if (version < 1 || version > 2) {
+            return fail<FilterCascade>(0, "unknown cascade version");
+        }
+        let at = 2;
+        let inverted = false;
+        let salt: uint8[list] = new;
+        if (version == 2) {
+            if (bytes.length < 4) {
+                return fail<FilterCascade>(at, "truncated at the inverted flag or salt length");
+            }
+            if (bytes[2] > 1) {
+                return fail<FilterCascade>(2, "invalid inverted flag");
+            }
+            inverted = bytes[2] == 1;
+            last salt_length = bytes[3] as int;
+            if (bytes.length - 4 < salt_length) {
+                return fail<FilterCascade>(4, "truncated salt");
+            }
+            salt = der.copy_range(bytes, 4, 4 + salt_length);
+            at = 4 + salt_length;
+        }
+        let layers: BloomLayer[list] = new;
+        let algorithm = CascadeHash.MurmurHash3;
+        while (at < bytes.length) {
+            if (bytes.length - at < 10) {
+                return fail<FilterCascade>(at, "truncated layer header");
+            }
+            last code = bytes[at] as int;
+            if (code < 1 || code > 3) {
+                return fail<FilterCascade>(at, "unknown hash algorithm");
+            }
+            last which = code == 1 ? CascadeHash.MurmurHash3 : (code == 2 ? CascadeHash.Sha256Low32 : CascadeHash.Sha256Counter);
+            if (layers.length == 0) {
+                algorithm = which;
+            } else if (which != algorithm) {
+                return fail<FilterCascade>(at, "layers use different hash algorithms");
+            }
+            last size = words.load32_le(bytes, at + 1);
+            last hashes = words.load32_le(bytes, at + 5);
+            last number = bytes[at + 9] as int;
+            if (number != layers.length + 1) {
+                return fail<FilterCascade>(at + 9, "irregular layer numbering");
+            }
+            if (size == 0) {
+                return fail<FilterCascade>(at + 1, "a layer must have at least one bit");
+            }
+            last byte_count = ((size as uint64) + 7) / 8;
+            if (byte_count > ((bytes.length - at - 10) as uint64)) {
+                return fail<FilterCascade>(at + 10, "layer bits run past the input");
+            }
+            layers.append(new BloomLayer(size, hashes, der.copy_range(bytes, at + 10, at + 10 + (byte_count as int))));
+            at += 10 + (byte_count as int);
+        }
+        if (layers.length == 0) {
+            return fail<FilterCascade>(at, "missing filters");
+        }
+        return Result<FilterCascade>.Ok(new FilterCascade(version, inverted, salt, algorithm, layers,
+            der.copy_range(bytes, 0, bytes.length)));
+    };
+
+    /// @brief The CRLite key: SHA-256 of the issuer's SubjectPublicKeyInfo, then the serial's content bytes.
+    #[NoDiscard, Since("0.3.0")]
+    export let key_of = func(certificate: Certificate, issuer: Certificate) -> uint8[list] {
+        let key = sha2.sha256(issuer.public_key.der_bytes);
+        words.append_all(key, certificate.serial);
+        return key;
+    };
+
+    /// @brief The decision for the certificate: `NotCovered` unless SHA-256 of its issuer's SubjectPublicKeyInfo
+    /// is in `covered_issuers` (empty means the caller vouches that the filter covers the issuer), else `Revoked`
+    /// when the cascade holds its key, else `NotRevoked`. The cascade must hold the revoked certificates.
+    #[NoDiscard, Since("0.3.0")]
+    export let check = func(cascade: FilterCascade, certificate: Certificate, issuer: Certificate,
+            covered_issuers: uint8[list][list]) -> Decision {
+        if (covered_issuers.length > 0) {
+            last issuer_hash = sha2.sha256(issuer.public_key.der_bytes);
+            let covered = false;
+            for (let h in covered_issuers) {
+                if (h.length == issuer_hash.length) {
+                    let same = true;
+                    for (let i = 0; i < h.length; i++) {
+                        if (h[i] != issuer_hash[i]) {
+                            same = false;
+                        }
+                    }
+                    if (same) {
+                        covered = true;
+                    }
+                }
+            }
+            if (!covered) {
+                return Decision.NotCovered;
+            }
+        }
+        return cascade.has(key_of(certificate, issuer)) ? Decision.Revoked : Decision.NotRevoked;
+    };
+);
