@@ -513,7 +513,7 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 9. `^`
 10. `|`
 11. `<`, `<=`, `>`, `>=`
-12. `==`, `!=`, `===`
+12. `==`, `!=`, `===`, `!==`
 13. `&&`
 14. `||`
 15. `??`, which associates to the right
@@ -535,6 +535,15 @@ let plain = func(shape: Shape, ready: bool) -> bool => shape is not Circle && no
 ```
 
 `a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
+
+`a !== b` is `!(a === b)` ([design](../design/Expressions030.md#value-inequality), implemented, proposed): the same `equals` call, the same diagnostics, and the same program. `!==` is one token. Like `===`, it forms no comparison chain, so `a !== b and c` is a syntax error.
+
+<!-- example: check -->
+```neura
+let Point = record (x: int, y: int);
+
+let moved = func(from: Point, to: Point) -> bool => from !== to;
+```
 
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
 

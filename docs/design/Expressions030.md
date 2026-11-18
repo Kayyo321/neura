@@ -72,7 +72,7 @@ The table replaces the list in [Expressions](../lang/CoreLanguage.md#expressions
 | 3 | prefix `++`, `--`, `!`, `not` (new), `-`, `~` | right (prefix) | implemented, proposed |
 | 4 | `as`, `is`, `is not` (new) | left | implemented, proposed |
 | 5–11 | `*` `/` `%`; `+` `-`; `<<` `>>`; `&`; `^`; `|`; `<` `<=` `>` `>=` | left | existing |
-| 12 | `==`, `!=`, `===`, `!==` (new) | left; `==` and `!=` also form comparison chains | proposed |
+| 12 | `==`, `!=`, `===`, `!==` (new) | left; `==` and `!=` also form comparison chains | implemented, proposed |
 | 13 | `&&` | left | existing |
 | 14 | `||` | left | existing |
 | 15 | `??` | right | existing |
@@ -193,7 +193,7 @@ A chain of two or more operands after folding lowers to `concat text` (NeuraIR o
 
 ## Value inequality
 
-`a !== b` is `!(a === b)`: the same operands, the same `equals` selection and dispatch, the same diagnostics, and the same image. `!==` is one token (the lexer takes it before `!=`), at level 12. Like `===`, it does not form a comparison chain: `x !== a and b` keeps the existing E0210 rule for `===`. Extending chains to `===` and `!==` is left for a later change.
+`a !== b` is `!(a === b)`: the same operands, the same `equals` selection and dispatch, the same diagnostics, and the same image. `!==` is one token (the lexer takes it before `!=`), at level 12. Like `===`, it does not form a comparison chain: `x !== a and b` is the syntax error that `x === a and b` gives (see [Decisions taken in the implementation](#decisions-taken-in-the-implementation)). Extending chains to `===` and `!==` is left for a later change. Status: implemented, proposed.
 
 ## Return forms
 
@@ -272,7 +272,7 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 43. `s ..= "x";` appends; `s ..= a .. b;` is one allocation; `s ..= (a .. b);` two; `items[next()] ..= "x";` calls `next` once.
 44. `n ..= 5;` with an integer `n` is E0262 explaining both forms; `let r = n ..= 5;` is a range; `s ..= 5;` is E1100.
 45. A read-only `string` destination of `..=` is the existing read-only assignment error.
-46. `a !== b` builds the image of `!(a === b)`; `a !== b and c` is E0210; `!==` on operands without `equals` is the `===` error.
+46. `a !== b` builds the image of `!(a === b)`; `a !== b and c` is the syntax error of `a === b and c`; `!==` on operands without `equals` is the `===` error.
 47. `a ! == b` and `a != = b`, written with spaces, are parse errors as today.
 48. `return if (x > 0) -> "Positive"; else if (x == 0) -> "Zero"; else -> "Negative";` returns each of the three; `return if (c) -> a else -> b;` is accepted.
 49. `return if (c) -> a;` with no `else`, `return if (c) a else -> b;` and a block arm are E0264.
@@ -333,3 +333,4 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 - **Step 3: scopes and names.** The true branch is a block inside the bindings' scope, so a `let` in it may hide a binding, as a block inside any scope may. Two narrowings of one condition that bind the same name, and an after-`if` binding of `is not` whose name the enclosing block already declares, are the duplicate-local error E0301. Assigning a binding is the error that assigning a `match.is` binding gives, E0440 ("cannot assign twice"), since the binding is made the same way.
 - **Step 3: rejections.** E0265 is reported in two ways: for a narrowing the parser recognized at the start of a top-level conjunct but that is not a conjunct root (`x is y: T || z`), and for a parse that fails at the `:` directly after `is name` or `is not name` in an `if`, `while`, `do` or `for` condition (parentheses, `!`, `a + b is y: T`, loops). Incomplete input such as `if (x is y:` reports the existing missing-type error at the end of the input. The language server lists the bindings as read-only names of the enclosing scope; hover with the refined type is left for step 8.
 - **Step 4: character literals.** The token is an Integer whose text is the literal as written, so the formatter, the language server's number class and the hole lexer of interpolated strings need no change; the parser gives the expression the decimal value and marks it, and lowering gives a marked literal `byte` where no integer type is expected, in a generic call's inference as well. Two literals in one binary operation keep the existing rule that the left operand types the right one, so `'A' + 1` is a `byte` and `1 + 'A'` an `int32`; `-'A'` with no expected type is the unsigned-literal range error E0424, with a note giving the literal's value. Three quotes, `'''`, are E0261 with the suggestion `'\''`. A tab between quotes has the machine-applicable fix `'\t'`; an unterminated literal skips the rest of its line, as an unterminated string does. The debugger's expressions accept a character literal where they accept an integer.
+- **Step 5: `!==` and `and`.** The note said `a !== b and c` keeps "the existing E0210 rule for `===`", but `a === b and c` is not E0210 today: `===` never starts a comparison chain, so the parser stops before `and` and reports the expected `;` or `)` (E0201 or E0203). `!==` is excluded from chains exactly as `===` is and gives the same errors, and E0210 stays the code of malformed `==`/`!=` chains. Lowering rewrites `a !== b` to `!(a === b)` before the operand checks of `!`, so the formatter and the syntax tree keep the written operator.

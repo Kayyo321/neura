@@ -2111,7 +2111,7 @@ private:
     int precedence() const {
         if (at("||")) return 1;
         if (at("&&")) return 2;
-        if (at("==") || at("!=") || at("===")) return equality_precedence;
+        if (at("==") || at("!=") || at("===") || at("!==")) return equality_precedence;
         if (at_shift()) return 8;
         if (at("<") || at("<=") || at(">") || at(">=")) return ordering_precedence;
         if (at("|")) return 5;
@@ -2139,7 +2139,8 @@ private:
             // Each top-level conjunct of an `if` condition may narrow.
             if (op == "&&" && start == narrowing_root_ && minimum_precedence == 1) narrowing_next_ = true;
             auto right = expression(priority + 1, true, branch_keyword);
-            if (op != "===" && (priority == equality_precedence || priority == ordering_precedence) &&
+            // `===` and `!==` form no comparison chain (docs/design/Expressions030.md).
+            if (op != "===" && op != "!==" && (priority == equality_precedence || priority == ordering_precedence) &&
                 at_comparison_connector(branch_keyword)) {
                 left = comparison_chain(start, std::move(op), std::move(left), std::move(right), branch_keyword);
                 continue;

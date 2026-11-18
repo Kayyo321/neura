@@ -1,0 +1,8 @@
+error[E0203]: expected ')'
+ --> $DIR/value-inequality-chain.nra:6:17
+  |
+6 |     if (a !== b and c) {
+  |                 ^^^ expected ')', found 'and'
+  |        - unclosed '(' opened here
+
+For more information about this error, try `neura explain E0203`.

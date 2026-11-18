@@ -3500,6 +3500,14 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
 }
 
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+    if (expr.kind == ExprKind::Binary && expr.text == "!==") {
+        // docs/design/Expressions030.md, Value inequality: `a !== b` is
+        // `!(a === b)`, lowered as that form so it builds the same image.
+        Expr equal = expr;
+        equal.text = "===";
+        Expr negation{ExprKind::Unary, expr.span, "!", {std::move(equal)}, {}, {}};
+        return expression(negation, context, expected, call_argument);
+    }
     const bool guarded = expr.kind == ExprKind::Binary || expr.kind == ExprKind::Unary ||
                          expr.kind == ExprKind::PrefixUpdate || expr.kind == ExprKind::PostfixUpdate ||
                          expr.kind == ExprKind::ComparisonChain || expr.kind == ExprKind::Member ||

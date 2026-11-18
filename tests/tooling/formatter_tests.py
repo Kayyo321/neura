@@ -117,6 +117,12 @@ let reference=func(value:&int)->&int=>value;'''
         self.assertIn('value: &int', formatted)
         self.assertIn('-> &int', formatted)
 
+    def test_expression_operators_of_0_3_0(self):
+        # docs/design/Expressions030.md, Tooling: one space around `!==`.
+        source = """let f=func(a:int,b:int)->bool=>a!==b||!(a===b);"""
+        formatted = self.formatted(source)
+        self.assertIn('=> a !== b || !(a === b);', formatted)
+
     def test_negation_words_keep_their_spelling(self):
         # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.
         source = """let Shape=class();let Circle=class:Shape();
