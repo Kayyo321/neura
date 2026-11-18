@@ -53,6 +53,8 @@ def make_fixtures(neura, wasm, work):
         'sha256': ROOT / 'tests/benchmarks/sha256.nra',
         'sorting': ROOT / 'tests/benchmarks/sort.nra',
         'kernelState': ROOT / 'tests/stdlib/sha256/traps/update-after-finish.nra',
+        # Lowered float operations in nvm.wasm against the native reference.
+        'floats': ROOT / 'tests/backend/programs/floats.nra',
     }
     oracles = {}
     for name, source in sources.items():
@@ -68,6 +70,10 @@ def make_fixtures(neura, wasm, work):
         else:
             oracles[name] = native_oracle(neura, image)
     oracles['stepLimit'] = native_oracle(neura, work / 'regions.nvr', options=('--max-steps', '11'))
+    # The image of tests/lift/portable.cmake, built natively; nvm.wasm must lift every hint of it.
+    subprocess.run([neura, 'build', ROOT / 'tests/lift/portable/graphs.nra', '-o', work / 'portable.nvr'], cwd=ROOT,
+                   check=True, timeout=60)
+    oracles['portable'] = {'status': subprocess.run([neura, 'run', work / 'portable.nvr'], timeout=60).returncode}
     (work / 'oracles.json').write_text(json.dumps(oracles))
 
 
@@ -145,6 +151,7 @@ def print_report(label, report):
     print(f'{label}: {len(cases)} oracle comparisons; {report["yields"]} driven yields; '
           f'{report["denied"]} busy idle callbacks skipped; longest explicit idle proof {proof_ms:.3f} ms '
           f'({longest["name"]}, tier {longest["tier"]}, slice {longest["budget"]})')
+    print(f'  native hints in nvm.wasm: {report["portable"]}')
     if report['browserPauses']:
         print(f'  {len(report["browserPauses"])} requestIdleCallback proofs, '
               f'longest {max(report["browserPauses"]):.3f} ms')

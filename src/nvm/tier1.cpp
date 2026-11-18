@@ -342,6 +342,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     regions_ = std::vector<RegionEntry>(total);
     programs_ = std::vector<RegionEntry>(image.functions.size());
+    settled_proofs_ = std::vector<std::uint64_t>(image.functions.size());
 #ifndef NEURA_WASM_RUNTIME
     // A function has at most five programs over its life: the first and four
     // refreshes (TierCache::program).
@@ -413,8 +414,13 @@ std::optional<std::chrono::steady_clock::duration> TierCache::prove_one_idle() {
     }
     const auto runs = counts_[first_entry_[proof.function] + proof.block].load(std::memory_order_relaxed);
     const auto start = std::chrono::steady_clock::now();
-    resolve_now(proof.function, proof.block, std::max(runs, proof.runs));
-    return std::chrono::steady_clock::now() - start;
+    const auto settled = resolve_now(proof.function, proof.block, std::max(runs, proof.runs)).settled;
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    if (settled) {
+        const std::lock_guard lock(mutex_);
+        ++settled_proofs_[proof.function];
+    }
+    return elapsed;
 }
 
 TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
@@ -510,10 +516,6 @@ TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32
         if (!result.block && result.rejection.find("out of time") != std::string::npos) result.exhausted = true;
     }
     time = std::chrono::steady_clock::now() - start;
-    if (bounded && result.exhausted && result.rejection == lift::exhausted_work) {
-        result.exhausted = false;
-        result.rejection = "the proof needs more work than one bounded attempt allows";
-    }
 
     const std::lock_guard lock(mutex_);
     (hint ? hint_spent_ : search_spent_) += time;
@@ -522,6 +524,20 @@ TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32
         return resolution;
     };
     auto& found = entry(function, block);
+    // A bounded attempt that ran out of work is resumed by the next one
+    // where it stopped (GraphProofs keeps the partial analysis), so it is
+    // tried again at the block's next visit while each attempt settles more
+    // of the graph. One that settled nothing more is final.
+    bool resume = false;
+    if (bounded && result.exhausted && result.rejection == lift::exhausted_work) {
+        if (result.progress > found.bounded_progress) {
+            found.bounded_progress = result.progress;
+            resume = true;
+        } else {
+            result.exhausted = false;
+            result.rejection = "the proof needs more work than one bounded attempt allows";
+        }
+    }
     const bool by_hint = retry ? found.from_hint : hint != nullptr;
     if (result.block) {
         found.state = Entry::State::Settled;
@@ -548,7 +564,7 @@ TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32
         // the proof does not pay for attempts that cannot finish.
         const auto share = std::max(result.progress, 1.0 / 256);
         const auto factor = std::clamp<std::uint64_t>(static_cast<std::uint64_t>(std::ceil(2.0 / share)), 8, 512);
-        found.next_attempt = std::max<std::uint64_t>(runs * factor, 256);
+        found.next_attempt = resume ? runs + 1 : std::max<std::uint64_t>(runs * factor, 256);
         return spent({nullptr, false, found.next_attempt});
     }
     // A failure is final for its source: a failed hint is not tried again

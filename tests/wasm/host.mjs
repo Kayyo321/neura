@@ -95,6 +95,7 @@ async function main() {
     const sha256 = await read('sha256.nvr');
     const sorting = await read('sorting.nvr');
     const state = await read('kernelState.nvr');
+    const floats = await read('floats.nvr');
     // An ungranted service binds and is answered by the runtime with error 14.
     const ungranted = new NvmExecution(module, hello);
     try {
@@ -113,6 +114,7 @@ async function main() {
         ['hello', hello, {}], ['overflow', trap, {}], ['clock', clock, { args: ['héllo'] }],
         ['regions', regions, {}], ['stepLimit', regions, { maxSteps: 11n }],
         ['sha256', sha256, { args: ['6000'] }], ['sorting', sorting, { args: ['600'] }], ['kernelState', state, {}],
+        ['floats', floats, {}],
     ]) {
         const kernelBoundaries = ['sha256', 'sorting', 'kernelState'].includes(name) ? new Map() : null;
         for (const [tier, budget, idle] of [[0, 1, false], [1, 17, true], [2, 1, false], [2, 17, true], [2, 4096, true]]) {
@@ -170,7 +172,28 @@ async function main() {
             run.close();
         }
     }
-    return { outcomes, yields, denied, proofs, browserPauses };
+    // Graphs built by the native compiler lift in nvm.wasm, which Clang builds (tests/lift/portable.cmake): every
+    // hint of the fixture is proven without a structural rejection, with a proof at every yield.
+    const portable = new NvmExecution(module, await read('portable.nvr'), { maxSteps: 10n ** 9n });
+    let portableStatistics;
+    try {
+        // Every queued proof is taken after each short slice, so every hint the run reaches is tried.
+        let event;
+        do {
+            event = portable.advanceSlice(64);
+            while (portable.proofPending) portable.proveOneIdle();
+        } while (event.kind === 'yield');
+        equal(event.kind, 'completed', 'portable fixture outcome');
+        equal(event.status, oracles.portable.status, 'portable fixture status');
+        portableStatistics = portable.tierStatistics.split('\n')[0];
+        const counts = /attempted (\d+), lifted (\d+) .*hints rejected (\d+);/.exec(portableStatistics);
+        if (!counts || counts[3] !== '0' || counts[2] === '0') {
+            throw new Error(`the native compiler's hints did not all lift in nvm.wasm: ${portableStatistics}`);
+        }
+    } finally {
+        portable.close();
+    }
+    return { outcomes, yields, denied, proofs, browserPauses, portable: portableStatistics };
 }
 
 if (new URL(import.meta.url).protocol === 'file:') {

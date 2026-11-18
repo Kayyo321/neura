@@ -62,7 +62,10 @@ async function wire() {
     let commits = 0;
     for (const sample of corpus) {
         for (const { operations } of sample.commits) {
-            equal(decodeCommit(encodeCommit(operations)), operations, sample.name);
+            // JSON has no BigInt: the corpus writes handler identifiers as numbers, which decode as BigInts.
+            const expected = operations.map(operation => (typeof operation.handler === 'number'
+                ? { ...operation, handler: BigInt(operation.handler) } : operation));
+            equal(decodeCommit(encodeCommit(operations)), expected, sample.name);
             commits += 1;
         }
     }
@@ -145,15 +148,24 @@ async function waits(module, oracles) {
     return results;
 }
 
-function canonical(node) {
+// A node as the corpus writes it (as tests/apps/ui-ops/dom-test.mjs reads it). The style attribute is the browser's
+// serialization of the custom properties, which are compared one by one under `vars`; `props` lists the DOM
+// properties the expected node names.
+function canonical(node, expected) {
     if (node.nodeType === Node.TEXT_NODE) return node.data;
     const result = { tag: node.localName };
     if (node.namespaceURI === 'http://www.w3.org/2000/svg') result.svg = true;
-    if (node.attributes.length) {
-        const names = node.getAttributeNames().sort();
-        result.attrs = Object.fromEntries(names.map(name => [name, node.getAttribute(name)]));
+    const names = node.getAttributeNames().filter(name => name !== 'style').sort();
+    if (names.length) result.attrs = Object.fromEntries(names.map(name => [name, node.getAttribute(name)]));
+    const variables = Array.from(node.style ?? [], name => name).filter(name => name.startsWith('--')).sort();
+    if (variables.length) {
+        result.vars = Object.fromEntries(variables.map(name => [name, node.style.getPropertyValue(name).trim()]));
     }
-    if (node.childNodes.length) result.children = Array.from(node.childNodes, canonical);
+    const props = Object.keys(expected?.props ?? {}).sort();
+    if (props.length) result.props = Object.fromEntries(props.map(name => [name, node[name]]));
+    if (node.childNodes.length) {
+        result.children = Array.from(node.childNodes, (child, i) => canonical(child, expected?.children?.[i]));
+    }
     return result;
 }
 
@@ -170,7 +182,7 @@ async function corpus() {
         try {
             for (const { operations, tree } of sample.commits) {
                 equal(ui.commit(root, encodeCommit(operations)), undefined, sample.name);
-                equal(Array.from(element.childNodes, canonical), tree, sample.name);
+                equal(Array.from(element.childNodes, (child, i) => canonical(child, tree[i])), tree, sample.name);
                 commits += 1;
             }
             equal(ui.commit(root, Uint8Array.of(1, 1, 0, 0, 0, 1, 99, 0, 0, 0)), { error: 4 }, 'unknown node');

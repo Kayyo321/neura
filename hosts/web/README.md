@@ -1,6 +1,6 @@
 # Browser host
 
-This directory holds the browser host of Neura web applications: the NVM adapter `nvm.js`, the UI and history services `ui.mjs` and their encodings `ui-wire.mjs`, and the DOM adapter `dom.mjs`. [Application host providers](../../docs/runtime/Providers.md) owns their contracts.
+This directory holds the browser host of Neura web applications: the NVM adapter `nvm.js`, the UI and history services `ui.mjs` and their encodings `ui-wire.mjs`, the DOM adapter `dom.mjs`, the HTTP client `fetch.mjs`, and the bundle's start module `boot.mjs`. [Application host providers](../../docs/runtime/Providers.md) owns their contracts.
 
 ## DOM adapter
 
@@ -40,7 +40,7 @@ Run `python3 tests/apps/ui-ops/browser.py` using local Chromium and Firefox. The
 
 Configure the `wasm-runtime` preset with `-DNEURA_WASM_HOST=ON`. The `neura_wasm` target produces `nvm.mjs` and `nvm.wasm` in the preset's build directory. Instantiate the generated module, then pass it and the NVR bytes to `new NvmExecution(module, image, { args, host, tier })` from `nvm.js`. The constructor checks the [browser adapter interface](../../docs/runtime/Providers.md#browser-adapter-interface) version, verifies the image, and binds every import before execution starts. Each instance owns its frames, heap, scheduler, and proof queue. Call `close()` when finished.
 
-The members of `host` grant [the browser services](../../docs/runtime/Providers.md#browser-services). A service the host does not grant still binds and answers error 14. `browserHost({ output, ui, history })` returns the defaults of a page: console lines on `console.log`, the page's clocks, timers for sleeps, `crypto.getRandomValues` for entropy, and the UI and history services when given a `UiHost` and a `HistoryHost` from `ui.mjs`.
+The members of `host` grant [the browser services](../../docs/runtime/Providers.md#browser-services). A service the host does not grant still binds and answers error 14. `browserHost({ output, ui, history, http })` returns the defaults of a page: console lines on `console.log`, the page's clocks, timers for sleeps, `crypto.getRandomValues` for entropy, the UI and history services when given a `UiHost` and a `HistoryHost` from `ui.mjs`, and [`neura.http.fetch`](../../docs/runtime/Providers.md#http-fetch) when given a `FetchHost` from `fetch.mjs`.
 
 | Member | Called as | Answer |
 | --- | --- | --- |

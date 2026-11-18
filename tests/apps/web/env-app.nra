@@ -1,0 +1,12 @@
+// An image a web target cannot have: it reads the environment, a capability group that is "no" for `web`
+// (Apps030.md, "Capability groups"). bundle-check.py expects build-web-bundle.py to refuse it.
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        return match (program.Environment.get("HOME")) {
+            program.Environment.Lookup.Found(_) => program.ExitCode.Ok,
+            _ => program.ExitCode.Failure,
+        };
+    };
+);

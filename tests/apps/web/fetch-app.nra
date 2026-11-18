@@ -1,0 +1,155 @@
+// neura.http.fetch in a browser (docs/runtime/Providers.md, "HTTP fetch"), run from a web bundle by
+// fetch-check.py. The page's own server answers /api/*; a second origin, which the bundle lists as a connect
+// origin, answers /cors/* with CORS headers and /plain/* without them. Each case prints one line, and the
+// lines are posted to /api/report at the end, so the check reads them without the browser's console.
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let http = import:Std.Net.Http.Fetch;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let system_clock = import:Std.Time.SystemClock;
+
+let lines: string[list] = new;
+
+let say = func(line: string) {
+    console.print_line(line);
+    lines.append(line);
+};
+
+let header_or = func(response: http.Response, name: string, fallback: string) -> string {
+    return match (response.header(name)) {
+        optional.Optional.Some(value) => value,
+        _ => fallback,
+    };
+};
+
+// "status body" for a response, the failure kind otherwise.
+let outcome = func(sent: result.Result<http.Response>) -> string {
+    return match (sent) {
+        result.Result.Ok(response) => response.status.to_string() + " " + match (response.text()) {
+            result.Result.Ok(text) => text,
+            result.Result.Err(_) => "<binary>",
+        },
+        result.Result.Err(problem) => "failed " + http.failure_of(problem).to_string(),
+    };
+};
+
+let now = func -> int64 {
+    return match (system_clock.create().monotonic()) {
+        result.Result.Ok(reading) => reading.to_nanos(),
+        result.Result.Err(_) => 0,
+    };
+};
+
+let slow = func(url: string, out: channels.Sender<string>) {
+    out.send(outcome(http.get(url)));
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        // Same origin: a text body, a status that is not 2xx, a binary echo.
+        say("hello: " + outcome(http.get("/api/hello")));
+        say("missing: " + outcome(http.get("/api/missing")));
+        let bytes: uint8[list] = new;
+        for (let i: int = 0; i < 256; i++) {
+            bytes.append(i as uint8);
+        }
+        match (http.request("PUT", "/api/echo").with_header("Content-Type", "application/octet-stream")
+                .with_body(bytes).send()) {
+            result.Result.Ok(response) => {
+                let same = response.body.length == 256;
+                for (let i: int = 0; i < response.body.length; i++) {
+                    same = same && response.body[i] == bytes[i];
+                }
+                say("echo: " + response.status.to_string() + " " + same.to_string() + " " +
+                    header_or(response, "X-Echo-Length", "none"));
+            },
+            result.Result.Err(problem) => {
+                say("echo: failed " + http.failure_of(problem).to_string());
+            },
+        }
+
+        // The other origin, which the page learns from its own server.
+        let base = match (http.get("/api/config")) {
+            result.Result.Ok(response) => result.value_or<string>(response.text(), ""),
+            result.Result.Err(_) => "",
+        };
+        // A custom header makes the browser send a preflight; the server exposes one response header.
+        match (http.request("POST", base + "/cors/greet").with_header("X-Neura", "yes")
+                .with_text("text/plain; charset=utf-8", "café").send()) {
+            result.Result.Ok(response) => {
+                say("cors: " + response.status.to_string() + " " + result.value_or<string>(response.text(), "?") + " " +
+                    header_or(response, "x-neura-seen", "hidden") + " " + header_or(response, "x-secret", "hidden"));
+            },
+            result.Result.Err(problem) => {
+                say("cors: failed " + http.failure_of(problem).to_string());
+            },
+        }
+        say("no cors: " + outcome(http.get(base + "/plain/hello")));
+        say("timeout: " + outcome(http.request("GET", base + "/cors/slow?ms=5000")
+            .with_timeout(durations.of_millis(300)).send()));
+        say("too large: " + outcome(http.get(base + "/cors/big")));
+        say("scheme: " + outcome(http.get("ftp://127.0.0.1/file")));
+        say("method: " + outcome(http.request("GE T", "/api/hello").send()));
+        say("get body: " + outcome(http.request("GET", "/api/hello").with_text("text/plain", "x").send()));
+        say("origin: " + outcome(http.get("http://192.0.2.1/denied")));
+
+        // Credentials: the page's server set a cookie; the other origin reports whether it arrived.
+        say("omit: " + outcome(http.request("GET", base + "/cors/cookie").with_credentials(http.Credentials.Omit).send()));
+        say("include: " + outcome(http.request("GET", base + "/cors/cookie")
+            .with_credentials(http.Credentials.Include).send()));
+
+        // Three slow fetches overlap; a scope deadline cancels a fourth.
+        let answers = channels.open<string>(3);
+        let started = now();
+        scope {
+            // Distinct URLs: a browser may hold a second request for a URL in flight until the first ends
+            // (Chromium's cache lock), which would serialize them.
+            spawn slow(base + "/cors/slow?ms=400&n=1", answers[0]);
+            spawn slow(base + "/cors/slow?ms=400&n=2", answers[0]);
+            spawn slow(base + "/cors/slow?ms=400&n=3", answers[0]);
+            for (let i: int = 0; i < 3; i++) {
+                match (answers[1].receive()) {
+                    channels.Received.Value(text) => {
+                        say("overlap: " + text);
+                    },
+                    _ => {
+                        say("overlap: nothing");
+                    },
+                }
+            }
+        }
+        let elapsed = now() - started;
+        say("overlapped: " + (elapsed >= 400000000 && elapsed < 1200000000).to_string());
+        let cancelled = channels.open<string>(1);
+        scope (deadline) {
+            match (deadline.cancel_after(durations.of_millis(200))) {
+                result.Result.Ok(_) => {},
+                result.Result.Err(_) => {
+                    say("deadline: failed");
+                },
+            }
+            spawn slow(base + "/cors/slow?ms=5000", cancelled[0]);
+            match (cancelled[1].receive()) {
+                channels.Received.Value(text) => {
+                    say("cancel: " + text);
+                },
+                _ => {
+                    say("cancel: nothing");
+                },
+            }
+        }
+
+        say("done");
+        match (http.post_text("/api/report", "text/plain; charset=utf-8", strings.join(lines, "\n"))) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(_) => {
+                console.print_line("the report was not delivered");
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);
