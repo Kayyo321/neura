@@ -890,6 +890,38 @@ neura_target_defaults(neura)
 
 install(TARGETS neura RUNTIME DESTINATION bin COMPONENT core)
 install(FILES LICENSE DESTINATION share/doc/neura COMPONENT core)
+# The licence texts of the server components this build links statically,
+# which packaging/build-server-components.sh copies out of the verified
+# sources: they ship with the core component, beside Neura's own. A release
+# build (NEURA_PORTABLE_RELEASE) that links one of them refuses to configure
+# without its text.
+set(NEURA_COMPONENT_LICENSES "" CACHE PATH
+    "The licenses directory that packaging/build-server-components.sh writes")
+set(neura_component_license_files)
+if(NEURA_ENABLE_SERVER_TLS)
+    list(APPEND neura_component_license_files openssl-LICENSE.txt)
+endif()
+if(NEURA_ENABLE_SERVER_HTTP2)
+    list(APPEND neura_component_license_files nghttp2-COPYING)
+endif()
+if(NEURA_ENABLE_POSTGRES)
+    list(APPEND neura_component_license_files postgresql-COPYRIGHT)
+endif()
+if(neura_component_license_files)
+    if(NEURA_COMPONENT_LICENSES)
+        set(neura_component_license_paths)
+        foreach(file IN LISTS neura_component_license_files)
+            if(NOT EXISTS "${NEURA_COMPONENT_LICENSES}/${file}")
+                message(FATAL_ERROR "${NEURA_COMPONENT_LICENSES}/${file} is missing")
+            endif()
+            list(APPEND neura_component_license_paths "${NEURA_COMPONENT_LICENSES}/${file}")
+        endforeach()
+        install(FILES ${neura_component_license_paths} DESTINATION share/doc/neura/third-party COMPONENT core)
+    elseif(NEURA_PORTABLE_RELEASE)
+        message(FATAL_ERROR "A release build that links ${neura_component_license_files} needs their texts: "
+            "pass -DNEURA_COMPONENT_LICENSES=<prefix>/licenses from packaging/build-server-components.sh")
+    endif()
+endif()
 # The third install component, service, holds neurad when its target exists
 # (docs/design/Service030.md). Without it the component is empty, and
 # packaging/make-archive.sh still writes its manifest with no tool or file
