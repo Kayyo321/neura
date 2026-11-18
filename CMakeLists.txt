@@ -545,7 +545,8 @@ endif()
 # The same executable is the worker, in its --worker mode.
 if(UNIX AND NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
-    add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp)
+    add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp
+        src/server/worker_zygote.cpp)
     target_include_directories(neura_server_worker PUBLIC src)
     target_link_libraries(neura_server_worker PUBLIC neura_server_worker_wire neura_runner neura_lifecycle)
     neura_target_defaults(neura_server_worker)

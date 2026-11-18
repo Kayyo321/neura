@@ -212,13 +212,20 @@ Clock::time_point local_deadline(std::int64_t unix_nanos) {
 
 } // namespace
 
-int run_request_worker(const WorkerOptions& options) {
+PreparedImage prepare_image(const WorkerOptions& options) {
     // Load and verify before greeting: a ready worker has a bound image.
-    const auto bytes = runner::read_file(options.image);
+    auto bytes = runner::read_file(options.image);
     util::Sha256 digest;
     digest.update(std::span<const std::uint8_t>(bytes));
     const auto image_digest = digest.finish();
-    const auto image = nvr::load(bytes);
+    auto image = nvr::load(bytes);
+    return PreparedImage{std::move(bytes), image_digest, std::move(image)};
+}
+
+int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared) {
+    const auto& bytes = prepared.bytes;
+    const auto& image_digest = prepared.digest;
+    const auto& image = prepared.image;
 
     auto capabilities = options.capabilities;
     capabilities.http_server = true;
@@ -255,6 +262,11 @@ int run_request_worker(const WorkerOptions& options) {
     const int status = runner::run(image, host, arguments, run_options, options.image.string(), bytes.size());
     exchange.drain();
     return status;
+}
+
+int run_request_worker(const WorkerOptions& options) {
+    const auto prepared = prepare_image(options);
+    return serve_assignment(options, prepared);
 }
 
 } // namespace neura::server

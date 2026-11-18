@@ -1,10 +1,13 @@
 #pragma once
 
 #include "nvm/providers.hpp"
+#include "nvr/format.hpp"
+#include "server/worker_wire.hpp"
 
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace neura::server {
 
@@ -29,9 +32,23 @@ struct WorkerOptions {
 
 inline constexpr int worker_channel_descriptor = 3;
 
-// The worker mode of neura-server-host: loads and verifies the image, greets
-// the host, waits for one Assign and its request body, runs the image once,
-// and returns the process status. Runs no Neura code before the Assign.
+// An image read, hashed, loaded and verified: everything a worker does
+// before its greeting. No Neura code has run.
+struct PreparedImage {
+    std::vector<std::uint8_t> bytes;
+    worker::ImageDigest digest{};
+    nvr::Image image;
+};
+
+PreparedImage prepare_image(const WorkerOptions& options);
+
+// Greets the host on descriptor 3, waits for one Assign and its request
+// body, runs the image once, and returns the process status. Runs no Neura
+// code before the Assign.
+int serve_assignment(const WorkerOptions& options, const PreparedImage& prepared);
+
+// The worker mode of neura-server-host (--worker): prepare_image, then
+// serve_assignment.
 int run_request_worker(const WorkerOptions& options);
 
 } // namespace neura::server

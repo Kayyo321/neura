@@ -9,6 +9,7 @@
 #include "server/json_line.hpp"
 #include "server/request_worker.hpp"
 #include "server/worker_messages.hpp"
+#include "server/worker_zygote.hpp"
 #include "util/sha256.hpp"
 
 #include <algorithm>
@@ -86,6 +87,8 @@ constexpr std::string_view usage =
     "                                 past it the execution traps and the request is answered 500\n"
     "  --worker-tier 0|1|2            highest execution tier of a worker (default: the runner's, 2)\n"
     "  --worker-jit off|on|auto       native compilation of a worker's tier-2 regions (default auto)\n"
+    "  --worker-start zygote|exec     fork workers from a process that loaded the image once (zygote,\n"
+    "                                 the default on Linux), or start each with exec\n"
     "  --allow-fs[=prefix,...], --allow-net, --allow-env\n"
     "                                 grant the workers that group (default: none)\n"
     "  --record-dir <directory>       record each request's host requests to <id>.trace\n"
@@ -116,6 +119,7 @@ struct HostOptions {
     std::optional<std::uint64_t> max_steps;
     std::optional<std::uint8_t> worker_tier;
     std::optional<std::string> worker_jit;
+    bool zygote = zygote_supported();
 };
 
 std::uint64_t parse_count(std::string_view option, std::string_view text, std::uint64_t low, std::uint64_t high) {
@@ -224,6 +228,13 @@ HostOptions read_options(int argc, char** argv) {
             auto mode = value_of(i, arg, "--worker-jit");
             if (mode != "off" && mode != "on" && mode != "auto") throw std::runtime_error("--worker-jit expects off, on or auto");
             options.worker_jit = std::move(mode);
+        } else if (is(arg, "--worker-start")) {
+            const auto mode = value_of(i, arg, "--worker-start");
+            if (mode != "zygote" && mode != "exec") throw std::runtime_error("--worker-start expects zygote or exec");
+            if (mode == "zygote" && !zygote_supported()) {
+                throw std::runtime_error("--worker-start zygote needs Linux");
+            }
+            options.zygote = mode == "zygote";
         } else if (is(arg, "--max-steps")) {
             options.max_steps = parse_count(arg, value_of(i, arg, "--max-steps"), 1, std::uint64_t{1} << 62);
         } else if (arg == "--allow-fs") {
@@ -308,6 +319,7 @@ public:
         std::random_device device;
         id_prefix_ = (static_cast<std::uint64_t>(device()) << 32) | device();
         worker_arguments_ = worker_arguments();
+        if (options_.zygote) start_zygote();
         if (::pipe(wake_) != 0) throw std::runtime_error("cannot create the reaper's wake pipe");
         for (const int end : wake_) {
             ::fcntl(end, F_SETFD, FD_CLOEXEC);
@@ -328,6 +340,8 @@ public:
         reaper_.request_stop();
         wake_reaper();
         if (reaper_.joinable()) reaper_.join();
+        std::lock_guard lock(zygote_mutex_);
+        zygote_.reset();
     }
 
     // The startup check (Backend030): one worker runs `serve`, which answers
@@ -503,8 +517,12 @@ public:
     void response_written() { --in_flight_; }
 
     void kill_all() {
-        std::lock_guard lock(pids_mutex_);
-        for (const auto pid : live_) ::kill(pid, SIGKILL);
+        {
+            std::lock_guard lock(pids_mutex_);
+            for (const auto pid : live_) ::kill(pid, SIGKILL);
+        }
+        std::lock_guard lock(zygote_mutex_);
+        if (zygote_) ::kill(zygote_->pid(), SIGKILL);
     }
 
 private:
@@ -602,7 +620,7 @@ private:
         slot_free_.notify_one();
     }
 
-    // The worker's options after --worker, without the image.
+    // The worker's options after --worker or --zygote, without the image.
     std::vector<std::string> worker_arguments() const {
         std::vector<std::string> arguments;
         const auto& caps = options_.capabilities;
@@ -622,6 +640,33 @@ private:
         if (options_.worker_jit) arguments.push_back("--jit=" + *options_.worker_jit);
         arguments.push_back(options_.image.string());
         return arguments;
+    }
+
+    // Called with zygote_mutex_ held, or before any other thread runs.
+    void start_zygote() {
+        std::string problem;
+        zygote_ = ZygoteClient::start(executable_, worker_arguments_, problem);
+        if (!zygote_) log(4, {}, "the worker zygote did not start; starting workers with exec", {{"reason", problem}});
+    }
+
+    // A worker forked by the zygote, or -1. A zygote that has ended is
+    // replaced, up to three times; after that, or when a new one does not
+    // start, workers are started with exec.
+    pid_t fork_from_zygote(int channel) {
+        std::lock_guard lock(zygote_mutex_);
+        const unsigned char flags = 0;
+        for (;;) {
+            if (!zygote_) return -1;
+            const pid_t pid = zygote_->fork_worker(channel, flags);
+            if (pid > 0 || !zygote_->failed()) return pid;
+            zygote_.reset();
+            if (++zygote_restarts_ > 3) {
+                log(4, {}, "the worker zygote ended again; starting workers with exec from now on");
+                return -1;
+            }
+            log(4, {}, "the worker zygote ended; starting a new one");
+            start_zygote();
+        }
     }
 
     pid_t exec_worker(int channel) {
@@ -658,7 +703,8 @@ private:
             ::close(pair[1]);
             pair[1] = moved;
         }
-        const pid_t pid = exec_worker(pair[1]);
+        pid_t pid = fork_from_zygote(pair[1]);
+        if (pid < 0) pid = exec_worker(pair[1]);
         ::close(pair[1]);
         if (pid < 0) {
             ::close(pair[0]);
@@ -1128,6 +1174,9 @@ private:
     int wake_[2] = {-1, -1};
 
     std::vector<std::string> worker_arguments_;
+    std::mutex zygote_mutex_;
+    std::unique_ptr<ZygoteClient> zygote_;
+    int zygote_restarts_ = 0;
 
     struct Metrics {
         std::array<std::atomic<std::uint64_t>, 5> responses{};
@@ -1320,7 +1369,8 @@ int serve(HostOptions options, const char* argv0) {
     std::_Exit(left > 0 ? 1 : 0);
 }
 
-int worker_main(int argc, char** argv) {
+// The options of --worker and --zygote, which the host writes.
+WorkerOptions read_worker_options(int argc, char** argv) {
     WorkerOptions options;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -1351,17 +1401,19 @@ int worker_main(int argc, char** argv) {
             options.image = arg;
         }
     }
-    // The worker leaves signals to the host: it ends when its channel does.
+    // A worker leaves signals to the host: it ends when its channel does.
+    // A zygote's workers inherit this.
     ::signal(SIGINT, SIG_IGN);
     ::signal(SIGPIPE, SIG_IGN);
-    return run_request_worker(options);
+    return options;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
-        if (argc >= 2 && std::string_view(argv[1]) == "--worker") return worker_main(argc, argv);
+        if (argc >= 2 && std::string_view(argv[1]) == "--worker") return run_request_worker(read_worker_options(argc, argv));
+        if (argc >= 2 && std::string_view(argv[1]) == "--zygote") return run_worker_zygote(read_worker_options(argc, argv));
         return serve(read_options(argc, argv), argv[0]);
     } catch (const std::exception& error) {
         std::cerr << "neura-server-host: " << error.what() << '\n';

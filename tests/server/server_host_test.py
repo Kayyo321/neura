@@ -66,8 +66,10 @@ class Host:
             self.err.flush()
         return self.err_path.read_text()
 
-    def children(self):
-        # Workers are children of whichever host thread spawned them.
+    def children(self, zygote=False):
+        # Workers are children of whichever host thread spawned them; a
+        # worker forked by the zygote is a child of the host too. The zygote
+        # is left out unless asked for.
         pids = []
         for task in Path(f"/proc/{self.process.pid}/task").glob("*"):
             try:
@@ -79,7 +81,7 @@ class Host:
         # from a later one. Only the processes that still exist after every
         # list has been read (zombies included) are counted: all of them
         # existed at one moment, the end of the reading.
-        return sorted(pid for pid in set(pids) if exists(pid))
+        return sorted(pid for pid in set(pids) if exists(pid) and (comm(pid) == "neura-zygote") == zygote)
 
     def stop(self, sig=signal.SIGTERM, timeout=15):
         if self.process.poll() is None:
@@ -95,6 +97,13 @@ class Host:
 
 def exists(pid):
     return Path(f"/proc/{pid}").exists()
+
+
+def comm(pid):
+    try:
+        return Path(f"/proc/{pid}/comm").read_text().strip()
+    except OSError:
+        return ""
 
 
 def request(port, method, path, body=None, headers=None, timeout=30):
@@ -509,11 +518,30 @@ def test_dead_ready_worker(args, image):
     check("a ready worker had ended" in host.stderr(), "the discarded worker is logged")
 
 
+def test_zygote_restart(args, image):
+    # A zygote that ends is replaced; requests are still served.
+    host = Host(args, image, "--ready-workers", "0")
+    try:
+        zygotes = host.children(zygote=True)
+        check(len(zygotes) == 1, f"one zygote: {zygotes}")
+        for pid in zygotes:
+            os.kill(pid, signal.SIGKILL)
+        time.sleep(0.2)
+        status, _, body = request(host.port, "GET", "/hello")
+        check(status == 200 and body == b"hello from http\n", f"after the zygote died: {status} {body!r}")
+        replaced = host.children(zygote=True)
+        check(len(replaced) == 1 and replaced != zygotes, f"a new zygote: {zygotes} then {replaced}")
+    finally:
+        host.stop()
+    check("the worker zygote ended; starting a new one" in host.stderr(), "the zygote restart is logged")
+
+
 def test_process_bound(args, image):
     # A worker holds its S-1 slot until it has been reaped, so the workers,
     # exited or not, never outnumber S-1 plus S-2 (B-S4).
-    for start in ("exec",):
-        host = Host(args, image, "--max-workers", "2", "--ready-workers", "1", "--max-queue", "256")
+    for start in ("zygote", "exec"):
+        host = Host(args, image, "--worker-start", start, "--max-workers", "2", "--ready-workers", "1",
+                    "--max-queue", "256")
         peak = [0]
         stop = threading.Event()
 
@@ -544,6 +572,7 @@ def test_process_bound(args, image):
             sampler.join()
             check(statuses.count(200) == 300, f"bounded load ({start}): {sorted(set(statuses))} {len(statuses)}")
             check(0 < peak[0] <= 3, f"workers at the peak ({start}): {peak[0]}, the bound is 3")
+            check(len(host.children(zygote=True)) == (1 if start == "zygote" else 0), f"zygote count ({start})")
         finally:
             stop.set()
             host.stop()
@@ -694,7 +723,7 @@ def main():
         print(build.stdout + build.stderr)
         return 1
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
-             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker,
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_zygote_restart,
              test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:
