@@ -1,5 +1,6 @@
 #include "source_docs.hpp"
 
+#include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
+#include <variant>
 
 namespace neura {
 namespace {
@@ -277,6 +279,20 @@ private:
             if (declaration.type) {
                 result += ": ";
                 result += type_text(*declaration.type);
+            } else if (declaration.initializer && declaration.initializer->html_factory) {
+                // A factory (Html030.md): its parameters and result, never its body.
+                const auto& factory = *declaration.initializer->html_factory;
+                result += factory.retained ? " = new html(" : " = html(";
+                for (std::size_t i = 0; i < factory.parameters.size(); ++i) {
+                    if (i != 0) result += ", ";
+                    result += factory.parameters[i].name + ": " + type_text(factory.parameters[i].type);
+                }
+                result += ") -> ui.View";
+                if (const auto* path = std::get_if<Token>(&factory.source)) result += " from " + path->text;
+            } else if (declaration.initializer && declaration.initializer->stylesheet) {
+                const auto& sheet = *declaration.initializer->stylesheet;
+                result += sheet.module ? " = css.module" : " = css";
+                if (sheet.source.kind != TokenKind::CssIsland) result += " from " + sheet.source.text;
             }
             result += accessor_text(declaration);
             return result;
