@@ -1,0 +1,10 @@
+error[E0264]: a block arm of 'return if' is not available yet
+ --> $DIR/return-if-block-arm.nra:4:29
+  |
+4 |     return if (c) -> 1 else { 2 };
+  |                             ^ expected '->' and a value
+  |
+  = note: arms written as blocks that yield a value need the lifetime milestone's 'yield'; they are specified and pending
+  = help: write each arm as '-> value', as in 'return if (c) -> a; else -> b;'
+
+For more information about this error, try `neura explain E0264`.

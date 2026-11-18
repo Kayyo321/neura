@@ -1,0 +1,9 @@
+error[E0264]: a 'return if' needs a final 'else'
+ --> $DIR/return-if-no-else.nra:5:1
+  |
+5 | };
+  | ^ expected 'else -> value'
+  |
+  = help: write each arm as '-> value', as in 'return if (c) -> a; else -> b;'
+
+For more information about this error, try `neura explain E0264`.

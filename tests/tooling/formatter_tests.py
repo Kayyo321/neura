@@ -138,6 +138,14 @@ let reference=func(value:&int)->&int=>value;'''
         formatted = self.formatted('let a="\\u{1F600}\\xC3\\xA9\\0\\\'";let c=\'\\u{e9}\';')
         self.assertIn('let a = "\\u{1F600}\\xC3\\xA9\\0\\\'";', formatted)
         self.assertIn("let c = '\\u{e9}';", formatted)
+        # docs/design/Expressions030.md, Return forms: a guard keeps its line,
+        # also after a '}', and a ';' after an arm puts the next arm on its own
+        # line at the statement's indent.
+        formatted = self.formatted('let f=func(x:int)->int{return 1 unless x>9;return match(x){_=>1,} unless x>2;'
+                                   'return if(x>0)->1;else ->2;};')
+        self.assertIn('    return 1 unless x > 9;', formatted)
+        self.assertIn('    } unless x > 2;', formatted)
+        self.assertIn('    return if (x > 0) -> 1;\n    else -> 2;', formatted)
 
     def test_negation_words_keep_their_spelling(self):
         # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.

@@ -61,6 +61,7 @@ Errors about declarations, scopes, and name resolution.
 | [E0261](E0261.md) | malformed character literal |
 | [E0262](E0262.md) | ..= statement whose destination is not a string |
 | [E0263](E0263.md) | range or chain of the wrong shape |
+| [E0264](E0264.md) | malformed return if |
 | [E0265](E0265.md) | narrowing binding outside the condition of an if |
 | [E0266](E0266.md) | is not narrowing inside an && chain |
 | [E0267](E0267.md) | typeof without a value or a type |

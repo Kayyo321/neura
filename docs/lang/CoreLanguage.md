@@ -502,7 +502,7 @@ The compiler rejects, at the span of the offending expression, a `spawn` outside
 
 Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are
 
-1. member access, optional access `?.`, indexing, calls, and the postfix `?`
+1. member access, optional access `?.`, indexing, calls, the postfix `?`, and the primaries `nameof(...)` and `typeof(...)`
 2. postfix `++` and `--`
 3. prefix `++`, `--`, `!`, `not`, `-`, and `~`
 4. `as`, `is`, and `is not`
@@ -782,6 +782,46 @@ true
 | `===` compares types. | `TypeInfo` is a record, so `typeof(a) === typeof(b)` compares kind and names and `==` compares identity. |
 | The description is program data. | The kind and names are constants of the image: they stay when names and source maps are stripped and are the same through `.nir`. |
 | `typeof` is a reserved word. | `typeof` without `(`, `typeof()`, and an operand with no type (a `void` call, a module, a function name that is not called) are `E0267`. |
+
+### Return forms
+
+`return if` returns the value of the first arm whose condition holds, and `return value unless guard;` returns unless the guard holds ([design](../design/Expressions030.md#return-forms), implemented, proposed).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let sign = func(x: int) -> string {
+    return if (x > 0) -> "Positive";
+    else if (x == 0) -> "Zero";
+    else -> "Negative";
+};
+
+let label = func(name: string) -> string {
+    return name unless name == "";
+    return "anonymous";
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(sign(4) + " " + sign(0) + " " + sign(-1) + " " + label("") + " " + label("Ada"));
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Positive Zero Negative anonymous Ada
+```
+
+| Rule | Detail |
+| --- | --- |
+| `return if (c1) -> v1; else if (c2) -> v2; else -> v3;` | The conditions are evaluated in order until one holds; only the selected value is evaluated and returned. It is `if (c1) { return v1; } else if (c2) { return v2; } else { return v3; }` and builds the same program. The `;` after a non-final arm is optional, so `return if (c) -> a else -> b;` is the same statement. The final `else` is required. |
+| `return v unless g;` | The `bool` guard is evaluated first; when it is true nothing happens, otherwise `v` is evaluated and returned. It is `if (!(g)) { return v; }`. The guard covers the whole value, including a `return if` or a `return match`. |
+| `unless` is a guard only after a complete return value. | Elsewhere it is an ordinary name: `return unless;` and `return unless(x);` use a binding or function named `unless`, and `return unless unless flag;` is guarded by `flag`. A bare `return;` takes no guard. |
+| A guarded return can fall through. | It does not end a function that returns a value (`E0405`); a `return if` with its final `else` always returns. |
+| Arms are `-> value`. | A missing `->`, a missing final `else`, and an arm written as a block are `E0264`. Arms written as blocks that `yield` a value wait for the lifetime milestone. |
 
 ### Comparison chains
 

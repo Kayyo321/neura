@@ -147,6 +147,10 @@ struct Expr {
     // operand is the TypeTest); `operator_span` is the word `not`.
     bool spelled_not{};
     bool is_not{};
+    // A node the parser made for a source form that has no token of its
+    // own: the negation of a `return ... unless guard` (docs/design/
+    // Expressions030.md, Return forms). Its span is its operand's.
+    bool implicit{};
     // docs/design/Expressions030.md, Narrowing. A TypeTest written
     // `x is name: T` binds `binding`, written at `narrowing`. The parser
     // accepts it only as the whole condition of an `if` or a top-level
@@ -221,7 +225,9 @@ struct Statement {
     bool constant_bindings{};
     std::vector<MatchArm> arms;
     std::vector<SelectArm> select_arms;
-    // The contextual keyword of a scope or select statement.
+    // The contextual keyword of a scope or select statement, or the word
+    // `unless` of the `if` that a guarded return stands for (docs/design/
+    // Expressions030.md, Return forms).
     Span keyword{};
     // Empty for other statements. Holds the operator for an assignment.
     std::string assignment_operator{};

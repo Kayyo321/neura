@@ -2106,12 +2106,69 @@ private:
         return true;
     }
 
+    // docs/design/Expressions030.md, Return forms. `return if (c1) -> v1;
+    // else if (c2) -> v2; else -> v3` is the statement `if (c1) { return v1; }
+    // else if (c2) { return v2; } else { return v3; }`; the `;` after a
+    // non-final arm is optional. The current token is `if`.
+    Statement return_if(std::size_t start) {
+        const auto malformed = [&](const std::string& message, const std::string& label) {
+            return Diagnostic(current().span, message).with_code("E0264").label(label)
+                .help("write each arm as '-> value', as in 'return if (c) -> a; else -> b;'");
+        };
+        const auto arm_value = [&] {
+            if (at("{"))
+                throw malformed("a block arm of 'return if' is not available yet", "expected '->' and a value")
+                    .note("arms written as blocks that yield a value need the lifetime milestone's 'yield'; "
+                          "they are specified and pending");
+            if (!at("->")) throw malformed("expected '->' before the value of a 'return if' arm", "expected '->'");
+            advance();
+            Statement value{};
+            value.kind = Statement::Kind::Return;
+            value.expressions.push_back(expression());
+            value.span = span_from(start);
+            return value;
+        };
+        advance();
+        Statement arm{};
+        arm.kind = Statement::Kind::If;
+        arm.expressions.push_back(condition("if"));
+        arm.body.push_back(arm_value());
+        match(";");
+        if (!at("else"))
+            throw malformed("a 'return if' needs a final 'else'", "expected 'else -> value'");
+        advance();
+        if (at("if") && next_is(1, "(")) arm.alternative.push_back(return_if(start));
+        else arm.alternative.push_back(arm_value());
+        arm.span = span_from(start);
+        return arm;
+    }
+
     Statement simple_statement() {
         Statement result{};
         if (match("return")) {
+            const auto start = cursor_ - 1;
             result.kind = Statement::Kind::Return;
-            if (!at(";")) {
+            if (at("if") && next_is(1, "(")) {
+                result = return_if(start);
+            } else if (!at(";")) {
                 result.expressions.push_back(expression());
+            }
+            // docs/design/Expressions030.md, Return forms: `return v unless g;`
+            // is `if (!(g)) { return v; }`. `unless` is a guard only after a
+            // complete return value; elsewhere it is an ordinary name.
+            if ((result.kind != Statement::Kind::Return || !result.expressions.empty()) && at_contextual("unless")) {
+                result.span = span_from(start);
+                const auto guard_word = advance().span;
+                auto guard = expression();
+                auto negated = make_expression(Expr::Kind::Unary, guard.span, "!");
+                negated.implicit = true;
+                negated.operands.push_back(std::move(guard));
+                Statement guarded{};
+                guarded.kind = Statement::Kind::If;
+                guarded.keyword = guard_word;
+                guarded.expressions.push_back(std::move(negated));
+                guarded.body.push_back(std::move(result));
+                result = std::move(guarded);
             }
         } else if (match("break")) {
             result.kind = Statement::Kind::Break;

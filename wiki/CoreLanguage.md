@@ -786,6 +786,46 @@ true
 | The description is program data. | The kind and names are constants of the image: they stay when names and source maps are stripped and are the same through `.nir`. |
 | `typeof` is a reserved word. | `typeof` without `(`, `typeof()`, and an operand with no type (a `void` call, a module, a function name that is not called) are `E0267`. |
 
+### Return forms
+
+`return if` returns the value of the first arm whose condition holds, and `return value unless guard;` returns unless the guard holds ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#return-forms), implemented, proposed).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let sign = func(x: int) -> string {
+    return if (x > 0) -> "Positive";
+    else if (x == 0) -> "Zero";
+    else -> "Negative";
+};
+
+let label = func(name: string) -> string {
+    return name unless name == "";
+    return "anonymous";
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(sign(4) + " " + sign(0) + " " + sign(-1) + " " + label("") + " " + label("Ada"));
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Positive Zero Negative anonymous Ada
+```
+
+| Rule | Detail |
+| --- | --- |
+| `return if (c1) -> v1; else if (c2) -> v2; else -> v3;` | The conditions are evaluated in order until one holds; only the selected value is evaluated and returned. It is `if (c1) { return v1; } else if (c2) { return v2; } else { return v3; }` and builds the same program. The `;` after a non-final arm is optional, so `return if (c) -> a else -> b;` is the same statement. The final `else` is required. |
+| `return v unless g;` | The `bool` guard is evaluated first; when it is true nothing happens, otherwise `v` is evaluated and returned. It is `if (!(g)) { return v; }`. The guard covers the whole value, including a `return if` or a `return match`. |
+| `unless` is a guard only after a complete return value. | Elsewhere it is an ordinary name: `return unless;` and `return unless(x);` use a binding or function named `unless`, and `return unless unless flag;` is guarded by `flag`. A bare `return;` takes no guard. |
+| A guarded return can fall through. | It does not end a function that returns a value (`E0405`); a `return if` with its final `else` always returns. |
+| Arms are `-> value`. | A missing `->`, a missing final `else`, and an arm written as a block are `E0264`. Arms written as blocks that `yield` a value wait for the lifetime milestone. |
+
 ### Comparison chains
 
 A comparison can use one subject and several alternatives. For example, `x == 0 or 1 or 2` tests whether `x` equals any of those values, and `x != 0 and 1` tests whether it differs from both. The subject is evaluated once. Each alternative is evaluated left to right and compared with the captured subject using the original operator. An `or` chain stops at the first true comparison. An `and` chain stops at the first false comparison.

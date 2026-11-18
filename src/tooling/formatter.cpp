@@ -72,6 +72,9 @@ std::vector<Item> with_trivia(std::string_view source, const std::vector<Token>&
 
 struct Hints {
     std::set<std::size_t> bodies;
+    // The word `unless` of a return guard (docs/design/Expressions030.md),
+    // which stays on the line of a '}' before it.
+    std::set<std::size_t> guards;
     std::set<std::size_t> inline_braces;
     std::set<std::size_t> angles;
     std::set<std::size_t> prefix;
@@ -149,7 +152,8 @@ private:
             if (end > start) angle_span({{}, 1, 1, start, end - start});
         }
         // `not` is a word and keeps the space after it (docs/design/Expressions030.md).
-        if ((value.kind == Expr::Kind::Unary && !value.spelled_not) || value.kind == Expr::Kind::PrefixUpdate)
+        if ((value.kind == Expr::Kind::Unary && !value.spelled_not && !value.implicit) ||
+            value.kind == Expr::Kind::PrefixUpdate)
             hints_.prefix.insert(value.span.offset);
         // `r?` is written without a space (docs/design/Matching030.md).
         if (value.kind == Expr::Kind::Propagate && value.operator_span) hints_.postfix.insert(value.operator_span->offset);
@@ -343,6 +347,7 @@ private:
     }
 
     void statement(const Statement& value) {
+        if (value.kind == Statement::Kind::If && value.keyword.length != 0) hints_.guards.insert(value.keyword.offset);
         if (value.declaration) declaration(*value.declaration);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
@@ -532,7 +537,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             out.text(text, indent(), text == "}" && !multiline && before != "{");
             if (text == "}" && next != ";" && next != "," && next != ")" && next != "]" && next != "." &&
                 next != "(" && next != "else" && next != "while" && next != "or" && next != "callback" &&
-                next != "=>" && next != "+" && next != "-" && next != "*" && next != "/" && next != "==" && next != "?" && next != ":") out.line();
+                next != "=>" && next != "+" && next != "-" && next != "*" && next != "/" && next != "==" && next != "?" && next != ":" &&
+                !(i + 1 < items.size() && hints.guards.contains(items[i + 1].offset))) out.line();
         } else {
             // Retain the lexical distinction between a binary operator and
             // a unary operator, and between adjacent operator tokens.

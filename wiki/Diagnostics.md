@@ -64,6 +64,7 @@ Errors about declarations, scopes, and name resolution.
 | [E0261](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0261.md) | malformed character literal |
 | [E0262](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0262.md) | ..= statement whose destination is not a string |
 | [E0263](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0263.md) | range or chain of the wrong shape |
+| [E0264](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0264.md) | malformed return if |
 | [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md) | narrowing binding outside the condition of an if |
 | [E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md) | is not narrowing inside an && chain |
 | [E0267](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0267.md) | typeof without a value or a type |
