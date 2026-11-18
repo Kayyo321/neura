@@ -36,7 +36,7 @@ export let Native = module:program.Entry (
         last stub = linker.upcall_stub(compare, descriptors.of(layouts.Int32, layouts.Address, layouts.Address), arena);
         clib.qsort(numbers, 3, 4, stub);
         console.print_line("sorted: " + numbers.get_int32(0).to_string() + " " + numbers.get_int32(4).to_string() +
-                           " " + numbers.get_int32(8).to_string());
+            " " + numbers.get_int32(8).to_string());
         console.print_line("abs: " + clib.abs(-42).to_string());
         arena.close();
         return program.ExitCode.Ok;

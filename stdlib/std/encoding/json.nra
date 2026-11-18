@@ -1199,8 +1199,12 @@ export let Json = module (
         }
         // Use the original parser to report the exact kind, byte offset, and message.
         match (parse(text)) {
-            Result.Err(failure) => { return Result<JsonValue>.Err(failure); },
-            Result.Ok(_) => { trap_with_message("invalid state: ordered JSON scanner rejected valid JSON"); },
+            Result.Err(failure) => {
+                return Result<JsonValue>.Err(failure);
+            },
+            Result.Ok(_) => {
+                trap_with_message("invalid state: ordered JSON scanner rejected valid JSON");
+            },
         }
     };
 
@@ -1377,8 +1381,12 @@ export let Json = module (
                 return -1;
             }
             match (escaped_string.value) {
-                JsonValue.Text(decoded) => { string_value = decoded; },
-                _ => { return -1; },
+                JsonValue.Text(decoded) => {
+                    string_value = decoded;
+                },
+                _ => {
+                    return -1;
+                },
             }
             return p + 1;
         };

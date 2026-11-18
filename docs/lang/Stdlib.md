@@ -101,7 +101,7 @@ A kernel call is charged, before it runs, one step plus its work in units of no 
 
 ### P3. Entry point from the library
 
-An override of `Std.Program.Entry.main` can be the image entry point. Its `ExitCode` maps `Ok` to 0, `Failure` to 1, `Status(int)` to the validated process status, and each named variant to its fixed status. The compiler rejects an image with two entry points.
+An override of `Std.Program.Entry.main` can be the image entry point; when modules inherit the module that declares it, the entry point is `main` of the one module of that line that no other module inherits ([Modules](Modules.md#interfaces-and-inheritance)). Its `ExitCode` maps `Ok` to 0, `Failure` to 1, `Status(int)` to the validated process status, and each named variant to its fixed status. The compiler rejects an image with two entry points.
 
 ### What the language does not provide
 

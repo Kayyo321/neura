@@ -39,7 +39,7 @@ export let Semaphore = module (
         /// the semaphore was created with traps.
         export let release = func {
             match (returned.try_send(true)) {
-                channels.TrySendOutcome.Sent => { },
+                channels.TrySendOutcome.Sent => {},
                 _ => {
                     trap_with_message("invalid state: released more permits than were created");
                 },

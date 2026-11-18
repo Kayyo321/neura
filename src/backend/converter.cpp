@@ -437,6 +437,11 @@ public:
     std::pair<IrType, Span> value_type(SymbolId id) const { return value_types_.at(id); }
 
     SymbolId member(SymbolId owner, const std::string& name) const;
+    // The member of `scope` named as `declared` is that stands for it. A
+    // generic function's specializations are named by the simple names of
+    // their type arguments, so one scope can hold several of one name, such
+    // as copy<Row> for two classes named Row in different modules.
+    SymbolId member_for(SymbolId scope, SymbolId declared) const;
     SymbolId resolve_member(SymbolId concrete, SymbolId declared) const;
     SymbolId implementation(SymbolId cls, SymbolId method) const;
     bool derives(SymbolId cls, SymbolId base) const;
@@ -523,7 +528,8 @@ private:
     // Lifted forms by (function, block) for the LIFT section.
     std::map<std::pair<std::uint32_t, std::uint32_t>, lift::LiftedForm> hints_;
 
-    std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
+    // Members by owner and name, in symbol order; a name can repeat (member_for).
+    std::multimap<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, std::vector<SymbolId>> constructors_;
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
@@ -1053,6 +1059,28 @@ SymbolId Converter::member(SymbolId owner, const std::string& name) const {
     return it == members_.end() ? no_symbol : it->second;
 }
 
+SymbolId Converter::member_for(SymbolId scope, SymbolId declared) const {
+    const auto [first, last] = members_.equal_range({scope, symbol(declared).name});
+    if (first == last) return no_symbol;
+    if (std::next(first) == last) return first->second;
+    // Several members share the name: the declared one itself, then the one
+    // that overrides it, then the one with its signature.
+    for (auto it = first; it != last; ++it)
+        if (it->second == declared) return declared;
+    for (auto it = first; it != last; ++it)
+        for (auto base = symbol(it->second).overrides; base != no_symbol; base = symbol(base).overrides)
+            if (base == declared) return it->second;
+    const auto signature = [&](SymbolId id) {
+        std::vector<IrType> types{symbol(id).type};
+        for (const auto parameter : symbol(id).parameters) types.push_back(symbol(parameter).type);
+        return types;
+    };
+    const auto wanted = signature(declared);
+    for (auto it = first; it != last; ++it)
+        if (signature(it->second) == wanted) return it->second;
+    return first->second;
+}
+
 FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
     if (selected == no_symbol) {
         if (const auto group = constructors_.find(cls); group != constructors_.end()) {
@@ -1067,9 +1095,8 @@ FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
 }
 
 SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
-    const auto& name = symbol(declared).name;
     for (auto scope = concrete; scope != no_symbol; scope = symbol(scope).base) {
-        if (const auto found = member(scope, name); found != no_symbol) {
+        if (const auto found = member_for(scope, declared); found != no_symbol) {
             return found;
         }
     }
@@ -1079,7 +1106,7 @@ SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
 SymbolId Converter::implementation(SymbolId cls, SymbolId method) const {
     const auto& name = symbol(method).name;
     for (auto scope = cls; scope != no_symbol; scope = symbol(scope).base) {
-        const auto found = member(scope, name);
+        const auto found = member_for(scope, method);
         if (found != no_symbol && symbol(found).kind == SymbolKind::Function && symbol(found).has_body) {
             return found;
         }
@@ -1351,7 +1378,35 @@ FunctionOrigin Converter::entry_point() const {
         throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point").with_code("E0804");
     }
     const auto main = candidates.front();
-    return {Role::Function, main, symbol(main).owner};
+    // The entry module inherits Std.Program.Entry and overrides main, or
+    // inherits that override from a module of its own, such as a library's
+    // application module that calls a requirement the program implements
+    // (Modules.md, Interfaces and inheritance). The image runs main for the
+    // one module of that line that no other module inherits.
+    const auto owner = symbol(main).owner;
+    const auto inherits = [&](SymbolId module) {
+        for (auto scope = module; scope != no_symbol; scope = symbol(scope).base)
+            if (scope == owner) return true;
+        return false;
+    };
+    std::vector<SymbolId> line;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = program_.symbols[id];
+        if (item.kind == SymbolKind::Module && !is_static_scope(item) && inherits(id)) line.push_back(id);
+    }
+    std::vector<SymbolId> leaves;
+    for (const auto module : line) {
+        if (std::ranges::none_of(line, [&](SymbolId other) { return symbol(other).base == module; }))
+            leaves.push_back(module);
+    }
+    if (leaves.size() > 1) {
+        throw Diagnostic(symbol(leaves[1]).span, "the program has more than one entry point")
+            .with_code("E0804")
+            .label("'" + symbol(leaves[1]).name + "' and '" + symbol(leaves[0]).name + "' both inherit main from '" +
+                   symbol(owner).name + "'")
+            .help("let only one module inherit '" + symbol(owner).name + "'");
+    }
+    return {Role::Function, main, leaves.empty() ? owner : leaves.front()};
 }
 
 FunctionOrigin Converter::target(const Dispatch& dispatch, SymbolId cls) const {
@@ -3883,8 +3938,14 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
         const auto module = module_of(receiver);
         const auto implementation = c_.resolve_member(module, node.symbol);
         if (!c_.symbol(implementation).has_body) {
-            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" +
-                                            c_.symbol(node.symbol).name + "'").with_code("E0899");
+            // A call through a module of a requirement that it, and every
+            // module it inherits, leaves without a body.
+            const auto& name = c_.symbol(node.symbol).name;
+            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" + name + "'")
+                .with_code("E0434")
+                .label("this call runs in module '" + c_.symbol(module).name + "', where '" + name + "' has no body")
+                .help("implement '" + name + "' with `let.override` in '" + c_.symbol(module).name +
+                      "', or in a module that inherits it and that the call goes through");
         }
         auto arguments = sequence(node.operands, 1);
         return invoke_values({Role::Function, implementation, module}, std::move(arguments), results, node.span,

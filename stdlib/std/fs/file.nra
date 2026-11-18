@@ -163,7 +163,7 @@ export let File = module (
     /// closes the files the run left open. Needs the fs capability.
     #NoDiscard
     export let with_open = func<T>(path: Path, mode: OpenMode,
-            body: func(File) -> result.Result<T>) -> result.Result<T> {
+        body: func(File) -> result.Result<T>) -> result.Result<T> {
         return match (open(path, mode)) {
             result.Result.Ok(file) => release<T>(file, run_body<T>(file, body)),
             result.Result.Err(failure) => result.Result<T>.Err(failure),

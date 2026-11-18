@@ -191,6 +191,33 @@ The constant applies to the binding; it does not by itself establish deep immuta
 
 See `examples/modules/module-interface.nra` for an interface with exported data, a class, a required function, and an inherited implementation.
 
+A module that overrides `main` can leave work to the modules that inherit it, as a library's application module does: its `main` calls a requirement, and the program's own module implements it. The image runs `main` for the one module of that line that no other module inherits, so the call reaches that module's implementation. Two modules that both inherit such a `main` are two entry points (`E0804`), and a requirement that the entry module leaves without a body cannot be called (`E0434`).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Server = module:program.Entry (
+    export let serve = func(path: string) -> string;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(serve("/"));
+        return program.ExitCode.Ok;
+    };
+);
+
+let Site = module:Server (
+    export let.override serve = func(path: string) -> string => "served " + path;
+);
+```
+
+```text
+served /
+```
+
+See `examples/modules/inherited-entry.nra`.
+
 ### Program entry
 
 A program implements the standard library requirement `Std.Program.Entry.main(string[]) -> ExitCode`. The compiler maps the library's `ExitCode.Ok` to process status 0, `ExitCode.Failure` to 1, and `ExitCode.Status(int)` to the supplied status. An explicit status outside 0 through 255 traps with `invalid argument: exit status`. The other variants name conventional statuses; most follow the shell convention of 128 plus the Linux number of the signal that would end a native process:
@@ -209,7 +236,7 @@ A program implements the standard library requirement `Std.Program.Entry.main(st
 | `CpuTimeExceeded` | 152 | SIGXCPU: the CPU time limit was exceeded |
 | `FileSizeExceeded` | 153 | SIGXFSZ: the file size limit was exceeded |
 
-SIGXCPU and SIGXFSZ are signals 24 and 25 on Linux for x86, Arm, and RISC-V, and 30 and 31 on MIPS, where a shell reports 158 and 159; Neura always uses 152 and 153. Integer division by zero raises SIGFPE (136), not SIGTRAP (133). `Std.Program.status_of(code)` returns the status a variant stands for, and `Std.Program.Process.exit` accepts either a status or an `ExitCode`. A runtime trap ends the run with the status of the variant that names its class ([Errors](Errors)). A program with more than one entry override is rejected.
+SIGXCPU and SIGXFSZ are signals 24 and 25 on Linux for x86, Arm, and RISC-V, and 30 and 31 on MIPS, where a shell reports 158 and 159; Neura always uses 152 and 153. Integer division by zero raises SIGFPE (136), not SIGTRAP (133). `Std.Program.status_of(code)` returns the status a variant stands for, and `Std.Program.Process.exit` accepts either a status or an `ExitCode`. A runtime trap ends the run with the status of the variant that names its class ([Errors](Errors)). A program with more than one entry override is rejected, as is one where two modules inherit the module that overrides `main` and no other module inherits either ([Interfaces and inheritance](#interfaces-and-inheritance)).
 
 The former built-in `SysIo` and `Test` modules are retired. Importing either is an error that names the replacement: `Std.Io.Console` and `Std.Program` for `SysIo`, and `Std.Test` for `Test`. Images built while they existed keep running under `neura run` as long as they import only `neura.console.write_line`; images that called the retired assertion services `neura.test.assert` or `neura.test.assert_equal_int32` no longer bind, because the runner no longer provides those services.
 

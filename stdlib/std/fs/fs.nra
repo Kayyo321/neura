@@ -57,7 +57,7 @@ export let Fs = module (
         #Pure
         export let.override to_string = func -> string =>
             kind.to_string() + "(" + size.to_string() + ", " +
-                (modified == nil ? "nil" : modified.to_string()) + ")";
+            (modified == nil ? "nil" : modified.to_string()) + ")";
     );
 
     /// @brief Carries the provider's entry kind, byte size and timestamp fields, or an error code.

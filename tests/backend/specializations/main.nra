@@ -1,0 +1,30 @@
+// Two classes named Row in different modules, each the type argument of the
+// same generic functions (IRtoNeuronConversion resolves each specialization
+// by its symbol, not by its name).
+let box = import:Box;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let shelf = import:Shelf;
+
+let Row = class (
+    export last key: string;
+    export last count: int32;
+
+    export let init = func(key: string, count: int32) => set;
+);
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let mine: Row[list] = new;
+        mine.append(new Row("a", 1));
+        let theirs: shelf.Row[list] = new;
+        theirs.append(new shelf.Row("b"));
+        last left = box.copy_of_list<Row>(mine);
+        last right = box.copy_of_list<shelf.Row>(theirs);
+        console.print_line(box.first<Row>(left).key + box.first<shelf.Row>(right).key + shelf.first_key(right));
+        const [row, other] = left.paired<shelf.Row>(right.get(0));
+        const [same, again] = left.paired<Row>(left.get(0));
+        console.print_line(row.count.to_string() + other.key + same.key + again.count.to_string());
+        return program.ExitCode.Ok;
+    };
+);

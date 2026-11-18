@@ -19,18 +19,18 @@ The following public declarations are taken from the module source; each links t
   A native argument or result, tagged by its carrier.
 - **ForeignValue** · [`export let as_bool = func(value: ForeignValue) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L34)
   The value of a Bool result. Tagged `#Pure`.
-- **ForeignValue** · [`export let as_int32 = func(value: ForeignValue) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L43)
+- **ForeignValue** · [`export let as_int32 = func(value: ForeignValue) -> int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L48)
   The value of any signed or unsigned integer result that fits in an int32. Tagged `#Pure`.
-- **ForeignValue** · [`export let as_int64 = func(value: ForeignValue) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L47)
+- **ForeignValue** · [`export let as_int64 = func(value: ForeignValue) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L52)
   The value of any integer result that fits in an int64, or of a Bool as 0 or 1. Tagged `#Pure`.
-- **ForeignValue** · [`export let as_uint64 = func(value: ForeignValue) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L64)
+- **ForeignValue** · [`export let as_uint64 = func(value: ForeignValue) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L90)
   The value of a UInt64 result, or of any non-negative integer result. Tagged `#Pure`.
-- **ForeignValue** · [`export let as_float32 = func(value: ForeignValue) -> float32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L73)
+- **ForeignValue** · [`export let as_float32 = func(value: ForeignValue) -> float32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L103)
   The value of a Float32 result. Tagged `#Pure`.
-- **ForeignValue** · [`export let as_float64 = func(value: ForeignValue) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L82)
+- **ForeignValue** · [`export let as_float64 = func(value: ForeignValue) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L117)
   The value of a Float32 or Float64 result as a float64. Tagged `#Pure`.
-- **ForeignValue** · [`export let as_segment = func(value: ForeignValue) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L91)
+- **ForeignValue** · [`export let as_segment = func(value: ForeignValue) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L133)
   The segment of an Address or Struct result.
-- **ForeignValue** · [`export let describe = func(value: ForeignValue) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L101)
+- **ForeignValue** · [`export let describe = func(value: ForeignValue) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/foreign-value.nra#L150)
   A short description such as `Int32(8)`. Tagged `#Pure`.
 <!-- END SOURCE API -->

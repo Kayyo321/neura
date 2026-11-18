@@ -58,7 +58,7 @@ export let Regex = module (
         #Pure
         export let.override to_string = func -> string =>
             "RegexFlags(ignore_ascii_case=" + ignore_ascii_case.to_string() +
-                ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
+            ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
     );
 
     /// @brief One match: group 0 is the whole match. Immutable.

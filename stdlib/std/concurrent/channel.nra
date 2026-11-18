@@ -20,7 +20,7 @@ export let Channel = module (
     #Final
     export let State = class (
         /// @brief Creates an identity that open has yet to register. Use open.
-        export let init = func { };
+        export let init = func {};
     );
 
     /// @brief The sending end of a channel of T.
