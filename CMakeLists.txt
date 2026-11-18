@@ -656,6 +656,13 @@ if(BUILD_TESTING)
         add_executable(neura_http_listener_foreground tests/server/http_listener_foreground.cpp)
         target_link_libraries(neura_http_listener_foreground PRIVATE neura_server_listeners Threads::Threads)
         neura_target_defaults(neura_http_listener_foreground)
+
+        if(NEURA_ENABLE_SERVER_HTTP2)
+            # The scripted HTTP/2 client of the server host tests.
+            add_executable(neura_http2_test_client tests/server/http2_test_client.cpp)
+            target_link_libraries(neura_http2_test_client PRIVATE neura_nghttp2)
+            neura_target_defaults(neura_http2_test_client)
+        endif()
     endif()
 
     if(TARGET neura_launcher)
@@ -758,12 +765,24 @@ if(BUILD_TESTING)
         if(NEURA_SERVER_TEST_CURL)
             list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
         endif()
+        if(TARGET neura_http2_test_client)
+            list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --http2-client "$<TARGET_FILE:neura_http2_test_client>")
+        endif()
         add_test(NAME server-host COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/server_host_test.py"
             --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
             --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-host-test"
             ${NEURA_SERVER_HOST_TEST_OPTIONS})
         set_tests_properties(server-host PROPERTIES TIMEOUT 300)
+        if(TARGET neura_http2_test_client)
+            # The same suite with request() over HTTP/2 (h2c, prior knowledge).
+            add_test(NAME server-host-h2c COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/server_host_test.py"
+                --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+                --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-host-h2c-test"
+                ${NEURA_SERVER_HOST_TEST_OPTIONS} --protocol h2c)
+            set_tests_properties(server-host-h2c PROPERTIES TIMEOUT 300)
+        endif()
     endif()
     foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
