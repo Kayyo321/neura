@@ -38,6 +38,12 @@ PG_IMAGES = {
     "18.7": "postgres@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015",
 }
 PG_PASSWORD = "neura-sql-test-secret"
+# The probe's request deadline (S-8): short, so /slow ends in a 504 soon, but
+# long enough for /big?1100000 to build its 1.1 MB parameter, which takes
+# seconds without the JIT on a slow runner (a 504 on x86_64 macOS, release
+# trial 16). NEURA_TEST_TIMEOUT_SCALE comes from CMake (docs/ContinuousIntegration.md).
+TIMEOUT_SCALE = int(os.environ.get("NEURA_TEST_TIMEOUT_SCALE", "1"))
+PROBE_DEADLINE = 2 * TIMEOUT_SCALE
 
 
 def check(condition, message):
@@ -216,7 +222,8 @@ def probe_journey(args, port, label):
     started = time.time()
     status, body = call(args, port, "GET", "/slow")
     elapsed = time.time() - started
-    check(status == 504 and elapsed < 10, f"{label} a statement past the deadline: {status} {elapsed:.1f}s {body!r}")
+    check(status == 504 and elapsed < PROBE_DEADLINE + 8,
+          f"{label} a statement past the deadline: {status} {elapsed:.1f}s {body!r}")
     status, body = call(args, port, "GET", "/count")
     check(status == 200 and body == b"1", f"{label} the connection is usable after the interrupt: {status} {body!r}")
     status, body = call(args, port, "GET", "/config?sql.main.url")
@@ -270,7 +277,7 @@ def test_sqlite_probes(args):
     for path in Path(args.work).glob("probe.db*"):
         path.unlink()
     env = {**os.environ, "SQLPROBE_sql.main.url": "leak", "SQLPROBE_sql.main.password": "leak"}
-    host = Host(args, image, "--request-timeout", "2", "--sql-pool", f"main=sqlite:{database}",
+    host = Host(args, image, "--request-timeout", str(PROBE_DEADLINE), "--sql-pool", f"main=sqlite:{database}",
                 "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=1",
                 "--config-env-prefix", "SQLPROBE_", env=env)
     try:
@@ -505,7 +512,7 @@ def test_postgres(args):
             applied = server.psql("SELECT version || ':' || name FROM neura_migrations ORDER BY version", "parts")
             check(applied.stdout.split() == ["1:create_parts", "2:add_note"], f"{label} neura_migrations: {applied.stdout!r}")
 
-            host = Host(args, probe, "--request-timeout", "2", "--sql-pool", f"main={server.url('probe')}",
+            host = Host(args, probe, "--request-timeout", str(PROBE_DEADLINE), "--sql-pool", f"main={server.url('probe')}",
                         "--config", "sql.main.password_env=NEURA_SQL_TEST_PASSWORD",
                         "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=1",
                         "--config", "probe.db=postgresql", env=env)
