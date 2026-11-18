@@ -408,6 +408,11 @@ public:
     std::pair<IrType, Span> value_type(SymbolId id) const { return value_types_.at(id); }
 
     SymbolId member(SymbolId owner, const std::string& name) const;
+    // The member of `scope` named as `declared` is that stands for it. A
+    // generic function's specializations are named by the simple names of
+    // their type arguments, so one scope can hold several of one name, such
+    // as copy<Row> for two classes named Row in different modules.
+    SymbolId member_for(SymbolId scope, SymbolId declared) const;
     SymbolId resolve_member(SymbolId concrete, SymbolId declared) const;
     SymbolId implementation(SymbolId cls, SymbolId method) const;
     bool derives(SymbolId cls, SymbolId base) const;
@@ -494,7 +499,8 @@ private:
     // Lifted forms by (function, block) for the LIFT section.
     std::map<std::pair<std::uint32_t, std::uint32_t>, lift::LiftedForm> hints_;
 
-    std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
+    // Members by owner and name, in symbol order; a name can repeat (member_for).
+    std::multimap<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, std::vector<SymbolId>> constructors_;
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
@@ -1024,6 +1030,28 @@ SymbolId Converter::member(SymbolId owner, const std::string& name) const {
     return it == members_.end() ? no_symbol : it->second;
 }
 
+SymbolId Converter::member_for(SymbolId scope, SymbolId declared) const {
+    const auto [first, last] = members_.equal_range({scope, symbol(declared).name});
+    if (first == last) return no_symbol;
+    if (std::next(first) == last) return first->second;
+    // Several members share the name: the declared one itself, then the one
+    // that overrides it, then the one with its signature.
+    for (auto it = first; it != last; ++it)
+        if (it->second == declared) return declared;
+    for (auto it = first; it != last; ++it)
+        for (auto base = symbol(it->second).overrides; base != no_symbol; base = symbol(base).overrides)
+            if (base == declared) return it->second;
+    const auto signature = [&](SymbolId id) {
+        std::vector<IrType> types{symbol(id).type};
+        for (const auto parameter : symbol(id).parameters) types.push_back(symbol(parameter).type);
+        return types;
+    };
+    const auto wanted = signature(declared);
+    for (auto it = first; it != last; ++it)
+        if (signature(it->second) == wanted) return it->second;
+    return first->second;
+}
+
 FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
     if (selected == no_symbol) {
         if (const auto group = constructors_.find(cls); group != constructors_.end()) {
@@ -1038,9 +1066,8 @@ FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
 }
 
 SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
-    const auto& name = symbol(declared).name;
     for (auto scope = concrete; scope != no_symbol; scope = symbol(scope).base) {
-        if (const auto found = member(scope, name); found != no_symbol) {
+        if (const auto found = member_for(scope, declared); found != no_symbol) {
             return found;
         }
     }
@@ -1050,7 +1077,7 @@ SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
 SymbolId Converter::implementation(SymbolId cls, SymbolId method) const {
     const auto& name = symbol(method).name;
     for (auto scope = cls; scope != no_symbol; scope = symbol(scope).base) {
-        const auto found = member(scope, name);
+        const auto found = member_for(scope, method);
         if (found != no_symbol && symbol(found).kind == SymbolKind::Function && symbol(found).has_body) {
             return found;
         }

@@ -1,0 +1,20 @@
+// Generic module functions and a generic method. Their specializations for
+// two classes named Row are both named, for example, copy_of_list<Row>.
+export let Box = module (
+    #Final
+    export let Holder = class<T> (
+        last storage: T[list];
+
+        export let init = func(values: T[list]) {
+            storage = values;
+        };
+
+        export let get = func(index: int) -> T => storage[index];
+
+        export let paired = func<U>(other: U) -> [T, U] => [storage[0], other];
+    );
+
+    export let copy_of_list = func<T>(source: T[list]) -> Holder<T> => new Holder<T>(source);
+
+    export let first = func<T>(holder: Holder<T>) -> T => holder.get(0);
+);
