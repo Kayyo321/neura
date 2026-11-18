@@ -149,7 +149,13 @@ std::string unix_path(const sockaddr_un& address, socklen_t length) {
     const auto offset = offsetof(sockaddr_un, sun_path);
     if (length <= offset) return {};
     const auto size = static_cast<std::size_t>(length) - offset;
+#ifdef __linux__
     if (address.sun_path[0] == '\0') return "@" + std::string(address.sun_path + 1, size - 1);
+#else
+    // No abstract namespace: a path that starts with NUL is an unnamed
+    // sender, which BSD systems report with a zeroed address.
+    if (address.sun_path[0] == '\0') return {};
+#endif
     return std::string(address.sun_path, strnlen(address.sun_path, size));
 }
 
