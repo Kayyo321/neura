@@ -587,6 +587,33 @@ void collect_references(std::string_view source, const std::vector<CssToken>& to
         }
         if (token.kind == Kind::Url || (token.kind == Kind::Ident && folded(token.name) == "url")) {
             if (reference(i, CssReference::Kind::Url, false) && token.kind == Kind::Ident) i = tokens[i + 1].match;
+            continue;
+        }
+        // In image-set(), a string that begins an option names an image as url() would. A string elsewhere in
+        // the option, such as the MIME type in type("image/avif"), is not a reference.
+        const bool image_set = token.kind == Kind::Ident &&
+                               (folded(token.name) == "image-set" || folded(token.name) == "-webkit-image-set");
+        if (image_set && is(i + 1, '(') && tokens[i + 1].begin == token.end && tokens[i + 1].match != no_match) {
+            const auto close = tokens[i + 1].match;
+            bool option_start = true;
+            for (auto j = i + 2; j < close; ++j) {
+                const auto& item = tokens[j];
+                if (trivia(item)) continue;
+                if (is(j, ',')) {
+                    option_start = true;
+                    continue;
+                }
+                if (item.kind == Kind::Url || (item.kind == Kind::Ident && folded(item.name) == "url")) {
+                    if (reference(j, CssReference::Kind::Url, false) && item.kind == Kind::Ident)
+                        j = tokens[j + 1].match;
+                } else if (option_start && item.kind == Kind::String) {
+                    reference(j, CssReference::Kind::Url, true);
+                } else if (item.match != no_match) {
+                    j = item.match;
+                }
+                option_start = false;
+            }
+            i = close;
         }
     }
 }

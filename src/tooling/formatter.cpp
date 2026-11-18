@@ -4,6 +4,7 @@
 #include "parser/syntax.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
@@ -33,6 +34,7 @@ struct Item {
     std::size_t line{};
     unsigned lines_before{};
     bool comment{};
+    TokenKind kind{TokenKind::Symbol};
 };
 
 // The compiler owns token recognition. Ordinary comments are recovered only
@@ -61,7 +63,7 @@ std::vector<Item> with_trivia(std::string_view source, const std::vector<Token>&
         }
         if (token.kind != TokenKind::End) {
             items.push_back({source.substr(token.span.offset, token.span.length), token.span.offset,
-                             token.span.line, lines, false});
+                             token.span.line, lines, false, token.kind});
             cursor = token.span.offset + token.span.length;
             line = token.span.line;
             lines = 0;
@@ -288,6 +290,226 @@ bool word(std::string_view text) {
            (first >= '0' && first <= '9') || first == '_' || first == '"';
 }
 
+// -- Islands (docs/design/Html030.md, "Formatter and editor") ---------------
+//
+// Inside an HTML or CSS body only leading indentation and trailing whitespace
+// change. A line that begins inside text the browser keeps as written (the
+// content of <pre> and <textarea>, a quoted attribute value, a comment, a
+// string in a hole or in CSS) is left byte for byte, and so is the end of a
+// line that ends inside one. Whitespace that contains a line break and
+// touches a tag collapses the same way at any width, so re-indenting never
+// changes a template's tree.
+
+// Byte ranges of an island body whose line breaks are content.
+using Ranges = std::vector<std::pair<std::size_t, std::size_t>>;
+
+// Skip Neura source from `at` to the delimiter that closes it (a `}` of a
+// hole or a `)` of a control head), recording strings and comments. Returns
+// the offset just past the delimiter, or the end of the text.
+std::size_t skip_neura(std::string_view text, std::size_t at, char close, Ranges& kept) {
+    int depth = 0;
+    while (at < text.size()) {
+        const char c = text[at];
+        if (c == '"' || c == '\'') {
+            const auto start = at++;
+            int braces = 0; // holes of an interpolated string
+            while (at < text.size() && (text[at] != c || braces > 0)) {
+                if (text[at] == '\\') ++at;
+                else if (c == '"' && text[at] == '{' && start > 0 && text[start - 1] == '$') ++braces;
+                else if (c == '"' && text[at] == '}' && braces > 0) --braces;
+                ++at;
+            }
+            kept.emplace_back(start, std::min(at + 1, text.size()));
+            ++at;
+        } else if (c == '/' && at + 1 < text.size() && text[at + 1] == '/') {
+            while (at < text.size() && text[at] != '\n') ++at;
+        } else if (c == '/' && at + 1 < text.size() && text[at + 1] == '*') {
+            const auto end = text.find("*/", at + 2);
+            const auto stop = end == std::string_view::npos ? text.size() : end + 2;
+            kept.emplace_back(at, stop);
+            at = stop;
+        } else if (c == '(' || c == '{' || c == '[') {
+            ++depth;
+            ++at;
+        } else if ((c == ')' || c == '}' || c == ']') && depth > 0) {
+            --depth;
+            ++at;
+        } else if (c == close) {
+            return at + 1;
+        } else {
+            ++at;
+        }
+    }
+    return at;
+}
+
+Ranges html_kept(std::string_view text) {
+    Ranges kept;
+    std::size_t at = 0;
+    const auto starts = [&](std::size_t from, std::string_view word) {
+        if (text.substr(from, word.size()) != word) return false;
+        const auto after = from + word.size();
+        return after >= text.size() || !std::isalnum(static_cast<unsigned char>(text[after]));
+    };
+    while (at < text.size()) {
+        const char c = text[at];
+        if (text.substr(at, 4) == "<!--") {
+            const auto end = text.find("-->", at + 4);
+            const auto stop = end == std::string_view::npos ? text.size() : end + 3;
+            kept.emplace_back(at, stop);
+            at = stop;
+        } else if (c == '<' && at + 1 < text.size() && std::isalpha(static_cast<unsigned char>(text[at + 1]))) {
+            const bool raw = starts(at + 1, "pre") || starts(at + 1, "textarea");
+            const auto name = starts(at + 1, "pre") ? std::string_view("</pre") : std::string_view("</textarea");
+            ++at;
+            while (at < text.size() && text[at] != '>') {
+                if (text[at] == '"' || text[at] == '\'') {
+                    const auto quote = text[at];
+                    const auto end = text.find(quote, at + 1);
+                    const auto stop = end == std::string_view::npos ? text.size() : end + 1;
+                    kept.emplace_back(at, stop);
+                    at = stop;
+                } else if (text[at] == '{') {
+                    at = skip_neura(text, at + 1, '}', kept);
+                } else {
+                    ++at;
+                }
+            }
+            if (at < text.size()) ++at;
+            if (raw) {
+                // The range takes the '<' of the end tag: whitespace before it is content too.
+                const auto end = text.find(name, at);
+                const auto stop = end == std::string_view::npos ? text.size() : end;
+                kept.emplace_back(at, std::min(stop + 1, text.size()));
+                at = stop;
+            }
+        } else if (c == '{') {
+            at = skip_neura(text, at + 1, '}', kept);
+        } else if (c == '@' && at + 1 < text.size() && std::isalpha(static_cast<unsigned char>(text[at + 1]))) {
+            const auto open = text.find_first_of("({", at);
+            at = open != std::string_view::npos && text[open] == '(' ? skip_neura(text, open + 1, ')', kept) : at + 1;
+        } else {
+            ++at;
+        }
+    }
+    return kept;
+}
+
+Ranges css_kept(std::string_view text) {
+    Ranges kept;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const char c = text[at];
+        if (c == '/' && at + 1 < text.size() && text[at + 1] == '*') {
+            const auto end = text.find("*/", at + 2);
+            const auto stop = end == std::string_view::npos ? text.size() : end + 2;
+            kept.emplace_back(at, stop);
+            at = stop;
+        } else if (c == '"' || c == '\'') {
+            const auto start = at++;
+            while (at < text.size() && text[at] != c && text[at] != '\n') {
+                if (text[at] == '\\') ++at;
+                ++at;
+            }
+            kept.emplace_back(start, std::min(at + 1, text.size()));
+            ++at;
+        } else {
+            ++at;
+        }
+    }
+    return kept;
+}
+
+bool inside(const Ranges& ranges, std::size_t offset) {
+    return std::ranges::any_of(ranges, [&](const auto& range) { return range.first < offset && offset < range.second; });
+}
+
+// The island token `text` (its braces included), re-indented so that its
+// body sits one level inside `depth`.
+std::string reindent_island(std::string_view text, TokenKind kind, unsigned depth, FormatOptions options,
+                            std::string_view eol) {
+    if (text.size() < 2 || text.front() != '{' || text.back() != '}' ||
+        text.find_first_of("\r\n") == std::string_view::npos)
+        return std::string(text);
+    const auto body = text.substr(1, text.size() - 2);
+    const auto kept = kind == TokenKind::HtmlIsland ? html_kept(body) : css_kept(body);
+    struct Line { std::size_t begin, end; };
+    std::vector<Line> lines;
+    for (std::size_t at = 0;;) {
+        const auto end = body.find_first_of("\r\n", at);
+        if (end == std::string_view::npos) {
+            lines.push_back({at, body.size()});
+            break;
+        }
+        lines.push_back({at, end});
+        at = end + (body[end] == '\r' && end + 1 < body.size() && body[end + 1] == '\n' ? 2 : 1);
+    }
+    const auto blank = [](char c) { return c == ' ' || c == '\t'; };
+    const auto lead = [&](const Line& line) {
+        std::size_t n = line.begin;
+        while (n < line.end && blank(body[n])) ++n;
+        return n - line.begin;
+    };
+    // The common indentation of the lines that may move; the first line
+    // continues the declaration and the last one holds the closing brace.
+    std::size_t common = std::string_view::npos;
+    for (std::size_t i = 1; i + 1 < lines.size(); ++i) {
+        const auto& line = lines[i];
+        if (inside(kept, line.begin) || lead(line) == line.end - line.begin) continue;
+        common = std::min(common, lead(line));
+    }
+    if (common == std::string_view::npos) common = 0;
+    const auto unit = options.insert_spaces ? std::string(options.tab_size, ' ') : std::string("\t");
+    std::string inner;
+    for (unsigned i = 0; i <= depth; ++i) inner += unit;
+    std::string outer;
+    for (unsigned i = 0; i < depth; ++i) outer += unit;
+    std::string result = "{";
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const auto& line = lines[i];
+        auto content = body.substr(line.begin, line.end - line.begin);
+        if (i > 0) result += eol;
+        const bool fixed = i > 0 && inside(kept, line.begin);
+        const bool open_end = inside(kept, line.end);
+        if (!open_end) {
+            while (!content.empty() && blank(content.back())) content.remove_suffix(1);
+        }
+        if (fixed || i == 0) {
+            result += content;
+            continue;
+        }
+        const auto indentation = std::min(lead(line), content.size());
+        if (i + 1 == lines.size()) {
+            // The closing line: the brace sits at the declaration's depth.
+            if (indentation == content.size()) {
+                result += outer;
+                continue;
+            }
+        }
+        if (indentation == content.size()) continue; // a blank line
+        result += inner + std::string(content.substr(std::min(common, indentation)));
+    }
+    return result + "}";
+}
+
+// Island bodies that differ at most in the whitespace that begins and ends
+// each line, with the same lines.
+bool same_island(std::string_view left, std::string_view right) {
+    const auto lines = [](std::string_view text) {
+        std::vector<std::string_view> result;
+        for (std::size_t at = 0;;) {
+            const auto end = text.find_first_of("\r\n", at);
+            auto line = text.substr(at, end == std::string_view::npos ? std::string_view::npos : end - at);
+            while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) line.remove_prefix(1);
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+            result.push_back(line);
+            if (end == std::string_view::npos) return result;
+            at = end + (text[end] == '\r' && end + 1 < text.size() && text[end + 1] == '\n' ? 2 : 1);
+        }
+    };
+    return lines(left) == lines(right);
+}
+
 class Writer {
 public:
     Writer(FormatOptions options, std::string eol, bool bom)
@@ -346,6 +568,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
     const auto first_eol = source.find_first_of("\r\n");
     if (first_eol != std::string_view::npos && source[first_eol] == '\r')
         eol = first_eol + 1 < source.size() && source[first_eol + 1] == '\n' ? "\r\n" : "\r";
+    const auto line_end = eol;
     Writer out(options, std::move(eol), source.starts_with("\xEF\xBB\xBF"));
     const auto items = with_trivia(source, tokens);
     std::vector<Delimiter> delimiters;
@@ -399,7 +622,9 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             const auto colon_owner = i > 1 ? items[previous_index].text : std::string_view{};
             if (colon_owner == "import" || colon_owner == "module" || colon_owner == "class" || colon_owner == "interface") space = false;
         }
-        if (text == "<" && hints.angles.contains(item.offset)) {
+        if (item.kind == TokenKind::HtmlIsland || item.kind == TokenKind::CssIsland) {
+            out.text(reindent_island(text, item.kind, indent(), options, line_end), indent(), true);
+        } else if (text == "<" && hints.angles.contains(item.offset)) {
             out.text(text, indent(), false);
             delimiters.push_back({text, false, false});
         } else if (text == ">" && hints.angles.contains(item.offset)) {
@@ -504,7 +729,8 @@ std::string format_source(std::string_view source, const std::string& file, Form
     for (std::size_t i = 0; i < tokens.size(); ++i) {
         const auto& before = tokens[i];
         const auto& after = result[i];
-        if (before.kind != after.kind || before.text != after.text)
+        const bool island = before.kind == TokenKind::HtmlIsland || before.kind == TokenKind::CssIsland;
+        if (before.kind != after.kind || (island ? !same_island(before.text, after.text) : before.text != after.text))
             throw std::runtime_error("formatter refused a change to source tokenization");
         if (static_cast<bool>(before.documentation) != static_cast<bool>(after.documentation) ||
             (before.documentation && before.documentation->text != after.documentation->text))

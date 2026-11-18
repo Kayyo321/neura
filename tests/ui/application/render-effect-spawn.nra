@@ -1,0 +1,11 @@
+// A hole that starts a task (E1010).
+let work = func(value: int32) -> int32 => value * 2;
+
+let doubled = func(value: int32) -> int32 {
+    scope {
+        spawn work(value);
+    }
+    return value * 2;
+};
+
+let badge = html(value: int32) { <data value={value}>{ doubled(value) }</data> };

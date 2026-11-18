@@ -192,6 +192,81 @@ a,   b: float64, // after a group
         self.assertIn("// after a group", formatted)
         self.assertIn("a, b: float64,", formatted)
 
+    def test_islands_shift_indentation_only(self):
+        source = """let ui = import:Std.Ui;
+
+let part_row = html(name: string, count: int32) {
+        <li class="part" title="two
+   lines">
+          <span>{name}</span>   
+            <pre>  keep
+      this   
+  </pre>
+          <!-- a
+     comment -->
+            @if (count > 0) {
+                <strong>{ "a}b" /* x
+  y */ }</strong>
+            }
+        </li>
+};
+
+let Inner = module (
+  const Styles = css {
+  .a { color: red; }   
+      .b { content: "x"; }  /* keep
+         this */
+};
+);
+"""
+        expected = """let ui = import:Std.Ui;
+
+let part_row = html(name: string, count: int32) {
+    <li class="part" title="two
+   lines">
+      <span>{name}</span>
+        <pre>  keep
+      this   
+  </pre>
+      <!-- a
+     comment -->
+        @if (count > 0) {
+            <strong>{ "a}b" /* x
+  y */ }</strong>
+        }
+    </li>
+};
+
+let Inner = module (
+    const Styles = css {
+        .a { color: red; }
+            .b { content: "x"; }  /* keep
+         this */
+    };
+);
+"""
+        formatted = self.formatted(source)
+        self.assertEqual(formatted, expected)
+        if arguments.standalone:
+            return
+        # Re-indenting never changes a template's descriptor.
+        with tempfile.TemporaryDirectory() as temporary:
+            descriptors = []
+            for name, text in (("before.nra", source), ("after.nra", formatted)):
+                path = pathlib.Path(temporary) / name
+                path.write_text(text)
+                result = subprocess.run([str(arguments.binary.resolve()), "emit-ir", "--no-optimize", str(path)],
+                                        capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                descriptors.append([line.strip().split(" : string at ")[0] for line in result.stdout.splitlines()
+                                    if '{\\"encoding\\":1' in line])
+            self.assertTrue(descriptors[0])
+            self.assertEqual(descriptors[0], descriptors[1])
+
+    def test_one_line_islands_are_kept(self):
+        source = 'let ready = html() { <p>Ready</p> };\nconst Empty = css { };\n'
+        self.assertEqual(self.formatted(source), source)
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

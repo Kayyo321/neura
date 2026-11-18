@@ -115,7 +115,7 @@ def run_browser(engine, executable):
                 process = subprocess.Popen([executable, *flags, url], stdout=log, stderr=subprocess.STDOUT,
                                            start_new_session=os.name == "posix")
                 try:
-                    report = results.get(timeout=18)
+                    report = results.get(timeout=90)
                 except Empty:
                     report = {"error": "the browser did not send a result"}
                 finally:

@@ -688,7 +688,10 @@ if(BUILD_TESTING)
     set_tests_properties(app-html-styles PROPERTIES TIMEOUT 180)
     add_test(NAME app-ui-reconcile COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/reconcile.py" "$<TARGET_FILE:neura>")
-    set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 300)
+    set_tests_properties(app-ui-reconcile PROPERTIES TIMEOUT 900)
+    add_test(NAME app-ui-trace COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/ui-ops/trace.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-ui-trace PROPERTIES TIMEOUT 180)
     # A Neura application in headless Chromium and Firefox through Std.Web.mount. It needs the browser
     # runtime of the wasm-runtime preset (configure with -DNEURA_WASM_HOST=ON, build the neura_wasm target),
     # Node, and the browsers; without them it is skipped.

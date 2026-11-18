@@ -18,7 +18,10 @@ import sys
 from tempfile import TemporaryDirectory
 
 NEURA = Path(sys.argv[1]).resolve()
+# With --update, rewrite the reconciler entries of batches.json instead of checking them.
+UPDATE = sys.argv[2:] == ["--update"]
 SOURCE = Path(__file__).resolve().parents[3]
+BATCHES = Path(__file__).resolve().parent / "batches.json"
 ENV = dict(os.environ, NEURA_GPU="off")
 
 SHIM = """let reconcile = import:Std.Ui.Internal.Reconcile;
@@ -78,6 +81,106 @@ let rows = html(count: int) {
     </ol>
 };
 
+let note = html(text: string) { <small>{text}</small> };
+
+let items = html(names: string[], tail: string) {
+    <ul>
+        @for (const name in names; key: name) {
+            <li>{name}</li>
+        }
+        <li>{tail}</li>
+    </ul>
+};
+
+let group = html(title: string, members: string[], open: bool) {
+    <section>
+        <h2>{title}</h2>
+        @if (open) {
+            <ol>
+                @for (const member in members; key: member) {
+                    <li>
+                        {member}
+                        @if (member == title) {
+                            <strong>lead</strong>
+                        }
+                    </li>
+                }
+            </ol>
+        } @else {
+            <p>closed</p>
+        }
+    </section>
+};
+
+let groups = html(names: string[], open: bool) {
+    @for (const name in names; key: name) {
+        {group(name, ["a", name, "z"], open)}
+    }
+    <footer>end</footer>
+};
+
+let typed = new func(event: ui.InputEvent) {};
+
+let controls = html(checked: bool, text: string, open: bool, choice: string, accent: uint32, ratio: float64,
+                    link: string, stop: bool) {
+    <form>
+        <input type="checkbox" prop:checked={checked} prop:indeterminate={!checked}>
+        <textarea prop:value={text} on:input={typed}></textarea>
+        <details prop:open={open}><summary>More</summary><p>Body</p></details>
+        <select prop:value={choice}><option value="a">A</option><option value="b">B</option></select>
+        <div var:--accent={ ui.color(accent) } var:--ratio={ ui.percent(ratio) } var:--scale={ ui.number(1.5) }>
+            Styled
+        </div>
+        <a href={ ui.url(link) }>Link</a>
+        @if (stop) {
+            <button type="button" on:click.stop_propagation={record}>Stop</button>
+        } @else {
+            <button type="button" on:click={record}>Go</button>
+        }
+    </form>
+};
+
+let icon = html(label: string) {
+    <figure>
+        <svg viewBox="0 0 4 4" aria-hidden="true"><path d="M 0 0 L 4 4"/></svg>
+        <figcaption>{label}</figcaption>
+    </figure>
+};
+
+let bulk = html(lists: int, size: int, extra: int) {
+    @for (const l in {0 .. lists}; key: l) {
+        <ol>
+            @for (const i in {0 .. size}; key: i) {
+                <li></li>
+            }
+        </ol>
+    }
+    @for (const e in {0 .. extra}; key: e) {
+        <hr>
+    }
+};
+
+let sized = html(text: string, title: string, link: ui.Url) {
+    <p title={title}><a href={link}>{text}</a></p>
+};
+
+// Validation only: the outcome, or the number of operations.
+let measure = func(r: testing.Reconciler, label: string, view: ui.View) {
+    last plan = r.prepare(view);
+    console.print_line("commit " + label);
+    if (plan.diagnostic != nil) {
+        console.print_line("invalid " + plan.diagnostic.message + " slot=" + plan.diagnostic.slot.to_string() +
+                           " index=" + plan.diagnostic.index.to_string() + " key=" + plan.diagnostic.key);
+        return;
+    }
+    console.print_line("count " + plan.operations.length.to_string());
+    r.accept(plan);
+};
+
+let scenario = func(name: string) {
+    console.print_line("scenario " + name);
+};
+
 let show = func(r: testing.Reconciler, label: string, view: ui.View) {
     last plan = r.prepare(view);
     console.print_line("commit " + label);
@@ -101,6 +204,7 @@ let show = func(r: testing.Reconciler, label: string, view: ui.View) {
 
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
+        scenario("reconciler: mount, keyed update, equal commit and replacement");
         last r = new testing.Reconciler();
         show(r, "mount", page(["a", "b", "c"], Optional<string>.Some("Stock"), false, badge("new"), true, "x",
                               record, false));
@@ -125,11 +229,73 @@ let App = module:program.Entry (
         last mounted = page(["z"], Optional<string>.None, false, badge("m"), true, "", record, false);
         show(r, "replace", mounted);
         show(r, "remount", mounted);
+        scenario("reconciler: keyed items before a static sibling");
+        last keyed = new testing.Reconciler();
+        show(keyed, "keyed 1", items(["a", "b", "c", "d", "e"], "end"));
+        show(keyed, "keyed 2", items(["e", "d", "c", "b", "a"], "end"));
+        show(keyed, "keyed 3", items(["x", "a", "y", "c", "z"], "tail"));
+        show(keyed, "keyed 4", items([], "tail"));
+        show(keyed, "keyed 5", items(["p", "q"], "end"));
+        scenario("reconciler: nested blocks and child views at the root");
+        last nested = new testing.Reconciler();
+        show(nested, "nested 1", groups(["g1", "g2"], true));
+        show(nested, "nested 2", groups(["g2", "g1", "g3"], false));
+        show(nested, "nested 3", groups(["g3", "g1"], true));
+        show(nested, "nested 4", groups([], true));
+        scenario("reconciler: child views change template");
+        last children = new testing.Reconciler();
+        show(children, "children 1", pair(badge("x"), note("y")));
+        show(children, "children 2", pair(note("y"), badge("x")));
+        show(children, "children 3", pair(note("w"), note("v")));
+        scenario("reconciler: properties, custom properties, URLs and handlers");
+        last forms = new testing.Reconciler();
+        show(forms, "controls 1", controls(true, "hello", true, "b", 16746496 as uint32, 25.0, "/parts/7", false));
+        show(forms, "controls 2", controls(false, "hi", false, "a", 255 as uint32, 12.5, "https://example.org/x",
+                                           true));
+        show(forms, "controls 3", controls(false, "hi", false, "a", 255 as uint32, 12.5, "https://example.org/x",
+                                           true));
+        scenario("reconciler: static SVG with a dynamic caption");
+        last icons = new testing.Reconciler();
+        show(icons, "icon 1", icon("first"));
+        show(icons, "icon 2", icon("second"));
+        scenario("-");
         last list = new testing.Reconciler();
         show(list, "limit", rows(10001));
         show(list, "rows", rows(3));
         list.reset();
         show(list, "after reset", rows(2));
+
+        // U-5 counts every element and text node of a root: ten lists of one <ol> and 9999 items make 100000.
+        last big = new testing.Reconciler();
+        measure(big, "nodes at the limit", bulk(10, 9999, 0));
+        measure(big, "nodes over the limit", bulk(10, 9999, 1));
+        // U-6: a text, attribute or URL value of 1 MiB is accepted, one byte more is refused.
+        let mebibyte = "x";
+        for (let i in {0 .. 20}) {
+            mebibyte = mebibyte + mebibyte;
+        }
+        last values = new testing.Reconciler();
+        measure(values, "values at the limit", sized(mebibyte, mebibyte, ui.url(mebibyte)));
+        measure(values, "text over the limit", sized(mebibyte + "y", "t", ui.url("u")));
+        measure(values, "attribute over the limit", sized("t", mebibyte + "y", ui.url("u")));
+        measure(values, "url over the limit", sized("t", "t", ui.url(mebibyte + "y")));
+
+        // ViewReused across roots: a view mounted in one root is refused by another until the first lets it go.
+        last root_a = new testing.Reconciler();
+        last root_b = new testing.Reconciler();
+        last moved = badge("moved");
+        measure(root_a, "root a mounts", moved);
+        measure(root_b, "root b takes a view mounted in a", moved);
+        measure(root_a, "root a mounts another view", badge("other"));
+        measure(root_b, "root b takes the view a released", moved);
+        last refused_once = badge("nested");
+        measure(root_a, "root a refuses a tree", pair(refused_once, refused_once));
+        measure(root_b, "root b takes a view a only refused", refused_once);
+        last kept = badge("kept");
+        measure(root_a, "root a mounts kept", kept);
+        root_a.reset();
+        measure(root_b, "root b takes a view a reset", kept);
+        measure(root_a, "root a takes the view b mounted", kept);
         return program.ExitCode.Ok;
     };
 );
@@ -229,8 +395,8 @@ class Model:
                 self.release(node)
             elif kind == "element":
                 assert node not in self.nodes
-                self.nodes[node] = {"tag": op["name"], "attrs": {}, "vars": {}, "props": {}, "on": {},
-                                    "children": []}
+                self.nodes[node] = {"tag": op["name"], "svg": op["svg"], "attrs": {}, "vars": {}, "props": {},
+                                    "on": {}, "children": []}
                 self.insert(node, op["parent"], op["before"])
             elif kind == "text":
                 assert node not in self.nodes
@@ -254,10 +420,59 @@ class Model:
                 if op["handler"] is None:
                     del self.nodes[node]["on"][op["event"]]
                 else:
-                    flags = ("p" if op["preventDefault"] else "") + ("s" if op["stopPropagation"] else "")
-                    self.nodes[node]["on"][op["event"]] = f"{op['handler']}{flags}"
+                    self.nodes[node]["on"][op["event"]] = (op["handler"], op["preventDefault"],
+                                                           op["stopPropagation"])
             elif kind == "property":
                 self.nodes[node]["props"][op["name"]] = op["value"]
+
+    def number(self, value):
+        """A number as JavaScript's String(number) writes it, for the values the corpus uses."""
+        return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+    def canonical(self, node):
+        """The node in the form of canonical() in dom-test.mjs."""
+        entry = self.nodes[node]
+        if "text" in entry:
+            return entry["text"]
+        result = {"tag": entry["tag"]}
+        svg = entry.get("svg", False)
+        if svg:
+            result["svg"] = True
+        attrs = dict(entry["attrs"])
+        for name in ("open",):
+            if entry["props"].get(name) is True:
+                attrs[name] = ""
+            elif entry["props"].get(name) is False:
+                attrs.pop(name, None)
+        if attrs:
+            result["attrs"] = {name: attrs[name] for name in sorted(attrs)}
+        if entry["vars"]:
+            result["vars"] = {
+                name: ("#%06x" % int(value["number"]) if value["unit"] == "rgb"
+                       else self.number(value["number"]) + value["unit"])
+                for name, value in sorted(entry["vars"].items())}
+        props = {name: value for name, value in sorted(entry["props"].items()) if name != "open"}
+        if props:
+            result["props"] = props
+        if entry["children"]:
+            result["children"] = [self.canonical(child) for child in entry["children"]]
+        return result
+
+    def walk(self, node=0, path=()):
+        for index, child in enumerate(self.nodes[node].get("children", [])):
+            yield child, [*path, index]
+            yield from self.walk(child, (*path, index))
+
+    def fixture(self):
+        """The expected tree, node identities and handlers after a commit, for dom-test.mjs."""
+        ids, events = [], []
+        for node, path in self.walk():
+            ids.append([node, path])
+            for event, handler in sorted(self.nodes[node].get("on", {}).items()):
+                events.append({"path": path, "event": event, "node": node, "handler": handler[0],
+                               "preventDefault": handler[1], "stopPropagation": handler[2]})
+        return {"tree": [self.canonical(child) for child in self.nodes[0]["children"]], "ids": ids,
+                "events": events}
 
     def html(self, node=0):
         entry = self.nodes[node]
@@ -269,7 +484,8 @@ class Model:
         parts = [entry["tag"]]
         parts += [f'{name}="{value}"' if value else name for name, value in entry["attrs"].items()]
         parts += [f"--{name[2:]}={value['number']:g}{value['unit']}" for name, value in entry["vars"].items()]
-        parts += [f"on:{event}={handler}" for event, handler in entry["on"].items()]
+        parts += [f"on:{event}={handler}{'p' if prevent else ''}{'s' if stop else ''}"
+                  for event, (handler, prevent, stop) in entry["on"].items()]
         parts += [f"prop:{name}={json.dumps(value)}" for name, value in entry["props"].items()]
         return f"<{' '.join(parts)}>{inner}</{entry['tag']}>"
 
@@ -298,25 +514,34 @@ with TemporaryDirectory() as temporary:
     built = subprocess.run([neura, "build", "main.nra", "-o", "main.nvr"], cwd=root, env=ENV,
                            capture_output=True, text=True)
     check(built.returncode == 0, built.stdout + built.stderr)
-    runs = [subprocess.run([neura, "run", "main.nvr", *tier], cwd=root, env=ENV, capture_output=True, text=True)
+    # The U-5 commits build, validate and diff 100000 nodes, which takes more than the default step limit.
+    runs = [subprocess.run([neura, "run", "main.nvr", "--max-steps", "4000000000", *tier], cwd=root, env=ENV,
+                           capture_output=True, text=True)
             for tier in ([], ["--tier=0"])]
     for run in runs:
         check(run.returncode == 0, run.stdout + run.stderr)
     check(runs[0].stdout == runs[1].stdout, "tier 0 and the default tier disagree")
     lines = runs[0].stdout.splitlines()
 
-    commits, current, extras = {}, None, []
+    commits, current, extras, scenarios = {}, None, [], {}
+    scenario = None
     for line in lines:
         kind, _, rest = line.partition(" ")
-        if kind == "commit":
+        if kind == "scenario":
+            scenario = None if rest == "-" else scenarios.setdefault(rest, [])
+        elif kind == "commit":
             current = rest
             commits[current] = {"ops": [], "bytes": None, "invalid": None}
+            if scenario is not None:
+                scenario.append(current)
         elif kind == "op":
             commits[current]["ops"].append(json.loads(rest))
         elif kind == "bytes":
             commits[current]["bytes"] = bytes.fromhex(rest)
         elif kind == "invalid":
             commits[current]["invalid"] = rest
+        elif kind == "count":
+            commits[current]["count"] = int(rest)
         else:
             extras.append(line)
 
@@ -362,5 +587,72 @@ with TemporaryDirectory() as temporary:
     check(extras == ["deliver true", "deliver false", "deliver true", "wrong record false", "handlers 1",
                      "clicked 7", "clicked 1008"],
           f"delivery {extras}")
+
+    def outcome(label):
+        commit = commits[label]
+        return commit["invalid"] if commit["invalid"] is not None else None
+
+    check(commits["nodes at the limit"]["invalid"] is None, commits["nodes at the limit"])
+    check(outcome("nodes over the limit") == "U-5: a root holds at most 100000 nodes slot=0 index=-1 key=",
+          outcome("nodes over the limit"))
+    check(outcome("values at the limit") is None, outcome("values at the limit"))
+    for label, slot in (("text over the limit", 2), ("attribute over the limit", 0), ("url over the limit", 1)):
+        check(outcome(label) == f"U-6: a text or attribute value holds at most 1 MiB slot={slot} index=-1 key=",
+              f"{label}: {outcome(label)}")
+    reused = "a view appears once in one tree, in one root slot=0 index=-1 key="
+    check([outcome(label) for label in ("root a mounts", "root b takes a view mounted in a",
+                                        "root a mounts another view", "root b takes the view a released",
+                                        "root a refuses a tree", "root b takes a view a only refused",
+                                        "root a mounts kept", "root b takes a view a reset",
+                                        "root a takes the view b mounted")] ==
+          [None, reused, None, None, reused, None, None, None, reused], "views across roots")
+
+    # The browser corpus: each scenario's accepted commits, with the tree the model builds from them. The
+    # adapter in headless Chromium and Firefox must build the same tree (tests/apps/ui-ops/browser.py).
+    generated = []
+    for name, labels in scenarios.items():
+        model, entries = Model(), []
+        for label in labels:
+            commit = commits[label]
+            if commit["invalid"] is not None:
+                continue
+            model.apply(commit["ops"])
+            entries.append({"operations": commit["ops"], **model.fixture()})
+        generated.append({"name": name, "source": "tests/apps/ui-ops/reconcile.py", "commits": entries})
+    corpus = json.loads(BATCHES.read_text())
+    kept = [sample for sample in corpus if sample.get("source") != "tests/apps/ui-ops/reconcile.py"]
+    if UPDATE:
+        # Hand-written entries come first and keep their text; generated ones follow them.
+        text, decoder, at, ends = BATCHES.read_text(), json.JSONDecoder(), 0, []
+        at = text.index("[") + 1
+        for sample in corpus:
+            while text[at] in " \t\r\n,":
+                at += 1
+            _, at = decoder.raw_decode(text, at)
+            ends.append(at)
+        check(corpus[:len(kept)] == kept, "generated entries must follow the hand-written ones")
+        prefix = text[:ends[len(kept) - 1]] if kept else "["
+        lines = []
+        for sample in generated:
+            commit_lines = []
+            for commit in sample["commits"]:
+                fields = [f'        "operations": [\n' + ",\n".join(
+                    "          " + json.dumps(op, ensure_ascii=False, separators=(",", ":"))
+                    for op in commit["operations"]) + "\n        ]"]
+                for field in ("tree", "ids", "events"):
+                    if field in commit:
+                        fields.append(f'        "{field}": ' + json.dumps(commit[field], ensure_ascii=False,
+                                                                       separators=(",", ":")))
+                commit_lines.append("      {\n" + ",\n".join(fields) + "\n      }")
+            head = f'    "name": {json.dumps(sample["name"])},\n'
+            if "source" in sample:
+                head += f'    "source": {json.dumps(sample["source"])},\n'
+            lines.append("  {\n" + head + '    "commits": [\n' + ",\n".join(commit_lines) + "\n    ]\n  }")
+        BATCHES.write_text(prefix + (",\n" if kept else "\n") + ",\n".join(lines) + "\n]\n")
+        rewritten = json.loads(BATCHES.read_text())
+        check(rewritten == kept + generated, "batches.json did not round-trip")
+    else:
+        check([sample for sample in corpus if sample.get("source") == "tests/apps/ui-ops/reconcile.py"] == generated,
+              "batches.json is out of date: run reconcile.py <neura> --update")
 
 print("reconciliation checks passed")

@@ -2,42 +2,40 @@ let ui = import:Std.Ui;
 let storage = import:Std.Ui.Internal.Storage;
 
 /// @brief Constructs a view from typed slot values in render order.
+///
+/// Each value is linked in front of the earlier ones, so the newest comes first and a render writes no object but
+/// the builder and the item lists it created. A render may not write what it did not create (E1010), and the
+/// effect analysis tracks the objects a call allocates together: appending at a tail would write an object
+/// reachable from a value the caller passed, such as a child view.
 #Internal
 export let Build = module (
     #NotThreadSafe
     export let Builder = class (
+        /// The slot evaluated last; each slot's `next` is the one evaluated before it.
         export let first: storage.Slot = nil;
-        let tail: storage.Slot = nil;
-
-        export let push = func(slot: storage.Slot) {
-            if (tail == nil) {
-                first = slot;
-            } else {
-                tail.next = slot;
-            }
-            tail = slot;
-        };
     );
 
     #NotThreadSafe
     export let Item = class (
         export last key: string;
         export last view: ui.View;
-        export let next: Item = nil;
+        /// The item before this one in iteration order.
+        export last next: Item;
 
-        export let init = func(key: string, view: ui.View) => set;
+        export let init = func(key: string, view: ui.View, next: Item) => set;
     );
 
     #NotThreadSafe
     export let Items = class (
+        /// The last item in iteration order.
         export let first: Item = nil;
-        export let tail: Item = nil;
+        export let count: int64 = 0;
     );
 
     export let begin = func -> Builder => new Builder();
 
     export let put = func<T>(builder: Builder, slot: uint32, value: T) {
-        builder.push(new storage.Payload<T>(slot, value));
+        builder.first = new storage.Payload<T>(slot, value, builder.first);
     };
 
     export let finish = func(builder: Builder, descriptor: string, fragment: uint32) -> ui.View =>
@@ -50,12 +48,7 @@ export let Build = module (
     export let begin_items = func -> Items => new Items();
 
     export let add_item = func(items: Items, key: string, view: ui.View) {
-        let item = new Item(key, view);
-        if (items.tail == nil) {
-            items.first = item;
-        } else {
-            items.tail.next = item;
-        }
-        items.tail = item;
+        items.first = new Item(key, view, items.first);
+        items.count += 1;
     };
 );

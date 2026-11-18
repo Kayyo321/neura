@@ -5043,7 +5043,9 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             artifact_files.insert(id);
         }
     }
-    check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    const auto prebuilt = [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); };
+    check_pure_tags(program_, prebuilt);
+    check_render_factories(program_, prebuilt);
     return std::move(program_);
 }
 

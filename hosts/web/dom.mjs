@@ -45,6 +45,11 @@ const PHASE = new Map([
     ["handler", 3],
     ["property", 4],
 ]);
+// Media attributes whose bundled files the compiler names "assets/<digest>.<extension>", relative to the bundle.
+const ASSET_ATTRIBUTES = new Map([
+    ["src", ["img", "source", "video", "audio", "track"]], ["poster", ["video"]], ["srcset", ["img", "source"]],
+]);
+const ASSET_PREFIX = "assets/";
 const ACTIVE_ROOTS = new Set();
 const encoder = new TextEncoder();
 
@@ -259,6 +264,51 @@ function eventFields(element, event) {
     }
 }
 
+// A bundled file is named relative to the bundle, not to the page: a deep-linked route such as /parts/7 would
+// otherwise resolve assets/<digest>.png to /parts/assets/<digest>.png.
+function bundledValue(record, name, value, base) {
+    if (base === null) return value;
+    const media = record.svg ? record.tag === "use" && name === "href" : ASSET_ATTRIBUTES.get(name)?.includes(record.tag);
+    if (!media) return value;
+    const resolve = url => url.startsWith(ASSET_PREFIX) ? new URL(url, base).href : url;
+    if (name !== "srcset") return resolve(value);
+    let result = "";
+    let copied = 0;
+    for (const [begin, end] of srcsetUrls(value)) {
+        result += value.slice(copied, begin) + resolve(value.slice(begin, end));
+        copied = end;
+    }
+    return result + value.slice(copied);
+}
+
+// The URLs of a srcset value, as the compiler finds them (src/parser/html_template.cpp, srcset_urls).
+function srcsetUrls(value) {
+    const blank = c => c === " " || c === "\t" || c === "\n" || c === "\f" || c === "\r";
+    const urls = [];
+    let at = 0;
+    while (at < value.length) {
+        while (at < value.length && (blank(value[at]) || value[at] === ",")) at += 1;
+        if (at === value.length) break;
+        const begin = at;
+        while (at < value.length && !blank(value[at])) at += 1;
+        let end = at;
+        let separated = false;
+        while (end > begin && value[end - 1] === ",") {
+            end -= 1;
+            separated = true;
+        }
+        urls.push([begin, end]);
+        if (separated) continue;
+        let depth = 0;
+        while (at < value.length && (value[at] !== "," || depth > 0)) {
+            if (value[at] === "(") depth += 1;
+            else if (value[at] === ")" && depth > 0) depth -= 1;
+            at += 1;
+        }
+    }
+    return urls;
+}
+
 function writeProperty(record, name, value) {
     const element = record.node;
     if (name === "value" && record.composing) {
@@ -304,8 +354,11 @@ export class DomRoot {
     #moving = false;
     #events = [];
     #generation = 0;
+    #assetBase = null;
 
-    constructor(element, onEvent) {
+    // `options.assetBase` is the URL of the bundle's directory; with it, bundled media files resolve against the
+    // bundle whatever the page's path. Without it, they resolve against the page, which suits hash routing.
+    constructor(element, onEvent, options = {}) {
         if (element?.nodeType !== 1 || typeof onEvent !== "function")
             throw new TypeError("a DOM root needs an element and an event sink");
         for (const root of ACTIVE_ROOTS) {
@@ -313,6 +366,7 @@ export class DomRoot {
         }
         this.#root = element;
         this.#emit = onEvent;
+        if (options.assetBase !== undefined) this.#assetBase = new URL(options.assetBase).href;
         this.#records.set(ROOT, { node: element, kind: "element", svg: element.namespaceURI === SVG, children: new Set() });
         element.addEventListener("compositionstart", this.#compositionStart, { capture: true });
         element.addEventListener("compositionend", this.#compositionEnd, { capture: true });
@@ -444,7 +498,7 @@ export class DomRoot {
             break;
         case "attribute":
             if (op.value === null) record.node.removeAttribute(op.name);
-            else record.node.setAttribute(op.name, op.value);
+            else record.node.setAttribute(op.name, bundledValue(record, op.name, op.value, this.#assetBase));
             break;
         case "variable":
             if (op.value === null) record.node.style.removeProperty(op.name);

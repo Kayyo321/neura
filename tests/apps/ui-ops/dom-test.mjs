@@ -54,27 +54,68 @@ function handler(id, event, target, preventDefault = false, stopPropagation = fa
     return { op: "handler", id, event, handler: target, preventDefault, stopPropagation };
 }
 
-function canonical(node) {
+// A node as the corpus writes it. The style attribute is the browser's serialization of the custom properties,
+// which are compared one by one under `vars`; `props` lists the DOM properties the expected node names.
+function canonical(node, expected) {
     if (node.nodeType === Node.TEXT_NODE) return node.data;
     const result = { tag: node.localName };
     if (node.namespaceURI === "http://www.w3.org/2000/svg") result.svg = true;
-    if (node.attributes.length) {
-        const names = node.getAttributeNames().sort();
-        result.attrs = Object.fromEntries(names.map(name => [name, node.getAttribute(name)]));
+    const names = node.getAttributeNames().filter(name => name !== "style").sort();
+    if (names.length) result.attrs = Object.fromEntries(names.map(name => [name, node.getAttribute(name)]));
+    const variables = Array.from(node.style ?? [], name => name).filter(name => name.startsWith("--")).sort();
+    if (variables.length) {
+        result.vars = Object.fromEntries(variables.map(name => [name, node.style.getPropertyValue(name).trim()]));
     }
-    if (node.childNodes.length) result.children = Array.from(node.childNodes, canonical);
+    const props = Object.keys(expected?.props ?? {}).sort();
+    if (props.length) result.props = Object.fromEntries(props.map(name => [name, node[name]]));
+    if (node.childNodes.length) {
+        result.children = Array.from(node.childNodes, (child, i) => canonical(child, expected?.children?.[i]));
+    }
     return result;
+}
+
+function at(root, path) {
+    return path.reduce((node, index) => node.childNodes[index], root);
+}
+
+function deliveryEvent(type) {
+    const init = { bubbles: true, cancelable: true };
+    if (type === "click" || type === "dblclick") return new MouseEvent(type, init);
+    if (type === "input") return new InputEvent(type, init);
+    return new Event(type, init);
 }
 
 async function batches() {
     const cases = await fetch("/batches.json").then(response => response.json());
     for (const sample of cases) {
-        fixture((root, adapter) => {
-            for (const { operations, tree } of sample.commits) {
+        const delivered = [];
+        fixture((root, adapter, parent) => {
+            const nodes = new Map();
+            let bubbled = 0;
+            parent.addEventListener("click", () => bubbled += 1);
+            parent.addEventListener("input", () => bubbled += 1);
+            sample.commits.forEach(({ operations, tree, ids = [], events = [] }, commit) => {
+                const label = sample.name + ", commit " + (commit + 1);
                 adapter.apply(operations);
-                equal(Array.from(root.childNodes, canonical), tree, sample.name);
-            }
-        });
+                equal(Array.from(root.childNodes, (child, i) => canonical(child, tree[i])), tree, label);
+                // A node keeps its DOM identity for as long as the reconciler keeps its id.
+                for (const [id, path] of ids) {
+                    const node = at(root, path);
+                    if (nodes.has(id)) assert(nodes.get(id) === node, label + ": node " + id + " was replaced");
+                    nodes.set(id, node);
+                }
+                for (const expected of events) {
+                    const event = deliveryEvent(expected.event);
+                    const before = bubbled;
+                    delivered.length = 0;
+                    at(root, expected.path).dispatchEvent(event);
+                    equal(delivered.map(item => [item.node, item.handler, item.event]),
+                          [[expected.node, expected.handler, expected.event]], label + ": delivery");
+                    equal([event.defaultPrevented, bubbled - before],
+                          [expected.preventDefault, expected.stopPropagation ? 0 : 1], label + ": modifiers");
+                }
+            });
+        }, event => delivered.push(event));
     }
     fixture((root, adapter) => {
         const [first, second] = cases[0].commits;
@@ -271,14 +312,51 @@ async function postCommit() {
     }
 }
 
-const tests = [batches, validation, handlers, controls, hostFailure, postCommit];
+function assets() {
+    const base = new URL("/bundle/", location.href).href;
+    const operations = [
+        element(1, "div"), element(2, "img", 1), element(3, "video", 1), element(4, "a", 1),
+        { op: "element", id: 5, name: "svg", svg: true, parent: 1, before: null },
+        { op: "element", id: 6, name: "use", svg: true, parent: 5, before: null },
+        attr(2, "src", "assets/0a.png"), attr(2, "alt", "assets/0a.png"),
+        attr(2, "srcset", "assets/1b.png 1x,assets/2c,d.png 2x, https://example.org/e.png 3x"),
+        attr(3, "poster", "assets/3f.png"), attr(4, "href", "assets/route"), attr(6, "href", "assets/4g.svg#tick"),
+    ];
+    const read = root => {
+        const [img, video, a] = root.firstElementChild.children;
+        const use = root.querySelector("use");
+        return [img.getAttribute("src"), img.getAttribute("alt"), img.getAttribute("srcset"),
+                video.getAttribute("poster"), a.getAttribute("href"), use.getAttribute("href")];
+    };
+    const parent = document.createElement("div");
+    document.body.append(parent);
+    const adapter = new DomRoot(parent, () => {}, { assetBase: base });
+    try {
+        adapter.apply(operations);
+        equal(read(parent), [
+            base + "assets/0a.png", "assets/0a.png",
+            base + "assets/1b.png 1x," + base + "assets/2c,d.png 2x, https://example.org/e.png 3x",
+            base + "assets/3f.png", "assets/route", base + "assets/4g.svg#tick",
+        ], "bundled media files resolve against the bundle; links and text do not");
+    } finally {
+        adapter.close();
+        parent.remove();
+    }
+    fixture((root, plain) => {
+        plain.apply(operations);
+        equal(read(root)[0], "assets/0a.png", "without a bundle base the value is written as committed");
+    });
+}
+
+const tests = [batches, validation, handlers, controls, hostFailure, postCommit, assets];
 const token = new URL(location.href).searchParams.get("token");
 let report;
 try {
     for (const test of tests) await test();
     report = { passed: tests.map(test => test.name), preservingMove: typeof Element.prototype.moveBefore === "function" };
 } catch (error) {
-    report = { error: error.stack + (error.cause ? "\n" + error.cause.stack : "") };
+    // The server takes at most 64 KiB; a long tree comparison is cut, not lost.
+    report = { error: (error.stack + (error.cause ? "\n" + error.cause.stack : "")).slice(0, 16000) };
 }
 await fetch("/result?token=" + encodeURIComponent(token), {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(report),

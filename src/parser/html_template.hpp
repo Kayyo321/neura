@@ -37,9 +37,10 @@ struct TemplateAttribute {
     std::vector<Token> modifiers;
     std::variant<std::monostate, std::string, Expr> value;
     std::optional<Span> value_span;
-    // A local media file named by a static src or poster, as the source
-    // loader resolved it, and the value that replaces the written one.
-    std::shared_ptr<BundleFileSyntax> asset{};
+    // The local media files named by a static src, poster, srcset or SVG
+    // <use> href, as the source loader resolved them, and the value that
+    // replaces the written one. Empty when the value names no local file.
+    std::vector<std::shared_ptr<BundleFileSyntax>> assets{};
     std::string asset_target{};
     // Why the file could not be resolved; lowering reports it after the
     // element's own checks.
@@ -121,5 +122,10 @@ struct StylesheetSyntax {
 TemplateSyntax parse_template(std::string_view body, Span origin);
 Expr parse_template_expression(const std::vector<Token>& tokens);
 TemplateForHead parse_template_for_head(const std::vector<Token>& tokens);
+
+// The URLs of a srcset value, as byte ranges: each candidate is a URL, then
+// optional descriptors, separated by commas (HTML, "srcset"). A URL may
+// contain a comma, but one that ends the URL separates candidates.
+std::vector<std::pair<std::size_t, std::size_t>> srcset_urls(std::string_view value);
 
 } // namespace neura

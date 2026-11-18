@@ -4,9 +4,10 @@ export let Storage = module (
     #NotThreadSafe
     export let Slot = class (
         export last index: uint32;
-        export let next: Slot = nil;
+        /// The slot evaluated before this one.
+        export last next: Slot;
 
-        export let init = func(index: uint32) => set;
+        export let init = func(index: uint32, next: Slot) => set;
     );
 
     /// @brief Preserves a slot's ordinary Neura type, including a callable's signature.
@@ -14,8 +15,8 @@ export let Storage = module (
     export let Payload = class<T> : Slot (
         export last value: T;
 
-        export let init = func(index: uint32, value: T) {
-            super.init(index);
+        export let init = func(index: uint32, value: T, next: Slot) {
+            super.init(index, next);
             instance.value = value;
         };
     );
