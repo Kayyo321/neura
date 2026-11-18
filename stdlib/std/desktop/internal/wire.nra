@@ -37,7 +37,7 @@ export let Wire = module (
     /// @brief Appends `value` as eight little-endian two's-complement bytes.
     export let put_i64 = func(target: uint8[list], value: int64) {
         last word = value as uint64;
-        for (let i = 0; i < 8; i = i + 1) {
+        for (let i in 0 .. 8) {
             target.append(((word >> ((i * 8) as uint64)) & 255) as uint8);
         }
     };
@@ -46,7 +46,7 @@ export let Wire = module (
     export let put_text = func(target: uint8[list], text: string) {
         put_u32(target, text.byte_length as uint32);
         last count = text.byte_length;
-        for (let i = 0; i < count; i = i + 1) {
+        for (let i in 0 .. count) {
             target.append(text.byte_at(i));
         }
     };
@@ -88,7 +88,7 @@ export let Wire = module (
                 return 0;
             }
             let word: uint64 = 0;
-            for (let i = 0; i < 8; i = i + 1) {
+            for (let i in 0 .. 8) {
                 word = word | ((body[offset + i] as uint64) << ((i * 8) as uint64));
             }
             offset = offset + 8;
