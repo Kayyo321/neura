@@ -15,6 +15,9 @@
 #include "lifecycle.hpp"
 #include "lift/hints.hpp"
 #include "neura-ir/containment.hpp"
+#include "neura-ir/event_guard.hpp"
+#include "neura-ir/lifetime.hpp"
+#include "neura-ir/scoped_resources.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
@@ -1009,6 +1012,7 @@ int emit_ir(const Options& options) {
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
         neura::specialize(program);
+        neura::check_using_results(program);
         neura::check_storage(program, neura::StorageStage::Specialized);
         neura::materialize_reference_storage(program);
         neura::elaborate_class_hooks(program);
@@ -1488,6 +1492,7 @@ int run_tests(const Options& options) {
                                  "test_* in a module of the listed files");
     }
     neura::specialize(program);
+    neura::check_using_results(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
     neura::check_containment(program);
@@ -1773,6 +1778,7 @@ int run_tests(const Options& options) {
 int task_safety_report(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
     neura::specialize(program);
+    neura::check_using_results(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
     neura::elaborate_class_hooks(program);
@@ -1843,6 +1849,7 @@ namespace {
 int check_program(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
     neura::specialize(program);
+    neura::check_using_results(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
     neura::elaborate_class_hooks(program);

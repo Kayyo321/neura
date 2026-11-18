@@ -1,4 +1,5 @@
 #include "debug.hpp"
+#include "neura-ir/lifetime.hpp"
 
 #include "json.hpp"
 #include "protocol.hpp"
@@ -535,6 +536,7 @@ void Adapter::launch(const Json& arguments) {
             const auto symbol = test->symbol;
             require_valid_ir(program, "before debug specialization");
             specialize(program);
+            check_using_results(program);
             check_storage(program, StorageStage::Specialized);
             materialize_reference_storage(program);
             check_containment(program);
