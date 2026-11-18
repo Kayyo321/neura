@@ -1,0 +1,13 @@
+error[E1100]: a string chain joins only strings, but this operand is int32
+ --> $DIR/chain-integer-left.nra:3:32
+  |
+3 | let turn = func() -> string => 3 .. "turn";
+  |                                ^ this is int32
+  |
+  = note: '..' converts nothing to text; call 'to_string()' to join a value
+help: convert it to text
+  |
+3 | let turn = func() -> string => (3).to_string() .. "turn";
+  |                                + +++++++++++++
+
+For more information about this error, try `neura explain E1100`.

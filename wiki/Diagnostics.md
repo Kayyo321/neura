@@ -299,6 +299,7 @@ Errors about `#` tags before declarations ([Tags](Tags)).
 | [E0921](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0923.md) | #HostEffects on a function that is not a host binding without a body |
+| [E1100](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1100.md) | string chain operand that is not a string |
 
 ## Warnings
 

@@ -264,6 +264,7 @@ NEURA_DIAGNOSTIC(E0920, "#Immutable class with a base or subclass that is not #I
 NEURA_DIAGNOSTIC(E0921, "#Synchronized on a method without a body to guard")
 NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchronized")
 NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding without a body")
+NEURA_DIAGNOSTIC(E1100, "string chain operand that is not a string")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

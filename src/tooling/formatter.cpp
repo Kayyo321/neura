@@ -507,7 +507,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             const bool body = hints.bodies.contains(item.offset);
             space = control || body || hints.record_bodies.contains(item.offset) || before == "module" ||
                     before == "class" || before == "interface" || before == "enum" || before == "singleton" ||
-                    before == "not";
+                    before == "not" || before == ".." || before == "..=" || before == "!==";
             out.text(text, indent(), space);
             const bool multiline = body && next != ")";
             delimiters.push_back({text, multiline, control});

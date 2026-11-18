@@ -401,6 +401,12 @@ private:
     Substitution enum_arguments(const IrType& type) const;
     IrNode tuple(const Expr& expr, Context& context, const IrType* expected);
     IrNode range(const Expr& expr, Context& context, const IrType* expected);
+    IrNode string_chain(const Expr& expr, Context& context, IrNode first);
+    void chain_operators(const Expr& chain);
+    IrNode text_operand(const Expr& syntax, Context& context);
+    Diagnostic not_text(const Expr& syntax, const IrType& type) const;
+    bool lowers_to_text(const Expr& syntax, Context& context);
+    IrNode concatenate_text(std::vector<IrNode> operands, const Span& span);
     IrType parameter_type(const Parameter& parameter, const Context& context);
     IrNode pack_argument(const Expr& expr, const IrType& argument, Context& context);
     IrNode allocate(const Expr& expr, Context& context, const IrType* target = nullptr);
@@ -3395,11 +3401,15 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     const auto& span = expr.span;
     const auto* expected_element = expected && collection(*expected) ? &expected->arguments.front() : nullptr;
     auto start = value(expr.operands[0], context, expected_element);
+    // docs/design/Expressions030.md, String chains: a string first operand
+    // makes the node a chain.
+    if (start.type.kind == TypeKind::String) return string_chain(expr, context, std::move(start));
     const auto element = start.type;
     const auto format = specified_integer_format(element);
     if (!format) throw Diagnostic(start.span, "a range requires integer bounds and step").with_code("E0429");
     // docs/design/Expressions030.md, Ranges with `..=`: exactly two bounds.
     if (expr.range_operators.size() > 1) {
+        if (lowers_to_text(expr.operands[1], context)) throw not_text(expr.operands[0], element);
         const bool mixed = expr.range_inclusive[0] || expr.range_inclusive[1];
         throw Diagnostic(expr.range_operators[1], mixed ? "'..=' and '..' do not combine in one range"
                                                         : "a range has exactly two bounds")
@@ -3444,7 +3454,15 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     };
 
     const auto current = save(std::move(start), "$range_current", false);
-    const auto stop = save(value(expr.operands[1], context, &element), "$range_stop");
+    const auto stop = save([&] {
+        try {
+            return value(expr.operands[1], context, &element);
+        } catch (const Diagnostic&) {
+            // `3 .. "turn"` is a chain whose integer operand is the error.
+            if (lowers_to_text(expr.operands[1], context)) throw not_text(expr.operands[0], element);
+            throw;
+        }
+    }(), "$range_stop");
     const auto step = save(expr.step_colon ? value(expr.operands[2], context, &element)
                                            : integer(element, "1"), "$range_step");
     const auto& distance_type = format->bits <= 32 ? uint32_type : uint64_type;
@@ -3521,6 +3539,88 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     loop.body.push_back(std::move(advance));
     result.body.push_back(std::move(loop));
     result.body.push_back(items);
+    return result;
+}
+
+// docs/design/Expressions030.md, String chains. `first` is the lowered
+// first operand, a string.
+IrNode Lowering::string_chain(const Expr& expr, Context& context, IrNode first) {
+    if (expr.braced)
+        throw Diagnostic(expr.span, "braces group a range, not a string chain").with_code("E0263")
+            .label("the first operand is a string")
+            .help("write the chain without braces, or parenthesize it: '(a .. b)'");
+    chain_operators(expr);
+    if (expr.step_colon)
+        throw Diagnostic(*expr.step_colon, "a string chain takes no step").with_code("E0263")
+            .label("a step is written here")
+            .note("a step belongs to an integer range; this chain joins text");
+    std::vector<IrNode> operands;
+    operands.push_back(std::move(first));
+    for (std::size_t i = 1; i < expr.operands.size(); ++i) operands.push_back(text_operand(expr.operands[i], context));
+    return concatenate_text(std::move(operands), expr.span);
+}
+
+// `..=` never joins text in an expression.
+void Lowering::chain_operators(const Expr& chain) {
+    for (std::size_t i = 0; i < chain.range_operators.size(); ++i) {
+        if (!chain.range_inclusive[i]) continue;
+        throw Diagnostic(chain.range_operators[i], "'..=' does not join text in an expression").with_code("E0263")
+            .label("'..=' with string operands")
+            .note("in an expression, '..=' makes an inclusive integer range; a chain joins text with '..'")
+            .help("to append to a string, write the statement 'place ..= text;', or join with 'a .. b'");
+    }
+}
+
+IrNode Lowering::text_operand(const Expr& syntax, Context& context) {
+    auto operand = value(syntax, context);
+    if (operand.type.kind != TypeKind::String) throw not_text(syntax, operand.type);
+    return operand;
+}
+
+// E1100: a chain operand that is not a string, which `..` never converts.
+Diagnostic Lowering::not_text(const Expr& syntax, const IrType& type) const {
+    auto error = Diagnostic(syntax.span, "a string chain joins only strings, but this operand is " + describe(type))
+        .with_code("E1100").label("this is " + describe(type))
+        .note("'..' converts nothing to text; call 'to_string()' to join a value");
+    if (syntax.kind == ExprKind::Binary && !syntax.grouped)
+        error.help("operators bind more tightly than '..'; parenthesize the chain to apply one to the joined text, "
+                   "as in '(a .. b) == c'");
+    const auto start = source_span(syntax.span.file, syntax.span.offset, 0);
+    const auto end = source_span(syntax.span.file, syntax.span.offset + syntax.span.length, 0);
+    if (start && end) {
+        if (syntax.kind == ExprKind::Name || syntax.grouped)
+            error.suggest("convert it to text", *end, ".to_string()", Applicability::MaybeIncorrect);
+        else
+            error.suggest("convert it to text", {{*start, "("}, {*end, ").to_string()"}}, Applicability::MaybeIncorrect);
+    }
+    return error;
+}
+
+// Whether `syntax` lowers to a string, tried without keeping its
+// diagnostics; used only on a path that already reports an error.
+bool Lowering::lowers_to_text(const Expr& syntax, Context& context) {
+    SpeculativeDiagnostics speculative;
+    try {
+        return value(syntax, context).type.kind == TypeKind::String;
+    } catch (const Diagnostic&) {
+        return false;
+    }
+}
+
+// The text of `operands` in order. Adjacent string constants fold at
+// compile time. Until NeuraIR has the one-allocation `concat text`
+// operation, the rest is the left fold of the string `+` that it replaces.
+IrNode Lowering::concatenate_text(std::vector<IrNode> operands, const Span& span) {
+    std::vector<IrNode> folded;
+    for (auto& operand : operands) {
+        if (operand.op == IrOp::String && !folded.empty() && folded.back().op == IrOp::String) {
+            folded.back().text += operand.text;
+            continue;
+        }
+        folded.push_back(std::move(operand));
+    }
+    auto result = std::move(folded.front());
+    for (std::size_t i = 1; i < folded.size(); ++i) result = arithmetic("+", span, std::move(result), std::move(folded[i]));
     return result;
 }
 

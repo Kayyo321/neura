@@ -296,6 +296,7 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0921](E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
+| [E1100](E1100.md) | string chain operand that is not a string |
 
 ## Warnings
 

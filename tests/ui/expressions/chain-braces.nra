@@ -1,0 +1,3 @@
+// Edge case 42 of docs/design/Expressions030.md: braces group ranges only,
+// so a braced chain is E0263.
+let braced = func(a: string, b: string) -> string => {a .. b};

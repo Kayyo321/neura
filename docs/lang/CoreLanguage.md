@@ -517,7 +517,7 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 13. `&&`
 14. `||`
 15. `??`, which associates to the right
-16. `..` and its optional step in [range expressions](Collections.md#ranges)
+16. `..` and `..=` with an optional step in [range expressions](Collections.md#ranges), and `..` in [string chains](#string-chains)
 17. `? :`
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
@@ -546,6 +546,36 @@ let moved = func(from: Point, to: Point) -> bool => from !== to;
 ```
 
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
+
+### String chains
+
+`a .. b .. c` with `string` operands joins their text in written order ([design](../design/Expressions030.md#string-chains), implemented, proposed). The first operand decides the role of `..`: a `string` makes a chain, and an integer makes a [range](Collections.md#ranges). A chain has two or more operands, each a `string`; nothing is converted, so a value of another type is `E1100`, with the suggestion to call `to_string()`. The operands are evaluated once each, left to right, and a trap stops the chain before any later operand runs. Empty operands and every byte are kept.
+
+`..` binds more loosely than every binary operator and `??`, and more tightly than `? :`: `a .. b == c` is `a .. (b == c)` (`E1100` at the `bool`), so write `(a .. b) == c`, and `c ? a .. b : d` takes the chain as its middle arm. A parenthesized chain is one operand. Adjacent string literals fold at compile time, so `"hi " .. "there"` is the constant `"hi there"`. A chain takes no step, braces do not group it, and `..=` does not join text in an expression (`E0263`); as a statement, `text ..= more;` appends to a string. `+` and `+=` still concatenate two strings.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let greet = func(name: string, count: int) -> string =>
+    "Hello, " .. name .. "! You have " .. count.to_string() .. " messages.";
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(greet("Ada", 3));
+        console.print_line(("[" .. "x") .. "]");
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Hello, Ada! You have 3 messages.
+[x]
+```
+
+The compiler currently builds a chain as the string concatenations of `+`; the single allocation the design specifies needs a runtime operation that is not yet in this build.
 
 ### Character literals
 
