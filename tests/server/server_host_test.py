@@ -978,8 +978,11 @@ def test_http2_reload(args, image):
         port = host.ports["https"]
 
         def handshake():
+            # s_client prints what the server sends after the handshake: the
+            # binary HTTP/2 SETTINGS frame, when it arrives before the input
+            # ends, which is not UTF-8.
             result = subprocess.run([args.openssl, "s_client", "-connect", f"127.0.0.1:{port}", "-alpn", "h2,http/1.1"],
-                                    input="", capture_output=True, text=True, timeout=30)
+                                    input="", capture_output=True, text=True, errors="replace", timeout=30)
             return result.stdout
 
         before = handshake()
