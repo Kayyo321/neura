@@ -42,16 +42,16 @@ export let CacheControl = module (
 
         /// @brief The directive as it is written in a field value.
         export let.override to_string = func -> string => match (argument) {
-            Optional.Some(text) => name + "=" + write_argument(name, text),
+            Optional.Some(text) => name .. "=" .. write_argument(name, text),
             Optional.None => name,
         };
 
         /// @brief Equal names and arguments.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Directive)) {
+            if (other is not that: Directive) {
                 return false;
             }
-            return to_string() == (other as Directive).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the written form.
@@ -74,12 +74,12 @@ export let CacheControl = module (
         /// and with "invalid argument: directive argument" when the argument holds CR, LF, NUL or another
         /// control byte except tab.
         export let add = func(name: string, argument: Optional<string>) {
-            if (!headers.is_token(name)) {
+            if (not headers.is_token(name)) {
                 trap_with_message("invalid argument: directive name");
             }
             match (argument) {
                 Optional.Some(text) => {
-                    if (!headers.is_valid_value(text)) {
+                    if (not headers.is_valid_value(text)) {
                         trap_with_message("invalid argument: directive argument");
                     }
                 },
@@ -188,7 +188,7 @@ export let CacheControl = module (
         export let extensions = func -> Directive[list] {
             last found: Directive[list] = new;
             for (let d in directives) {
-                if (!is_known(d.name)) {
+                if (not is_known(d.name)) {
                     found.append(d);
                 }
             }
@@ -207,17 +207,14 @@ export let CacheControl = module (
 
         /// @brief Equal when both hold equal directives in the same order.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is CacheControl)) {
+            if (other is not list: CacheControl) {
                 return false;
             }
-            last list = other as CacheControl;
             if (list.size() != directives.length) {
                 return false;
             }
             for (let i = 0; i < directives.length; i++) {
-                if (!directives[i].equals(list.at(i))) {
-                    return false;
-                }
+                return false unless directives[i].equals(list.at(i));
             }
             return true;
         };
@@ -365,17 +362,17 @@ export let CacheControl = module (
         for (let i = 0; i < text.byte_length; i++) {
             last b = text.byte_at(i);
             if (b == 34 || b == 92) {
-                out = out + text.slice(start, i) + "\\";
+                out ..= text.slice(start, i) .. "\\";
                 start = i;
             }
         }
-        return out + text.slice(start, text.byte_length) + "\"";
+        return out .. text.slice(start, text.byte_length) .. "\"";
     };
 
     /// @brief An argument as written: quoted for the field lists of no-cache and private and for anything that
     /// is not a token.
     let write_argument = func(name: string, text: string) -> string {
-        if (name == "no-cache" || name == "private" || !headers.is_token(text)) {
+        if (name == "no-cache" || name == "private" || not headers.is_token(text)) {
             return quote(text);
         }
         return text;
@@ -446,9 +443,7 @@ export let CacheControl = module (
             return unquote(text, first, end);
         }
         for (let i = first; i < end; i++) {
-            if (!headers.is_tchar(text.byte_at(i))) {
-                return Optional<string>.None;
-            }
+            return Optional<string>.None unless headers.is_tchar(text.byte_at(i));
         }
         return Optional<string>.Some(text.slice(first, end));
     };

@@ -14,9 +14,7 @@ export let Method = module (
     /// @brief The method named by `text` (exact case), or None when `text` is not a token.
     #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Optional<HttpMethod> {
-        if (!headers.is_token(text)) {
-            return Optional<HttpMethod>.None;
-        }
+        return Optional<HttpMethod>.None unless headers.is_token(text);
         last known = standard(text);
         return match (known) {
             Optional.Some(m) => Optional<HttpMethod>.Some(m),

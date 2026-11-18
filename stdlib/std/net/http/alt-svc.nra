@@ -65,26 +65,26 @@ export let AltSvc = module (
 
         /// @brief The alternative as written in a field value, with `ma` only when it is not the default.
         export let.override to_string = func -> string {
-            let text = protocol_id + "=" + cc.quote(host + ":" + port.to_string());
+            let text = protocol_id .. "=" .. cc.quote(host .. ":" .. port.to_string());
             if (max_age != DefaultMaxAge) {
-                text = text + "; ma=" + max_age.to_string();
+                text ..= "; ma=" .. max_age.to_string();
             }
             if (persist) {
-                text += "; persist=1";
+                text ..= "; persist=1";
             }
             for (let i = 0; i < parameter_names.length; i++) {
                 last value = parameter_values[i];
-                text = text + "; " + parameter_names[i] + "=" + (header_map.is_token(value) ? value : cc.quote(value));
+                text ..= "; " .. parameter_names[i] .. "=" .. (header_map.is_token(value) ? value : cc.quote(value));
             }
             return text;
         };
 
         /// @brief Equal written forms.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Alternative)) {
+            if (other is not that: Alternative) {
                 return false;
             }
-            return to_string() == (other as Alternative).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the written form.
@@ -132,10 +132,10 @@ export let AltSvc = module (
 
         /// @brief Equal field values.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is AltSvc)) {
+            if (other is not that: AltSvc) {
                 return false;
             }
-            return to_string() == (other as AltSvc).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the field value.
@@ -188,7 +188,7 @@ export let AltSvc = module (
             } else {
                 last high = (b / 16) as int;
                 last low = (b % 16) as int;
-                text = text + "%" + digits.slice(high, high + 1) + digits.slice(low, low + 1);
+                text ..= "%" .. digits.slice(high, high + 1) .. digits.slice(low, low + 1);
             }
         }
         return text;
@@ -205,7 +205,7 @@ export let AltSvc = module (
         let i = 0;
         while (i < text.byte_length) {
             last b = text.byte_at(i);
-            if (!header_map.is_tchar(b)) {
+            if (not header_map.is_tchar(b)) {
                 return Result<uint8[list]>.Err(
                     failure(ParseErrorKind.InvalidCharacter, i, "protocol-id is not a token"));
             }
@@ -266,7 +266,7 @@ export let AltSvc = module (
         for (let p = 1; p < parts.length; p++) {
             last parameter = parts[p];
             last at = strings.index_of(parameter, "=");
-            if (at <= 0 || !header_map.is_token(parameter.slice(0, at))) {
+            if (at <= 0 || not header_map.is_token(parameter.slice(0, at))) {
                 return Result<Alternative>.Err(failure(ParseErrorKind.Syntax, 0, "expected parameter=value"));
             }
             last name = strings.to_ascii_lower(parameter.slice(0, at));

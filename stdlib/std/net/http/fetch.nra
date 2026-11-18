@@ -93,7 +93,7 @@ export let Fetch = module (
         /// @brief The status and the body's size.
         #Pure
         export let.override to_string = func -> string =>
-            "Response(" + status.to_string() + ", " + body.length.to_string() + " bytes)";
+            "Response(" .. status.to_string() .. ", " .. body.length.to_string() .. " bytes)";
     );
 
     /// @brief A request to send: a method, a URL (absolute, or relative to the page in a browser), headers, a
@@ -164,13 +164,13 @@ export let Fetch = module (
             return match (fetch(method, url, flatten(pairs), body, nanos < 0 ? 0 : nanos, mode_code(credentials))) {
                 FetchOutcome.Ok(answer) =>
                     result.Result<Response>.Ok(new Response(answer[0] as int, pair_up(answer[1]), answer[2])),
-                FetchOutcome.Error(code) => result.Result<Response>.Err(error_of(code, method + " " + url)),
+                FetchOutcome.Error(code) => result.Result<Response>.Err(error_of(code, method .. " " .. url)),
             };
         };
 
         /// @brief The method and URL.
         #Pure
-        export let.override to_string = func -> string => method + " " + url;
+        export let.override to_string = func -> string => method .. " " .. url;
     );
 
     /// @brief A request with no headers or body, the default timeout, and same-origin credentials.
@@ -226,13 +226,13 @@ export let Fetch = module (
     #Pure
     let error_of = func(code: uint32, what: string) -> Error {
         if (code == 16) {
-            return custom("http.TooLarge", what + ": a body exceeds the host's limit");
+            return custom("http.TooLarge", what .. ": a body exceeds the host's limit");
         }
         if (code == 17) {
-            return custom("http.Busy", what + ": too many fetches are in flight");
+            return custom("http.Busy", what .. ": too many fetches are in flight");
         }
         if (code == 18) {
-            return custom("http.OutcomeUnknown", what + ": no response; the server may have acted");
+            return custom("http.OutcomeUnknown", what .. ": no response; the server may have acted");
         }
         return host_error.io(code, "fetch failed", what);
     };

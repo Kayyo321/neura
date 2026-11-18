@@ -71,7 +71,7 @@ export let Message = module (
 
         /// @brief The text "HttpRequest(METHOD target VERSION)".
         export let.override to_string = func -> string =>
-            "HttpRequest(" + methods.name(method) + " " + target + " " + version_text(version) + ")";
+            "HttpRequest(" .. methods.name(method) .. " " .. target .. " " .. version_text(version) .. ")";
     );
 
     /// @brief A response: status, header map and body.
@@ -101,12 +101,12 @@ export let Message = module (
 
         /// @brief The text "HttpResponse(STATUS VERSION)".
         export let.override to_string = func -> string =>
-            "HttpResponse(" + status.to_string() + " " + version_text(version) + ")";
+            "HttpResponse(" .. status.to_string() .. " " .. version_text(version) .. ")";
     );
 
     /// @brief Traps unless `code` is a status code.
     let check_status = func(code: int) {
-        if (!statuses.is_valid(code)) {
+        if (not statuses.is_valid(code)) {
             trap_with_message("invalid argument: status");
         }
     };

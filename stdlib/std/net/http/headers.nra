@@ -143,7 +143,7 @@ export let Headers = module (
                         break;
                     }
                 }
-                if (!present) {
+                if (not present) {
                     seen.append(key);
                 }
             }
@@ -169,15 +169,14 @@ export let Headers = module (
 
         /// @brief Equal when both hold the same fields in the same order, names compared without case.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Headers)) {
+            if (other is not map: Headers) {
                 return false;
             }
-            last map = other as Headers;
             if (map.size() != names.length) {
                 return false;
             }
             for (let i = 0; i < names.length; i++) {
-                if (!strings.equals_ignore_ascii_case(map.name_at(i), names[i]) || map.value_at(i) != values[i]) {
+                if (not strings.equals_ignore_ascii_case(map.name_at(i), names[i]) || map.value_at(i) != values[i]) {
                     return false;
                 }
             }
@@ -198,9 +197,9 @@ export let Headers = module (
         export let.override to_string = func -> string {
             last parts: string[list] = new;
             for (let i = 0; i < names.length; i++) {
-                parts.append(names[i] + ": " + values[i]);
+                parts.append(names[i] .. ": " .. values[i]);
             }
-            return "Headers{" + strings.join(parts, "; ") + "}";
+            return "Headers{" .. strings.join(parts, "; ") .. "}";
         };
 
         /// @brief The position of the first field with lowercase name `key`, or -1.
@@ -247,9 +246,7 @@ export let Headers = module (
             return false;
         }
         for (let i = 0; i < name.byte_length; i++) {
-            if (!is_tchar(name.byte_at(i))) {
-                return false;
-            }
+            return false unless is_tchar(name.byte_at(i));
         }
         return true;
     };
@@ -329,14 +326,14 @@ export let Headers = module (
 
     /// @brief Traps unless `name` is a token.
     let check_name = func(name: string) {
-        if (!is_token(name)) {
+        if (not is_token(name)) {
             trap_with_message("invalid argument: header name");
         }
     };
 
     /// @brief Traps unless `value` is a valid field value.
     let check_value = func(value: string) {
-        if (!is_valid_value(value)) {
+        if (not is_valid_value(value)) {
             trap_with_message("invalid argument: header value");
         }
     };

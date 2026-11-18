@@ -107,7 +107,7 @@ export let RouteTree = module (
                             present = true;
                         }
                     }
-                    if (!present) {
+                    if (not present) {
                         found.append(m);
                     }
                 }
@@ -137,7 +137,7 @@ export let RouteTree = module (
         };
 
         /// @brief The text "Node(N routes)".
-        export let.override to_string = func -> string => "Node(" + count().to_string() + " routes)";
+        export let.override to_string = func -> string => "Node(" .. count().to_string() .. " routes)";
     );
 
     /// @brief Inserts a route along `pattern_segments`, where a segment `{}` stands for a parameter; returns
