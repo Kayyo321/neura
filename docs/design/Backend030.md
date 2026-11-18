@@ -43,9 +43,13 @@ Added by this branch:
 | `Std.App` (`Context`, `Request`, `Response`, `Handler`, `handler_of`, `run`) and the internal binding `Std.Net.Internal.HttpServer` | `stdlib/std/app.nra`, `stdlib/std/net/internal/http-server.nra` | implemented |
 | Response header fields in the connection loop; reason phrases for the common statuses | `src/server/http_connection.cpp` | implemented |
 | Error codes 16 to 22 in the provider table | `src/nvm/providers.hpp` | codes defined; the library maps them to `Other` until `IoErrorKind` gains their names |
-| The admin listener (`/livez`, `/readyz`, `/metrics`), `neura.app.metric`, `neura.app.shutdown.wait` | | not started |
-| Streamed request bodies (`open_body`) and streamed responses with backpressure | | not started: the host reads the whole body within S-6 before it assigns the request, and buffers the response within S-7 before it writes it |
-| SQL, migrations, `neura run <bundle>`, `neura dev`, `trusted_proxies`, authentication helpers | | not started |
+| The admin listener (`--admin-listen`: `/livez`, `/readyz`, `/metrics` in the Prometheus text format) and `neura.app.metric` (`Context.count`, `Context.gauge`) | `src/server/server_host.cpp`, `src/nvm/app_provider.cpp`, `stdlib/std/app.nra` | implemented; `neura.app.shutdown.wait` is not, by approved decision 8 |
+| Streamed request bodies and streamed responses with backpressure: the request is assigned at the end of its head and its body streams to the worker; a response sent with `respond(..., complete: false)` streams back with chunked transfer coding, one chunk per write; `Context.serve_streamed`, `BodyReader`, `stream`, `BodyWriter` | `src/server/http_connection.cpp`, `server_host.cpp`, `request_worker.cpp`, `stdlib/std/app.nra` | implemented; the response is forwarded once the request body has been received |
+| S-8 from the end of the request head, for the connection and the worker alike | `src/server/http_connection.cpp`, `server_host.cpp` | implemented |
+| The worker step limit (`--max-steps`) and the worker tier (`--worker-tier`, `--worker-jit`) | `src/server/server_host.cpp`, `request_worker.cpp` | implemented; one value for every request (no per-route limit is defined) |
+| A ready worker that has ended is discarded and the request given to another, once | `src/server/server_host.cpp` | implemented |
+| `neura serve`, the closest form of `neura run <bundle>` | `src/cli/serve.cpp` | implemented: builds a source program and runs the host in the foreground; bundles wait for the project build |
+| SQL, migrations, `neura run <bundle>`, `neura dev`, `trusted_proxies`, authentication helpers | | not started on this branch (SQL is the `sql-providers` branch) |
 
 Departures, each to be confirmed by the owner:
 
@@ -53,10 +57,14 @@ Departures, each to be confirmed by the owner:
 2. **No `?` and no `using`** on this branch's language baseline: `Std.App` and the examples use `match`.
 3. **Header and log fields** cross the host boundary as one flat `string[list]` of alternating names and values, because a host call cannot carry a list of tuples (`E0801`). `Std.App` presents them as `[string, string][list]`.
 4. **Configuration** reaches the worker through `Call`/`Return` frames; the worker never holds the host's configuration. Logs are written by the worker to the inherited standard error as JSON lines with the request identifier. No other `Call` operation exists yet.
-5. **`Cancel`** is not sent: at the deadline the host kills the worker with `SIGKILL` and answers 504; no grace period applies to a request past S-8. A worker whose channel ends without `Done` gets the grace period S-12 (5 s) to exit before it is killed.
+5. **`Cancel`** is not sent: at the deadline the host kills the worker with `SIGKILL` and answers 504 (or closes the connection inside a streamed response); no grace period applies to a request past S-8. A worker whose channel ends without `Done` gets the grace period S-12 (5 s) to exit before it is killed.
 6. **The handler interface** the `Std.Net.Http` router implements is `Std.App.Handler` (below), not `http.Router` itself, so that `Std.App` does not depend on `Std.Net.Http`.
 7. **File paths outside the file group.** A Unix-domain socket path and the CA, certificate and key files of the TLS services are opened by the network services and are not checked against `--allow-fs` prefixes; `neura.net.tls.accept` requires the file group as a whole. A program with the network group can therefore reach any Unix socket the process can.
 8. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host. Native code is always denied.
+9. **Retrying a dead ready worker.** "Nothing is replayed" stays the rule. The one exception is a worker that provably ran nothing: a ready worker whose channel is readable when it is taken (it sends nothing after its greeting, so it has ended), or whose channel refuses the `Assign` itself. The request goes to another worker, once. A worker that took its `Assign` is never replaced.
+10. **S-7 scope.** S-7 bounds a *buffered* response: a complete body given to `respond`. A streamed body (`respond` with `complete` false, then `body.write`) is forwarded chunk by chunk, so S-7 does not count it; S-8 and backpressure bound it.
+11. **Order of the two bodies.** The host sends the request body to the worker as it arrives and starts forwarding the response once the request body has ended. A worker that answers first keeps the request body that arrives while it sends (its channel reads while it waits to write), so neither side blocks the other; what it leaves unread is read and discarded before it exits.
+12. **The admin listener is opt-in** (`--admin-listen`); it has no default address, and answers outside worker admission.
 
 ### Host services for the standard library
 
@@ -70,17 +78,48 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | Socket options, `neura.net.option.*`: `SO_REUSEADDR`, `SO_REUSEPORT`, `TCP_NODELAY`, `TCP_FASTOPEN`, `TCP_USER_TIMEOUT`, keepalive and its timers, buffers, broadcast | implemented; an option the platform lacks answers 13 | `backend-host` |
 | TLS client streams with verification, SNI and ALPN, and server streams outside the host, `neura.net.tls.*` | implemented in builds with `NEURA_ENABLE_SERVER_TLS`; 13 otherwise | `backend-host` (TLS builds) |
 | `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a copy elsewhere | `backend-host` |
-| `splice` | stub: the providers have no pipe handles to splice between; `send_file` covers file to socket | |
+| `splice` with pipe handles, `neura.net.pipe` and `neura.net.splice` | implemented on Linux (`splice(2)`, the bytes never reach the NVM); 13 elsewhere | `backend-host` |
 | System name resolution, `neura.net.resolve` | implemented with `getaddrinfo`; blocks every task while it waits | `backend-host` |
-| HTTP/2 over TLS through ALPN | stub: ALPN is negotiated by the TLS streams, but the server host speaks HTTP/1.1 only (approved decision 9) | |
-| `MSG_ZEROCOPY` | stub: host values are copied at the boundary, so the kernel would gain nothing to share | |
-| UDP GSO and GRO | stub: not reached; needs a segment-size argument and batched results | |
-| MPTCP | stub: not reached; it would be a protocol flag of `connect` and `listen` on Linux 5.6 and later | |
-| `io_uring`, `epoll` and `kqueue` driver backends | stub: the driver waits with `poll(2)` or `WaitForMultipleObjects`; another backend changes the scheduling evidence and needs its own qualification | |
-| kTLS | stub: not reached; needs the kernel `tls` module and qualification of OpenSSL's offload | |
-| Fork and VM-generation detection, `neura.process.generation` | implemented for `fork` (a change of process ID); a VM snapshot restore is not detected | `backend-host` |
+| HTTP/2 over TLS through ALPN, and h2c | not provided: approved decision 9 excludes HTTP/2 from 0.3.0 and allows no flag; see "HTTP/2 and decision 9" below | |
+| `MSG_ZEROCOPY` | not provided, after measurement: see "MSG_ZEROCOPY" below | |
+| UDP GSO and GRO: options 13 `UDP_SEGMENT` and 14 `UDP_GRO`, `neura.net.udp.receive_segments` with the segment size | implemented on Linux; 13 elsewhere | `backend-host` (loopback: a 2,500-byte send arrives as 1,000, 1,000 and 500; with GRO, coalesced with segment size 1,000) |
+| MPTCP: `neura.net.mptcp.listen`, `neura.net.mptcp.connect`, option 15 `SO_PROTOCOL` | implemented on Linux 5.6 and later; 13 when the kernel has none or `net.mptcp.enabled` is 0 | `backend-host` (262 read back on this kernel) |
+| `epoll` and `io_uring` driver backends, `NEURA_IO_BACKEND` | implemented on Linux, feature-detected with fallback to `poll(2)`, which stays the default; completion order is the request sequence under every backend | `nvm-wait-source-epoll`, `nvm-wait-source-io-uring`; `concurrency-io` and `backend-concurrency` run under each |
+| `kqueue` driver backend | not provided: no BSD or macOS machine qualifies it in this release | |
+| kTLS | not provided on this machine, see "kTLS" below | |
+| Fork and VM-generation detection, `neura.process.generation` | implemented for `fork` (a change of process ID) and, on Linux with a vmgenid device, for a VM snapshot restore or clone (the `NEW_VMGENID=1` uevent) | `backend-host` for fork and the uevent parser; no vmgenid device on this machine, so a restore was not observed |
 | `RDSEED` and `RNDR`, `neura.entropy.hardware` | implemented on x86-64 and AArch64 Linux; 13 elsewhere or without the instruction | `backend-host` |
-| `mlock`, core-dump exclusion and zeroization (`neura.memory.lock`, which the `Std.Crypto` design note asks for) | not provided by this runtime: the collector moves and copies heap storage, so the NVM cannot pin, lock or promise to zero it | |
+| `mlock`, core-dump exclusion and zeroization: `neura.memory.lock.create`, `write`, `read`, `equal`, `release`, bound by `Std.Crypto.Internal.LockedMemory` | implemented on POSIX for a host buffer addressed by handle, outside the NVM heap, which the collector still moves and copies: bytes passed in or read out are ordinary heap copies. A recorded run cannot create a buffer. 13 on Windows | `backend-host` (the kernel's `Locked`, `dd` and `wf` flags of the mapping read from `/proc/self/smaps`) |
+
+### kTLS
+
+Kernel TLS moves record encryption into the kernel after OpenSSL's handshake (`SSL_OP_ENABLE_KTLS`, then `setsockopt(TCP_ULP, "tls")` and the key material). It is not provided, for two reasons found on this machine (Linux 7.1, x86-64):
+
+1. The pinned OpenSSL 3.5.9 of the server component is configured `no-ktls` (`OPENSSL_NO_KTLS` in its `configuration.h`), so OpenSSL cannot hand a connection to the kernel. Changing that is a change of the locked component's build configuration.
+2. The kernel's `tls` module is present (`tls.ko.xz`) but not loaded, and only a process with `CAP_NET_ADMIN` makes the kernel load it on `TCP_ULP`. The server host runs unprivileged, so on a default system the offload is unavailable whatever OpenSSL does.
+
+What providing it needs: rebuild the pinned OpenSSL with `enable-ktls` and record it in the lock; set `SSL_OP_ENABLE_KTLS` in the host's and the providers' contexts; detect the offload per connection with `BIO_get_ktls_send` and `BIO_get_ktls_recv` and report it (a metric); qualify on a machine where `tls` is loaded, comparing throughput and checking `SIGHUP` reload, `close_notify` and renegotiation-free TLS 1.3 key updates, which kTLS handles differently.
+
+### MSG_ZEROCOPY
+
+Measured on this machine with a standalone loopback benchmark (2 GiB per run, three runs per size, while other builds ran, so indicative): `send` against `send(MSG_ZEROCOPY)` of a buffer the provider has just copied from the host value, as `neura.net.write` has it, keeping a ring of 64 copies alive until the kernel reports their completion. Results are in the table below. On loopback the kernel reports every zerocopy send as copied (`SO_EE_CODE_ZEROCOPY_COPIED`), so the flag only adds the completion bookkeeping; across a real network interface the saving is one copy per send, against a host value the provider has already copied once at the boundary, and the Linux documentation itself places the break-even near 10 KB per send. Without a measurable benefit here, and with a provider that would have to keep every sent buffer until its notification arrives, the service is not provided.
+
+| Bytes per send | `send`, MiB/s (three runs) | `send(MSG_ZEROCOPY)`, MiB/s | Zerocopy sends the kernel copied anyway |
+| --- | --- | --- | --- |
+| 4,096 | 7,769; 5,979; 8,822 | 2,602; 3,767; 4,527 | all 524,288 per run, less a few in flight |
+| 65,536 | 10,578; 10,738; 10,963 | 8,302; 10,007; 8,693 | all 32,768 per run, less a few in flight |
+| 1,048,576 | 9,414; 9,424; 9,427 | 7,495; 7,462; 6,612 | all 2,048 per run, less one in flight |
+
+### HTTP/2 and decision 9
+
+Approved decision 9 reads "No WebSocket, HTTP/2 or connection upgrade in 0.3.0". It names no configuration under which HTTP/2 may be offered, so this branch does not offer it, not even behind a build option or a host flag: an option that turns it on would ship HTTP/2 in 0.3.0. The TLS listener's ALPN callback selects `http/1.1` only; a client that offers only `h2` gets no ALPN answer and either speaks HTTP/1.1 or gives up. `curl --http2` against the host negotiates HTTP/1.1, which `server-host` checks. Operators who need HTTP/2 or HTTP/3 terminate it in a reverse proxy, as the HTTP table says.
+
+What changing it needs, in order:
+
+1. The owner amends decision 9, here, with the scope: HTTP/2 over TLS (ALPN `h2`) only, or also cleartext h2c (prior knowledge, or the `Upgrade: h2c` that decision 9 also excludes); and whether it is on by default.
+2. A pinned HTTP/2 framing library in [the server component lock](../../packaging/server-components.lock.toml), with its digest, signature and license, linked statically like OpenSSL. nghttp2 1.64 is what this machine's curl uses; a hand-written HPACK and frame layer is not reasonable to qualify for this release.
+3. In the host: the ALPN callback selects `h2` when it is enabled; an HTTP/2 connection maps each stream to the same `Responder` the HTTP/1.1 loop calls (request head at `HEADERS`, body by `DATA`, response through a `ResponseWriter` whose chunks become `DATA` frames with flow control as backpressure). S-4 counts connections, and a new limit bounds concurrent streams per connection (`SETTINGS_MAX_CONCURRENT_STREAMS`), each stream still admitted by S-1 and S-3. Header limits S-5 apply to the decoded header list; HPACK table size is bounded.
+4. Tests: an HTTP/2 wire suite with `curl --http2` and `nghttp`, interleaved streams, flow-control stalls, `RST_STREAM` cancelling a worker, and the existing host suite over both protocols.
 
 ### Handler interface for `Std.Net.Http`
 
@@ -104,11 +143,11 @@ All integers are little-endian; a *text* is a `uint32` byte count and the bytes.
 | Frame | Body |
 | --- | --- |
 | `Assign` | `uint32` kind (1 request, 2 startup check), text request identifier, `int64` deadline (Unix nanoseconds), text peer, text scheme, text method, text target, `uint32` field count and that many (text name, text value), `int64` body length, `uint32` lease count (0) |
-| `Head` | `uint32` status, `uint32` field count and that many (text name, text value) |
-| `Call` | `uint32` call identifier, `uint32` operation (1: configuration), text key |
-| `Return` | `uint32` call identifier, `uint32` error code (0 for success), `uint8` found, text value |
+| `Head` | `uint32` status, `uint32` field count and that many (text name, text value), `int64` body length: the exact length of a complete body, or -1 for a streamed body |
+| `Call` | `uint32` call identifier, `uint32` operation, and its arguments: operation 1, configuration: text key; operation 2, metric: `uint32` kind (1 counter, 2 gauge), `int64` value, text name |
+| `Return` | `uint32` call identifier, `uint32` error code (0 for success); for a configuration, `uint8` found and text value |
 
-The host sends `Assign`, the request body as `BodyChunk` frames of at most 64 KiB, and `BodyEnd` before the worker runs any Neura code. The worker sends `Head`, its body chunks, `BodyEnd` and `Done` as the image responds. Both sides check every frame with `ChannelSequence`.
+The host sends `Assign` at the end of the request head, then the request body as `BodyChunk` frames of at most 64 KiB as the client sends it, and `BodyEnd`. The worker runs the image as soon as it has the `Assign`; `body.read` waits for the next chunk. The worker sends `Head`, its body chunks, `BodyEnd` and `Done` as the image responds. Both sides check every frame with `ChannelSequence`.
 
 ## Layers
 
@@ -130,10 +169,10 @@ The host sends `Assign`, the request body as `BodyChunk` frames of at most 64 Ki
 | The host keeps `S-2` ready workers that have loaded and verified the image and bound its services and have executed nothing: no global initializer, no `static scope`, no entry. A request is given to a ready worker, or to a new one, up to `S-1`; beyond that it waits, up to `S-3`. | implemented |
 | A worker is never reused. A reuse would need a proved reset of the NVM, which 0.3.0 does not have; startup cost is measured (budget B-S1), not hidden. | implemented; B-S1 not yet measured |
 | A worker is the runner (`src/runner/runner.cpp`) with a host registry whose services forward to the host over one inherited channel. It has no listener, no database connection and no file or network capability of its own beyond what the manifest grants the target. | implemented: `neura-server-host --worker` over a socket pair |
-| A trap ends that worker and every task in it. The host answers 500 with the framework envelope if no byte of the response was sent, and otherwise closes the connection. It revokes the worker's leases, logs the request identifier and the trap, and starts a ready worker for later requests. Other requests are unaffected. | implemented: always 500, because responses are buffered; no leases exist yet |
-| Nothing is replayed: not a request whose worker died, not a statement, not a commit. | implemented |
+| A trap ends that worker and every task in it. The host answers 500 with the framework envelope if no byte of the response was sent, and otherwise closes the connection. It revokes the worker's leases, logs the request identifier and the trap, and starts a ready worker for later requests. Other requests are unaffected. | implemented; no leases exist yet |
+| Nothing is replayed: not a request whose worker died, not a statement, not a commit. | implemented; a ready worker that ended before it took its assignment is replaced (departure 9) |
 | If the host itself fails, the application ends. Neither it nor `neurad` restarts it; a deployment's supervisor may, by its own policy. | implemented |
-| The host runs in the foreground: `neura run dist/server` or `neura-server-host dist/server`. Under `neura run --runtime=required` the whole tree is one application of the service. | partly: `neura-server-host <image.nvr>`; bundles and `neura run dist/server` wait for the project build |
+| The host runs in the foreground: `neura run dist/server` or `neura-server-host dist/server`. Under `neura run --runtime=required` the whole tree is one application of the service. | partly: `neura-server-host <image.nvr>` and `neura serve <file.nra or image>`; bundles and `neura run dist/server` wait for the project build |
 | Before it accepts, the host runs one worker with a *startup check* request. `serve` runs as usual, the router answers the check without calling a route, and migrations and configuration are verified. Readiness is true only after it succeeds. | implemented, without migrations |
 
 ### Request-worker protocol
@@ -178,8 +217,8 @@ Calls may overlap. Each `Return` requires an outstanding `Call`, and call and re
 | The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS. HTTP/2 and HTTP/3 are terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | implemented for HTTP/1.1 over TCP and TLS |
 | The host rejects before any worker: a head over `S-5` (431), more than 100 header fields (431), a body over `S-6` (413), both `Content-Length` and `Transfer-Encoding` (400), a transfer coding other than `chunked` (501), a folded header line, a missing or repeated `Host` (400), and a method it does not know (501). A head that takes more than 10 s is closed. | implemented (A4 decoder) and tested through the host |
 | Requests on one connection are served one at a time, in order. | implemented |
-| `http.Request` is immutable: `method`, `path`, `query`, `headers`, `client`, `scheme`, `request_id`, and the body, which is read whole within `S-6` (`body()`) or in chunks under a `using` owner (`open_body()`). | proposed |
-| `http.Response` is a status, headers and a body: bytes within `S-7`, or a stream written under a `using` owner with backpressure. `http.json(status, value, codec)` is the usual constructor. | proposed |
+| `http.Request` is immutable: `method`, `path`, `query`, `headers`, `client`, `scheme`, `request_id`, and the body, which is read whole within `S-6` (`body()`) or in chunks under a `using` owner (`open_body()`). | proposed for `Std.Net.Http`; the host side and `Std.App` (`serve_streamed`, `BodyReader`) are implemented |
+| `http.Response` is a status, headers and a body: bytes within `S-7`, or a stream written under a `using` owner with backpressure. `http.json(status, value, codec)` is the usual constructor. | proposed for `Std.Net.Http`; the host side and `Std.App` (`stream`, `BodyWriter`) are implemented |
 | `http.Router`: `get`, `post`, `put`, `patch`, `delete` each take a path pattern (`/parts/{id}`; segments only) and a handler `func(http.Request, http.Params) -> Result<http.Response>`. `mount` adds a generated adapter's routes. Two routes with one method and equal patterns are an error of the startup check. | proposed |
 | Matching is exact on method and segment count; a literal segment beats a parameter. No match is 404; a path that matches under another method is 405 with `Allow`. `HEAD` is answered from the `GET` route without its body. | proposed |
 | Middleware is `func(http.Request, http.Next) -> Result<http.Response>`. `router.use` middlewares run in the order they were added, then those of the route, then the handler; responses return through them in reverse. | proposed |
@@ -277,7 +316,7 @@ The [server component lock](../../packaging/server-components.lock.toml) pins Op
 | --- | --- |
 | Configuration is the bundle's defaults overlaid by a file the operator names and by environment variables with the prefix the manifest declares. It is validated in full before the host listens: unknown keys, wrong types, missing secrets and unreadable files each fail the start with every problem listed. | proposed |
 | A secret (a database password, a key file) exists only in the server host's configuration. `context.config` exposes the keys the manifest marks `expose`, and no secret can be marked so for a `web` target. | proposed |
-| The host answers `/livez` (the process is running) and `/readyz` (the startup check passed, pools are connected, it is not draining) itself, on an admin listener bound to loopback by default. `/metrics` on the same listener gives the counters of `neura.app.metric` and the host's own in the Prometheus text format. | proposed |
+| The host answers `/livez` (the process is running) and `/readyz` (the startup check passed, pools are connected, it is not draining) itself, on an admin listener bound to loopback by default. `/metrics` on the same listener gives the counters of `neura.app.metric` and the host's own in the Prometheus text format. | implemented with `--admin-listen` (opt-in), without pools |
 | Logs are JSON lines on standard error: time, level, request identifier, `traceparent` if the request carried one, message, and named fields, within `S-13`. | implemented, without `traceparent` |
 | On `SIGTERM`, `SIGINT`, or a console close event, the host stops accepting, answers 503 to waiting requests, cancels no worker yet, and waits up to `S-12` for workers to finish; then it cancels the rest, waits the grace period, kills what remains, reports each, and exits. `context.on_shutdown` callbacks do not exist: a request sees only its own cancellation. | partly: stops accepting, 503 for new requests, waits S-12, then kills; no cancel or grace step |
 | This drain is the host's own control event. `neurad stop` keeps its meaning of external termination. | proposed |

@@ -125,6 +125,8 @@ class Load:
 
 class Echo(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # Without it each answer waits for the loader's delayed acknowledgement.
+    disable_nagle_algorithm = True
 
     def do_GET(self):  # noqa: N802 - the standard library's name
         body = b'{"ok":true}'
