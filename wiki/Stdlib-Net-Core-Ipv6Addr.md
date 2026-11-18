@@ -54,23 +54,23 @@ The following public declarations are taken from the module source; each links t
   Always `AddressFamily.Ipv6`. Tagged `#Pure`.
 - **Ipv6Addr.Ipv6Addr** · [`export let compare_to = func(other: Ipv6Addr) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L114)
   Compares the unsigned 128-bit values, then the zones bytewise ("" first). Tagged `#Pure`.
-- **Ipv6Addr.Ipv6Addr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L125)
+- **Ipv6Addr.Ipv6Addr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L123)
   Tests whether another object is an `Ipv6Addr` with the same value and zone.
-- **Ipv6Addr.Ipv6Addr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L134)
+- **Ipv6Addr.Ipv6Addr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L132)
   Combines 17 with both halves and the zone's hash. Tagged `#Pure`.
-- **Ipv6Addr.Ipv6Addr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L140)
+- **Ipv6Addr.Ipv6Addr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L138)
   The RFC 5952 text, followed by `%` and the zone when there is one. Tagged `#Pure`.
-- **Ipv6Addr** · [`export let parse = func(text: string) -> Result<Ipv6Addr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L206)
+- **Ipv6Addr** · [`export let parse = func(text: string) -> Result<Ipv6Addr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L204)
   Parses the text forms of RFC 4291 section 2.2, optionally followed by `%` and a zone. Accepted: eight groups of 1 to 4 hex digits in either case (`2001:DB8:0:0:8:800:200C:417A`); one `::` standing for one or more zero groups (`ff01::101`, `::1`, `::`); and a final dotted IPv4 address in place of the last two groups (`::ffff:129.144.52.38`, `0:0:0:0:0:0:13.1.68.3`), parsed as strictly as `Ipv4Addr.parse`. The zone is everything after the first `%`; it must be non-empty and contain no further `%`. Errors: Empty for ""; InvalidCharacter at the first unexpected byte (a group of five digits fails at its fifth digit); Syntax for a second `::`, a lone leading or trailing `:`, a wrong group count (at the end of the address), an IPv4 part not at the end, or an empty or invalid zone; UnexpectedEnd when the text stops after `:`; errors of the embedded IPv4 part are reported at their offset in the whole text. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv6Addr** · [`export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L316)
+- **Ipv6Addr** · [`export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L314)
   The address held in `bytes[offset]` to `bytes[offset + 15]`, network order, with no zone; traps when fewer than sixteen bytes follow `offset`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv6Addr** · [`export let of_segments = func(segments: uint16[list]) -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L332)
+- **Ipv6Addr** · [`export let of_segments = func(segments: uint16[list]) -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L330)
   The address with the eight given groups, most significant first, and no zone; traps unless the list holds exactly eight groups. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv6Addr** · [`export let from_ipv4_mapped = func(address: v4.Ipv4Addr) -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L345)
+- **Ipv6Addr** · [`export let from_ipv4_mapped = func(address: v4.Ipv4Addr) -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L343)
   The IPv4-mapped address `::ffff:a.b.c.d` (RFC 4291 section 2.5.5.2). Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv6Addr** · [`export let localhost = func -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L350)
+- **Ipv6Addr** · [`export let localhost = func -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L348)
   `::1`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv6Addr** · [`export let unspecified = func -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L354)
+- **Ipv6Addr** · [`export let unspecified = func -> Ipv6Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv6-addr.nra#L352)
   `::`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

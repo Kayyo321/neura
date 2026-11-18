@@ -96,23 +96,23 @@ The following public declarations are taken from the module source; each links t
   Text such as "LoadedMap(8, socks)".
 - **Ebpf** · [`export let validate = func(program: EbpfProgram) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L201)
   Checks a program: a name of 1 to 15 bytes of letters, digits, `_` and `.`; a non-empty license without NUL; 1 to 1000000 whole 8-byte instructions. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let validate_map = func(map: RedirectMap) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L218)
+- **Ebpf** · [`export let validate_map = func(map: RedirectMap) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L216)
   Checks a map: a valid name, at least one entry, and a key of 4 bytes for a SockMap or 1 to 512 bytes for a SockHash. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let load = func(program: EbpfProgram) -> Result<LoadedProgram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L233)
+- **Ebpf** · [`export let load = func(program: EbpfProgram) -> Result<LoadedProgram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L231)
   Validates and loads `program`. Needs the host's eBPF service (see the module). Tagged `#NoDiscard`.
-- **Ebpf** · [`export let create_map = func(map: RedirectMap) -> Result<LoadedMap>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L240)
+- **Ebpf** · [`export let create_map = func(map: RedirectMap) -> Result<LoadedMap>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L238)
   Validates and creates `map`. Needs the host's eBPF service. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let attach_cgroup = func(program: LoadedProgram, cgroup_path: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L247)
+- **Ebpf** · [`export let attach_cgroup = func(program: LoadedProgram, cgroup_path: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L245)
   Attaches a SockOps program to the cgroup at `cgroup_path` (cgroup v2). Needs the host's eBPF service. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let attach_map = func(program: LoadedProgram, map: LoadedMap) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L256)
+- **Ebpf** · [`export let attach_map = func(program: LoadedProgram, map: LoadedMap) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L254)
   Attaches an SkMsg program to a redirect map. Needs the host's eBPF service. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let attach_netns = func(program: LoadedProgram, netns_path: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L265)
+- **Ebpf** · [`export let attach_netns = func(program: LoadedProgram, netns_path: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L263)
   Attaches an SkLookup program to the network namespace at `netns_path` (such as "/proc/self/ns/net"). Needs the host's eBPF service. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let map_update = func(map: LoadedMap, key: uint8[list], socket_handle: int64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L275)
+- **Ebpf** · [`export let map_update = func(map: LoadedMap, key: uint8[list], socket_handle: int64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L273)
   Stores the socket `socket_handle` under `key` in a redirect map. The key must have the map's key size. Needs the host's eBPF service. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let detach = func(program: LoadedProgram) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L286)
+- **Ebpf** · [`export let detach = func(program: LoadedProgram) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L284)
   Detaches and unloads a program. Needs the host's eBPF service. Tagged `#NoDiscard`.
-- **Ebpf** · [`export let is_valid_name = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L293)
+- **Ebpf** · [`export let is_valid_name = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/ebpf.nra#L291)
   Whether `name` is 1 to 15 bytes of letters, digits, `_` and `.`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

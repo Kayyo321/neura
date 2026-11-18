@@ -78,11 +78,11 @@ The following public declarations are taken from the module source; each links t
   A validated server configuration, or a `tls.config` error. Tagged `#NoDiscard`.
 - **TlsConfig.TlsConfigBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L235)
   Text such as "TlsConfigBuilder".
-- **TlsConfig** · [`export let builder = func -> TlsConfigBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L255)
+- **TlsConfig** · [`export let builder = func -> TlsConfigBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L253)
   An empty builder: TLS 1.2 through 1.3, no ALPN, the system trust store, no certificate. Tagged `#NoDiscard`.
-- **TlsConfig** · [`export let check_alpn = func(names: string[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L259)
+- **TlsConfig** · [`export let check_alpn = func(names: string[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L257)
   Ok when `names` is a valid ALPN list (RFC 7301 section 3.1), else a `tls.config` error. Tagged `#NoDiscard`.
-- **TlsConfig** · [`export let check_server_name = func(name: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L276)
+- **TlsConfig** · [`export let check_server_name = func(name: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-config.nra#L272)
   Ok when `name` is a valid SNI host name (RFC 6066 section 3, see the module documentation), else a `tls.config` error. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

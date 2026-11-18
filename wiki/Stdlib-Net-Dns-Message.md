@@ -208,19 +208,19 @@ The following public declarations are taken from the module source; each links t
   A response to `request`: same ID, opcode, RD and questions, QR set, the given RCODE. Tagged `#NoDiscard`.
 - **Message** · [`export let encode = func(message: Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L425)
   Encodes a message. Err (Custom `dns.too_large`) when it would exceed 65,535 bytes or a section exceeds 65,535 entries. Tagged `#NoDiscard`.
-- **Message** · [`export let decode = func(bytes: uint8[list]) -> Result<Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L474)
+- **Message** · [`export let decode = func(bytes: uint8[list]) -> Result<Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L472)
   Decodes a message. Err (Parse) for a truncated or malformed message, a bad name, rdata that does not use exactly RDLENGTH, more than one OPT record or trailing bytes. Tagged `#NoDiscard`.
-- **Message** · [`export let rdata_bytes = func(data: RecordData) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L521)
+- **Message** · [`export let rdata_bytes = func(data: RecordData) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L517)
   The record data as raw bytes, as RFC 3597 section 5 writes it for an unknown type (uncompressed). Tagged `#NoDiscard`.
-- **Message** · [`export let txt_strings = func(data: RecordData) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L529)
+- **Message** · [`export let txt_strings = func(data: RecordData) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L525)
   The character-strings of TXT data as text (invalid UTF-8 replaced); empty for other data. Tagged `#NoDiscard`.
-- **Message** · [`export let txt_of = func(texts: string[list]) -> RecordData`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L545)
+- **Message** · [`export let txt_of = func(texts: string[list]) -> RecordData`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L541)
   TXT data of text strings; a string above 255 bytes traps with "invalid argument: character-string". Tagged `#NoDiscard`.
-- **Message** · [`export let type_name = func(rtype: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L559)
+- **Message** · [`export let type_name = func(rtype: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L555)
   The mnemonic of a type ("A", "AAAA", ...), or "TYPEn" (RFC 3597 section 5). Tagged `#NoDiscard`.
-- **Message** · [`export let class_name = func(rclass: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L590)
+- **Message** · [`export let class_name = func(rclass: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L586)
   "IN" for class 1, otherwise "CLASSn" (RFC 3597 section 5). Tagged `#NoDiscard`.
-- **Message** · [`export let data_text = func(data: RecordData) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L594)
+- **Message** · [`export let data_text = func(data: RecordData) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L590)
   The master-file-like text of record data; unknown data as `\# length hex` (RFC 3597 section 5). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

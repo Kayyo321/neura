@@ -50,11 +50,11 @@ The following public declarations are taken from the module source; each links t
   The element as it is written in the header.
 - **Extensions** · [`export let is_token_byte = func(c: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L112)
   Whether `c` is a tchar of RFC 9110 section 5.6.2. Tagged `#NoDiscard`, `#Pure`.
-- **Extensions** · [`export let is_token = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L122)
+- **Extensions** · [`export let is_token = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L119)
   Whether the text is a non-empty token. Tagged `#NoDiscard`, `#Pure`.
-- **Extensions** · [`export let parse = func(value: string) -> Result<Extension[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L135)
+- **Extensions** · [`export let parse = func(value: string) -> Result<Extension[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L132)
   Parses a header value into its extensions, in order. Empty list elements (`a, , b`) are skipped, as RFC 9110 section 5.6.1 allows; a value with no element fails. Tagged `#NoDiscard`.
-- **Extensions** · [`export let format = func(list: Extension[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L208)
+- **Extensions** · [`export let format = func(list: Extension[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L203)
   The header value of the extensions, `, `-separated. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

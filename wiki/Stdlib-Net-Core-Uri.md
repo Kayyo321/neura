@@ -82,57 +82,57 @@ The following public declarations are taken from the module source; each links t
   The path with `.` and `..` segments removed (RFC 3986 section 5.2.4). Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`. Since 0.3.0.
 - **Uri** · [`export let default_port = func(scheme: string) -> optional.Optional<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L344)
   The default port of http (80) and https (443), compared without case; None for other schemes. Tagged `#Pure`, `#ThreadSafe`. Since 0.3.0.
-- **Uri** · [`export let UriBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L359)
+- **Uri** · [`export let UriBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L357)
   Collects URI components and builds a checked Uri. Setters without `raw` percent-encode their argument for the component; `raw` setters take text that is already encoded. The builder does not return itself from setters (the language has no receiver expression); call them as statements. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.0.
-- **Uri.UriBuilder** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L369)
+- **Uri.UriBuilder** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L367)
   An empty builder: no components, empty path.
-- **Uri.UriBuilder** · [`export let set_scheme = func(scheme: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L373)
+- **Uri.UriBuilder** · [`export let set_scheme = func(scheme: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L371)
   Sets the scheme (checked by build).
-- **Uri.UriBuilder** · [`export let clear_scheme = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L378)
+- **Uri.UriBuilder** · [`export let clear_scheme = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L376)
   Removes the scheme.
-- **Uri.UriBuilder** · [`export let set_userinfo = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L383)
+- **Uri.UriBuilder** · [`export let set_userinfo = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L381)
   Sets the userinfo from decoded text, encoding it with the UserInfo set.
-- **Uri.UriBuilder** · [`export let set_raw_userinfo = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L388)
+- **Uri.UriBuilder** · [`export let set_raw_userinfo = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L386)
   Sets the userinfo as already-encoded text.
-- **Uri.UriBuilder** · [`export let clear_userinfo = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L393)
+- **Uri.UriBuilder** · [`export let clear_userinfo = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L391)
   Removes the userinfo.
-- **Uri.UriBuilder** · [`export let set_host = func(name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L400)
+- **Uri.UriBuilder** · [`export let set_host = func(name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L398)
   Sets the host from a name or address: text with a `:` is an IPv6 address and gets brackets (a `%` zone separator becomes `%25`); other text is encoded with the RegName set, except that its non-ASCII bytes are kept, and build converts a host with non-ASCII with Idna.to_ascii.
-- **Uri.UriBuilder** · [`export let set_raw_host = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L411)
+- **Uri.UriBuilder** · [`export let set_raw_host = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L409)
   Sets the host as written (IP literals with brackets).
-- **Uri.UriBuilder** · [`export let clear_host = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L416)
+- **Uri.UriBuilder** · [`export let clear_host = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L414)
   Removes the host, and with it the authority.
-- **Uri.UriBuilder** · [`export let set_port = func(port: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L421)
+- **Uri.UriBuilder** · [`export let set_port = func(port: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L419)
   Sets the port (checked by build).
-- **Uri.UriBuilder** · [`export let clear_port = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L426)
+- **Uri.UriBuilder** · [`export let clear_port = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L424)
   Removes the port.
-- **Uri.UriBuilder** · [`export let set_path = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L431)
+- **Uri.UriBuilder** · [`export let set_path = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L429)
   Sets the path from decoded text, encoding it with the Path set (`/` separates segments).
-- **Uri.UriBuilder** · [`export let set_raw_path = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L436)
+- **Uri.UriBuilder** · [`export let set_raw_path = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L434)
   Sets the path as already-encoded text.
-- **Uri.UriBuilder** · [`export let add_path_segment = func(segment: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L441)
+- **Uri.UriBuilder** · [`export let add_path_segment = func(segment: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L439)
   Appends `/` and the segment encoded with the PathSegment set (so `/` in it is encoded).
-- **Uri.UriBuilder** · [`export let set_query = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L446)
+- **Uri.UriBuilder** · [`export let set_query = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L444)
   Sets the query from decoded text, encoding it with the Query set.
-- **Uri.UriBuilder** · [`export let set_raw_query = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L451)
+- **Uri.UriBuilder** · [`export let set_raw_query = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L449)
   Sets the query as already-encoded text.
-- **Uri.UriBuilder** · [`export let set_query_parameters = func(parameters: queries.QueryString, mode: queries.QueryMode)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L456)
+- **Uri.UriBuilder** · [`export let set_query_parameters = func(parameters: queries.QueryString, mode: queries.QueryMode)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L454)
   Sets the query from key/value pairs, encoded for the mode.
-- **Uri.UriBuilder** · [`export let add_query_parameter = func(key: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L462)
+- **Uri.UriBuilder** · [`export let add_query_parameter = func(key: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L460)
   Appends `key=value` to the query (with `&` when it is not empty), both encoded with the QueryComponent set.
-- **Uri.UriBuilder** · [`export let clear_query = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L470)
+- **Uri.UriBuilder** · [`export let clear_query = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L468)
   Removes the query.
-- **Uri.UriBuilder** · [`export let set_fragment = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L475)
+- **Uri.UriBuilder** · [`export let set_fragment = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L473)
   Sets the fragment from decoded text, encoding it with the Fragment set.
-- **Uri.UriBuilder** · [`export let set_raw_fragment = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L480)
+- **Uri.UriBuilder** · [`export let set_raw_fragment = func(raw: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L478)
   Sets the fragment as already-encoded text.
-- **Uri.UriBuilder** · [`export let clear_fragment = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L485)
+- **Uri.UriBuilder** · [`export let clear_fragment = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L483)
   Removes the fragment.
-- **Uri.UriBuilder** · [`export let set_all = func(uri: Uri)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L490)
+- **Uri.UriBuilder** · [`export let set_all = func(uri: Uri)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L488)
   Copies every component of a URI into the builder.
-- **Uri.UriBuilder** · [`export let build = func -> Result<Uri>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L509)
+- **Uri.UriBuilder** · [`export let build = func -> Result<Uri>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L507)
   The URI of the components. The recomposed text is parsed again and must give back the same components, so a builder cannot make a URI that reads differently. Errors: Parse Syntax for a userinfo or port without a host, a non-empty path that does not start with `/` after a host, a path starting with `//` without a host, a relative path whose first segment contains `:`, or components that otherwise do not read back unchanged; the errors of parse for invalid raw components; those of PercentEncoding.decode and Idna.to_ascii for a non-ASCII host (which build decodes, converts, and encodes with the RegName set again). Tagged `#NoDiscard`.
-- **Uri.UriBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L547)
+- **Uri.UriBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/uri.nra#L545)
   The text the components recompose to, unchecked.
 <!-- END SOURCE API -->
 

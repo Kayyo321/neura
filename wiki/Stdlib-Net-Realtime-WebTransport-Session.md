@@ -68,37 +68,37 @@ The following public declarations are taken from the module source; each links t
   The request fields that open a session (draft section 3.2). An empty origin is left out. Tagged `#NoDiscard`.
 - **Session** · [`export let validate_connect_request = func(fields: Field[list]) -> Result<SessionRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L123)
   Checks a session request as a server must: `:method CONNECT`, `:protocol webtransport`, `:scheme https`, and non-empty `:authority` and `:path`. The caller then checks the origin and answers 404 for an unknown resource or 403 for a refused origin (draft section 3.2). Tagged `#NoDiscard`.
-- **Session** · [`export let accepts = func(status: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L144)
+- **Session** · [`export let accepts = func(status: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L142)
   Whether a response status accepts the session (2xx). Tagged `#NoDiscard`.
-- **Session** · [`export let WebTransportSession = class implements MultiplexedTransport<int64, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L155)
+- **Session** · [`export let WebTransportSession = class implements MultiplexedTransport<int64, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L153)
   One WebTransport session: streams identified by QUIC stream IDs carrying byte chunks, and datagrams through `send` and `receive`. The session logic is real and runs over the private QUIC host-call wrappers of this module, which trap until the runtime provides QUIC: `open_stream` writes the stream header (`Wire.uni_stream_header` or `Wire.bidi_stream_header`), `accept_stream` reads and checks it, `send` and `receive` frame datagrams with the quarter stream ID (datagrams of other sessions are skipped), and `close_with` sends the WT_CLOSE_SESSION capsule on the request stream and finishes it. Tagged `#Final`, `#NotThreadSafe`.
-- **Session.WebTransportSession** · [`export last session_id: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L159)
+- **Session.WebTransportSession** · [`export last session_id: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L157)
   The session ID: the ID of the CONNECT request stream.
-- **Session.WebTransportSession** · [`export last is_client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L161)
+- **Session.WebTransportSession** · [`export last is_client: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L159)
   Whether this end is the client.
-- **Session.WebTransportSession** · [`export let init = func(handle: int64, id: int64, client: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L165)
+- **Session.WebTransportSession** · [`export let init = func(handle: int64, id: int64, client: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L163)
   A session with the given ID on a QUIC connection handle. An ID that is not a client-initiated bidirectional stream ID traps with "invalid argument: session id".
-- **Session.WebTransportSession** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L176)
+- **Session.WebTransportSession** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L174)
   The next datagram of the session, or `None` once the connection is closed. Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L196)
+- **Session.WebTransportSession** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L194)
   Sends one datagram (unreliable, unordered). Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let open_stream = func(bidirectional: bool) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L201)
+- **Session.WebTransportSession** · [`export let open_stream = func(bidirectional: bool) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L199)
   Opens a stream and writes the WebTransport header of this session on it. Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let accept_stream = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L211)
+- **Session.WebTransportSession** · [`export let accept_stream = func -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L209)
   Waits for the next stream the peer opens and reads its WebTransport header. A stream for another session, or without a WebTransport header, fails. Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let send_on = func(stream: int64, frame: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L244)
+- **Session.WebTransportSession** · [`export let send_on = func(stream: int64, frame: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L242)
   Writes bytes on a stream of this session. Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L249)
+- **Session.WebTransportSession** · [`export let receive_on = func(stream: int64) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L247)
   The next bytes of a stream (at most 64 KiB), or `None` once the peer finished it. Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let finish_stream = func(stream: int64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L259)
+- **Session.WebTransportSession** · [`export let finish_stream = func(stream: int64) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L255)
   Finishes the local side of a stream (QUIC FIN). Tagged `#NoDiscard`.
-- **Session.WebTransportSession** · [`export let close_with = func(reason: wire.SessionClose) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L263)
+- **Session.WebTransportSession** · [`export let close_with = func(reason: wire.SessionClose) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L259)
   Ends the session: the WT_CLOSE_SESSION capsule (`Wire.encode_close_capsule`) in an HTTP/3 DATA frame on the request stream, which is then finished.
-- **Session.WebTransportSession** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L267)
+- **Session.WebTransportSession** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L263)
   Ends the session with code 0 and no message.
-- **Session.WebTransportSession** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L270)
+- **Session.WebTransportSession** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L266)
   The session ID and role.
-- **Session** · [`export let connect = func(authority: string, path: string, origin: string) -> Result<WebTransportSession>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L278)
+- **Session** · [`export let connect = func(authority: string, path: string, origin: string) -> Result<WebTransportSession>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/session.nra#L274)
   Opens a QUIC connection to `authority`, waits for the server's settings to allow WebTransport, and sends the session request. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

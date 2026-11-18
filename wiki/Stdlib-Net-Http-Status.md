@@ -20,21 +20,21 @@ The following public declarations are taken from the module source; each links t
 
 - **Status** · [`export let reason_phrase = func(code: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L11)
   The reason phrase of `code`, or "" for a code without one. Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_valid = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L161)
+- **Status** · [`export let is_valid = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L159)
   Whether `code` is in 100 through 599. Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_informational = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L165)
+- **Status** · [`export let is_informational = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L163)
   1xx (RFC 9110 section 15.2). Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_success = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L169)
+- **Status** · [`export let is_success = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L167)
   2xx (RFC 9110 section 15.3). Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_redirection = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L173)
+- **Status** · [`export let is_redirection = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L171)
   3xx (RFC 9110 section 15.4). Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_client_error = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L177)
+- **Status** · [`export let is_client_error = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L175)
   4xx (RFC 9110 section 15.5). Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_server_error = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L181)
+- **Status** · [`export let is_server_error = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L179)
   5xx (RFC 9110 section 15.6). Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let has_no_content = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L185)
+- **Status** · [`export let has_no_content = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L183)
   Whether a response with `code` never has content: 1xx, 204 and 304 (RFC 9110 section 6.4.1). Tagged `#Pure`, `#ThreadSafe`.
-- **Status** · [`export let is_heuristically_cacheable = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L190)
+- **Status** · [`export let is_heuristically_cacheable = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/status.nra#L188)
   The codes heuristically cacheable by default (RFC 9110 section 15.1): 200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

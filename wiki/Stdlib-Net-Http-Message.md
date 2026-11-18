@@ -24,39 +24,39 @@ The following public declarations are taken from the module source; each links t
   The version's text: "HTTP/1.0", "HTTP/1.1", "HTTP/2", "HTTP/3". Tagged `#Pure`, `#ThreadSafe`.
 - **Message** · [`export let of_alpn = func(protocol_id: string) -> Optional<Version>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L32)
   The version named by an ALPN protocol id: "http/1.1", "h2", "h3" (RFC 7301, RFC 9113 section 3.1, RFC 9114 section 3.1); None for any other id. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Message** · [`export let HttpRequest = class<Body>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L47)
+- **Message** · [`export let HttpRequest = class<Body>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L45)
   A request: method, request target, header map and body. Tagged `#Final`, `#NotThreadSafe`.
-- **Message.HttpRequest** · [`export last method: methods.HttpMethod`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L49)
+- **Message.HttpRequest** · [`export last method: methods.HttpMethod`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L47)
   The method.
-- **Message.HttpRequest** · [`export last target: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L51)
+- **Message.HttpRequest** · [`export last target: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L49)
   The request target as sent: origin form `/path?query`, or absolute, authority or `*` form.
-- **Message.HttpRequest** · [`export last headers: header_maps.Headers`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L53)
+- **Message.HttpRequest** · [`export last headers: header_maps.Headers`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L51)
   The header fields; a mutable map owned by the message.
-- **Message.HttpRequest** · [`export last body: Body`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L55)
+- **Message.HttpRequest** · [`export last body: Body`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L53)
   The body.
-- **Message.HttpRequest** · [`export last version: Version`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L57)
+- **Message.HttpRequest** · [`export last version: Version`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L55)
   The protocol that carried or will carry the message.
-- **Message.HttpRequest** · [`export let init = func(request_method: methods.HttpMethod, request_target: string, fields: header_maps.Headers, content: Body, protocol: Version)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L60)
+- **Message.HttpRequest** · [`export let init = func(request_method: methods.HttpMethod, request_target: string, fields: header_maps.Headers, content: Body, protocol: Version)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L58)
   A request over the given protocol.
-- **Message.HttpRequest** · [`export let method_name = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L70)
+- **Message.HttpRequest** · [`export let method_name = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L68)
   The method's token.
-- **Message.HttpRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L73)
+- **Message.HttpRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L71)
   The text "HttpRequest(METHOD target VERSION)".
-- **Message** · [`export let HttpResponse = class<Body>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L79)
+- **Message** · [`export let HttpResponse = class<Body>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L77)
   A response: status, header map and body. Tagged `#Final`, `#NotThreadSafe`.
-- **Message.HttpResponse** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L81)
+- **Message.HttpResponse** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L79)
   The status code, 100 through 599.
-- **Message.HttpResponse** · [`export last headers: header_maps.Headers`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L83)
+- **Message.HttpResponse** · [`export last headers: header_maps.Headers`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L81)
   The header fields; a mutable map owned by the message.
-- **Message.HttpResponse** · [`export last body: Body`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L85)
+- **Message.HttpResponse** · [`export last body: Body`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L83)
   The body.
-- **Message.HttpResponse** · [`export last version: Version`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L87)
+- **Message.HttpResponse** · [`export last version: Version`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L85)
   The protocol that carried or will carry the message.
-- **Message.HttpResponse** · [`export let init = func(code: int, fields: header_maps.Headers, content: Body, protocol: Version)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L91)
+- **Message.HttpResponse** · [`export let init = func(code: int, fields: header_maps.Headers, content: Body, protocol: Version)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L89)
   A response over the given protocol. A status outside 100 through 599 traps with "invalid argument: status".
-- **Message.HttpResponse** · [`export let reason = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L100)
+- **Message.HttpResponse** · [`export let reason = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L98)
   The status's reason phrase (RFC 9110 section 15), or "".
-- **Message.HttpResponse** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L103)
+- **Message.HttpResponse** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/message.nra#L101)
   The text "HttpResponse(STATUS VERSION)".
 <!-- END SOURCE API -->
 

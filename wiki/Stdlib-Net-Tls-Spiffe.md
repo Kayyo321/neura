@@ -34,23 +34,23 @@ The following public declarations are taken from the module source; each links t
   True when the ID belongs to `domain`. Tagged `#Pure`.
 - **Spiffe.SpiffeId** · [`export let segments = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L51)
   The path segments; empty for an ID without a path. Tagged `#NoDiscard`.
-- **Spiffe.SpiffeId** · [`export let trust_domain_id = func -> SpiffeId`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L60)
+- **Spiffe.SpiffeId** · [`export let trust_domain_id = func -> SpiffeId`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L58)
   The ID of the trust domain itself (`spiffe://<domain>`), as a signing authority uses. Tagged `#NoDiscard`.
-- **Spiffe.SpiffeId** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L63)
+- **Spiffe.SpiffeId** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L61)
   Equal when the trust domain and path are.
-- **Spiffe.SpiffeId** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L71)
+- **Spiffe.SpiffeId** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L69)
   A hash consistent with equals.
-- **Spiffe.SpiffeId** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L74)
+- **Spiffe.SpiffeId** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L72)
   The URI text, `spiffe://<trust domain><path>`.
-- **Spiffe** · [`export let parse = func(text: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L79)
+- **Spiffe** · [`export let parse = func(text: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L77)
   Parses a SPIFFE ID (see the module documentation). Tagged `#NoDiscard`.
-- **Spiffe** · [`export let of = func(trust_domain: string, path: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L98)
+- **Spiffe** · [`export let of = func(trust_domain: string, path: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L96)
   A SPIFFE ID from a trust domain and a path (empty, or starting with `/`), checked as by `parse`; offsets refer to the joined text. Tagged `#NoDiscard`.
-- **Spiffe** · [`export let check_trust_domain_name = func(domain: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L103)
+- **Spiffe** · [`export let check_trust_domain_name = func(domain: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L101)
   Ok when `domain` is a valid trust domain name (section 2.1). Tagged `#NoDiscard`.
-- **Spiffe** · [`export let verify_x509_svid = func(chain_pem: string, bundle_pem: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L111)
+- **Spiffe** · [`export let verify_x509_svid = func(chain_pem: string, bundle_pem: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L109)
   Verifies an X.509-SVID chain (PEM) against a trust bundle (PEM) and returns its SPIFFE ID. Tagged `#NoDiscard`.
-- **Spiffe** · [`export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L118)
+- **Spiffe** · [`export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string) -> Result<SpiffeId>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/spiffe.nra#L116)
   Verifies a JWT-SVID against a JWK set (JSON) and an audience and returns its SPIFFE ID. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

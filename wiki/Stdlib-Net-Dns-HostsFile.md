@@ -74,15 +74,19 @@ The following public declarations are taken from the module source; each links t
   The IPv6 addresses of `name`. Tagged `#NoDiscard`.
 - **HostsFile.HostsFile** · [`export let reverse = func(ip: ips.IpAddr) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L181)
   Every name listed for `ip` (equal addresses, zone included), in file order, canonical names first within each line; empty when none. Tagged `#NoDiscard`.
-- **HostsFile.HostsFile** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L194)
+- **HostsFile.HostsFile** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L194)
+  Equal when the entries and the problems are equal, in order.
+- **HostsFile.HostsFile** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L211)
+  Combines the hashes of the entries and the problems, consistent with equals.
+- **HostsFile.HostsFile** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L223)
   Text such as "HostsFile(3 entries, 1 problems)".
-- **HostsFile** · [`export let empty = func -> HostsFile`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L200)
+- **HostsFile** · [`export let empty = func -> HostsFile`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L229)
   A table with no entries. Tagged `#NoDiscard`.
-- **HostsFile** · [`export let parse = func(text: string) -> HostsFile`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L204)
+- **HostsFile** · [`export let parse = func(text: string) -> HostsFile`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L233)
   Parses host-table text; never fails. Invalid lines are skipped and listed in `problems`. Tagged `#NoDiscard`.
-- **HostsFile** · [`export let read = func(path: string) -> Result<HostsFile>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L248)
+- **HostsFile** · [`export let read = func(path: string) -> Result<HostsFile>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L277)
   Reads and parses the file at `path` (usually `DefaultPath`). Fails only when the file cannot be read as UTF-8 text. Tagged `#NoDiscard`.
-- **HostsFile** · [`export let name_problem = func(name: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L255)
+- **HostsFile** · [`export let name_problem = func(name: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/hosts-file.nra#L284)
   Why `name` is not a valid host-table name, or "" when it is. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

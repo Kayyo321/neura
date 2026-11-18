@@ -166,29 +166,29 @@ The following public declarations are taken from the module source; each links t
   A TLV holding UTF-8 `text`. Tagged `#NoDiscard`.
 - **ProxyProtocol** · [`export let encode = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L380)
   The header in its own version's form; version 2 adds a CRC32C TLV when `with_crc` is true. Tagged `#NoDiscard`.
-- **ProxyProtocol** · [`export let encode_v1 = func(header: ProxyHeader) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L390)
+- **ProxyProtocol** · [`export let encode_v1 = func(header: ProxyHeader) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L388)
   The version 1 line, CRLF included. Fails for LOCAL, for Unix or datagram addresses, for mixed families and for an IPv6 zone, none of which version 1 can say. Tagged `#NoDiscard`.
-- **ProxyProtocol** · [`export let encode_v2 = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L406)
+- **ProxyProtocol** · [`export let encode_v2 = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L404)
   The version 2 bytes; with `with_crc` any CRC32C TLV is replaced by a computed one at the end. Fails for mixed IP families, for addresses with an UNSPEC transport, and above 65535 bytes after the fixed part. Tagged `#NoDiscard`.
-- **ProxyProtocol** · [`export let detect = func(bytes: uint8[list]) -> Detection`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L472)
+- **ProxyProtocol** · [`export let detect = func(bytes: uint8[list]) -> Detection`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L470)
   What `bytes` start with (section 2.2 "Identifying the protocol version"), decided as soon as the prefix cannot match either signature. Tagged `#NoDiscard`.
-- **ProxyProtocol** · [`export let parse = func(bytes: uint8[list]) -> Result<ProxyHeader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L476)
+- **ProxyProtocol** · [`export let parse = func(bytes: uint8[list]) -> Result<ProxyHeader>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L474)
   The header at the start of `bytes`, which must be complete; bytes after it are ignored. Tagged `#NoDiscard`.
-- **ProxyProtocol** · [`export let ProxyDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L491)
+- **ProxyProtocol** · [`export let ProxyDecoder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L489)
   Reads one PROXY header from a byte stream that arrives in chunks of any size. Push bytes, then call `next`: it returns the header, `None` while more bytes are needed, or the failure. `needed` says how many more bytes `next` needs at least, so a reader can avoid reading past the header. After the header, `remaining` holds the bytes that followed it. After a failure the decoder stays failed. Tagged `#Final`, `#NotThreadSafe`.
-- **ProxyProtocol.ProxyDecoder** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L502)
+- **ProxyProtocol.ProxyDecoder** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L500)
   An empty decoder.
-- **ProxyProtocol.ProxyDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L506)
+- **ProxyProtocol.ProxyDecoder** · [`export let push = func(chunk: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L504)
   Adds received bytes.
-- **ProxyProtocol.ProxyDecoder** · [`export let buffered = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L511)
+- **ProxyProtocol.ProxyDecoder** · [`export let buffered = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L509)
   The number of bytes received.
-- **ProxyProtocol.ProxyDecoder** · [`export let next = func -> Result<Optional<ProxyHeader>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L515)
+- **ProxyProtocol.ProxyDecoder** · [`export let next = func -> Result<Optional<ProxyHeader>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L513)
   The header, `None` while more bytes are needed, or the failure. Tagged `#NoDiscard`.
-- **ProxyProtocol.ProxyDecoder** · [`export let needed = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L546)
+- **ProxyProtocol.ProxyDecoder** · [`export let needed = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L544)
   The fewest further bytes `next` needs to make progress: 8 to tell the version (both forms are at least 15 bytes long), then for version 1 one byte at a time up to the CRLF, and for version 2 the rest of the 16 fixed bytes and then the announced length. Reading exactly this many never reads past the header. Zero once a header or a failure is known. Tagged `#NoDiscard`.
-- **ProxyProtocol.ProxyDecoder** · [`export let remaining = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L570)
+- **ProxyProtocol.ProxyDecoder** · [`export let remaining = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L568)
   The bytes received after the header (empty before the header is decoded). Tagged `#NoDiscard`.
-- **ProxyProtocol.ProxyDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L582)
+- **ProxyProtocol.ProxyDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/proxy-protocol.nra#L580)
   Text such as "ProxyDecoder(12 bytes buffered)".
 <!-- END SOURCE API -->
 

@@ -112,11 +112,11 @@ The following public declarations are taken from the module source; each links t
   Removes every stored response for `uri` (any method); returns how many were removed.
 - **Cache.ResponseCache** · [`export let record_response = func(method: string, uri: string, status: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L486)
   Section 4.4: after a non-error (2xx or 3xx) response to a request whose method is not safe (unknown methods included), invalidates `uri`; returns how many responses were removed.
-- **Cache.ResponseCache** · [`export let remove = func(method: string, uri: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L494)
+- **Cache.ResponseCache** · [`export let remove = func(method: string, uri: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L492)
   Removes the response stored for `method` and `uri`; returns whether one was stored.
-- **Cache.ResponseCache** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L504)
+- **Cache.ResponseCache** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L502)
   Removes every stored response.
-- **Cache.ResponseCache** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L511)
+- **Cache.ResponseCache** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache.nra#L509)
   The kind of cache, the number of entries and the capacity.
 <!-- END SOURCE API -->
 

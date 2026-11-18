@@ -36,45 +36,45 @@ The following public declarations are taken from the module source; each links t
   The index in the view of the first byte equal to `value`, or -1.
 - **IoSlice.IoSlice** · [`export let equals_bytes = func(bytes: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L85)
   Tests whether the view holds exactly the bytes of `bytes`.
-- **IoSlice.IoSlice** · [`export let content_equals = func(other: IoSlice) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L93)
+- **IoSlice.IoSlice** · [`export let content_equals = func(other: IoSlice) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L91)
   Tests whether two views hold the same bytes (wherever they are stored).
-- **IoSlice.IoSlice** · [`export let starts_with = func(prefix: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L106)
+- **IoSlice.IoSlice** · [`export let starts_with = func(prefix: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L104)
   Tests whether the view begins with the bytes of `prefix`.
-- **IoSlice.IoSlice** · [`export let backing = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L119)
+- **IoSlice.IoSlice** · [`export let backing = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L117)
   The backing list itself (not a copy), for a host call that takes a list and a range.
-- **IoSlice.IoSlice** · [`export let offset = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L122)
+- **IoSlice.IoSlice** · [`export let offset = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L120)
   The index in the backing list of the view's first byte.
-- **IoSlice.IoSlice** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L125)
+- **IoSlice.IoSlice** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L123)
   `IoSlice(offset N, length M)`; the bytes are not shown.
-- **IoSlice** · [`export let IoSliceList = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L131)
+- **IoSlice** · [`export let IoSliceList = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L129)
   An ordered list of views to be written as one gather (writev-style) vector. Tagged `#Final`, `#NoDiscard`. Since 0.3.0.
-- **IoSlice.IoSliceList** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L136)
+- **IoSlice.IoSliceList** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L134)
   Creates an empty list.
-- **IoSlice.IoSliceList** · [`export let add = func(slice: IoSlice)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L141)
+- **IoSlice.IoSliceList** · [`export let add = func(slice: IoSlice)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L139)
   Appends a view.
-- **IoSlice.IoSliceList** · [`export let count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L146)
+- **IoSlice.IoSliceList** · [`export let count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L144)
   The number of views.
-- **IoSlice.IoSliceList** · [`export let get = func(index: int) -> IoSlice`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L149)
+- **IoSlice.IoSliceList** · [`export let get = func(index: int) -> IoSlice`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L147)
   View `index`; traps when it is outside the list.
-- **IoSlice.IoSliceList** · [`export let slices = func -> IoSlice[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L157)
+- **IoSlice.IoSliceList** · [`export let slices = func -> IoSlice[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L155)
   A new list of the views (the views themselves are shared).
-- **IoSlice.IoSliceList** · [`export let total_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L166)
+- **IoSlice.IoSliceList** · [`export let total_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L164)
   The sum of the views' lengths.
-- **IoSlice.IoSliceList** · [`export let gather = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L169)
+- **IoSlice.IoSliceList** · [`export let gather = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L167)
   A new list holding the views' bytes in order.
-- **IoSlice.IoSliceList** · [`export let write_to = func(writer: func(IoSlice) -> Result<int>) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L172)
+- **IoSlice.IoSliceList** · [`export let write_to = func(writer: func(IoSlice) -> Result<int>) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L170)
   Writes the views in order through `writer`, as `write_gather` does.
-- **IoSlice.IoSliceList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L176)
+- **IoSlice.IoSliceList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L174)
   `IoSliceList(N slices, M bytes)`.
-- **IoSlice** · [`export let of = func(bytes: uint8[list]) -> IoSlice`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L182)
+- **IoSlice** · [`export let of = func(bytes: uint8[list]) -> IoSlice`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L180)
   The view of the whole list. Tagged `#NoDiscard`, `#ThreadSafe`.
-- **IoSlice** · [`export let view = func(bytes: uint8[list], offset: int, length: int) -> IoSlice`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L186)
+- **IoSlice** · [`export let view = func(bytes: uint8[list], offset: int, length: int) -> IoSlice`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L184)
   The view of `length` bytes from `offset`; traps when that range is not inside the list. Tagged `#NoDiscard`, `#ThreadSafe`.
-- **IoSlice** · [`export let total_length = func(slices: IoSlice[list]) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L191)
+- **IoSlice** · [`export let total_length = func(slices: IoSlice[list]) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L189)
   The sum of the views' lengths. Tagged `#ThreadSafe`.
-- **IoSlice** · [`export let gather = func(slices: IoSlice[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L195)
+- **IoSlice** · [`export let gather = func(slices: IoSlice[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L193)
   A new list holding the views' bytes in order (one copy of each byte). Tagged `#NoDiscard`, `#ThreadSafe`.
-- **IoSlice** · [`export let write_gather = func(slices: IoSlice[list], writer: func(IoSlice) -> Result<int>) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L205)
+- **IoSlice** · [`export let write_gather = func(slices: IoSlice[list], writer: func(IoSlice) -> Result<int>) -> Result<int>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/io-slice.nra#L203)
   Writes the views in order through `writer` and returns the number of bytes written. `writer` is offered the unwritten rest of one view at a time and returns how many of its bytes it took, 1 to the view's length; after a short write it is offered the rest of the same view. Empty views are skipped. An error from `writer` is returned as is (the bytes written before it are not reported); a count of 0 or more than offered is an `Io` error of kind `Other`. This is the writev-style entry point: a runtime with a vectored host write would take the whole list in one call. Tagged `#NoDiscard`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

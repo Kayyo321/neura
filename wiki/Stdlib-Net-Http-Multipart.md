@@ -66,17 +66,17 @@ The following public declarations are taken from the module source; each links t
   Parses the next bytes of the body; Ok holds the events they completed, possibly none. Tagged `#NoDiscard`.
 - **Multipart.MultipartParser** · [`export let finish = func -> Result<MultipartEvent[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L314)
   Ends the body: Ok with no events after the close delimiter, else 400 (the close delimiter is missing). Tagged `#NoDiscard`.
-- **Multipart.MultipartParser** · [`export let is_done = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L325)
+- **Multipart.MultipartParser** · [`export let is_done = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L323)
   Whether the close delimiter has been read.
-- **Multipart.MultipartParser** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L328)
+- **Multipart.MultipartParser** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L326)
   The parser's progress as text.
-- **Multipart** · [`export let boundary_of = func(content_type: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L408)
+- **Multipart** · [`export let boundary_of = func(content_type: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L406)
   The boundary parameter of a multipart Content-Type value such as `multipart/form-data; boundary=AaB03x`, quoted or not (RFC 2046 section 5.1.1, RFC 7578 section 4.1). 415 when the media type is not multipart/<subtype>; 400 when the parameters are malformed (RFC 9110 section 5.6.6: an unquoted value must be a token), the boundary is missing or given twice, or it is not 1 to 70 bchars without a final space (`is_boundary`). Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Multipart** · [`export let is_boundary = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L438)
+- **Multipart** · [`export let is_boundary = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L436)
   Whether `text` is a boundary: 1 to 70 bchars (digits, letters, space and '()+_,-./:=?) not ending in a space (RFC 2046 section 5.1.1). Tagged `#Pure`, `#ThreadSafe`.
-- **Multipart** · [`export let parameter = func(value: string, name: string) -> Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L458)
+- **Multipart** · [`export let parameter = func(value: string, name: string) -> Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L456)
   The value of parameter `name` (compared without case) of a field value of the form `type *( ";" name "=" value )` (RFC 9110 section 5.6.6), where type is a token or token "/" token, quoted-pairs undone. Ok(None) when absent; 400 when the parameters are malformed. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Multipart** · [`export let parse_all = func(body: uint8[list], boundary: string, limits: MultipartLimits) -> Result<Part[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L475)
+- **Multipart** · [`export let parse_all = func(body: uint8[list], boundary: string, limits: MultipartLimits) -> Result<Part[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/multipart.nra#L473)
   The parts of a complete multipart body with `boundary`. 400 for an invalid boundary or a missing close delimiter; other errors as `MultipartParser.feed`. A part's body is held in memory; use `MultipartParser` for large parts. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

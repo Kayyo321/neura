@@ -48,43 +48,43 @@ The following public declarations are taken from the module source; each links t
   The longest close reason in bytes: 125 minus the two status bytes.
 - **CloseStatus** · [`export let is_valid_on_wire = func(code: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L52)
   Whether an endpoint may put the code in a close frame, and accept it from one (RFC 6455 section 7.4). Tagged `#NoDiscard`, `#Pure`.
-- **CloseStatus** · [`export let CloseReason = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L64)
+- **CloseStatus** · [`export let CloseReason = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L62)
   The status and reason of a close frame. Status 1005 stands for a frame without a body. Tagged `#Final`, `#Immutable`.
-- **CloseStatus.CloseReason** · [`export last code: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L66)
+- **CloseStatus.CloseReason** · [`export last code: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L64)
   The status code, or 1005 when the frame had no body.
-- **CloseStatus.CloseReason** · [`export last reason: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L68)
+- **CloseStatus.CloseReason** · [`export last reason: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L66)
   The reason text, possibly empty.
-- **CloseStatus.CloseReason** · [`export let init = func(status: int, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L71)
+- **CloseStatus.CloseReason** · [`export let init = func(status: int, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L69)
   Stores the code and reason.
-- **CloseStatus.CloseReason** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L77)
+- **CloseStatus.CloseReason** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L75)
   Equal when the code and reason are.
-- **CloseStatus.CloseReason** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L85)
+- **CloseStatus.CloseReason** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L83)
   Combines the code and the reason.
-- **CloseStatus.CloseReason** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L89)
+- **CloseStatus.CloseReason** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L87)
   `code reason`, or the code alone.
-- **CloseStatus** · [`export let ProtocolFailure = class:errors.ErrorDetail`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L95)
+- **CloseStatus** · [`export let ProtocolFailure = class:errors.ErrorDetail`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L93)
   The error detail of a WebSocket failure: the status the connection closes with and a message. Tagged `#Final`.
-- **CloseStatus.ProtocolFailure** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L97)
+- **CloseStatus.ProtocolFailure** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L95)
   The close status this failure maps to, such as 1002 or 1009.
-- **CloseStatus.ProtocolFailure** · [`export let init = func(code_value: int, message_value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L102)
+- **CloseStatus.ProtocolFailure** · [`export let init = func(code_value: int, message_value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L100)
   Stores the status and message.
-- **CloseStatus.ProtocolFailure** · [`export let.override code = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L109)
+- **CloseStatus.ProtocolFailure** · [`export let.override code = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L107)
   Always `ws.protocol`.
-- **CloseStatus.ProtocolFailure** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L112)
+- **CloseStatus.ProtocolFailure** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L110)
   The message.
-- **CloseStatus.ProtocolFailure** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L115)
+- **CloseStatus.ProtocolFailure** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L113)
   Equal when the status and message are.
-- **CloseStatus.ProtocolFailure** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L123)
+- **CloseStatus.ProtocolFailure** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L121)
   Combines the status and message.
-- **CloseStatus.ProtocolFailure** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L127)
+- **CloseStatus.ProtocolFailure** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L125)
   `ws.protocol status: message`.
-- **CloseStatus** · [`export let failure = func(status: int, message: string) -> errors.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L132)
+- **CloseStatus** · [`export let failure = func(status: int, message: string) -> errors.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L130)
   A Custom error holding a `ProtocolFailure`. Tagged `#NoDiscard`.
-- **CloseStatus** · [`export let status_of = func(problem: errors.Error) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L138)
+- **CloseStatus** · [`export let status_of = func(problem: errors.Error) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L136)
   The close status a failure maps to: its `ProtocolFailure` status, otherwise 1011 for any other error. Tagged `#NoDiscard`.
-- **CloseStatus** · [`export let encode_body = func(code: int, reason: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L146)
+- **CloseStatus** · [`export let encode_body = func(code: int, reason: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L144)
   The body of a close frame with the status and reason. Fails when the code is not valid on the wire or the reason is longer than 123 bytes. Tagged `#NoDiscard`.
-- **CloseStatus** · [`export let decode_body = func(body: uint8[list]) -> Result<CloseReason>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L167)
+- **CloseStatus** · [`export let decode_body = func(body: uint8[list]) -> Result<CloseReason>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/close-status.nra#L165)
   Reads a received close frame body (RFC 6455 section 5.5.1). An empty body gives status 1005; a one-byte body, a status not valid on the wire, or a reason that is not UTF-8 fails with status 1002 (1007 for the reason). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

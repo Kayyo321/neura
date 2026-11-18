@@ -34,67 +34,67 @@ The following public declarations are taken from the module source; each links t
   The code's number, 0 to 16. Tagged `#NoDiscard`.
 - **Status** · [`export let of_number = func(value: int) -> Optional<Code>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L81)
   The code with that number, or `None` outside 0 to 16. Tagged `#NoDiscard`.
-- **Status** · [`export let name = func(code: Code) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L90)
+- **Status** · [`export let name = func(code: Code) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L88)
   The canonical name, such as `DEADLINE_EXCEEDED`. Tagged `#NoDiscard`.
-- **Status** · [`export let of_name = func(text: string) -> Optional<Code>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L94)
+- **Status** · [`export let of_name = func(text: string) -> Optional<Code>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L92)
   The code with the canonical name, or `None`. Tagged `#NoDiscard`.
-- **Status** · [`export let from_http = func(http_status: int) -> Code`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L108)
+- **Status** · [`export let from_http = func(http_status: int) -> Code`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L106)
   The gRPC code a client synthesizes for an HTTP response without `grpc-status` (http-grpc-status-mapping.md): 400 INTERNAL, 401 UNAUTHENTICATED, 403 PERMISSION_DENIED, 404 UNIMPLEMENTED, 429/502/503/504 UNAVAILABLE, every other status (200 included) UNKNOWN. Tagged `#NoDiscard`.
-- **Status** · [`export let to_http = func(code: Code) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L130)
+- **Status** · [`export let to_http = func(code: Code) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L126)
   The HTTP status of a code per google/rpc/code.proto ("HTTP Mapping"), for gateways that answer a gRPC failure over plain HTTP. A gRPC server itself always answers `:status 200`. Tagged `#NoDiscard`.
-- **Status** · [`export let encode_message = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L153)
+- **Status** · [`export let encode_message = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L149)
   Percent-encodes a status message (PROTOCOL-HTTP2.md "Percent-Encoded"): its UTF-8 bytes in 0x20 to 0x7E except `%` stay, every other byte becomes `%XX` with upper-case hex. Tagged `#NoDiscard`.
-- **Status** · [`export let decode_message = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L173)
+- **Status** · [`export let decode_message = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L169)
   Decodes a percent-encoded status message; never fails. A `%` not followed by two hex digits is kept as is; when the decoded bytes are not UTF-8 the raw text is returned unchanged (both allowed by PROTOCOL-HTTP2.md). Tagged `#NoDiscard`.
-- **Status** · [`export let RpcStatus = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L193)
+- **Status** · [`export let RpcStatus = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L189)
   A call's final status: a code, a message, and optional serialized `google.rpc.Status` details. Tagged `#Final`.
-- **Status.RpcStatus** · [`export last code: Code`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L195)
+- **Status.RpcStatus** · [`export last code: Code`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L191)
   The code.
-- **Status.RpcStatus** · [`export last message: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L197)
+- **Status.RpcStatus** · [`export last message: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L193)
   The message, possibly empty.
-- **Status.RpcStatus** · [`export last details: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L199)
+- **Status.RpcStatus** · [`export last details: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L195)
   The serialized `google.rpc.Status`, empty when there are no details.
-- **Status.RpcStatus** · [`export let init = func(status_code: Code, text: string, detail_bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L202)
+- **Status.RpcStatus** · [`export let init = func(status_code: Code, text: string, detail_bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L198)
   A status with every part given.
-- **Status.RpcStatus** · [`export let is_ok = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L210)
+- **Status.RpcStatus** · [`export let is_ok = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L206)
   Whether the code is OK. Tagged `#NoDiscard`.
-- **Status.RpcStatus** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L213)
+- **Status.RpcStatus** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L209)
   Equal when the code, message and details are.
-- **Status.RpcStatus** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L229)
+- **Status.RpcStatus** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L225)
   Combines the code, message and details.
-- **Status.RpcStatus** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L238)
+- **Status.RpcStatus** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L234)
   `NAME: message`.
-- **Status** · [`export let of = func(code: Code, message: string) -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L244)
+- **Status** · [`export let of = func(code: Code, message: string) -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L240)
   A status without details. Tagged `#NoDiscard`.
-- **Status** · [`export let ok = func -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L248)
+- **Status** · [`export let ok = func -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L244)
   The OK status. Tagged `#NoDiscard`.
-- **Status** · [`export let to_trailers = func(status: RpcStatus) -> metadata.Metadata`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L253)
+- **Status** · [`export let to_trailers = func(status: RpcStatus) -> metadata.Metadata`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L249)
   The trailers of a status: `grpc-status`, then `grpc-message` when the message is not empty, then `grpc-status-details-bin` when the code is not OK and details are present. Tagged `#NoDiscard`.
-- **Status** · [`export let from_trailers = func(trailers: metadata.Metadata, http_status: int) -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L273)
+- **Status** · [`export let from_trailers = func(trailers: metadata.Metadata, http_status: int) -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L269)
   The status a client reads from trailers (or a Trailers-Only header block) of a response with HTTP status `http_status`. Without `grpc-status`, the code comes from `from_http` and the message names the HTTP status. A value that is not a decimal code 0 to 16 gives UNKNOWN. Details are kept only for a non-OK code, when they decode as base64 and as a `google.rpc.Status` whose code field (if present) equals `grpc-status`; otherwise they are dropped. Tagged `#NoDiscard`.
-- **Status** · [`export let encode_rpc_status = func(status: RpcStatus) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L304)
+- **Status** · [`export let encode_rpc_status = func(status: RpcStatus) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L298)
   The `google.rpc.Status` message of a status: code (field 1), message (field 2); its `details` (field 3, `google.protobuf.Any`) are not modelled. Tagged `#NoDiscard`.
-- **Status** · [`export let RpcFailure = class:errors.ErrorDetail`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L317)
+- **Status** · [`export let RpcFailure = class:errors.ErrorDetail`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L311)
   The error detail of a gRPC failure: the status a call ends with. Tagged `#Final`.
-- **Status.RpcFailure** · [`export last status: RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L319)
+- **Status.RpcFailure** · [`export last status: RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L313)
   The status.
-- **Status.RpcFailure** · [`export let init = func(value: RpcStatus)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L322)
+- **Status.RpcFailure** · [`export let init = func(value: RpcStatus)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L316)
   Wraps `value`.
-- **Status.RpcFailure** · [`export let.override code = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L328)
+- **Status.RpcFailure** · [`export let.override code = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L322)
   Always `grpc.status`.
-- **Status.RpcFailure** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L331)
+- **Status.RpcFailure** · [`export let.override message = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L325)
   `NAME: message`.
-- **Status.RpcFailure** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L334)
+- **Status.RpcFailure** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L328)
   Equal when the statuses are.
-- **Status.RpcFailure** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L342)
+- **Status.RpcFailure** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L336)
   The status's hash.
-- **Status.RpcFailure** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L345)
+- **Status.RpcFailure** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L339)
   `grpc.status NAME: message`.
-- **Status** · [`export let to_error = func(status: RpcStatus) -> errors.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L350)
+- **Status** · [`export let to_error = func(status: RpcStatus) -> errors.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L344)
   A Custom error carrying `status`. Tagged `#NoDiscard`.
-- **Status** · [`export let error = func(code: Code, message: string) -> errors.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L354)
+- **Status** · [`export let error = func(code: Code, message: string) -> errors.Error`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L348)
   A Custom error carrying a status with `code` and `message`. Tagged `#NoDiscard`.
-- **Status** · [`export let of_error = func(problem: errors.Error) -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L359)
+- **Status** · [`export let of_error = func(problem: errors.Error) -> RpcStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/status.nra#L353)
   The status an error maps to: an `RpcFailure`'s status, the status inside a Context error's cause, otherwise UNKNOWN with the error's message (statuscodes.md: an application failure without a status). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

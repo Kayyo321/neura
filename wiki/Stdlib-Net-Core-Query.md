@@ -82,15 +82,15 @@ The following public declarations are taken from the module source; each links t
   The child with the name, if any.
 - **Query.QueryNode** · [`export let value = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L245)
   The first value at this path, if any.
-- **Query.QueryNode** · [`export let child_names = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L253)
+- **Query.QueryNode** · [`export let child_names = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L251)
   The names of the children in order.
-- **Query.QueryNode** · [`export let child_for = func(segment: string) -> QueryNode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L263)
+- **Query.QueryNode** · [`export let child_for = func(segment: string) -> QueryNode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L261)
   The existing child with the name, or a new one appended; the empty name appends a child named by its index.
-- **Query.QueryNode** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L280)
+- **Query.QueryNode** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L278)
   The node as `name{values}[children]`, for diagnostics.
-- **Query** · [`export let parse = func(raw: string, mode: QueryMode) -> Result<QueryString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L304)
+- **Query** · [`export let parse = func(raw: string, mode: QueryMode) -> Result<QueryString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L302)
   The pairs of a raw query (the text after `?`, without it). Errors: Parse InvalidCharacter at the offset in `raw` of a `%` not followed by two hex digits; Encoding at the offset in `raw` of decoded bytes that are not UTF-8. Tagged `#NoDiscard`. Since 0.3.0.
-- **Query** · [`export let key_path = func(key: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L335)
+- **Query** · [`export let key_path = func(key: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L333)
   The path segments of a key under the bracket convention; a key that does not fit it is one segment. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

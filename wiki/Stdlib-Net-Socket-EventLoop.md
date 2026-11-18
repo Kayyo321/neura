@@ -42,9 +42,9 @@ The following public declarations are taken from the module source; each links t
   The default preference: `IoUring`, `Epoll`, `Kqueue`, `Poll`. Tagged `#NoDiscard`.
 - **EventLoop** · [`export let is_available = func(backend: EventLoopBackend, platform: Platform) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/event-loop.nra#L76)
   Whether `platform` has `backend` (see the module documentation). Tagged `#Pure`.
-- **EventLoop** · [`export let select = func(platform: Platform, preference: EventLoopBackend[list]) -> Result<EventLoopBackend>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/event-loop.nra#L93)
+- **EventLoop** · [`export let select = func(platform: Platform, preference: EventLoopBackend[list]) -> Result<EventLoopBackend>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/event-loop.nra#L91)
   The first backend of `preference` that `platform` has, else the first of the default order it has. Err (a Custom error with the code `socket.event_loop`) when it has none, as on Windows. Tagged `#NoDiscard`.
-- **EventLoop** · [`export let install = func(backend: EventLoopBackend) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/event-loop.nra#L111)
+- **EventLoop** · [`export let install = func(backend: EventLoopBackend) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/event-loop.nra#L109)
   Asks the runtime's driver to wait with `backend`. Traps in Neura 0.3.0: the driver waits with `poll(2)` only and no runtime offers a service to switch. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
