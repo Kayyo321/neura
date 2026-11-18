@@ -4,7 +4,7 @@ This page defines the core of the language: bindings, functions, control flow, t
 
 ## Source and bindings
 
-Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let`, `const`, or `last`, with an optional type annotation, and ends with `;`. The exact Unicode identifier and escape rules remain open.
+Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let`, `const`, or `last`, with an optional type annotation, and ends with `;`. String and character literals have the [escapes](#escapes) below; the exact Unicode identifier rules remain open.
 
 | Introducer | Assigned | Where |
 | --- | --- | --- |
@@ -592,10 +592,10 @@ The compiler rejects, at the span of the offending expression, a `spawn` outside
 
 Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are
 
-1. member access, optional access `?.`, indexing, calls, and the postfix `?`
+1. member access, optional access `?.`, indexing, calls, the postfix `?`, and the primaries `nameof(...)` and `typeof(...)`
 2. postfix `++` and `--`
-3. prefix `++`, `--`, `!`, `-`, and `~`
-4. `as` and `is`
+3. prefix `++`, `--`, `!`, `not`, `-`, and `~`
+4. `as`, `is`, and `is not`
 5. `*`, `/`, `%`
 6. `+`, `-`
 7. `<<`, `>>`
@@ -603,20 +603,160 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 9. `^`
 10. `|`
 11. `<`, `<=`, `>`, `>=`
-12. `==`, `!=`, `===`
+12. `==`, `!=`, `===`, `!==`
 13. `&&`
 14. `||`
 15. `??`, which associates to the right
-16. `..` and its optional step in [range expressions](Collections.md#ranges)
+16. `..` and `..=` with an optional step in [range expressions](Collections.md#ranges), and `..` in [string chains](#string-chains)
 17. `? :`
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 
+A statement that is exactly `place ..= text;` appends text to a `string` place ([design](../design/Expressions030.md#-as-a-statement), implemented, proposed): it stores `place .. text` into the place, as a compound assignment does, so the receiver and index are evaluated once, a getter and a setter each run once, and a trap skips the store. An unparenthesized [chain](#string-chains) on the right joins after the old value, so `line ..= name .. "!";` is one chain of three operands. Each right operand must be a `string` (`E1100`). An integer destination is `E0262`, because `..=` in an expression is an [inclusive range](Collections.md#ranges): write `let r = n ..= 5;` for the range.
+
+<!-- example: check -->
+```neura
+let banner = func(name: string) -> string {
+    let line = "Hello";
+    line ..= ", " .. name;
+    line ..= "!";
+    return line;
+};
+```
+
 Prefix and postfix increment and decrement require a mutable numeric binding, field, or element. They evaluate the destination once and add or subtract a one of its type. `++x` and `--x` yield the updated value. `x++` and `x--` yield the previous value. The usual arithmetic rules apply, including checked integer overflow. [Numbers](Numbers.md) specifies integer and floating-point arithmetic. `+` and `+=` can also concatenate strings.
+
+`not` is `!` spelled as a word ([design](../design/Expressions030.md#negation-words), implemented, proposed). It is a reserved word and a prefix operator at the level of `!`, with the same `bool` operand and the same result, so `not a && b` is `(not a) && b` and `not x == y` is `(not x) == y`; write `not (x == y)` for the other reading. `x is not T` is `!(x is T)`, with the type rules of `is`. Both build the same program as the `!` forms, and the formatter keeps the spelling that was written.
+
+<!-- example: check -->
+```neura
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+
+let plain = func(shape: Shape, ready: bool) -> bool => shape is not Circle && not ready;
+```
 
 `a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
 
+`a !== b` is `!(a === b)` ([design](../design/Expressions030.md#value-inequality), implemented, proposed): the same `equals` call, the same diagnostics, and the same program. `!==` is one token. Like `===`, it forms no comparison chain, so `a !== b and c` is a syntax error.
+
+<!-- example: check -->
+```neura
+let Point = record (x: int, y: int);
+
+let moved = func(from: Point, to: Point) -> bool => from !== to;
+```
+
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
+
+### String chains
+
+`a .. b .. c` with `string` operands joins their text in written order ([design](../design/Expressions030.md#string-chains), implemented, proposed). The first operand decides the role of `..`: a `string` makes a chain, and an integer makes a [range](Collections.md#ranges). A chain has two or more operands, each a `string`; nothing is converted, so a value of another type is `E1100`, with the suggestion to call `to_string()`. The operands are evaluated once each, left to right, and a trap stops the chain before any later operand runs. Empty operands and every byte are kept.
+
+`..` binds more loosely than every binary operator and `??`, and more tightly than `? :`: `a .. b == c` is `a .. (b == c)` (`E1100` at the `bool`), so write `(a .. b) == c`, and `c ? a .. b : d` takes the chain as its middle arm. A parenthesized chain is one operand. Adjacent string literals fold at compile time, so `"hi " .. "there"` is the constant `"hi there"`. A chain takes no step, braces do not group it, and `..=` does not join text in an expression (`E0263`); as a statement, `text ..= more;` appends to a string. `+` and `+=` still concatenate two strings.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let greet = func(name: string, count: int) -> string =>
+    "Hello, " .. name .. "! You have " .. count.to_string() .. " messages.";
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(greet("Ada", 3));
+        console.print_line(("[" .. "x") .. "]");
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Hello, Ada! You have 3 messages.
+[x]
+```
+
+A chain evaluates its operands once each, left to right, then allocates its result once and copies each operand's bytes once, however many operands it has; `a + b + c` allocates a string per `+`. A parenthesized inner chain is a separate allocation, made before the next outer operand is evaluated. A result longer than the text length limit, or one the heap budget cannot hold, traps after every operand ran and stores nothing.
+
+### Character literals
+
+A character literal is one character between single quotes, `'A'`, and names one byte ([design](../design/Expressions030.md#character-literals), implemented, proposed). It is an integer literal whose value is that byte: where an integer type is expected it takes that type, as a decimal literal does, and without an expected type it is a `byte`, not an `int32`. So `let c = 'A';` is a `byte` of 65, `let i: int32 = 'A';` is 65, `'A' + 1` is a `byte` of 66, `b == 'A'` compares any integer `b` with 65, and `'a' .. 'z'` is a `byte[]`. A value that the expected type cannot hold is the literal range error `E0424`, as in `let s: int8 = '\xFF';`. A character literal builds the same program as the decimal literal of its byte.
+
+| Form | Value |
+| --- | --- |
+| A printable ASCII character other than `'` and `\`, such as `'A'` or `'"'` | its code, 0x20 to 0x7E |
+| `'\n'`, `'\r'`, `'\t'`, `'\0'` | 10, 13, 9, 0 |
+| `'\\'`, `'\''`, `'\"'` | 92, 39, 34 |
+| `'\xHH'`, with exactly two hexadecimal digits | any byte, 0x00 to 0xFF |
+| `'\u{H}'`, with one to six hexadecimal digits and a value up to FF | that byte, so `'\u{E9}'` is 0xE9 |
+
+A character outside ASCII, such as `'é'`, and a `\u{...}` escape above `\u{FF}` are `E0260`: use `Std.Core.Character` for a Unicode code point and a string literal for text. An empty literal, more than one character, a line or file end before the closing quote, a raw tab or control byte, and any other escape are `E0261`. A typographic quote `‘` or `’` is `E0101`.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let count = func(text: string, wanted: byte) -> int {
+    let found = 0;
+    for (let value: byte in text.to_bytes()) {
+        if (value == wanted) {
+            found = found + 1;
+        }
+    }
+    return found;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let letter = 'A';
+        let code: int32 = '\n';
+        console.print_line((letter + 1).to_string() + " " + code.to_string() + " " +
+                           count("banana", 'a').to_string() + " " + ('a' .. 'z').length.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+66 10 3 25
+```
+
+### Escapes
+
+A backslash in a string, interpolated string or character literal starts an escape ([proposal](../design/Expressions030.md#escapes), implemented, proposed). Every escape a character literal accepts is also accepted in a string.
+
+| Escape | String literal | Character literal |
+| --- | --- | --- |
+| `\n`, `\r`, `\t` | newline, carriage return, tab | 10, 13, 9 |
+| `\0` | U+0000 | 0 |
+| `\\`, `\'`, `\"` | backslash, apostrophe, quote | 92, 39, 34 |
+| `\xHH`, exactly two hexadecimal digits | the byte 0xHH | the byte 0xHH |
+| `\u{H}`, one to six hexadecimal digits in either case | the code point, encoded as UTF-8 | the byte, for a value up to FF |
+
+A string is UTF-8 text, so the bytes that a literal's `\x` escapes and characters write must together be valid UTF-8: `"\xC3\xA9"` is `"é"`, and a lone `"\xE9"` is `E0270`, whose fix is `\u{E9}`. A `\u` escape names a Unicode scalar value: a surrogate (`\u{D800}` to `\u{DFFF}`) or a value above `\u{10FFFF}` is `E0269`, and a `\u` without braces, with no digits or more than six, or without its `}` is `E0268`. Any other escape is `E0104` in a string and `E0261` in a character literal. The formatter keeps every escape as written.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let same = "caf\u{E9}" == "café" && "\xC3\xA9" == "\u{e9}" && "\u{1F600}" == "😀";
+        console.print_line(same.to_string() + " " + "it\'s".byte_length.to_string() + " " + "a\0b".byte_length.to_string());
+        let latin: byte = '\u{E9}';
+        console.print_line(latin.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+true 4 3
+233
+```
 
 ### Optional access and coalescing
 
@@ -692,6 +832,86 @@ let kind = nameof(Invoice);          // "Invoice"
 | The operand resolves to one accessible declaration. | An unknown name is `E0304`, an unknown or inaccessible member `E0305`, and a built-in type, a literal, a call, an index or any other expression `E0487`. |
 | The string is program data. | It is in the image and stays when names and source maps are stripped. It changes when the declaration is renamed, so it is not a stable name for stored data. |
 | `nameof` is an operator where an expression starts and `(` follows. | No declaration may be named `nameof` (`E0311`). |
+
+### typeof
+
+`typeof(operand)` describes a type as a `Std.Reflect.Core.TypeInfo` record ([design](../design/Expressions030.md#typeof), implemented, proposed): its `kind` (a `Std.Reflect.Type.TypeKind`), its `name` with type arguments, and its `qualified_name`, the name the program uses for class text. The operand is a value, evaluated once, or a type, which is not evaluated. No import is needed; import `Std.Reflect.Core.TypeInfo` to name the record's type.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class ( );
+let Circle = class : Shape ( );
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let shape: Shape = new Circle();
+        let none: Shape = nil;
+        let held: any = 7 as int64;
+        console.print_line(typeof(shape).name + " " + typeof(none).kind.to_string() + " " + typeof(held).name);
+        console.print_line(typeof(int32[]).name + " " + typeof([1, 2]).kind.to_string());
+        console.print_line((typeof(shape) === typeof(new Circle())).to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Circle Nil int64
+int32[] Array
+true
+```
+
+| Rule | Detail |
+| --- | --- |
+| A class or interface reference, `class` and `any` are described dynamically. | `typeof(shape)` of a `Circle` held as `Shape` is `Circle`; an `any` describes the value it holds. A nil reference, or an `any` holding nil, is kind `Nil` with the name `nil`; `typeof` never traps. |
+| Every other value is described by its static type. | Scalars, `string`, tuples (`[int32, string]`), arrays (`int32[]`), lists (`int32[list]`), enums (`Optional<int32>`) and function values (`func(int32) -> int32`). In a generic function, `typeof(value)` and `typeof(T)` describe the type argument of each specialization. |
+| A type operand is described statically. | A built-in type name, a class, interface, record, enum or type parameter, a dotted path to one, an applied generic (`Box<int32>`), an array or a tuple type. A name that is both a type and a value is the type. |
+| `===` compares types. | `TypeInfo` is a record, so `typeof(a) === typeof(b)` compares kind and names and `==` compares identity. |
+| The description is program data. | The kind and names are constants of the image: they stay when names and source maps are stripped and are the same through `.nir`. |
+| `typeof` is a reserved word. | `typeof` without `(`, `typeof()`, and an operand with no type (a `void` call, a module, a function name that is not called) are `E0267`. |
+
+### Return forms
+
+`return if` returns the value of the first arm whose condition holds, and `return value unless guard;` returns unless the guard holds ([design](../design/Expressions030.md#return-forms), implemented, proposed).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let sign = func(x: int) -> string {
+    return if (x > 0) -> "Positive";
+    else if (x == 0) -> "Zero";
+    else -> "Negative";
+};
+
+let label = func(name: string) -> string {
+    return name unless name == "";
+    return "anonymous";
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(sign(4) + " " + sign(0) + " " + sign(-1) + " " + label("") + " " + label("Ada"));
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+Positive Zero Negative anonymous Ada
+```
+
+| Rule | Detail |
+| --- | --- |
+| `return if (c1) -> v1; else if (c2) -> v2; else -> v3;` | The conditions are evaluated in order until one holds; only the selected value is evaluated and returned. It is `if (c1) { return v1; } else if (c2) { return v2; } else { return v3; }` and builds the same program. The `;` after a non-final arm is optional, so `return if (c) -> a else -> b;` is the same statement. The final `else` is required. |
+| `return v unless g;` | The `bool` guard is evaluated first; when it is true nothing happens, otherwise `v` is evaluated and returned. It is `if (!(g)) { return v; }`. The guard covers the whole value, including a `return if` or a `return match`. |
+| `unless` is a guard only after a complete return value. | Elsewhere it is an ordinary name: `return unless;` and `return unless(x);` use a binding or function named `unless`, and `return unless unless flag;` is guarded by `flag`. A bare `return;` takes no guard. |
+| A guarded return can fall through. | It does not end a function that returns a value (`E0405`); a `return if` with its final `else` always returns. |
+| Arms are `-> value`. | A missing `->`, a missing final `else`, and an arm written as a block are `E0264`. Arms written as blocks that `yield` a value wait for the lifetime milestone. |
 
 ### Comparison chains
 

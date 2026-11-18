@@ -1,0 +1,13 @@
+error[E0201]: expected ';'
+ --> $DIR/return-unless-bare.nra:7:18
+  |
+7 |     return unless g;
+  |                  ^ expected ';' here
+  |                   - found 'g'
+  |
+help: add the missing ';'
+  |
+7 |     return unless; g;
+  |                  +
+
+For more information about this error, try `neura explain E0201`.

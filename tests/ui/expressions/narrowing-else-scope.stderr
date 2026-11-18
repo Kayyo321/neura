@@ -1,0 +1,12 @@
+error[E0304]: unknown name 'circle'
+  --> $DIR/narrowing-else-scope.nra:15:16
+   |
+15 |         return circle.radius;
+   |                ^^^^^^ not found in this scope
+   |
+help: there is a binding with a similar name: 'Circle'
+   |
+15 |         return Circle.radius;
+   |                ~~~~~~
+
+For more information about this error, try `neura explain E0304`.

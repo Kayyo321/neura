@@ -1,0 +1,9 @@
+error[E0403]: expected class, got int32
+ --> $DIR/value-inequality-operand.nra:4:52
+  |
+4 | let differ = func(a: Box, b: int) -> bool => a !== b;
+  |                                                    ^ expected class, found int32
+ ::: <class>:1:1
+  = <class>:1:1: parameter 'other' is declared here
+
+For more information about this error, try `neura explain E0403`.

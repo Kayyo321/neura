@@ -7,6 +7,7 @@
 #include "decompiler/decompile.hpp"
 #include "fixtures.hpp"
 
+#include <fstream>
 #include <functional>
 #include <stdexcept>
 
@@ -783,7 +784,8 @@ NEURA_TEST(format, storage_regions_need_version_1_7) {
     check_equal(static_cast<unsigned>(nvr::StateOp::MoveToRegion), 32U, "the move-to-region number");
     check_equal(static_cast<unsigned>(nvr::StateOp::HookEnter), 33U, "the hook-enter number");
     check_equal(static_cast<unsigned>(nvr::StateOp::HookLeave), 34U, "the hook-leave number");
-    check_equal(static_cast<unsigned>(nvr::state_op_count), 35U, "the operation count");
+    check_equal(static_cast<unsigned>(nvr::StateOp::ConcatText), 35U, "the concat-text number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 36U, "the operation count");
     const auto image = region_image(environment);
     check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
     check(nvr::uses_regions(image), "the image uses regions");
@@ -1470,6 +1472,69 @@ NEURA_TEST(format, structural_types_are_equal) {
     const auto loaded = nvr::load(nvr::encode(image));
     const auto run = run_captured(loaded);
     check(run.result.completed && run.result.status == 7, describe_trap(run.result, loaded));
+}
+
+// docs/runtime/NVR.md, Text concatenation (1.9): the writer selects 1.9 only
+// for concat-text, and the loader checks its arguments and result.
+NEURA_TEST(format, concat_text_needs_version_1_9) {
+    const auto path = fs::temp_directory_path() / "neura-format-tests" / "concat.nra";
+    fs::create_directories(path.parent_path());
+    std::ofstream(path) << R"(let program = import:Std.Program;
+
+let join = func(a: string, b: string, c: string) -> string => a .. b .. c;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (join("a", "b", "c") != "abc") { return program.ExitCode.Failure; }
+        return program.ExitCode.Ok;
+    };
+);
+)";
+    const auto image = build_program({path});
+    check_equal(image.minor_version, std::uint16_t{9}, "a chain declares 1.9");
+    std::size_t function = 0, block = 0, exit = 0;
+    bool found = false;
+    for (std::size_t f = 0; f < image.functions.size() && !found; ++f)
+        for (std::size_t b = 0; b < image.functions[f].blocks.size() && !found; ++b)
+            for (std::size_t e = 0; e < image.functions[f].blocks[b].exits.size() && !found; ++e) {
+                const auto& candidate = image.functions[f].blocks[b].exits[e];
+                if (candidate.kind == nvr::ExitKind::State && candidate.operation == nvr::StateOp::ConcatText) {
+                    function = f, block = b, exit = e, found = true;
+                }
+            }
+    check(found, "the image has a concat-text exit");
+    if (!found) return;
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{9}, "the writer emits 1.9");
+    check(nvr::encode(nvr::load(bytes)) == bytes, "an image with concat-text round trips");
+    auto declared_old = image;
+    declared_old.minor_version = 8;
+    check(nvr::encode(declared_old) == bytes, "a declared 1.8 image with concat-text is written as 1.9");
+    auto old_header = bytes;
+    old_header[6] = 8;
+    expect_rejected(old_header, Kind::Malformed, "uses NVR 1.9 features but declares 1.8");
+    const auto mutated = [&](const std::function<void(nvr::Exit&, nvr::Function&)>& change) {
+        auto copy = image;
+        auto& target = copy.functions[function];
+        change(target.blocks[block].exits[exit], target);
+        return nvr::encode(copy);
+    };
+    expect_rejected(mutated([](nvr::Exit& e, nvr::Function&) { e.arguments.resize(1); }), Kind::Invalid,
+                    "at least two arguments");
+    expect_rejected(mutated([](nvr::Exit& e, nvr::Function&) { e.immediate = 1; }), Kind::Invalid,
+                    "immediate must be zero");
+    // Argument 1 read from a new frame slot of type bool.
+    expect_rejected(mutated([&](nvr::Exit& e, nvr::Function& f) {
+                        for (std::uint32_t t = 0; t < image.types.size(); ++t) {
+                            if (image.types[t].kind != nvr::TypeKind::Bool) continue;
+                            f.frame_types.push_back(t);
+                            e.arguments[1] = {nvr::ValueKind::Slot, t, static_cast<std::uint32_t>(f.frame_types.size() - 1)};
+                            break;
+                        }
+                    }),
+                    Kind::Invalid, "argument 1 has the wrong type");
+    expect_rejected(mutated([](nvr::Exit& e, nvr::Function&) { e.result_slot = nvr::absent; }), Kind::Invalid,
+                    "result slot must have type text");
 }
 
 } // namespace neura::testing

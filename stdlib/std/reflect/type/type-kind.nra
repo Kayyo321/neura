@@ -1,0 +1,24 @@
+/// @brief The kinds of type that Std.Reflect describes (docs/design/Expressions030.md, typeof). `typeof` of a
+/// value never gives Interface, Any or TypeParameter; only a type operand does.
+/// @see [Std.Reflect.Type.TypeKind](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-TypeKind)
+#Since("0.3.0")
+export let TypeKind = module (
+    /// @brief One kind of type. The order is part of the contract: `typeof` passes a kind as its ordinal.
+    #Since("0.3.0")
+    export let TypeKind = enum (
+        Nil, Bool, Integer, Float, String, Class, Interface, Record, Enum, Tuple, Array, List, Function, Any,
+        TypeParameter, Other
+    );
+
+    /// @brief The kind whose ordinal is `ordinal`, or Other for an ordinal outside the enum.
+    #[Pure, ThreadSafe]
+    #Since("0.3.0")
+    export let of_ordinal = func(ordinal: int) -> TypeKind {
+        let kinds: TypeKind[] = [
+            TypeKind.Nil, TypeKind.Bool, TypeKind.Integer, TypeKind.Float, TypeKind.String, TypeKind.Class,
+            TypeKind.Interface, TypeKind.Record, TypeKind.Enum, TypeKind.Tuple, TypeKind.Array, TypeKind.List,
+            TypeKind.Function, TypeKind.Any, TypeKind.TypeParameter, TypeKind.Other
+        ];
+        return ordinal >= 0 && ordinal < kinds.length ? kinds[ordinal] : TypeKind.Other;
+    };
+);

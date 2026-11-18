@@ -1,0 +1,8 @@
+// A bare `return` takes no guard (docs/design/Expressions030.md, Return
+// forms, edge case 51): `return unless g;` returns a binding named `unless`
+// and then meets `g`, the existing expected-';' error.
+let unless = 1;
+let g = true;
+let pick = func -> int {
+    return unless; g;
+};

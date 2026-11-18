@@ -1,0 +1,19 @@
+// The program of string-folding.chain.nra with each chain written as the
+// literal it folds to.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let greeting = func() -> string => "hi there!";
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("abc");
+        console.print_line("abc");
+        console.print_line("");
+        console.print_line("é\n€");
+        console.print_line(greeting());
+        let text = "xyz";
+        console.print_line(text);
+        return program.ExitCode.Ok;
+    };
+);

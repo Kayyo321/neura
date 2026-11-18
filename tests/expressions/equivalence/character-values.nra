@@ -1,0 +1,55 @@
+// Character literals (docs/design/Expressions030.md, Character literals,
+// edge cases 25, 28 and 29): the value of each form and escape, the `byte`
+// default type, contextual integer typing (`1 + 'A'` takes the type of its
+// left operand, as two decimal literals do), ranges with character bounds,
+// overloads and inferred type arguments.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let identity = func<T>(value: T) -> T => value;
+
+let width = func(value: byte) -> string => "byte"
+    or func(value: int32) -> string => "int32";
+
+let join = func(values: byte[], separator: byte = ' ') -> string {
+    let text = "";
+    for (let value: byte in values) {
+        text = text + (separator == ' ' ? " " : ",") + value.to_string();
+    }
+    return text;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let escapes: byte[] = ['A', '\n', '\'', '\\', '\"', '"', '\0', '\x41', '\xFF', '\xff', ' ', '~', '\r', '\t'];
+        console.print_line(join(escapes));
+
+        let letter = 'A';
+        let maximum: byte = 255;
+        console.print_line((letter == 65).to_string() + " " + (maximum - letter).to_string());
+        let next = 'A' + 1;
+        let wide: uint8 = 189;
+        let mixed = 1 + 'A';
+        let promoted: int32 = mixed * 1000;
+        console.print_line(next.to_string() + " " + (wide + next).to_string() + " " + promoted.to_string());
+
+        let code: int32 = 'A';
+        let large: int64 = '\xFF';
+        let small: int8 = '\x7F';
+        console.print_line((code * 1000).to_string() + " " + (large * 1000000).to_string() + " " +
+                           small.to_string());
+
+        let input: uint8 = 72;
+        let other: int32 = 72;
+        console.print_line((input == 'H').to_string() + " " + (other == 'H').to_string() + " " +
+                           ('H' == input).to_string() + " " + (input != 'h').to_string());
+
+        let lower = 'a' .. 'z';
+        let digits = '0' .. '9' : 3;
+        console.print_line(lower.length.to_string() + " " + lower[0].to_string() + " " +
+                           lower[24].to_string() + join(digits, ','));
+
+        console.print_line(width('A') + " " + width(65) + " " + identity('A').to_string());
+        return program.ExitCode.Ok;
+    };
+);

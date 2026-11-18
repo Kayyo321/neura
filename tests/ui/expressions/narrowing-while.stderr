@@ -1,0 +1,10 @@
+error[E0265]: a narrowing binding is allowed only in the condition of an 'if'
+  --> $DIR/narrowing-while.nra:12:21
+   |
+12 |     while (shape is circle: Circle) {
+   |                     ^^^^^^ 'circle' cannot be bound here
+   |
+   = note: the condition of 'while' takes no narrowing binding
+   = help: test with 'is' in the condition and narrow with an 'if' inside the loop, as in 'if (x is circle: T) { ... }'
+
+For more information about this error, try `neura explain E0265`.

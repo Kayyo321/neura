@@ -1,0 +1,9 @@
+error[E0264]: expected '->' before the value of a 'return if' arm
+ --> $DIR/return-if-no-arrow.nra:4:19
+  |
+4 |     return if (c) 1 else -> 2;
+  |                   ^ expected '->'
+  |
+  = help: write each arm as '-> value', as in 'return if (c) -> a; else -> b;'
+
+For more information about this error, try `neura explain E0264`.

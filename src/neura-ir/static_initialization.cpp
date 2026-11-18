@@ -151,6 +151,7 @@ std::optional<IrNode> Initialization::constant_expression(IrNode value) {
     case IrOp::Binary:
     case IrOp::Convert:
     case IrOp::TextEqual:
+    case IrOp::ConcatText:
     case IrOp::ShortCircuit:
     case IrOp::SelectValue:
         break;

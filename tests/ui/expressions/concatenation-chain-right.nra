@@ -1,0 +1,8 @@
+// docs/design/Expressions030.md, `..=` as a statement: an unparenthesized
+// chain on the right joins the chain, so each of its operands must be a
+// string; E1100 at the first that is not.
+let append = func(text: string) -> string {
+    let result = text;
+    result ..= "a" .. 1 .. 2;
+    return result;
+};

@@ -1,0 +1,10 @@
+error[E0263]: '..=' does not join text in an expression
+ --> $DIR/concatenation-inclusive-right.nra:5:20
+  |
+5 |     result ..= "a" ..= "b";
+  |                    ^^^ '..=' with string operands
+  |
+  = note: in an expression, '..=' makes an inclusive integer range; a chain joins text with '..'
+  = help: to append to a string, write the statement 'place ..= text;', or join with 'a .. b'
+
+For more information about this error, try `neura explain E0263`.

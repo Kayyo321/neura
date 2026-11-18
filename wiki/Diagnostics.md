@@ -81,6 +81,17 @@ Errors about declarations, scopes, and name resolution.
 | [E0231](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0231.md) | pattern form that is not supported |
 | [E0232](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0232.md) | postfix ? that needs parentheses |
 | [E0233](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0233.md) | malformed optional access |
+| [E0260](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0260.md) | character literal that is not one byte |
+| [E0261](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0261.md) | malformed character literal |
+| [E0262](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0262.md) | ..= statement whose destination is not a string |
+| [E0263](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0263.md) | range or chain of the wrong shape |
+| [E0264](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0264.md) | malformed return if |
+| [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md) | narrowing binding outside the condition of an if |
+| [E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md) | is not narrowing inside an && chain |
+| [E0267](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0267.md) | typeof without a value or a type |
+| [E0268](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0268.md) | invalid Unicode escape |
+| [E0269](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0269.md) | Unicode escape that is not a scalar value |
+| [E0270](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0270.md) | string literal escapes that are not valid UTF-8 |
 | [E0301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0301.md) | duplicate local binding |
 | [E0302](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0302.md) | duplicate declaration |
 | [E0303](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0303.md) | duplicate parameter or field name |
@@ -330,6 +341,7 @@ Errors about `#` tags before declarations ([Tags](Tags)).
 | [E0921](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0923.md) | #HostEffects on a function that is not a host binding without a body |
+| [E1100](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1100.md) | string chain operand that is not a string |
 
 ## E10xx: Applications
 

@@ -1616,8 +1616,21 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             for (const auto &member : candidate.members) declaration(member, candidate.span);
             statements(candidate.body, candidate.span);
         };
+        // docs/design/Expressions030.md, Narrowing: `x is name: T` in an `if`
+        // condition binds `name` as a constant of type T within the `if`.
+        std::function<void(const Expr &, const Span &)> narrowings;
+        narrowings = [&](const Expr &value, const Span &scope) {
+            if (value.kind == Expr::Kind::TypeTest && value.binding == name && value.narrowing && value.type &&
+                contains(scope, at) && value.narrowing->offset <= at && scope.length <= scope_size) {
+                result = {nullptr, &context, nullptr, &*value.type, false};
+                scope_size = scope.length;
+            }
+            for (const auto &operand : value.operands) narrowings(operand, scope);
+        };
         statements = [&](const std::vector<Statement> &body, const Span &scope) {
             for (const auto &statement : body) {
+                if (statement.kind == Statement::Kind::If && statement.constant_bindings)
+                    for (const auto &condition : statement.expressions) narrowings(condition, statement.span);
                 if (statement.declaration) declaration(*statement.declaration, scope);
                 const auto nested = statement.kind == Statement::Kind::Block ? statement.span : scope;
                 statements(statement.body, nested);
@@ -2056,7 +2069,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 return expression_type(value.operands.front(), context, depth + 1);
             TypeSyntax type;
             switch (value.kind) {
-            case Expr::Kind::Integer: type.name = "int32"; break;
+            case Expr::Kind::Integer: type.name = value.character ? "byte" : "int32"; break;
             case Expr::Kind::Float: type.name = "float64"; break;
             case Expr::Kind::String: type.name = "string"; break;
             case Expr::Kind::Boolean: type.name = "bool"; break;

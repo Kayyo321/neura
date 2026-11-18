@@ -1,0 +1,16 @@
+// Edge cases 43 and 44 of docs/design/Expressions030.md: the accepted forms
+// of the `..=` statement.
+let Holder = class ( export let text: string = ""; );
+let append = func(holder: Holder, items: string[], tail: string) -> string {
+    let result = "";
+    result ..= tail;
+    result ..= tail .. "!" .. tail;
+    result ..= (tail .. tail);
+    holder.text ..= result;
+    items[0] ..= holder.text;
+    for (let i = 0; i < 2; result ..= "#") {
+        i = i + 1;
+    }
+    let r = 0 ..= 5;
+    return result;
+};

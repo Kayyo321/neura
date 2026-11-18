@@ -467,8 +467,20 @@ private:
         auto no = fork(flow);
         yes.reachable &= known.value_or(true);
         no.reachable &= !known.value_or(false);
-        check_body(stmt.body, yes);
-        check_body(stmt.alternative, no);
+        // A narrowing's names hide outer ones in the branch that binds them
+        // and, for `is not` whose true branch cannot complete, after the
+        // `if` (docs/design/Expressions030.md, Narrowing).
+        const auto narrowed = [&](const std::vector<Statement>& body, Flow& path, bool bound) {
+            scopes_.emplace_back();
+            if (bound)
+                for (const auto& binding : stmt.bindings) hide(binding.text);
+            check_body(body, path);
+            scopes_.pop_back();
+        };
+        narrowed(stmt.body, yes, !stmt.negated_narrowing);
+        narrowed(stmt.alternative, no, stmt.negated_narrowing);
+        if (stmt.negated_narrowing && !yes.reachable)
+            for (const auto& binding : stmt.bindings) hide(binding.text);
         flow.reachable = false;
         merge(flow, std::move(yes), Skip{condition.span, "not assigned when this condition is true"});
         merge(flow, std::move(no), Skip{condition.span, "not assigned when this condition is false"});

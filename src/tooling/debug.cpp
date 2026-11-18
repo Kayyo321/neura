@@ -5,6 +5,7 @@
 #include "test_protocol.hpp"
 #include "backend/converter.hpp"
 #include "cli/source_loader.hpp"
+#include "lexer/lexer.hpp"
 #include "neura-ir/any.hpp"
 #include "neura-ir/class_hooks.hpp"
 #include "neura-ir/containment.hpp"
@@ -1084,7 +1085,27 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
                 if (!take(")")) throw std::runtime_error("expected ')'");
             } else {
                 space();
-                if (position < input.size() && ((input[position] >= '0' && input[position] <= '9') || input[position] == '-')) {
+                if (position < input.size() && input[position] == '\'') {
+                    // A character literal is the integer of its byte
+                    // (docs/design/Expressions030.md); the lexer checks it.
+                    // Through the closing quote; an escape's next byte never
+                    // closes it, so '\'' ends at its third quote.
+                    auto close = position + 1;
+                    if (close < input.size() && input[close] == '\\') close += 2;
+                    while (close < input.size() && input[close] != '\'') ++close;
+                    const auto width = std::min(close + 1, input.size()) - position;
+                    const auto literal = input.substr(position, width);
+                    std::vector<Token> tokens;
+                    try {
+                        tokens = lex(literal, "<expression>");
+                    } catch (const Diagnostic&) {
+                    }
+                    if (tokens.size() != 2 || !is_character_literal(tokens.front()))
+                        throw std::runtime_error("invalid character literal");
+                    position += width;
+                    const auto value = decode_character_literal(literal);
+                    result = {{type(nvr::TypeKind::Unsigned, 64), value, true, std::to_string(value), 0}};
+                } else if (position < input.size() && ((input[position] >= '0' && input[position] <= '9') || input[position] == '-')) {
                     const auto start = position;
                     if (input[position] == '-') ++position;
                     while (position < input.size() && input[position] >= '0' && input[position] <= '9') ++position;
@@ -1149,8 +1170,21 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
             --depth;
             return result;
         }
+        // `not` is `!` spelled as a word (docs/design/Expressions030.md).
+        bool take_not() {
+            space();
+            if (input.substr(position, 3) != "not") return false;
+            if (position + 3 < input.size()) {
+                const char next = input[position + 3];
+                if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') ||
+                    next == '_')
+                    return false;
+            }
+            position += 3;
+            return true;
+        }
         InspectedValue unary() {
-            if (take("!")) {
+            if (take("!") || take_not()) {
                 const auto operand = unary();
                 return boolean(evaluating && !truth(operand));
             }

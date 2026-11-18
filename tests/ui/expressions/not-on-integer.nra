@@ -1,0 +1,4 @@
+// Edge case 2 of docs/design/Expressions030.md: `not` on a value that is not
+// a bool is the error of `!`, which names `not`.
+let count = 3;
+let negated = not count;

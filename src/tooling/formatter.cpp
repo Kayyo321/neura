@@ -76,6 +76,9 @@ std::vector<Item> with_trivia(std::string_view source, const std::vector<Token>&
 
 struct Hints {
     std::set<std::size_t> bodies;
+    // The word `unless` of a return guard (docs/design/Expressions030.md),
+    // which stays on the line of a '}' before it.
+    std::set<std::size_t> guards;
     std::set<std::size_t> inline_braces;
     std::set<std::size_t> angles;
     std::set<std::size_t> prefix;
@@ -249,8 +252,11 @@ private:
             if (end > start) angle_span({{}, 1, 1, start, end - start});
         }
         // The operator of a unary expression, whose span may begin at a
-        // '(' around it, as in `(-scale) as int`.
-        if (value.kind == Expr::Kind::Unary || value.kind == Expr::Kind::PrefixUpdate) {
+        // '(' around it, as in `(-scale) as int`. `not` is a word and keeps
+        // the space after it, and the negation a `return ... unless` implies
+        // has no token (docs/design/Expressions030.md).
+        if ((value.kind == Expr::Kind::Unary && !value.spelled_not && !value.implicit) ||
+            value.kind == Expr::Kind::PrefixUpdate) {
             bool found = false;
             in_span(value.span, [&](const Token& token) {
                 if (!found && token.text == value.text) {
@@ -289,7 +295,8 @@ private:
                 }
             }
         }
-        if ((value.kind == Expr::Kind::Conditional || value.kind == Expr::Kind::Range) && value.operands.size() == 3) {
+        if (value.kind == Expr::Kind::Range && value.step_colon) hints_.spaced_colons.insert(value.step_colon->offset);
+        if (value.kind == Expr::Kind::Conditional && value.operands.size() == 3) {
             const auto start = value.operands[1].span.offset + value.operands[1].span.length;
             const auto end = value.operands[2].span.offset;
             if (end > start) {
@@ -509,6 +516,7 @@ private:
             const auto [open, close] = delimited(value.span.offset, "{", "}");
             if (close) hints_.do_closes.insert(close->span.offset);
         }
+        if (value.kind == Statement::Kind::If && value.keyword.length != 0) hints_.guards.insert(value.keyword.offset);
         if (value.declaration) declaration(*value.declaration);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
@@ -557,7 +565,7 @@ bool word(std::string_view text) {
     if (text.empty()) return false;
     const auto first = static_cast<unsigned char>(text.front());
     return (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') ||
-           (first >= '0' && first <= '9') || first == '_' || first == '"';
+           (first >= '0' && first <= '9') || first == '_' || first == '"' || first == '\'';
 }
 
 // -- Islands (docs/design/Html030.md, "Formatter and editor") ---------------
@@ -1047,7 +1055,9 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
              (before == ">" && hints.angles.contains(previous->offset)) ||
              previous->kind == TokenKind::Identifier || previous->kind == TokenKind::Integer ||
              previous->kind == TokenKind::Float || previous->kind == TokenKind::String ||
-             keyword_of(*previous, "func") || keyword_of(*previous, "new"));
+             keyword_of(*previous, "func") || keyword_of(*previous, "new")) &&
+            // `not` is an operator word: `not (a)`, `not [x]` (Expressions030.md).
+            before != "not";
         if ((text == "(" || text == "[") && after_operand) space = false;
         if (!space && previous && !previous->comment && previous->kind == TokenKind::Symbol &&
             item.kind == TokenKind::Symbol && would_merge(before, text))
@@ -1070,7 +1080,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             if (control || body || hints.record_bodies.contains(item.offset) || hints.container_opens.contains(item.offset) ||
                 before == "module" ||
                 before == "class" || before == "interface" || before == "enum" || before == "singleton" ||
-                hints.keyword_operands.contains(item.offset))
+                hints.keyword_operands.contains(item.offset) || before == "not" || before == ".." || before == "..=" ||
+                before == "!==")
                 space = true;
             emit(text, continuation, space, anchor);
             const bool multiline = body && next != ")";
@@ -1114,7 +1125,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             const bool do_close = text == "}" && hints.do_closes.contains(item.offset);
             if (text == "}" && next != ";" && next != "," && next != ")" && next != "]" && next != "." &&
                 next != "(" && next != "}" && next != "else" && !(next == "while" && do_close) && next != "or" && next != "callback" &&
-                next != "=>" && next != "+" && next != "-" && next != "*" && next != "/" && next != "==" && next != "?" && next != ":") out.line();
+                next != "=>" && next != "+" && next != "-" && next != "*" && next != "/" && next != "==" && next != "?" && next != ":" &&
+                !(i + 1 < items.size() && hints.guards.contains(items[i + 1].offset))) out.line();
         } else {
             // Retain the lexical distinction between a binary operator and
             // a unary operator, and between adjacent operator tokens.

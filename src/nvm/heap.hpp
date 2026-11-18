@@ -470,8 +470,39 @@ public:
         item->head = {kind, inline_flag, ElementWidth::W1, ElementWidth::W1, type, bytes.size()};
         item->data = reinterpret_cast<unsigned char*>(item + 1);
         if (!bytes.empty()) std::memcpy(item->data, bytes.data(), bytes.size());
+        ++text_counters_.allocations;
+        text_counters_.bytes_copied += bytes.size();
         return store_new(&item->head);
     }
+
+    // A text entry of `total` bytes holding `parts` in order, the sum of
+    // whose sizes is `total`: one block of the final length, each part's
+    // bytes copied once into place (ConcatText, NVR 1.9). The parts may be
+    // views of live entries: allocating a block never moves an entry.
+    std::uint64_t create_text_parts(std::uint32_t type, std::size_t total, std::span<const std::string_view> parts) {
+        reserve_handle();
+        auto* item = new (blocks_.allocate(inline_bytes(total, ElementWidth::W1))) ArrayEntry{};
+        item->head = {EntryKind::Text, inline_flag, ElementWidth::W1, ElementWidth::W1, type, total};
+        item->data = reinterpret_cast<unsigned char*>(item + 1);
+        std::size_t at = 0;
+        for (const auto part : parts) {
+            if (!part.empty()) std::memcpy(item->data + at, part.data(), part.size());
+            at += part.size();
+        }
+        ++text_counters_.allocations;
+        text_counters_.bytes_copied += total;
+        return store_new(&item->head);
+    }
+
+    // Test-only counts of the text and bytes entries the heap has created
+    // and the payload bytes copied into them. Tests read them through
+    // RunResult to prove that a string chain allocates once; no output
+    // (statistics, profiles, traces) shows them.
+    struct TextCounters {
+        std::uint64_t allocations = 0;
+        std::uint64_t bytes_copied = 0;
+    };
+    const TextCounters& text_counters() const { return text_counters_; }
 
     // The entry a Builder holds. The builder is consumed.
     std::uint64_t create(Builder&& built);
@@ -1356,6 +1387,7 @@ private:
     std::size_t released_pages_ = 0;
     std::size_t swept_pages_ = 0;
     std::uint64_t last_identity_ = 0;
+    TextCounters text_counters_{};
 };
 
 static_assert(Heap::kind_offset() == 0 && Heap::flags_offset() == 1 && Heap::declared_width_offset() == 2 &&

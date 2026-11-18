@@ -152,6 +152,66 @@ let reference=func(value:&int)->&int=>value;'''
         self.assertIn('value: &int', formatted)
         self.assertIn('-> &int', formatted)
 
+    def test_expression_operators_of_0_3_0(self):
+        # docs/design/Expressions030.md, Tooling: one space around `!==`.
+        source = """let f=func(a:int,b:int)->bool=>a!==b||!(a===b);"""
+        formatted = self.formatted(source)
+        self.assertIn('=> a !== b || !(a === b);', formatted)
+        # One space around `..=`, and around the colon of its step.
+        formatted = self.formatted("let r=0..=5:2;let t=0..5:2;let u=0..(5);let v=0..=(5);let w=1!==(2);")
+        self.assertIn('let r = 0 ..= 5 : 2;', formatted)
+        self.assertIn('let t = 0 .. 5 : 2;', formatted)
+        self.assertIn('let u = 0 .. (5);', formatted)
+        self.assertIn('let v = 0 ..= (5);', formatted)
+        self.assertIn('let w = 1 !== (2);', formatted)
+        formatted = self.formatted('let s=func(a:string)->string=>a.."b"..("c"..a);')
+        self.assertIn('=> a .. "b" .. ("c" .. a);', formatted)
+        formatted = self.formatted('let f=func(a:string){let s="";s..=a.."!";s..=(a);};')
+        self.assertIn('s ..= a .. "!";', formatted)
+        self.assertIn('s ..= (a);', formatted)
+        # docs/design/Expressions030.md, Escapes: every escape stays as written.
+        formatted = self.formatted('let a="\\u{1F600}\\xC3\\xA9\\0\\\'";let c=\'\\u{e9}\';')
+        self.assertIn('let a = "\\u{1F600}\\xC3\\xA9\\0\\\'";', formatted)
+        self.assertIn("let c = '\\u{e9}';", formatted)
+        # docs/design/Expressions030.md, Return forms: a guard keeps its line,
+        # also after a '}', and a ';' after an arm puts the next arm on its own
+        # line at the statement's indent.
+        formatted = self.formatted('let f=func(x:int)->int{return 1 unless x>9;return match(x){_=>1,} unless x>2;'
+                                   'return if(x>0)->1;else ->2;};')
+        self.assertIn('    return 1 unless x > 9;', formatted)
+        self.assertIn('    } unless x > 2;', formatted)
+        self.assertIn('    return if (x > 0) -> 1;\n    else -> 2;', formatted)
+
+    def test_negation_words_keep_their_spelling(self):
+        # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.
+        source = """let Shape=class();let Circle=class:Shape();
+let f=func(a:bool,b:bool,s:Shape)->bool=>not a||not(a&&b)||!not b||!a||s is   not Circle;
+let g=func(a:bool)->bool=>not   [a][0];"""
+        formatted = self.formatted(source)
+        self.assertIn('=> not a || not (a && b) || !not b || !a || s is not Circle;', formatted)
+        self.assertIn('=> not [a][0];', formatted)
+
+    def test_narrowing_colon_spacing(self):
+        # docs/design/Expressions030.md, Tooling: `x is y: T`, and `?:` unchanged.
+        source = """let Shape=class();let Circle=class:Shape(export let radius:int=1;);
+let f=func(s:Shape,c:bool)->int{if(s is   c2 :Circle&&c2.radius>0){return c2.radius;}if(s is not c3:Circle){return 0;}if(c?s is Circle:c){return 1;}return 2;};"""
+        formatted = self.formatted(source)
+        self.assertIn('    if (s is c2: Circle && c2.radius > 0) {\n', formatted)
+        self.assertIn('    if (s is not c3: Circle) {\n', formatted)
+        self.assertIn('    if (c ? s is Circle : c) {\n', formatted)
+
+    def test_character_literals_keep_their_spelling(self):
+        # docs/design/Expressions030.md, Tooling: a character literal is
+        # written back as written, and a quote in it hides no comment.
+        source = r"""let q='"';// a comment with " quote
+let t=['\t','\\','\'','\x41','\xff'];let n='a'..'z';let y=t[0]+'B';let s=$"{'}'}";"""
+        formatted = self.formatted(source)
+        self.assertIn("""let q = '"'; // a comment with " quote""", formatted)
+        self.assertIn(r"""let t = ['\t', '\\', '\'', '\x41', '\xff'];""", formatted)
+        self.assertIn("let n = 'a' .. 'z';", formatted)
+        self.assertIn("let y = t[0] + 'B';", formatted)
+        self.assertIn("""let s = $"{'}'}";""", formatted)
+
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
         formatted = self.formatted(source)

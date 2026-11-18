@@ -416,6 +416,13 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | --- | --- | --- |
 | [`Std.Program`](Stdlib-Program) | [Contracts](Stdlib-Program#detailed-contracts) | [Declarations](Stdlib-Program#exported-declarations) |
 
+### `Std.Reflect`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Reflect.Core.TypeInfo`](Stdlib-Reflect-TypeInfo) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-TypeInfo#exported-declarations) |
+| [`Std.Reflect.Type.TypeKind`](Stdlib-Reflect-TypeKind) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-TypeKind#exported-declarations) |
+
 ### `Std.Random`
 
 | Module | Detailed contracts | Exported declarations |

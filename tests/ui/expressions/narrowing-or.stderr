@@ -1,0 +1,10 @@
+error[E0265]: a narrowing binding is allowed only in the condition of an 'if'
+  --> $DIR/narrowing-or.nra:12:18
+   |
+12 |     if (shape is circle: Circle || ready) {
+   |                  ^^^^^^ 'circle' cannot be bound here
+   |
+   = note: a narrowing 'x is circle: T' must be the whole condition, or an operand of the '&&' chain that is the whole condition, outside parentheses
+   = help: move the narrowing to the top level of the condition, or test with 'is' here and narrow in an 'if' inside
+
+For more information about this error, try `neura explain E0265`.

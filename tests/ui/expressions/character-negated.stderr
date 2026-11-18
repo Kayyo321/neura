@@ -1,0 +1,9 @@
+error[E0424]: integer literal is outside the range of uint8
+ --> $DIR/character-negated.nra:4:16
+  |
+4 | let negated = -'A';
+  |                ^^^
+  |
+  = note: a character literal is the integer 65
+
+For more information about this error, try `neura explain E0424`.

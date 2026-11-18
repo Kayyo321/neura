@@ -547,6 +547,7 @@ private:
         case IrOp::ReinterpretFloat:
         case IrOp::AnyPack:
         case IrOp::AnyTag:
+        case IrOp::TypeOf:
         case IrOp::AnyUnpack:
         case IrOp::ShortCircuit:
         case IrOp::ComparisonChain:
@@ -612,6 +613,7 @@ private:
             break;
         case IrOp::TextSlice:
         case IrOp::TextFromUtf8:
+        case IrOp::ConcatText:
             allocate(node, "builds a string");
             trap(node, "builds a string");
             break;

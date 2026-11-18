@@ -17,7 +17,7 @@ error[E0104]: invalid string escape
 4 | let folder = "C:\data";
   |                 ^^ unknown escape
   |
-  = note: the escapes are \n, \r, \t, \\, and \"
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits
 help: to write a backslash, escape it
   |
 4 | let folder = "C:\\data";

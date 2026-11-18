@@ -556,6 +556,10 @@ public:
     // run that never entered a region.
     std::uint64_t live_stack_cells() const;
     std::uint64_t peak_stack_cells() const;
+    // Test-only (RunResult::text_allocations): text entries created and
+    // payload bytes copied since the constants were loaded.
+    std::uint64_t text_allocations() const;
+    std::uint64_t text_bytes_copied() const;
     // A live heap entry as the allocator recorded it: its kind (0 object, 1
     // array, 2 list, 3 text, 4 bytes), its layout or type index, and its
     // declared element width in bytes. For tests of the allocator.
@@ -631,6 +635,11 @@ struct RunResult {
     // The region cells still live when the run ended: zero, since a run
     // releases every region it leaves open, on a trap too.
     std::uint64_t live_stack_cells = 0;
+    // Test-only: the text and bytes entries the run created after loading
+    // the image's constants, and the payload bytes copied into them
+    // (Heap::text_counters). No output shows them.
+    std::uint64_t text_allocations = 0;
+    std::uint64_t text_bytes_copied = 0;
 };
 
 // The monotonic clock a driver gives the scheduler's timers and deadlines

@@ -1,0 +1,5 @@
+// typeof needs a value or a type (docs/design/Expressions030.md, typeof,
+// edge case 23): a void call is E0267 at the operand.
+let console = import:Std.Io.Console;
+
+let void_call = func { let t = typeof(console.print_line("x")); };

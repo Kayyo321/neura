@@ -1,0 +1,12 @@
+error[E0304]: unknown name 'circle'
+  --> $DIR/narrowing-earlier-conjunct.nra:12:9
+   |
+12 |     if (circle.radius > 0 && shape is circle: Circle) {
+   |         ^^^^^^ not found in this scope
+   |
+help: there is a binding with a similar name: 'Circle'
+   |
+12 |     if (Circle.radius > 0 && shape is circle: Circle) {
+   |         ~~~~~~
+
+For more information about this error, try `neura explain E0304`.

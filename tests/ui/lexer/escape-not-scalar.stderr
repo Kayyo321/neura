@@ -1,0 +1,33 @@
+error[E0269]: Unicode escape is not a Unicode scalar value
+ --> $DIR/escape-not-scalar.nra:4:18
+  |
+4 | let surrogate = "\u{D800}";
+  |                  ^^^^^^^^ U+D800 is a surrogate code point
+  |
+  = note: a Unicode escape names a scalar value: U+0000 to U+D7FF or U+E000 to U+10FFFF
+
+error[E0269]: Unicode escape is not a Unicode scalar value
+ --> $DIR/escape-not-scalar.nra:5:23
+  |
+5 | let last_surrogate = "\u{dfff}";
+  |                       ^^^^^^^^ U+DFFF is a surrogate code point
+  |
+  = note: a Unicode escape names a scalar value: U+0000 to U+D7FF or U+E000 to U+10FFFF
+
+error[E0269]: Unicode escape is not a Unicode scalar value
+ --> $DIR/escape-not-scalar.nra:6:14
+  |
+6 | let above = "\u{110000}";
+  |              ^^^^^^^^^^ this value is above U+10FFFF
+  |
+  = note: a Unicode escape names a scalar value: U+0000 to U+D7FF or U+E000 to U+10FFFF
+
+error[E0269]: Unicode escape is not a Unicode scalar value
+ --> $DIR/escape-not-scalar.nra:7:18
+  |
+7 | let character = '\u{D83D}';
+  |                  ^^^^^^^^ U+D83D is a surrogate code point
+  |
+  = note: a Unicode escape names a scalar value: U+0000 to U+D7FF or U+E000 to U+10FFFF
+
+For more information about this error, try `neura explain E0269`.

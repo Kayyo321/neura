@@ -1,0 +1,10 @@
+// Edge case 46 of docs/design/Expressions030.md: `!==` forms no comparison
+// chain, as `===` forms none, so `and` after it is the parse error `===`
+// gives.
+let Box = class ( export let size: int = 0; );
+let differ = func(a: Box, b: Box, c: Box) -> bool {
+    if (a !== b and c) {
+        return true;
+    }
+    return false;
+};

@@ -115,6 +115,7 @@ REPOSITORY_ONLY = (
     "docs/design/Desktop030.md",
     "docs/design/Projects030.md",
     "docs/design/Net030.md",
+    "docs/design/Expressions030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )

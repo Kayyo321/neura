@@ -1,0 +1,49 @@
+// The binding of 'x is not y: T' after an 'if' whose true branch cannot
+// complete (docs/design/Expressions030.md, Narrowing, edge cases 12 and 13):
+// a return, a return with an else branch, and a continue.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let radius = func(shape: Shape) -> int {
+    if (shape is not circle: Circle) {
+        return -1;
+    }
+    let doubled = circle.radius * 2;
+    return doubled + circle.radius;
+};
+
+let both = func(shape: Shape) -> string {
+    if (shape is not circle: Circle) {
+        return "none";
+    } else {
+        console.print_line("else " + circle.radius.to_string());
+    }
+    return "after " + circle.radius.to_string();
+};
+
+let loop = func(shapes: Shape[]) -> int {
+    let total = 0;
+    for (let shape: Shape in shapes) {
+        if (shape is not circle: Circle) {
+            continue;
+        }
+        total = total + circle.radius;
+    }
+    return total;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(radius(new Circle()).to_string() + " " + radius(new Shape()).to_string());
+        console.print_line(both(new Circle()) + " " + both(new Shape()));
+        console.print_line(loop([new Circle(), new Shape(), new Circle()]).to_string());
+        return program.ExitCode.Ok;
+    };
+);

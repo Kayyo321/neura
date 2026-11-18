@@ -1,0 +1,86 @@
+// Narrowing forms with no written-out equivalent (docs/design/Expressions030.md,
+// Narrowing, edge cases 6, 8, 10, 16 and 17): several narrowings after a
+// plain conjunct, a string subject, nested generic types, an else if on an
+// interface, unchanged '?:' and named arguments, an 'is not' guard clause and
+// a snapshot binding.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Box = class<T> (
+    export let count: int = 0;
+);
+let Holder = interface (
+    let size = func -> int;
+);
+let Bag = class<T> implements Holder (
+    export let.override size = func -> int => 2;
+);
+
+let check = func(flag: bool, scale: int) -> bool => flag;
+
+let several = func(a: Shape, b: Shape, ready: bool) -> string {
+    if (ready && a is p: Circle && b is q: Circle && p.radius == q.radius) {
+        return "pair " + p.radius.to_string() + " " + q.radius.to_string();
+    }
+    return "no pair";
+};
+
+let text = func(s: string) -> string {
+    if (s is t: string) {
+        return "text " + t;
+    }
+    return "never";
+};
+
+let nested = func(value: class) -> string {
+    if (value is boxed: Box<Box<Shape>>) {
+        return "box of box";
+    } else if (value is holder: Holder) {
+        return "holder " + holder.size().to_string();
+    }
+    return "plain";
+};
+
+let unchanged = func(shape: Shape, c: bool) -> bool {
+    if (c ? shape is Circle : false) {
+        return check(flag: shape is Circle, scale: 1);
+    }
+    return false;
+};
+
+let guard = func(shape: Shape) -> string {
+    if (shape is not circle: Circle) {
+        return "not a circle";
+    }
+    return "circle";
+};
+
+let snapshot = func(shape: Shape) -> string {
+    if (shape is circle: Circle) {
+        shape = new Shape();
+        return circle.radius.to_string() + " " + (shape is Circle).to_string();
+    }
+    return "none";
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(several(new Circle(), new Circle(), true));
+        console.print_line(several(new Circle(), new Shape(), true));
+        console.print_line(several(new Circle(), new Circle(), false));
+        console.print_line(text("abc"));
+        console.print_line(nested(new Box<Box<Shape>>()));
+        console.print_line(nested(new Bag<int>()));
+        console.print_line(nested(new Shape()));
+        console.print_line(unchanged(new Circle(), true).to_string());
+        console.print_line(guard(new Shape()) + " " + guard(new Circle()));
+        console.print_line(snapshot(new Circle()));
+        return program.ExitCode.Ok;
+    };
+);

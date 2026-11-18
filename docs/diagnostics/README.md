@@ -78,6 +78,17 @@ Errors about declarations, scopes, and name resolution.
 | [E0231](E0231.md) | pattern form that is not supported |
 | [E0232](E0232.md) | postfix ? that needs parentheses |
 | [E0233](E0233.md) | malformed optional access |
+| [E0260](E0260.md) | character literal that is not one byte |
+| [E0261](E0261.md) | malformed character literal |
+| [E0262](E0262.md) | ..= statement whose destination is not a string |
+| [E0263](E0263.md) | range or chain of the wrong shape |
+| [E0264](E0264.md) | malformed return if |
+| [E0265](E0265.md) | narrowing binding outside the condition of an if |
+| [E0266](E0266.md) | is not narrowing inside an && chain |
+| [E0267](E0267.md) | typeof without a value or a type |
+| [E0268](E0268.md) | invalid Unicode escape |
+| [E0269](E0269.md) | Unicode escape that is not a scalar value |
+| [E0270](E0270.md) | string literal escapes that are not valid UTF-8 |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |
@@ -327,6 +338,7 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0921](E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
+| [E1100](E1100.md) | string chain operand that is not a string |
 
 ## E10xx: Applications
 

@@ -26,10 +26,14 @@ inline constexpr std::uint16_t nir_any_minor = 12;
 // operations Cleanup, Pending and Yield and the attribute generator.resume.
 // A file uses it only when its program does.
 inline constexpr std::uint16_t nir_lifetime_minor = 14;
+// NeuraIR 1.15, the 0.3.0 expressions (docs/design/Expressions030.md): the
+// operations ConcatText (tag 73) and TypeOf (tag 74). A file uses it only
+// when its program does.
+inline constexpr std::uint16_t nir_expressions_minor = 15;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = nir_lifetime_minor;
+inline constexpr std::uint16_t nir_minor_version = nir_expressions_minor;
 
 // The minor version that adds class hooks (docs/design/Hooks030.md): the
 // attributes hook.get, hook.set and hook.of. A module that declares a clause

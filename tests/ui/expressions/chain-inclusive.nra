@@ -1,0 +1,3 @@
+// Edge case 37 of docs/design/Expressions030.md: `..=` does not join text in
+// an expression; E0263 at the operator.
+let inclusive = func(a: string) -> string => a ..= "b";

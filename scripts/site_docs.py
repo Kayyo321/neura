@@ -55,7 +55,7 @@ SOURCE_NAMES = {"CMakeLists.txt", "LICENSE"}
 NEURA_KEYWORDS = {
     "let", "const", "export", "override", "func", "module", "class", "import", "new", "destroy", "if", "else",
     "while", "do", "for", "in", "break", "continue", "return", "true", "false", "as", "is", "nil", "enum",
-    "match", "and", "or", "interface", "implements", "promote", "static", "singleton",
+    "match", "and", "or", "interface", "implements", "promote", "static", "singleton", "not", "typeof",
 }
 # A tag before a declaration (docs/lang/Tags.md), `#Name` or the opening of a
 # group `#[Name`, is marked like a keyword.

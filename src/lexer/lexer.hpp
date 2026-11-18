@@ -2,6 +2,7 @@
 
 #include "util/diagnostic.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -57,5 +58,12 @@ std::vector<Token> lex_recovering(std::string_view source, const std::string& fi
 bool is_identifier(std::string_view spelling);
 // Decode a string token that has already passed lexical validation.
 std::string decode_string_literal(std::string_view literal);
+// A character literal, `'a'` or `'\n'` (docs/design/Expressions030.md), is an
+// Integer token whose text is the literal as written, beginning with `'`.
+inline bool is_character_literal(const Token& token) {
+    return token.kind == TokenKind::Integer && token.text.starts_with('\'');
+}
+// The byte of a character literal that has already passed lexical validation.
+std::uint8_t decode_character_literal(std::string_view literal);
 
 } // namespace neura

@@ -1,0 +1,16 @@
+// String and character escapes (docs/design/Expressions030.md, Escapes, edge
+// case 56): values in strings, interpolated strings and character literals.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let same = "caf\u{E9}" == "café" && "\xC3\xA9" == "\u{e9}" && "\u{1F600}" == "😀";
+        console.print_line(same.to_string() + " " + "it\'s".byte_length.to_string() + " " + "a\0b".byte_length.to_string());
+        let latin: byte = '\u{E9}';
+        let low: byte = '\u{41}';
+        console.print_line(latin.to_string() + " " + low.to_string() + " " + $"q\u{41}{low}\x42");
+        console.print_line("\u{10FFFF}".byte_length.to_string() + " " + "\u{7FF}\u{800}".byte_length.to_string());
+        return program.ExitCode.Ok;
+    };
+);

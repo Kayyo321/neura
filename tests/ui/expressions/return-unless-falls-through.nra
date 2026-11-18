@@ -1,0 +1,6 @@
+// A guarded return can fall through, so it does not end a function that
+// returns a value (docs/design/Expressions030.md, Return forms, edge case
+// 52): the existing missing-return error.
+let pick = func(value: int, skip: bool) -> int {
+    return value unless skip;
+};
