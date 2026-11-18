@@ -1,0 +1,6 @@
+// docs/design/Expressions030.md, Negation words: `x is not not T` is rejected
+// at the second `not`, where a type was expected.
+let Shape = class (
+    export let sides: int = 0;
+);
+let check = func(shape: Shape) -> bool => shape is not not Shape;

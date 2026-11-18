@@ -507,8 +507,8 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 
 1. member access, optional access `?.`, indexing, calls, and the postfix `?`
 2. postfix `++` and `--`
-3. prefix `++`, `--`, `!`, `-`, and `~`
-4. `as` and `is`
+3. prefix `++`, `--`, `!`, `not`, `-`, and `~`
+4. `as`, `is`, and `is not`
 5. `*`, `/`, `%`
 6. `+`, `-`
 7. `<<`, `>>`
@@ -526,6 +526,16 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 
 Prefix and postfix increment and decrement require a mutable numeric binding, field, or element. They evaluate the destination once and add or subtract a one of its type. `++x` and `--x` yield the updated value. `x++` and `x--` yield the previous value. The usual arithmetic rules apply, including checked integer overflow. [Numbers](Numbers) specifies integer and floating-point arithmetic. `+` and `+=` can also concatenate strings.
+
+`not` is `!` spelled as a word ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#negation-words), implemented, proposed). It is a reserved word and a prefix operator at the level of `!`, with the same `bool` operand and the same result, so `not a && b` is `(not a) && b` and `not x == y` is `(not x) == y`; write `not (x == y)` for the other reading. `x is not T` is `!(x is T)`, with the type rules of `is`. Both build the same program as the `!` forms, and the formatter keeps the spelling that was written.
+
+<!-- example: check -->
+```neura
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+
+let plain = func(shape: Shape, ready: bool) -> bool => shape is not Circle && not ready;
+```
 
 `a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
 

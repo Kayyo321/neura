@@ -2051,9 +2051,10 @@ private:
                     expect(":");
                 } catch (Diagnostic& error) {
                     // `r? - 1` is a conditional (docs/design/Matching030.md).
-                    if (after.kind == TokenKind::Symbol &&
-                        (after.text == "-" || after.text == "(" || after.text == "[" || after.text == "{" ||
-                         after.text == "++" || after.text == "--" || after.text == "!" || after.text == "~")) {
+                    if ((after.kind == TokenKind::Symbol &&
+                         (after.text == "-" || after.text == "(" || after.text == "[" || after.text == "{" ||
+                          after.text == "++" || after.text == "--" || after.text == "!" || after.text == "~")) ||
+                        (after.kind == TokenKind::Keyword && after.text == "not")) {
                         const auto operand = source_text(left.span);
                         const auto rest = source_text(when_true.span);
                         error.help("to return an error here, write '(" + operand.value_or("r") + "?) " +
@@ -2133,11 +2134,21 @@ private:
     Expr cast_tail(std::size_t start, Expr result) {
         while (at("as") || at("is")) {
             const bool test = advance().text == "is";
+            // `x is not T` is `!(x is T)` (docs/design/Expressions030.md).
+            std::optional<Span> negation;
+            if (test && at("not")) negation = advance().span;
             auto target = type();
             auto conversion = make_expression(test ? Expr::Kind::TypeTest : Expr::Kind::Cast, span_from(start));
             conversion.type = std::move(target);
             conversion.operands.push_back(std::move(result));
             result = std::move(conversion);
+            if (negation) {
+                auto negated = make_expression(Expr::Kind::Unary, span_from(start), "!");
+                negated.spelled_not = negated.is_not = true;
+                negated.operator_span = negation;
+                negated.operands.push_back(std::move(result));
+                result = std::move(negated);
+            }
         }
         return result;
     }
@@ -2154,10 +2165,17 @@ private:
             result.operands.push_back(std::move(operand));
             return result;
         }
-        if (at("!") || at("-") || at("~")) {
-            const auto op = advance().text;
+        if (at("!") || at("not") || at("-") || at("~")) {
+            // `not` is `!` spelled as a word (docs/design/Expressions030.md).
+            const auto& token = advance();
+            const bool word = token.text == "not";
+            const auto operator_span = token.span;
             auto operand = unary(branch_keyword);
-            auto result = make_expression(Expr::Kind::Unary, span_from(start), op);
+            auto result = make_expression(Expr::Kind::Unary, span_from(start), word ? std::string("!") : token.text);
+            if (word) {
+                result.spelled_not = true;
+                result.operator_span = operator_span;
+            }
             result.operands.push_back(std::move(operand));
             return result;
         }
@@ -2274,7 +2292,7 @@ private:
             return true;
         case TokenKind::Keyword:
             return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
-                   token.text == "true" || token.text == "false" || token.text == "nil";
+                   token.text == "true" || token.text == "false" || token.text == "nil" || token.text == "not";
         case TokenKind::Symbol:
             return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
                    token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";

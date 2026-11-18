@@ -1,0 +1,37 @@
+// `not` in conditions, a conditional and a return (docs/design/
+// Expressions030.md, Negation words), built against
+// not-statements.expanded.nra, the same program written with `!`.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, a: bool, b: bool) -> string {
+    let parts = "";
+    if (not a) {
+        parts = parts + " not a";
+    }
+    while (not b) {
+        b = true;
+        parts = parts + " loop";
+    }
+    parts = parts + " " + (a ? not b : b).to_string();
+    return parts + " " + check(shape is not Circle).to_string();
+};
+
+let check = func(value: bool) -> bool {
+    return not value;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), true, false));
+        console.print_line(describe(new Shape(), false, true));
+        return program.ExitCode.Ok;
+    };
+);

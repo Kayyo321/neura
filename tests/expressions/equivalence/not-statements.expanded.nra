@@ -1,0 +1,35 @@
+// The program of not-statements.words.nra written with `!`.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, a: bool, b: bool) -> string {
+    let parts = "";
+    if (!a) {
+        parts = parts + " not a";
+    }
+    while (!b) {
+        b = true;
+        parts = parts + " loop";
+    }
+    parts = parts + " " + (a ? !b : b).to_string();
+    return parts + " " + check(!(shape is Circle)).to_string();
+};
+
+let check = func(value: bool) -> bool {
+    return !value;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), true, false));
+        console.print_line(describe(new Shape(), false, true));
+        return program.ExitCode.Ok;
+    };
+);

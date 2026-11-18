@@ -27,6 +27,8 @@ constexpr auto keywords = std::to_array<std::string_view>({
     "destroy", "if", "else", "while", "do", "for", "in", "break", "continue", "return", "true", "false",
     "as", "is", "nil", "enum", "match", "and", "or", "interface", "implements",
     "promote", "static", "singleton",
+    // docs/design/Expressions030.md: the negation word and the type query.
+    "not", "typeof",
 });
 
 constexpr auto compound_symbols = std::to_array<std::string_view>({

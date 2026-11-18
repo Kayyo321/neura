@@ -1,0 +1,9 @@
+error[E0403]: expected bool, got int32
+ --> $DIR/not-on-integer.nra:4:19
+  |
+4 | let negated = not count;
+  |                   ^^^^^ expected bool, found int32
+  |
+  = note: 'not' requires a bool operand, as '!' does
+
+For more information about this error, try `neura explain E0403`.

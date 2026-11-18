@@ -1130,8 +1130,21 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
             --depth;
             return result;
         }
+        // `not` is `!` spelled as a word (docs/design/Expressions030.md).
+        bool take_not() {
+            space();
+            if (input.substr(position, 3) != "not") return false;
+            if (position + 3 < input.size()) {
+                const char next = input[position + 3];
+                if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || (next >= '0' && next <= '9') ||
+                    next == '_')
+                    return false;
+            }
+            position += 3;
+            return true;
+        }
         InspectedValue unary() {
-            if (take("!")) {
+            if (take("!") || take_not()) {
                 const auto operand = unary();
                 return boolean(evaluating && !truth(operand));
             }

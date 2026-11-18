@@ -1,0 +1,6 @@
+// Edge case 4 of docs/design/Expressions030.md: `x is not` before `)` reports
+// the missing type at the `)`.
+let Shape = class (
+    export let sides: int = 0;
+);
+let check = func(shape: Shape) -> bool => (shape is not);

@@ -611,6 +611,12 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/equivalence")
     set_tests_properties(records-equivalence PROPERTIES TIMEOUT 300)
+    # The 0.3.0 expression forms (docs/design/Expressions030.md) against the
+    # forms they are written out to, and programs that use them.
+    add_test(NAME expressions-equivalence COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/equivalence")
+    set_tests_properties(expressions-equivalence PROPERTIES TIMEOUT 300)
     add_test(NAME records-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/records.py" "$<TARGET_FILE:neura>")
     set_tests_properties(records-boundary PROPERTIES TIMEOUT 300)

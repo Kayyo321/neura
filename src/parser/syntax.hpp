@@ -137,6 +137,11 @@ struct Expr {
     std::vector<Span> label_spans{};
     std::shared_ptr<const struct InterpolationSyntax> interpolation{};
     std::optional<Span> operator_span{};
+    // docs/design/Expressions030.md, Negation words. A Unary "!" written
+    // `not`, either as a prefix (`not x`) or after `is` (`x is not T`, whose
+    // operand is the TypeTest); `operator_span` is the word `not`.
+    bool spelled_not{};
+    bool is_not{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the

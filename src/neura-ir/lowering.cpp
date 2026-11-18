@@ -3586,7 +3586,19 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             return literal;
         }
         bool logical = expr.text == "!";
-        auto input = value(child, context, logical ? &bool_type : expected);
+        auto input = [&] {
+            if (!expr.spelled_not) return value(child, context, logical ? &bool_type : expected);
+            // A diagnostic about the operand of `not` names `not`
+            // (docs/design/Expressions030.md, Negation words).
+            try {
+                return value(child, context, &bool_type);
+            } catch (Diagnostic& error) {
+                if (error.code() == "E0403" && error.span.offset == child.span.offset &&
+                    error.span.length == child.span.length)
+                    error.note("'not' requires a bool operand, as '!' does");
+                throw;
+            }
+        }();
         if (expr.text == "~" && input.type.kind != TypeKind::Integer)
             throw Diagnostic(expr.span, "unary '~' requires an integer operand").with_code("E0413");
         if (expr.text == "-" && input.type.kind != TypeKind::Integer && input.type.kind != TypeKind::Float)

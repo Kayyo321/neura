@@ -148,7 +148,8 @@ private:
             const auto end = value.open ? value.open->offset : value.span.offset + value.span.length;
             if (end > start) angle_span({{}, 1, 1, start, end - start});
         }
-        if (value.kind == Expr::Kind::Unary || value.kind == Expr::Kind::PrefixUpdate)
+        // `not` is a word and keeps the space after it (docs/design/Expressions030.md).
+        if ((value.kind == Expr::Kind::Unary && !value.spelled_not) || value.kind == Expr::Kind::PrefixUpdate)
             hints_.prefix.insert(value.span.offset);
         // `r?` is written without a space (docs/design/Matching030.md).
         if (value.kind == Expr::Kind::Propagate && value.operator_span) hints_.postfix.insert(value.operator_span->offset);
@@ -485,7 +486,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
         if (hints.glued.contains(item.offset) || hints.postfix.contains(item.offset) ||
             (previous && hints.prefix.contains(previous->offset))) space = false;
         if (text == "[") space = before == "=" || before == "return" || before == "in" || before == "=>" ||
-                                 before == ":" || before == "let" || before == "const";
+                                 before == ":" || before == "let" || before == "const" || before == "not";
         if (before == ":" && previous) {
             const auto previous_index = i > 1 ? i - 2 : 0;
             const auto colon_owner = i > 1 ? items[previous_index].text : std::string_view{};
@@ -504,7 +505,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                                  before == "scope" || match_is;
             const bool body = hints.bodies.contains(item.offset);
             space = control || body || hints.record_bodies.contains(item.offset) || before == "module" ||
-                    before == "class" || before == "interface" || before == "enum" || before == "singleton";
+                    before == "class" || before == "interface" || before == "enum" || before == "singleton" ||
+                    before == "not";
             out.text(text, indent(), space);
             const bool multiline = body && next != ")";
             delimiters.push_back({text, multiline, control});

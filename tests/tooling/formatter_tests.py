@@ -117,6 +117,15 @@ let reference=func(value:&int)->&int=>value;'''
         self.assertIn('value: &int', formatted)
         self.assertIn('-> &int', formatted)
 
+    def test_negation_words_keep_their_spelling(self):
+        # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.
+        source = """let Shape=class();let Circle=class:Shape();
+let f=func(a:bool,b:bool,s:Shape)->bool=>not a||not(a&&b)||!not b||!a||s is   not Circle;
+let g=func(a:bool)->bool=>not   [a][0];"""
+        formatted = self.formatted(source)
+        self.assertIn('=> not a || not (a && b) || !not b || !a || s is not Circle;', formatted)
+        self.assertIn('=> not [a][0];', formatted)
+
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
         formatted = self.formatted(source)

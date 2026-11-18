@@ -1,0 +1,7 @@
+error[E0202]: expected an identifier
+ --> $DIR/not-is-reserved.nra:2:5
+  |
+2 | let not = true;
+  |     ^^^ 'not' is a keyword
+
+For more information about this error, try `neura explain E0202`.

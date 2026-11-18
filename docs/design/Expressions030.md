@@ -69,8 +69,8 @@ The table replaces the list in [Expressions](../lang/CoreLanguage.md#expressions
 | --- | --- | --- | --- |
 | 1 | member access, `?.`, indexing, calls, postfix `?`; the primaries `nameof(...)` and `typeof(...)` (new) | left | proposed |
 | 2 | postfix `++`, `--` | none | existing |
-| 3 | prefix `++`, `--`, `!`, `not` (new), `-`, `~` | right (prefix) | proposed |
-| 4 | `as`, `is`, `is not` (new) | left | proposed |
+| 3 | prefix `++`, `--`, `!`, `not` (new), `-`, `~` | right (prefix) | implemented, proposed |
+| 4 | `as`, `is`, `is not` (new) | left | implemented, proposed |
 | 5–11 | `*` `/` `%`; `+` `-`; `<<` `>>`; `&`; `^`; `|`; `<` `<=` `>` `>=` | left | existing |
 | 12 | `==`, `!=`, `===`, `!==` (new) | left; `==` and `!=` also form comparison chains | proposed |
 | 13 | `&&` | left | existing |
@@ -86,9 +86,9 @@ The table replaces the list in [Expressions](../lang/CoreLanguage.md#expressions
 
 | Rule | Detail | Status |
 | --- | --- | --- |
-| `not` is a reserved word and a prefix operator. | `not e` is `!e` in every position, with the same operand rules (a `bool`), the same diagnostics and the same image. `!` keeps working. | proposed |
-| `x is not T` is one form. | It is `!(x is T)`, with the type rules of `is`, and builds the same image. `not` directly after `is` belongs to the test; `x is (not T)` is not a type. `x is not not T` is rejected at the second `not` as a type was expected. | proposed |
-| Spelling is kept. | Syntax records which spelling was written, so the formatter, the LSP and diagnostics show `not` where `not` was written. A diagnostic about the operand of `not` names `not`. | proposed |
+| `not` is a reserved word and a prefix operator. | `not e` is `!e` in every position, with the same operand rules (a `bool`), the same diagnostics and the same image. `!` keeps working. | implemented, proposed |
+| `x is not T` is one form. | It is `!(x is T)`, with the type rules of `is`, and builds the same image. `not` directly after `is` belongs to the test; `x is (not T)` is not a type. `x is not not T` is rejected at the second `not` as a type was expected. | implemented, proposed |
+| Spelling is kept. | Syntax records which spelling was written, so the formatter, the LSP and diagnostics show `not` where `not` was written. A diagnostic about the operand of `not` names `not`. | implemented, proposed |
 
 ## Narrowing
 
@@ -288,7 +288,7 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 | Step | Content | Image effect | Status |
 | --- | --- | --- | --- |
 | 1 | This note. | none | proposed |
-| 2 | `not`, `is not`: lexer, parser, formatter, LSP, highlighting. | identical to `!` forms | proposed |
+| 2 | `not`, `is not`: lexer, parser, formatter, LSP, highlighting. | identical to `!` forms | implemented, proposed |
 | 3 | Narrowing in `if`, then `is not` scoping and E0265/E0266. | identical to the `match.is` forms | proposed |
 | 4 | Character literals, E0260/E0261, docs of literals and numbers. | identical to integer literals | proposed |
 | 5 | Inclusive ranges, string chains, `..=` statements, `!==`; NeuraIR 1.15 op 73, NVR 1.9 op 35, loader, assembler, tiers, counters; E0262, E0263, E1100. | new only where used | proposed |
@@ -327,4 +327,5 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 
 ## Decisions taken in the implementation
 
-None yet.
+- **Step 2: the `not` diagnostic.** The error for a non-`bool` operand of `!` (E0403) names no operator; for `not` it keeps the code, span and text and adds the note "'not' requires a bool operand, as '!' does", so the `!` diagnostics stay byte-identical. `x is not` with no type reports the existing "expected an identifier" of a missing type at the next token, as `x is` does.
+- **Step 2: no editor grammar in this repository.** No VS Code grammar is tracked here (the search for one under `packaging` found none), so the keyword change reaches editors through the language server's semantic tokens, which mark `not` and `typeof` as keywords from their token kind. The debugger's condition expressions accept `not` beside `!`.

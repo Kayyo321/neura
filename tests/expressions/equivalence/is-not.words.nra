@@ -1,0 +1,31 @@
+// `x is not T` (docs/design/Expressions030.md, Negation words, edge case
+// 3), built against is-not.expanded.nra, the same program written with
+// `!(x is T)`.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, a: bool, b: bool) -> string {
+    let parts = "";
+    parts = parts + " " + (shape is not Circle).to_string();
+    parts = parts + " " + (shape is not Circle && a).to_string();
+    parts = parts + " " + (shape is
+        not Circle).to_string();
+    parts = parts + " " + (shape is // the test
+        not Circle).to_string();
+    return parts;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), true, false));
+        console.print_line(describe(new Shape(), false, true));
+        return program.ExitCode.Ok;
+    };
+);
