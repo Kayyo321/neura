@@ -30,7 +30,8 @@ ROOT = HERE.parent.parent
 APPLICATION_ID = "example.neura.fixture"
 OPERATIONS = ["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir", "fixture.echo",
               "fixture.fail", "fixture.focus", "fixture.notify", "fixture.open", "fixture.open_many", "fixture.quit",
-              "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved"]
+              "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved", "fixture.wait",
+              "fixture.work"]
 TITLE = "Packaged ✓"
 CSP = "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
 

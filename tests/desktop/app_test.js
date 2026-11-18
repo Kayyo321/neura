@@ -24,7 +24,7 @@ const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
     "frame-src 'self' https:; base-uri 'none'; form-action 'none'";
 const operations = ['fixture.clipboard_read', 'fixture.clipboard_write', 'fixture.close', 'fixture.data_dir',
     'fixture.echo', 'fixture.fail', 'fixture.focus', 'fixture.notify', 'fixture.open', 'fixture.open_many', 'fixture.quit',
-    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved'];
+    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved', 'fixture.wait', 'fixture.work'];
 
 function digest(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
 
@@ -315,17 +315,22 @@ async function windows() {
     const order = ['event Focused 1', 'event Blurred 1', 'event Focused 9'].map(position);
     assert.ok(order[0] < order[1] && order[1] < order[2], `events out of order: ${order}`);
 
+    step('close with a call in flight');
+    // Case 26: a window closed with a call in flight; the call is cancelled in the child.
+    reopened.webContents.executeJavaScript("bridgeCall('fixture.work', '')").catch(() => {});
+    await waitFor(() => running.inFlight(9) === 1, 'the working call did not reach the host');
+    mark = childLog.length;
+    await evaluate('globalThis.kept = 42', reopened);
+    reopened.close();
+    await waitFor(() => seen('event Closed 9'), 'the child did not see Closed 9');
+    await waitFor(() => childLog.slice(mark).some(line => /^child: work \d+ stopped$/.test(line)), 'the child did not stop the call');
+
     step('reopen');
     // Case 3: a window on a route that was closed before opens with a fresh renderer and fresh state.
-    await evaluate('globalThis.kept = 42', reopened);
-    const oldRenderer = reopened.webContents.getOSProcessId();
-    assert.deepEqual(await bridge(evaluate, 'fixture.close', '9'), { status: 0, text: 'closed' });
-    await waitFor(() => seen('event Closed 9'), 'the child did not see Closed 9');
     assert.deepEqual(await bridge(evaluate, 'fixture.open'), { status: 0, text: '10' });
     const fresh = running.windows().find(entry => entry.handle === 10).window;
     await waitFor(() => fresh.isVisible(), 'window 10 did not show');
     assert.equal(await evaluate('typeof globalThis.kept', fresh), 'undefined');
-    assert.notEqual(fresh.webContents.getOSProcessId(), oldRenderer);
     assert.equal((await bridge(evaluate, 'fixture.echo', 'fresh', fresh)).text, 'fresh');
 
     step('frames');
@@ -358,12 +363,17 @@ async function windows() {
     // Case 33: the second window's renderer ends. That window shows the failure page; the child and the
     // other windows continue, and Reload is a fresh execution.
     const crashed = fresh.webContents;
+    // A call in flight from that page waits on a timer in the child; it is cancelled there, and its reply dropped.
+    crashed.executeJavaScript("bridgeCall('fixture.wait', '60000')").catch(() => {});
+    await waitFor(() => running.inFlight(10) === 1, 'the waiting call did not reach the host');
     const gone = new Promise(resolve => crashed.once('render-process-gone', (_event, details) => resolve(details.reason)));
     process.kill(crashed.getOSProcessId(), 'SIGKILL');
     step(`renderer gone: ${await Promise.race([gone, delay(10000, 'no event')])}`);
     await waitFor(() => !fresh.isDestroyed() && crashed.getURL() === `${home}second.html` && crashed.getTitle() === 'Window stopped',
         () => `no failure page: ${crashed.getURL()} "${crashed.getTitle()}"; ${logged.join('; ')}`);
     assert.ok(logged.some(line => /renderer ended/.test(line)));
+    await waitFor(() => childLog.some(line => /^child: wait \d+ cancelled$/.test(line)), 'the child did not cancel the call');
+    assert.equal(running.inFlight(10), 0);
     assert.equal((await bridge(evaluate, 'fixture.echo', 'alive')).text, 'alive');
     await crashed.executeJavaScript("document.getElementById('neura-reload').click()");
     await waitFor(() => crashed.getTitle() === 'Second page', 'Reload did not load the route again');

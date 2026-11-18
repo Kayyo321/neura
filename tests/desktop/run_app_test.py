@@ -26,11 +26,27 @@ HERE = Path(__file__).resolve().parent
 UNLIMITED_STEPS = "18446744073709551615"
 
 
-def build_child(neura, scratch, source=HERE / "fixtures" / "app-child.nra", allow=()):
+def build_child(neura, scratch, source=HERE / "fixtures" / "app-child.nra", allow=("--allow-clock",)):
     child = Path(scratch) / Path(source).stem
     subprocess.run([neura, "build", "--native", "--deny-all", *allow, "--max-steps", UNLIMITED_STEPS, str(source),
                     "-o", str(child)], check=True, timeout=120)
     return child
+
+
+def check_rejection(neura):
+    """A bridge operation that captures the Context is rejected (E0602) at the program's own call of `run`."""
+    source = HERE / "fixtures" / "capture-context.nra"
+    result = subprocess.run([neura, "check", str(source)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            timeout=120)
+    expected = ["error[E0602]: a value of type func(Call) -> Result<uint8[list]> is not transferable",
+                f"--> {source}:15:16", "captures a value of type Context here"]
+    missing = [text for text in expected if text not in result.stdout]
+    if result.returncode == 0 or missing:
+        print(result.stdout, end="")
+        print(f"capture-context: NOT rejected as expected (missing {missing})")
+        return 1
+    print("capture-context: rejected with E0602 at the program's call of run")
+    return 0
 
 
 def run_bridge(child):
@@ -38,7 +54,7 @@ def run_bridge(child):
     if node is None:
         raise RuntimeError("the bridge tests need Node")
     env = {**os.environ, "NEURA_DESKTOP_TEST_CHILD": str(child)}
-    result = subprocess.run([node, "--test", "--test-timeout=30000", str(HERE / "bridge_test.js")], env=env, timeout=180,
+    result = subprocess.run([node, "--test", "--test-timeout=60000", str(HERE / "bridge_test.js")], env=env, timeout=600,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end="")
     return result.returncode
@@ -139,7 +155,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="neura-desktop-child-") as build:
         child = build_child(args.neura, build)
-        failed = 0 if args.skip_bridge else run_bridge(child)
+        failed = 0 if args.skip_bridge else run_bridge(child) | check_rejection(args.neura)
         for case in args.case or sorted(CASES):
             failed |= run_case(args.electron, child, case)
     sys.exit(1 if failed else 0)

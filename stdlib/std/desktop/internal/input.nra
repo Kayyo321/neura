@@ -1,0 +1,11 @@
+/// @brief The desktop child's standard input as a raw byte source that a task may read
+/// (docs/design/Desktop030.md). `Std.Io.Console.input()` keeps a read-ahead buffer that belongs to the root task;
+/// the desktop channel's reader task reads standard input through this binding instead, so it holds no module
+/// state. Nothing else in a desktop child reads standard input: it is the channel to the window host.
+export let Input = module (
+    /// @brief Bytes read, or the host's error code.
+    export let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+
+    /// @brief Reads up to `max` bytes; empty at the end of input. Overlapping and cancellable (version 2).
+    export let read = func(max: int) -> BytesOutcome host("neura.console.read", 2);
+);

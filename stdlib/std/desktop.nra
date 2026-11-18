@@ -1,7 +1,11 @@
+let atomics = import:Std.Concurrent.AtomicInt64;
 let bytes = import:Std.Io.Internal.Bytes;
+let channels = import:Std.Concurrent.Channel;
 let console = import:Std.Io.Console;
 let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
 let host_error = import:Std.Core.Internal.HostError;
+let input = import:Std.Desktop.Internal.Input;
 let.promote _ = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let program = import:Std.Program;
@@ -16,16 +20,22 @@ let wire = import:Std.Desktop.Internal.Wire;
 /// A desktop application is a window host, renderers that show the web target's bundle, and this native child.
 /// The child speaks to the host over its standard input and output; its standard error is its log. Everything
 /// written to standard output belongs to the channel, so a desktop child logs with `eprintln` and never with
-/// `println`. The host starts the child before any window exists, exchanges the bridge protocol version and the
-/// SHA-256 digest of `registry.json` with it, and ends the application when the two differ.
+/// `println`, and nothing in it reads standard input. The host starts the child before any window exists,
+/// exchanges the bridge protocol version and the SHA-256 digest of `registry.json` with it, and ends the
+/// application when the two differ.
 ///
-/// `run_application` connects, calls the application's `start` with a `Context`, and returns the process status.
-/// `start` opens windows and normally ends with `context.run(dispatcher)`, which answers bridge calls from the
-/// windows and consumes window events until the last window closes or the application quits.
+/// `run_application` connects, calls the application's `start` with a `Context`, and ends the process with its
+/// status. `start` opens windows and normally ends with `context.run(dispatcher)`, which answers bridge calls
+/// from the windows and consumes window events until the last window closes or the application quits.
 ///
-/// The child handles one bridge call at a time, in the order the host sent them; the host answers its callers
-/// by request identifier, so callers see replies in that order. A call whose caller stopped waiting before the
-/// child reached it is skipped. A trap in the child ends the application.
+/// Every bridge call runs as its own task (docs/lang/Concurrency.md), so a slow operation does not hold up the
+/// others, and replies go back in the order the operations finish. A call whose caller stops waiting (its
+/// deadline D-4 passed, or its window closed or its page ended) is cancelled: its task's scope is cancelled,
+/// which wakes a parked timer, channel or host request with `Cancelled`, and a computing operation sees it at
+/// `Std.Concurrent.Cancellation.requested()`. Nothing interrupts an operation that never parks and never asks.
+/// The implementations are therefore spawned calls: each must be task-safe and its captures transferable, so
+/// an operation reaches the window host through `call.host()`, never through a captured `Context`. A trap in
+/// the child ends the application.
 /// @see docs/design/Desktop030.md
 #Since("0.3.0")
 export let Desktop = module (
@@ -35,6 +45,14 @@ export let Desktop = module (
 
     /// @brief The error code a host service uses for too many windows (Busy).
     const BusyCode: uint32 = 17;
+
+    /// @brief The error code of a request whose channel to the window host has ended (UnexpectedEnd).
+    const EndedCode: uint32 = 6;
+
+    /// @brief The capacity of the channels between the reader task, the application and the bridge calls.
+    /// The window host keeps at most D-1 windows of D-2 calls in flight, so they hold every call; a burst of
+    /// events past it waits in the reader until the application takes them.
+    const ChannelCapacity: int = 4096;
 
     /// @brief The operation identifiers a desktop target's bridge serves, as `registry.json` lists them.
     ///
@@ -97,192 +115,75 @@ export let Desktop = module (
         export let.override hash_code = func -> uint32 => strings.hash(json());
     );
 
-    /// @brief An open window of this application, identified by the host's handle.
-    #Final
-    export let Window = class (
-        /// @brief The host's handle; never reused while the application runs.
-        export last handle: uint32;
-        /// @brief The context that opened the window.
-        last owner: Context;
+    /// @brief Writes frames to standard output, one whole frame at a time, from any task.
+    #[Final, Synchronized]
+    let Writer = class (
+        /// @brief A writer of the process's standard output.
+        export let init = func {};
 
-        /// @brief Use `Context.open_window`.
-        export let init = func(window_handle: uint32, context: Context) {
-            handle = window_handle;
-            owner = context;
-        };
-
-        /// @brief Closes the window. Its renderer and state end; a call in flight from it is cancelled.
-        export let close = func -> Result<Unit> => owner.window_request("neura.desktop.window.close", handle, "", false);
-
-        /// @brief Gives the window the input focus.
-        export let focus = func -> Result<Unit> => owner.window_request("neura.desktop.window.focus", handle, "", false);
-
-        /// @brief Replaces the window's title.
-        export let set_title = func(title: string) -> Result<Unit> =>
-            owner.window_request("neura.desktop.window.set_title", handle, title, true);
-
-        export let.override to_string = func -> string => "Window(" + handle.to_string() + ")";
-
-        export let.override equals = func(other: class) -> bool {
-            if (other is Window) {
-                return (other as Window).handle == handle;
+        /// @brief Writes one frame. False when the write failed, which means the window host is gone. A frame
+        /// past D-3 is a defect of this module and traps.
+        export let send = func(kind: uint8, body: uint8[list]) -> bool {
+            if (body.length + 5 > wire.FrameLimit) {
+                trap_with_message("invalid state: desktop frame exceeds D-3");
             }
-            return false;
-        };
-
-        export let.override hash_code = func -> uint32 => handle;
-    );
-
-    /// @brief A window event in the order the host observed it.
-    export let Event = enum (
-        Closed(Window),
-        Focused(Window),
-        Blurred(Window),
-        Resized(Window, int, int),
-        MenuActivated(string, Window)
-    );
-
-    /// @brief What became of a notification.
-    export let NotifyOutcome = enum (Shown, Denied, Unsupported);
-
-    /// @brief One bridge call from a window. It carries nothing of the page: no URL, no script, no path.
-    #Final
-    export let Call = class (
-        /// @brief The host's request identifier.
-        export last id: uint32;
-        /// @brief The window whose main frame made the call.
-        export last window: Window;
-        /// @brief The registry operation identifier.
-        export last operation: string;
-        /// @brief The request: the JSON bytes of the contract operation.
-        export last request: uint8[list];
-        /// @brief Nanoseconds the caller still waited when the host forwarded the call (at most D-4).
-        export last deadline_nanos: int64;
-
-        /// @brief Built by the context from a Call frame.
-        export let init = func(call_id: uint32, from: Window, operation_id: string, body: uint8[list], nanos: int64) {
-            id = call_id;
-            window = from;
-            operation = operation_id;
-            request = body;
-            deadline_nanos = nanos;
-        };
-
-        export let.override to_string = func -> string =>
-            "Call(" + id.to_string() + ", " + operation + ", " + window.to_string() + ")";
-    );
-
-    /// @brief One operation of a dispatcher and its implementation.
-    #Final
-    let Route = class (
-        /// @brief The operation identifier.
-        export last operation: string;
-        /// @brief Answers the reply bytes of a call, or an error.
-        export last handler: func(Call) -> Result<uint8[list]>;
-
-        /// @brief Pairs `id` with `implementation`.
-        export let init = func(id: string, implementation: func(Call) -> Result<uint8[list]>) {
-            operation = id;
-            handler = implementation;
-        };
-
-        export let.override to_string = func -> string => "Route(" + operation + ")";
-    );
-
-    /// @brief Maps each operation of a registry to its implementation. An operation without one answers the
-    /// caller with error 13 (Unsupported).
-    #Final
-    export let Dispatcher = class (
-        /// @brief The operations this dispatcher serves.
-        export last registry: Registry;
-        /// @brief The implementations added so far.
-        let routes: Route[list] = new;
-        /// @brief Called by `Context.run` for every window event, in the order the host observed them.
-        let observer: func(Event) -> void = func(event: Event) {};
-
-        /// @brief A dispatcher for `served`, with no implementation yet.
-        export let init = func(served: Registry) {
-            registry = served;
-        };
-
-        /// @brief Adds the implementation of `operation`, which must be in the registry and not yet added. Traps
-        /// with "invalid argument: dispatcher operation" otherwise.
-        export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher {
-            if (!registry.contains(operation) || find(operation) >= 0) {
-                trap_with_message("invalid argument: dispatcher operation " + operation);
-            }
-            routes.append(new Route(operation, handler));
-            return instance;
-        };
-
-        /// @brief Has `Context.run` call `handler` with every window event, in the order the host observed them,
-        /// after its own handling (a Closed window is no longer open). Replaces an earlier handler.
-        export let on_event = func(handler: func(Event) -> void) -> Dispatcher {
-            observer = handler;
-            return instance;
-        };
-
-        /// @brief Passes `event` to the handler given to `on_event`. Used by `Context.run`.
-        #Hidden
-        export let notice = func(event: Event) {
-            observer(event);
-        };
-
-        /// @brief The status and reply bytes of `call`: 0 and the reply, or an error code and the UTF-8 message.
-        export let dispatch = func(call: Call) -> [uint32, uint8[list]] {
-            last index = find(call.operation);
-            if (index < 0) {
-                return [13 as uint32, strings.to_bytes("unsupported: operation " + call.operation)];
-            }
-            return match (routes[index].handler(call)) {
-                Result.Ok(reply) => [0 as uint32, reply],
-                Result.Err(problem) => [100 as uint32, strings.to_bytes(errors.message(problem))],
+            return match (console.output()(wire.frame(kind, body))) {
+                Result.Ok(_) => true,
+                Result.Err(_) => false,
             };
         };
 
-        /// @brief The index of the route of `operation`, or -1.
-        let find = func(operation: string) -> int {
-            for (let i = 0; i < routes.length; i = i + 1) {
-                if (routes[i].operation == operation) {
-                    return i;
-                }
-            }
-            return -1;
-        };
-
-        export let.override to_string = func -> string =>
-            "Dispatcher(" + routes.length.to_string() + " of " + registry.operations.length.to_string() + ")";
+        export let.override to_string = func -> string => "Writer";
     );
 
-    /// @brief The connection of the native child to its window host.
-    #[Final, NotThreadSafe]
-    export let Context = class (
-        /// @brief The registry sent in Hello.
-        export last registry: Registry;
-        /// @brief Splits standard input into frames.
-        last reader: wire.Reader = new(wire.FrameLimit);
-        /// @brief Reads standard input.
-        last input: func(int) -> Result<uint8[list]> = console.input();
-        /// @brief Writes standard output.
-        last output: func(uint8[list]) -> Result<Unit> = console.output();
-        /// @brief The identifier of the next host request.
-        let next_request: uint32 = 1;
-        /// @brief Events received while waiting for a host answer.
-        let events: Event[list] = new;
-        /// @brief Calls received while waiting for a host answer.
-        let calls: Call[list] = new;
-        /// @brief Whether the host closed standard input or the channel failed.
-        let ended: bool = false;
-        /// @brief The windows open now.
-        let windows: Window[list] = new;
-        /// @brief Whether the application asked to quit, and with which status.
-        let quitting: bool = false;
-        let quit_status: int = 0;
+    /// @brief The answer to one host request: the error code (0 for success) and the packed result bytes.
+    let Answer = enum (Reply(uint32, string));
 
-        /// @brief Use `run_application`.
-        export let init = func(served: Registry) {
-            registry = served;
+    /// @brief A host request waiting for its answer: the request identifier and where the answer goes.
+    let Waiter = enum (Waiting(uint32, channels.Sender<Answer>));
+
+    /// @brief What the reader task passes to the application: the handshake's outcome, bridge calls, cancels,
+    /// window events, and the end of the channel.
+    let Inbound = enum (
+        Connected,
+        Refused(string),
+        Call(uint32, uint32, string, int64, string),
+        Cancel(uint32),
+        Event(uint32, uint32, int64, int64, string),
+        End
+    );
+
+    /// @brief The services of the window host, usable from any task. Each request waits for its answer while
+    /// the reader task runs; a request of a cancelled task answers Cancelled. Requests made through one `Host`
+    /// take turns; `Context.host()` and `Call.host()` give every call its own.
+    #[Final, Synchronized]
+    export let Host = class (
+        /// @brief Writes the request frames.
+        last writer: Writer;
+        /// @brief The next request identifier, shared by every Host of the connection.
+        last ids: atomics.AtomicInt64;
+        /// @brief Registers a request with the reader task before its frame is written.
+        last waiters: channels.Sender<Waiter>;
+        /// @brief The status given to `quit`, or -1.
+        last quit_status: atomics.AtomicInt64;
+        /// @brief The windows opened through any Host and not yet seen closed by the reader.
+        last window_count: atomics.AtomicInt64;
+
+        /// @brief Built by `run_application` and `Context`; shares the connection's handles.
+        export let init = func(frames: Writer, requests: atomics.AtomicInt64, registrations: channels.Sender<Waiter>,
+                status: atomics.AtomicInt64, windows: atomics.AtomicInt64) {
+            writer = frames;
+            ids = requests;
+            waiters = registrations;
+            quit_status = status;
+            window_count = windows;
         };
+
+        /// @brief Another Host on the same connection, for another task.
+        export let fork = func -> Host => new Host(writer, ids, waiters, quit_status, window_count);
+
+        /// @brief The window with `handle`, open or not; a request for a closed one answers InvalidInput.
+        export let window = func(handle: uint32) -> Window => new Window(handle, fork());
 
         /// @brief Opens a window of `width` by `height` pixels that shows the bundle's start route. Busy when
         /// D-1 windows are open.
@@ -297,7 +198,7 @@ export let Desktop = module (
                     !strings.starts_with(route, "/")) {
                 return Result<Window>.Err(failure(4, "invalid window size or route"));
             }
-            if (windows.length >= MaxWindows) {
+            if (window_count.load() >= MaxWindows as int64) {
                 return Result<Window>.Err(failure(BusyCode, "too many windows"));
             }
             last args: uint8[list] = new;
@@ -307,16 +208,15 @@ export let Desktop = module (
             wire.put_u32(args, min_width as uint32);
             wire.put_u32(args, min_height as uint32);
             wire.put_text(args, route);
-            match (host_call("neura.desktop.window.open", args)) {
+            match (request("neura.desktop.window.open", args)) {
                 Result.Ok(answer) => {
                     last cursor = new wire.Cursor(answer);
                     last handle = cursor.u32();
                     if (!cursor.finished()) {
                         return Result<Window>.Err(failure(100, "malformed window.open answer"));
                     }
-                    last window = new Window(handle, instance);
-                    windows.append(window);
-                    return Result<Window>.Ok(window);
+                    window_count.add(1);
+                    return Result<Window>.Ok(new Window(handle, fork()));
                 },
                 Result.Err(problem) => {
                     return Result<Window>.Err(problem);
@@ -325,13 +225,10 @@ export let Desktop = module (
             return Result<Window>.Err(failure(100, "unreachable"));
         };
 
-        /// @brief The windows open now, in the order they opened.
-        export let open_windows = func -> Window[list] => windows;
-
         /// @brief The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
         export let data_directory = func -> Result<string> {
             last empty: uint8[list] = new;
-            return match (host_call("neura.desktop.data_directory", empty)) {
+            return match (request("neura.desktop.data_directory", empty)) {
                 Result.Ok(answer) => text_answer(answer),
                 Result.Err(problem) => Result<string>.Err(problem),
             };
@@ -343,7 +240,7 @@ export let Desktop = module (
             last args: uint8[list] = new;
             wire.put_text(args, title);
             wire.put_text(args, body);
-            match (host_call("neura.desktop.notify", args)) {
+            match (request("neura.desktop.notify", args)) {
                 Result.Ok(answer) => {
                     last cursor = new wire.Cursor(answer);
                     last outcome = cursor.u32();
@@ -370,33 +267,421 @@ export let Desktop = module (
         export let clipboard_write = func(text: string) -> Result<Unit> {
             last args: uint8[list] = new;
             wire.put_text(args, text);
-            match (host_call("neura.desktop.clipboard.write", args)) {
-                Result.Ok(_) => {
-                    return bytes.ok();
-                },
-                Result.Err(problem) => {
-                    return Result<Unit>.Err(problem);
-                },
-            }
-            return bytes.ok();
+            return match (request("neura.desktop.clipboard.write", args)) {
+                Result.Ok(_) => bytes.ok(),
+                Result.Err(problem) => Result<Unit>.Err(problem),
+            };
         };
 
         /// @brief The clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_read`.
         export let clipboard_read = func -> Result<string> {
             last empty: uint8[list] = new;
-            return match (host_call("neura.desktop.clipboard.read", empty)) {
+            return match (request("neura.desktop.clipboard.read", empty)) {
                 Result.Ok(answer) => text_answer(answer),
                 Result.Err(problem) => Result<string>.Err(problem),
             };
         };
 
-        /// @brief The next window event, waiting for one. UnexpectedEnd once the host has closed the channel.
+        /// @brief Ends the application with `status` (0 to 255). The host closes every window and the channel,
+        /// so the calls in flight are cancelled and the process ends with `status`. Returns once the channel has
+        /// ended; code after it in a bridge operation may not run.
+        export let quit = func(status: int) -> Result<Unit> {
+            if (status < 0 || status > 255) {
+                return Result<Unit>.Err(failure(4, "invalid exit status"));
+            }
+            last args: uint8[list] = new;
+            wire.put_u32(args, status as uint32);
+            quit_status.store(status as int64);
+            // The host answers quit by closing every window and the channel, never with a HostReturn, so the
+            // request ends with the channel.
+            match (request("neura.desktop.quit", args)) {
+                Result.Ok(_) => {},
+                Result.Err(_) => {},
+            }
+            return bytes.ok();
+        };
+
+        /// @brief Runs a window request that answers nothing. Used by `Window`.
+        #Hidden
+        export let window_request = func(service: string, handle: uint32, title: string, with_title: bool)
+                -> Result<Unit> {
+            last args: uint8[list] = new;
+            wire.put_u32(args, handle);
+            if (with_title) {
+                wire.put_text(args, title);
+            }
+            return match (request(service, args)) {
+                Result.Ok(_) => bytes.ok(),
+                Result.Err(problem) => Result<Unit>.Err(problem),
+            };
+        };
+
+        /// @brief Sends a HostCall frame for `service` and waits for its answer: the result bytes, or the
+        /// service's error code as an Io error. UnexpectedEnd once the channel has ended; Cancelled when this
+        /// task is cancelled while it waits, and the answer is then dropped.
+        #Hidden
+        export let request = func(service: string, args: uint8[list]) -> Result<uint8[list]> {
+            last id = (ids.add(1) % 4294967295 + 1) as uint32;
+            const [reply, answers, closer] = channels.open<Answer>(1);
+            match (waiters.send(Waiter.Waiting(id, reply))) {
+                channels.SendOutcome.Sent => {},
+                channels.SendOutcome.Cancelled => {
+                    return Result<uint8[list]>.Err(failure(15, service + " cancelled"));
+                },
+                channels.SendOutcome.Closed => {
+                    return Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel"));
+                },
+            }
+            last body: uint8[list] = new;
+            wire.put_u32(body, id);
+            wire.put_text(body, service);
+            bytes.append_range(body, args, 0, args.length);
+            if (!writer.send(wire.HostCall, body)) {
+                return Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel"));
+            }
+            return match (answers.receive()) {
+                channels.Received.Value(answer) => match (answer) {
+                    Answer.Reply(code, packed) => code == 0
+                        ? Result<uint8[list]>.Ok(unpack(packed))
+                        : Result<uint8[list]>.Err(code == EndedCode
+                            ? failure(code, "the window host closed the channel")
+                            : failure(code, service + " failed")),
+                },
+                channels.Received.Cancelled => Result<uint8[list]>.Err(failure(15, service + " cancelled")),
+                channels.Received.Closed => Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel")),
+            };
+        };
+
+        /// @brief The count of open windows the reader task lowers at each Closed. Used by `run_application`.
+        #Hidden
+        export let window_counter = func -> atomics.AtomicInt64 => window_count;
+
+        /// @brief The status given to `quit`, or 0.
+        export let exit_status = func -> int {
+            last status = quit_status.load();
+            return status < 0 ? 0 : status as int;
+        };
+
+        export let.override to_string = func -> string => "Host";
+    );
+
+    /// @brief A window of this application, identified by the host's handle. Usable from any task.
+    #[Final, Synchronized]
+    export let Window = class (
+        /// @brief The host's handle; never reused while the application runs.
+        export last handle: uint32;
+            | get: handle;
+        /// @brief The services the window's requests go through.
+        last services: Host;
+
+        /// @brief The window with `window_handle`. Use `Context.open_window` or `Host.window`.
+        export let init = func(window_handle: uint32, through: Host) {
+            handle = window_handle;
+            services = through;
+        };
+
+        /// @brief Closes the window. Its renderer and state end; a call in flight from it is cancelled.
+        export let close = func -> Result<Unit> => services.window_request("neura.desktop.window.close", handle, "", false);
+
+        /// @brief Gives the window the input focus.
+        export let focus = func -> Result<Unit> => services.window_request("neura.desktop.window.focus", handle, "", false);
+
+        /// @brief Replaces the window's title.
+        export let set_title = func(title: string) -> Result<Unit> =>
+            services.window_request("neura.desktop.window.set_title", handle, title, true);
+
+        /// @brief The services this window uses.
+        export let host = func -> Host => services;
+
+        export let.override to_string = func -> string => "Window(" + handle.to_string() + ")";
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is Window) {
+                return (other as Window).hash_code() == handle;
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 => handle;
+    );
+
+    /// @brief A window event in the order the host observed it.
+    export let Event = enum (
+        Closed(Window),
+        Focused(Window),
+        Blurred(Window),
+        Resized(Window, int, int),
+        MenuActivated(string, Window)
+    );
+
+    /// @brief What became of a notification.
+    export let NotifyOutcome = enum (Shown, Denied, Unsupported);
+
+    /// @brief One bridge call from a window. It carries nothing of the page: no URL, no script, no path. A call
+    /// is handed to the task that runs its operation.
+    #[Final, Synchronized]
+    export let Call = class (
+        /// @brief The host's request identifier.
+        export last id: uint32;
+            | get: id;
+        /// @brief The registry operation identifier.
+        export last operation: string;
+            | get: operation;
+        /// @brief Nanoseconds the caller still waited when the host forwarded the call (at most D-4).
+        export last deadline_nanos: int64;
+            | get: deadline_nanos;
+        /// @brief The handle of the window whose main frame made the call.
+        last window_handle: uint32;
+        /// @brief The request bytes, packed for the task: "t" and the text when they are UTF-8, else "x" and hex.
+        last packed: string;
+        /// @brief This call's own services.
+        last services: Host;
+
+        /// @brief A call of `operation_id` from `from` carrying `body`. Built by `Context.run` from a Call frame.
+        export let init = func(call_id: uint32, from: Window, operation_id: string, body: uint8[list], nanos: int64) {
+            id = call_id;
+            operation = operation_id;
+            deadline_nanos = nanos;
+            window_handle = from.hash_code();
+            packed = pack(body);
+            services = from.host().fork();
+        };
+
+        /// @brief The request: the JSON bytes of the contract operation.
+        export let request = func -> uint8[list] => unpack(packed);
+
+        /// @brief The request as text, when it is UTF-8.
+        export let text = func -> Optional<string> {
+            if (strings.starts_with(packed, "t")) {
+                return Optional<string>.Some(packed.slice(1, packed.byte_length));
+            }
+            return Optional<string>.None;
+        };
+
+        /// @brief The window whose main frame made the call.
+        export let window = func -> Window => new Window(window_handle, services);
+
+        /// @brief The window host's services for this call. Requests through it answer Cancelled once the call
+        /// is cancelled.
+        export let host = func -> Host => services;
+
+        export let.override to_string = func -> string =>
+            "Call(" + id.to_string() + ", " + operation + ", Window(" + window_handle.to_string() + "))";
+    );
+
+    /// @brief One operation of a dispatcher and its implementation.
+    #Final
+    let Route = class (
+        /// @brief The operation identifier.
+        export last operation: string;
+        /// @brief Answers the reply bytes of a call, or an error.
+        export last handler: func(Call) -> Result<uint8[list]>;
+
+        /// @brief Pairs `id` with `implementation`.
+        export let init = func(id: string, implementation: func(Call) -> Result<uint8[list]>) {
+            operation = id;
+            handler = implementation;
+        };
+
+        export let.override to_string = func -> string => "Route(" + operation + ")";
+    );
+
+    /// @brief Maps each operation of a registry to its implementation. An operation without one answers the
+    /// caller with error 13 (Unsupported). Each implementation runs as its own task: it must be task-safe and
+    /// capture only transferable values (docs/lang/Concurrency.md section 5).
+    #Final
+    export let Dispatcher = class (
+        /// @brief The operations this dispatcher serves.
+        export last registry: Registry;
+        /// @brief The implementations added so far.
+        let routes: Route[list] = new;
+        /// @brief Called by `Context.run` for every window event, in the order the host observed them.
+        let observer: func(Event) -> void = func(event: Event) {};
+
+        /// @brief A dispatcher for `served`, with no implementation yet.
+        export let init = func(served: Registry) {
+            registry = served;
+        };
+
+        /// @brief Adds the implementation of `operation`, which must be in the registry and not yet added. Traps
+        /// with "invalid argument: dispatcher operation" otherwise.
+        export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher {
+            if (!registry.contains(operation) || find(operation) >= 0) {
+                trap_with_message("invalid argument: dispatcher operation " + operation);
+            }
+            routes.append(new Route(operation, handler));
+            return instance;
+        };
+
+        /// @brief Has `Context.run` call `handler` with every window event, in the order the host observed them,
+        /// after its own handling (a Closed window is no longer open). The handler runs on the task that called
+        /// `run`, between calls, so it may use the context. Replaces an earlier handler.
+        export let on_event = func(handler: func(Event) -> void) -> Dispatcher {
+            observer = handler;
+            return instance;
+        };
+
+        /// @brief Passes `event` to the handler given to `on_event`. Used by `Context.run`.
+        #Hidden
+        export let notice = func(event: Event) {
+            observer(event);
+        };
+
+        /// @brief The implementation of `operation`, if one was added. Used by `Context.run`.
+        #Hidden
+        export let handler = func(operation: string) -> Optional<func(Call) -> Result<uint8[list]>> {
+            last index = find(operation);
+            if (index < 0) {
+                return Optional<func(Call) -> Result<uint8[list]>>.None;
+            }
+            return Optional<func(Call) -> Result<uint8[list]>>.Some(routes[index].handler);
+        };
+
+        /// @brief Runs `call` on the calling task: the status and reply bytes, 0 and the reply, or an error code
+        /// and the UTF-8 message. `Context.run` runs each call as a task instead.
+        export let dispatch = func(call: Call) -> [uint32, uint8[list]] {
+            last index = find(call.operation);
+            if (index < 0) {
+                return [13 as uint32, strings.to_bytes("unsupported: operation " + call.operation)];
+            }
+            return outcome(routes[index].handler(call));
+        };
+
+        /// @brief The index of the route of `operation`, or -1.
+        let find = func(operation: string) -> int {
+            for (let i = 0; i < routes.length; i = i + 1) {
+                if (routes[i].operation == operation) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        export let.override to_string = func -> string =>
+            "Dispatcher(" + routes.length.to_string() + " of " + registry.operations.length.to_string() + ")";
+    );
+
+    /// @brief A bridge call that `Context.run` started and that has not reported finishing.
+    #Final
+    let Running = class (
+        /// @brief The host's request identifier.
+        export last id: uint32;
+        /// @brief Asks the call's task to stop.
+        export last cancel: channels.Sender<bool>;
+
+        /// @brief Records the call `call_id`, stopped through `stop`.
+        export let init = func(call_id: uint32, stop: channels.Sender<bool>) {
+            id = call_id;
+            cancel = stop;
+        };
+
+        export let.override to_string = func -> string => "Running(" + id.to_string() + ")";
+    );
+
+    /// @brief The connection of the native child to its window host, used by the task that runs `start`.
+    #[Final, NotThreadSafe]
+    export let Context = class (
+        /// @brief The registry sent in Hello.
+        export last registry: Registry;
+        /// @brief Writes frames to the host.
+        last writer: Writer = new;
+        /// @brief Registrations of host requests, read by the reader task.
+        last waiter_sender: channels.Sender<Waiter>;
+        last waiter_receiver: channels.Receiver<Waiter>;
+        last waiter_closer: channels.Closer<Waiter>;
+        /// @brief Calls, cancels, events and the end of the channel, from the reader task.
+        last inbound_sender: channels.Sender<Inbound>;
+        last inbound: channels.Receiver<Inbound>;
+        /// @brief Identifiers of calls whose task finished.
+        last finished_sender: channels.Sender<uint32>;
+        last finished: channels.Receiver<uint32>;
+        /// @brief The services of this context's own task.
+        last services: Host;
+        /// @brief Calls received before `run`, in order.
+        let queued: Inbound[list] = new;
+        /// @brief Events received while waiting for something else, in order.
+        let events: Event[list] = new;
+        /// @brief Calls `run` started that have not reported finishing.
+        let running: Running[list] = new;
+        /// @brief Whether the reader reported the end of the channel.
+        let ended: bool = false;
+        /// @brief The windows this context opened and has not seen close.
+        let windows: Window[list] = new;
+
+        /// @brief Use `run_application`.
+        export let init = func(served: Registry) {
+            registry = served;
+            const [waiter_out, waiter_in, waiter_end] = channels.open<Waiter>(ChannelCapacity);
+            waiter_sender = waiter_out;
+            waiter_receiver = waiter_in;
+            waiter_closer = waiter_end;
+            const [inbound_out, inbound_in, inbound_end] = channels.open<Inbound>(ChannelCapacity);
+            inbound_sender = inbound_out;
+            inbound = inbound_in;
+            const [finished_out, finished_in, finished_end] = channels.open<uint32>(ChannelCapacity);
+            finished_sender = finished_out;
+            finished = finished_in;
+            services = new Host(writer, atomics.create(0), waiter_out, atomics.create(-1), atomics.create(0));
+        };
+
+        /// @brief The services of the window host for this task. Pass `context.host().fork()` to another task.
+        export let host = func -> Host => services;
+
+        /// @brief The window with `handle`, open or not.
+        export let window = func(handle: uint32) -> Window => services.window(handle);
+
+        /// @brief Opens a window of `width` by `height` pixels that shows the bundle's start route. Busy when
+        /// D-1 windows are open.
+        export let open_window = func(title: string, width: int, height: int) -> Result<Window> =>
+            open_window_at(title, width, height, 0, 0, "/");
+
+        /// @brief Opens a window with a minimum size and the bundle route it starts on. Sizes are 0 to 65,535; a
+        /// route starts with `/`. Busy when D-1 windows are open.
+        export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int,
+                route: string) -> Result<Window> {
+            match (services.open_window_at(title, width, height, min_width, min_height, route)) {
+                Result.Ok(window) => {
+                    windows.append(window);
+                    return Result<Window>.Ok(window);
+                },
+                Result.Err(problem) => {
+                    return Result<Window>.Err(problem);
+                },
+            }
+            return Result<Window>.Err(failure(100, "unreachable"));
+        };
+
+        /// @brief The windows this context opened that it has not seen close, in the order they opened.
+        /// Windows a bridge operation opened through its own `Host` are not listed.
+        export let open_windows = func -> Window[list] => windows;
+
+        /// @brief The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
+        export let data_directory = func -> Result<string> => services.data_directory();
+
+        /// @brief Shows a system notification: Shown, Denied (notifications turned off), or Unsupported (no
+        /// notification service).
+        export let notify = func(title: string, body: string) -> Result<NotifyOutcome> => services.notify(title, body);
+
+        /// @brief Replaces the clipboard's text. CapabilityDenied unless the package grants
+        /// `desktop.clipboard_write`.
+        export let clipboard_write = func(text: string) -> Result<Unit> => services.clipboard_write(text);
+
+        /// @brief The clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_read`.
+        export let clipboard_read = func -> Result<string> => services.clipboard_read();
+
+        /// @brief The next window event, waiting for one. Bridge calls that arrive first wait for `run`.
+        /// UnexpectedEnd once the host has closed the channel.
         export let next_event = func -> Result<Event> {
             while (events.length == 0) {
                 if (ended) {
-                    return Result<Event>.Err(failure(6, "the window host closed the channel"));
+                    return Result<Event>.Err(failure(EndedCode, "the window host closed the channel"));
                 }
-                receive();
+                last message = take();
+                match (message) {
+                    Inbound.Call(id, handle, operation, nanos, packed) => { queued.append(message); },
+                    Inbound.Cancel(id) => { drop_queued(id); },
+                    _ => {},
+                }
             }
             last event = events[0];
             events.remove_at(0);
@@ -404,327 +689,437 @@ export let Desktop = module (
         };
 
         /// @brief Answers bridge calls with `dispatcher` and consumes events until the host ends the channel: after
-        /// the last window closes, after `quit`, or when the host itself ends. A Closed event forgets its window; then
-        /// every event goes to the dispatcher's `on_event` handler. A dispatcher for another registry is InvalidInput.
+        /// the last window closes, after `quit`, or when the host itself ends. Each call runs as its own task. A
+        /// Closed event forgets its window; then every event goes to the dispatcher's `on_event` handler on this
+        /// task. When the channel ends, calls still running are cancelled; if any is still running then, the
+        /// process ends at once with the application's status. A dispatcher for another registry is
+        /// InvalidInput.
         export let run = func(dispatcher: Dispatcher) -> Result<Unit> {
             if (!dispatcher.registry.equals(registry)) {
                 return Result<Unit>.Err(failure(4, "the dispatcher serves another registry"));
             }
-            while (!ended) {
-                if (calls.length > 0) {
-                    last call = calls[0];
-                    calls.remove_at(0);
-                    let [status, reply] = dispatcher.dispatch(call);
-                    last body: uint8[list] = new;
-                    wire.put_u32(body, call.id);
-                    if (reply.length + 13 > wire.FrameLimit) {
-                        // A reply beyond D-3 is TooLarge; nothing of it is sent.
-                        wire.put_u32(body, 16);
+            scope (serving) {
+                while (true) {
+                    let message = Inbound.End;
+                    if (queued.length > 0) {
+                        message = queued[0];
+                        queued.remove_at(0);
+                    } else if (events.length > 0) {
+                        last event = events[0];
+                        events.remove_at(0);
+                        dispatcher.notice(event);
+                        continue;
+                    } else if (ended) {
+                        break;
                     } else {
-                        wire.put_u32(body, status);
-                        bytes.append_range(body, reply, 0, reply.length);
+                        message = take();
                     }
-                    send(wire.Return, body);
-                } else if (events.length > 0) {
-                    last event = events[0];
-                    events.remove_at(0);
-                    dispatcher.notice(event);
-                } else {
-                    receive();
+                    match (message) {
+                        Inbound.Call(id, handle, operation, nanos, packed) => {
+                            reap();
+                            match (dispatcher.handler(operation)) {
+                                Optional.Some(handler) => {
+                                    const [stop, stopped, stop_closer] = channels.open<bool>(1);
+                                    running.append(new Running(id, stop));
+                                    last call = new Call(id, services.window(handle), operation, unpack(packed), nanos);
+                                    spawn serve(handler, call, stopped, finished_sender, writer);
+                                },
+                                Optional.None => {
+                                    answer(writer, id, 13, strings.to_bytes("unsupported: operation " + operation));
+                                },
+                            }
+                        },
+                        Inbound.Cancel(id) => {
+                            reap();
+                            for (let i = 0; i < running.length; i = i + 1) {
+                                if (running[i].id == id) {
+                                    running[i].cancel.try_send(true);
+                                    running.remove_at(i);
+                                    break;
+                                }
+                            }
+                        },
+                        _ => {},
+                    }
+                }
+                serving.cancel();
+                reap();
+                if (running.length > 0) {
+                    // An operation that never parks and never asks would hold the process forever once nobody
+                    // is waiting for it: end now, as the host would after its grace period.
+                    program.Process.exit(services.exit_status());
                 }
             }
             return bytes.ok();
         };
 
         /// @brief Ends the application with `status` (0 to 255). The host closes every window and the channel;
-        /// `quit` returns when the channel has ended, `run` then returns, and `run_application` answers `status`.
+        /// `quit` returns when the channel has ended, `run` then returns, and the process ends with `status`.
         /// Calls and events still in flight are dropped.
-        export let quit = func(status: int) -> Result<Unit> {
-            if (status < 0 || status > 255) {
-                return Result<Unit>.Err(failure(4, "invalid exit status"));
-            }
-            last args: uint8[list] = new;
-            wire.put_u32(args, status as uint32);
-            if (ended) {
-                return Result<Unit>.Err(failure(6, "the window host closed the channel"));
-            }
-            quitting = true;
-            quit_status = status;
-            // The host answers quit by closing every window and the channel, never with a HostReturn, so the
-            // request ends at the end of input. Calls and events that arrive first are dropped.
-            match (host_call("neura.desktop.quit", args)) {
-                Result.Ok(_) => {},
-                Result.Err(_) => {},
-            }
-            ended = true;
-            return bytes.ok();
-        };
+        export let quit = func(status: int) -> Result<Unit> => services.quit(status);
 
-        /// @brief The process status the application ends with.
-        export let exit_status = func -> int => quit_status;
+        /// @brief The process status the application ends with: the status given to `quit`, or 0.
+        export let exit_status = func -> int => services.exit_status();
 
-        /// @brief Sends the Hello frame and waits for the host's. Used once by `run_application`.
+        /// @brief Starts the reader task's handshake and waits for its outcome. Used once by `run_application`.
+        #Hidden
         export let connect = func -> Result<Unit> {
-            send(wire.Hello, wire.hello(registry.digest()));
+            writer.send(wire.Hello, wire.hello(registry.digest()));
             while (true) {
-                match (reader.next()) {
-                    Optional.Some(frame) => {
-                        if (frame.kind != wire.Hello) {
-                            return Result<Unit>.Err(failure(100, "the first frame from the host is not Hello"));
+                match (inbound.receive()) {
+                    channels.Received.Value(message) => {
+                        match (message) {
+                            Inbound.Connected => { return bytes.ok(); },
+                            Inbound.Refused(reason) => { return Result<Unit>.Err(failure(100, reason)); },
+                            Inbound.End => {
+                                ended = true;
+                                return Result<Unit>.Err(failure(EndedCode, "the window host closed the channel before Hello"));
+                            },
+                            _ => {},
                         }
-                        last cursor = new wire.Cursor(frame.body);
-                        last version = cursor.u32();
-                        last digest = cursor.rest();
-                        if (cursor.failed || version != wire.Version || digest.length != 32) {
-                            return Result<Unit>.Err(failure(100, "unsupported bridge protocol version"));
-                        }
-                        if (!same_bytes(digest, registry.digest())) {
-                            return Result<Unit>.Err(failure(100, "registry.json differs between host and child"));
-                        }
-                        return bytes.ok();
                     },
-                    Optional.None => {
-                        if (!fill()) {
-                            return Result<Unit>.Err(failure(6, "the window host closed the channel before Hello"));
-                        }
+                    _ => {
+                        return Result<Unit>.Err(failure(EndedCode, "the window host closed the channel before Hello"));
                     },
                 }
             }
             return bytes.ok();
         };
 
-        /// @brief Runs a window request that answers nothing.
-        export let window_request = func(service: string, handle: uint32, title: string, with_title: bool) -> Result<Unit> {
-            last args: uint8[list] = new;
-            wire.put_u32(args, handle);
-            if (with_title) {
-                wire.put_text(args, title);
-            }
-            match (host_call(service, args)) {
-                Result.Ok(_) => {
-                    if (service == "neura.desktop.window.close") {
-                        forget(handle);
+        /// @brief The arguments of the reader task. Used once by `run_application`.
+        #Hidden
+        export let reader_inbound = func -> channels.Sender<Inbound> => inbound_sender;
+        #Hidden
+        export let reader_waiters = func -> channels.Receiver<Waiter> => waiter_receiver;
+        #Hidden
+        export let reader_waiter_closer = func -> channels.Closer<Waiter> => waiter_closer;
+        #Hidden
+        export let window_counter = func -> atomics.AtomicInt64 => services.window_counter();
+
+        /// @brief The next message from the reader, applying events: Closed forgets its window.
+        let take = func -> Inbound {
+            match (inbound.receive()) {
+                channels.Received.Value(message) => {
+                    match (message) {
+                        Inbound.Event(kind, handle, first, second, identifier) => {
+                            events.append(event_of(kind, handle, first, second, identifier));
+                        },
+                        Inbound.End => { ended = true; },
+                        _ => {},
                     }
-                    return bytes.ok();
+                    return message;
                 },
-                Result.Err(problem) => {
-                    return Result<Unit>.Err(problem);
+                _ => {
+                    ended = true;
+                    return Inbound.End;
                 },
             }
-            return bytes.ok();
+            return Inbound.End;
         };
 
-        /// @brief Sends a HostCall and waits for its HostReturn, keeping the calls and events that arrive first.
-        let host_call = func(service: string, args: uint8[list]) -> Result<uint8[list]> {
-            if (ended) {
-                return Result<uint8[list]>.Err(failure(6, "the window host closed the channel"));
-            }
-            last id = next_request;
-            next_request = next_request + 1;
-            last body: uint8[list] = new;
-            wire.put_u32(body, id);
-            wire.put_text(body, service);
-            bytes.append_range(body, args, 0, args.length);
-            send(wire.HostCall, body);
-            while (true) {
-                match (reader.next()) {
-                    Optional.Some(frame) => {
-                        if (frame.kind == wire.HostReturn) {
-                            last cursor = new wire.Cursor(frame.body);
-                            last answered = cursor.u32();
-                            last code = cursor.u32();
-                            last rest = cursor.rest();
-                            if (cursor.failed || answered != id) {
-                                return protocol_failure("a HostReturn for another request");
-                            }
-                            if (code != 0) {
-                                return Result<uint8[list]>.Err(failure(code, service + " failed"));
-                            }
-                            return Result<uint8[list]>.Ok(rest);
-                        }
-                        accept(frame);
-                    },
-                    Optional.None => {
-                        if (!fill()) {
-                            return Result<uint8[list]>.Err(failure(6, "the window host closed the channel"));
-                        }
-                    },
+        /// @brief The Event for an Event frame's fields. Closed forgets its window.
+        let event_of = func(kind: uint32, handle: uint32, first: int64, second: int64, identifier: string) -> Event {
+            last window = services.window(handle);
+            if (kind == 0) {
+                for (let i = 0; i < windows.length; i = i + 1) {
+                    if (windows[i].handle == handle) {
+                        windows.remove_at(i);
+                        break;
+                    }
                 }
+                return Event.Closed(window);
             }
-            return protocol_failure("unreachable");
+            if (kind == 1) {
+                return Event.Focused(window);
+            }
+            if (kind == 2) {
+                return Event.Blurred(window);
+            }
+            if (kind == 3) {
+                return Event.Resized(window, first as int, second as int);
+            }
+            return Event.MenuActivated(identifier, window);
         };
 
-        /// @brief Reads frames until one call or event is queued, or the channel ends.
-        let receive = func {
-            while (true) {
-                match (reader.next()) {
-                    Optional.Some(frame) => {
-                        accept(frame);
-                        return;
-                    },
-                    Optional.None => {
-                        if (!fill()) {
+        /// @brief Drops a call received before `run` whose caller stopped waiting.
+        let drop_queued = func(call_id: uint32) {
+            for (let i = 0; i < queued.length; i = i + 1) {
+                match (queued[i]) {
+                    Inbound.Call(id, handle, operation, nanos, packed) => {
+                        if (id == call_id) {
+                            queued.remove_at(i);
                             return;
                         }
                     },
+                    _ => {},
                 }
             }
         };
 
-        /// @brief Queues a Call or Event frame and applies a Cancel. Any other frame ends the application.
-        let accept = func(frame: wire.Frame) {
-            last cursor = new wire.Cursor(frame.body);
-            if (frame.kind == wire.Call) {
-                last id = cursor.u32();
-                last handle = cursor.u32();
-                last nanos = cursor.i64();
-                last operation = cursor.text();
-                last request = cursor.rest();
-                if (cursor.failed) {
-                    trap_with_message("invalid state: malformed Call frame from the window host");
-                }
-                calls.append(new Call(id, window_of(handle), operation, request, nanos));
-            } else if (frame.kind == wire.Cancel) {
-                last id = cursor.u32();
-                for (let i = 0; i < calls.length; i = i + 1) {
-                    if (calls[i].id == id) {
-                        calls.remove_at(i);
-                        return;
-                    }
-                }
-            } else if (frame.kind == wire.Event) {
-                last kind = cursor.u32();
-                last handle = cursor.u32();
-                last first = cursor.i64();
-                last second = cursor.i64();
-                last identifier = cursor.text();
-                if (cursor.failed || kind > 4) {
-                    trap_with_message("invalid state: malformed Event frame from the window host");
-                }
-                last window = window_of(handle);
-                if (kind == 0) {
-                    forget(handle);
-                    // After the last window's Closed the host ends the channel; the child keeps reading until
-                    // then, so it never exits while the host still counts it as running.
-                    events.append(Event.Closed(window));
-                } else if (kind == 1) {
-                    events.append(Event.Focused(window));
-                } else if (kind == 2) {
-                    events.append(Event.Blurred(window));
-                } else if (kind == 3) {
-                    events.append(Event.Resized(window, first as int, second as int));
-                } else {
-                    events.append(Event.MenuActivated(identifier, window));
-                }
-            } else {
-                trap_with_message("invalid state: unexpected frame from the window host");
-            }
-        };
-
-        /// @brief Reads more input. False at the end of input or on a broken stream, which ends the channel.
-        let fill = func -> bool {
-            if (ended) {
-                return false;
-            }
-            match (input(65536)) {
-                Result.Ok(chunk) => {
-                    if (chunk.length == 0) {
-                        if (reader.partial()) {
-                            trap_with_message("invalid state: the window host ended inside a frame");
+        /// @brief Forgets the calls whose task reported finishing.
+        let reap = func {
+            while (true) {
+                match (finished.try_receive()) {
+                    channels.TryReceived.Value(id) => {
+                        for (let i = 0; i < running.length; i = i + 1) {
+                            if (running[i].id == id) {
+                                running.remove_at(i);
+                                break;
+                            }
                         }
-                        ended = true;
-                        return false;
-                    }
-                    reader.feed(chunk);
-                    if (reader.broken) {
-                        trap_with_message("invalid state: oversized or empty frame from the window host");
-                    }
-                    return true;
-                },
-                Result.Err(_) => {
-                    ended = true;
-                    return false;
-                },
-            }
-            return false;
-        };
-
-        /// @brief Writes one frame. A failed write means the host is gone, which ends the channel.
-        let send = func(kind: uint8, body: uint8[list]) {
-            if (ended) {
-                return;
-            }
-            if (body.length + 5 > wire.FrameLimit) {
-                trap_with_message("invalid state: desktop frame exceeds D-3");
-            }
-            match (output(wire.frame(kind, body))) {
-                Result.Ok(_) => {},
-                Result.Err(_) => { ended = true; },
-            }
-        };
-
-        /// @brief The open window with `handle`, or a new value for a window the child has not seen open.
-        let window_of = func(handle: uint32) -> Window {
-            for (let window in windows) {
-                if (window.handle == handle) {
-                    return window;
+                    },
+                    _ => { return; },
                 }
             }
-            return new Window(handle, instance);
-        };
-
-        /// @brief Drops `handle` from the open windows.
-        let forget = func(handle: uint32) {
-            for (let i = 0; i < windows.length; i = i + 1) {
-                if (windows[i].handle == handle) {
-                    windows.remove_at(i);
-                    return;
-                }
-            }
-        };
-
-        /// @brief The UTF-8 text of an answer that is exactly one text.
-        let text_answer = func(answer: uint8[list]) -> Result<string> {
-            last cursor = new wire.Cursor(answer);
-            last text = cursor.text();
-            if (!cursor.finished()) {
-                return Result<string>.Err(failure(100, "malformed host answer"));
-            }
-            return Result<string>.Ok(text);
-        };
-
-        /// @brief A protocol failure: the channel is unusable.
-        let protocol_failure = func(message: string) -> Result<uint8[list]> {
-            ended = true;
-            return Result<uint8[list]>.Err(failure(100, message));
         };
 
         export let.override to_string = func -> string =>
             "Context(" + windows.length.to_string() + " windows)";
     );
 
-    /// @brief Connects to the window host, runs `start`, and answers the process status: the status given to
-    /// `quit`, 0 when `start` returns Ok, and 1 when it returns an error or the handshake fails. The error goes to
-    /// standard error.
+    /// @brief Connects to the window host, runs `start`, and ends the process with the application's status:
+    /// the status given to `quit`, 0 when `start` returns Ok, and 1 when it returns an error or the handshake
+    /// fails. The error goes to standard error. It returns only if ending the process fails.
     export let run_application = func(registry: Registry, start: func(Context) -> Result<Unit>) -> program.ExitCode {
         last context = new Context(registry);
-        match (context.connect()) {
-            Result.Ok(_) => {},
-            Result.Err(problem) => {
-                console.eprintln("desktop: {}", errors.message(problem));
-                return program.ExitCode.Failure;
-            },
+        let status = 1;
+        scope {
+            spawn read_channel(hex.encode(registry.digest()), context.reader_waiters(), context.reader_waiter_closer(),
+                context.reader_inbound(), context.window_counter());
+            match (context.connect()) {
+                Result.Ok(_) => {
+                    match (start(context)) {
+                        Result.Ok(_) => { status = context.exit_status(); },
+                        Result.Err(problem) => { console.eprintln("desktop: {}", errors.message(problem)); },
+                    }
+                },
+                Result.Err(problem) => {
+                    console.eprintln("desktop: {}", errors.message(problem));
+                },
+            }
+            // The reader task may still wait for input, and calls may still run: end the process now.
+            program.Process.exit(status);
         }
-        match (start(context)) {
-            Result.Ok(_) => {
-                return program.ExitCode.Status(context.exit_status());
-            },
-            Result.Err(problem) => {
-                console.eprintln("desktop: {}", errors.message(problem));
-                return program.ExitCode.Failure;
-            },
+        return program.ExitCode.Status(status);
+    };
+
+    /// @brief The reader task: the only reader of standard input. It checks the host's Hello, answers host
+    /// requests by identifier, and passes calls, cancels and events to the application in order. At the end of
+    /// input it answers every waiting request with UnexpectedEnd and passes End.
+    let read_channel = func(digest: string, waiters: channels.Receiver<Waiter>, waiter_closer: channels.Closer<Waiter>,
+            inbound: channels.Sender<Inbound>, window_count: atomics.AtomicInt64) {
+        last reader = new wire.Reader(wire.FrameLimit);
+        let pending: Waiter[list] = new;
+        let backlog: Inbound[list] = new;
+        let connected = false;
+        while (true) {
+            backlog = deliver(inbound, backlog);
+            match (input.read(65536)) {
+                input.BytesOutcome.Ok(chunk) => {
+                    if (chunk.length == 0) {
+                        if (reader.partial()) {
+                            trap_with_message("invalid state: the window host ended inside a frame");
+                        }
+                        break;
+                    }
+                    reader.feed(chunk);
+                    if (reader.broken) {
+                        trap_with_message("invalid state: oversized or empty frame from the window host");
+                    }
+                },
+                input.BytesOutcome.Error(_) => {
+                    break;
+                },
+            }
+            while (true) {
+                match (reader.next()) {
+                    Optional.Some(frame) => {
+                        last cursor = new wire.Cursor(frame.body);
+                        if (!connected) {
+                            if (frame.kind != wire.Hello) {
+                                backlog.append(Inbound.Refused("the first frame from the host is not Hello"));
+                                finish(waiters, waiter_closer, pending, inbound, backlog);
+                                return;
+                            }
+                            last version = cursor.u32();
+                            last received = cursor.rest();
+                            if (cursor.failed || version != wire.Version || received.length != 32) {
+                                backlog.append(Inbound.Refused("unsupported bridge protocol version"));
+                                finish(waiters, waiter_closer, pending, inbound, backlog);
+                                return;
+                            }
+                            if (hex.encode(received) != digest) {
+                                backlog.append(Inbound.Refused("registry.json differs between host and child"));
+                                finish(waiters, waiter_closer, pending, inbound, backlog);
+                                return;
+                            }
+                            connected = true;
+                            backlog.append(Inbound.Connected);
+                        } else if (frame.kind == wire.HostReturn) {
+                            last answered = cursor.u32();
+                            last code = cursor.u32();
+                            last rest = cursor.rest();
+                            if (cursor.failed) {
+                                trap_with_message("invalid state: malformed HostReturn frame from the window host");
+                            }
+                            pending = registered(waiters, pending);
+                            let found = false;
+                            for (let i = 0; i < pending.length; i = i + 1) {
+                                match (pending[i]) {
+                                    Waiter.Waiting(id, reply) => {
+                                        if (id == answered) {
+                                            reply.try_send(Answer.Reply(code, pack(rest)));
+                                            pending.remove_at(i);
+                                            found = true;
+                                            break;
+                                        }
+                                    },
+                                }
+                            }
+                            if (!found) {
+                                trap_with_message("invalid state: a HostReturn for a request the child did not make");
+                            }
+                        } else if (frame.kind == wire.Call) {
+                            last id = cursor.u32();
+                            last handle = cursor.u32();
+                            last nanos = cursor.i64();
+                            last operation = cursor.text();
+                            last request = cursor.rest();
+                            if (cursor.failed) {
+                                trap_with_message("invalid state: malformed Call frame from the window host");
+                            }
+                            backlog.append(Inbound.Call(id, handle, operation, nanos, pack(request)));
+                        } else if (frame.kind == wire.Cancel) {
+                            last id = cursor.u32();
+                            if (!cursor.finished()) {
+                                trap_with_message("invalid state: malformed Cancel frame from the window host");
+                            }
+                            backlog.append(Inbound.Cancel(id));
+                        } else if (frame.kind == wire.Event) {
+                            last kind = cursor.u32();
+                            last handle = cursor.u32();
+                            last first = cursor.i64();
+                            last second = cursor.i64();
+                            last identifier = cursor.text();
+                            if (!cursor.finished() || kind > 4) {
+                                trap_with_message("invalid state: malformed Event frame from the window host");
+                            }
+                            if (kind == 0) {
+                                window_count.add(-1);
+                            }
+                            backlog.append(Inbound.Event(kind, handle, first, second, identifier));
+                        } else {
+                            trap_with_message("invalid state: unexpected frame from the window host");
+                        }
+                        backlog = deliver(inbound, backlog);
+                    },
+                    Optional.None => { break; },
+                }
+            }
         }
-        return program.ExitCode.Failure;
+        backlog.append(Inbound.End);
+        finish(waiters, waiter_closer, pending, inbound, backlog);
+    };
+
+    /// @brief Ends the reader: no request can register any more, every waiting request answers UnexpectedEnd,
+    /// and the messages not yet taken reach the application, waiting for it to take them.
+    let finish = func(waiters: channels.Receiver<Waiter>, waiter_closer: channels.Closer<Waiter>, pending: Waiter[list],
+            inbound: channels.Sender<Inbound>, backlog: Inbound[list]) {
+        waiter_closer.close();
+        last all = registered(waiters, pending);
+        for (let waiter in all) {
+            match (waiter) {
+                Waiter.Waiting(id, reply) => { reply.try_send(Answer.Reply(EndedCode, "x")); },
+            }
+        }
+        for (let message in backlog) {
+            inbound.send(message);
+        }
+    };
+
+    /// @brief `pending` with every registration received since.
+    let registered = func(waiters: channels.Receiver<Waiter>, pending: Waiter[list]) -> Waiter[list] {
+        while (true) {
+            match (waiters.try_receive()) {
+                channels.TryReceived.Value(waiter) => { pending.append(waiter); },
+                _ => { return pending; },
+            }
+        }
+        return pending;
+    };
+
+    /// @brief Passes the messages of `backlog` the application has room for, in order; answers the rest.
+    let deliver = func(inbound: channels.Sender<Inbound>, backlog: Inbound[list]) -> Inbound[list] {
+        while (backlog.length > 0) {
+            match (inbound.try_send(backlog[0])) {
+                channels.TrySendOutcome.Sent => { backlog.remove_at(0); },
+                _ => { return backlog; },
+            }
+        }
+        return backlog;
+    };
+
+    /// @brief The task of one bridge call: runs the implementation in a scope of its own, writes its Return
+    /// frame, and reports finishing. A message on `stop` cancels the scope; the Return of a cancelled call is
+    /// not written, because the host has already answered its caller.
+    let serve = func(handler: func(Call) -> Result<uint8[list]>, call: Call, stop: channels.Receiver<bool>,
+            finished: channels.Sender<uint32>, writer: Writer) {
+        scope (work) {
+            last task = spawn handler(call);
+            select {
+                let result = task.join() => {
+                    let [status, reply] = outcome(result);
+                    answer(writer, call.id, status, reply);
+                },
+                let _ = stop.receive() => {
+                    work.cancel();
+                    let _ = task.join();
+                },
+            }
+        }
+        finished.try_send(call.id);
+    };
+
+    /// @brief The status and reply bytes of an implementation's result: 0 and the reply, or 100 and the error's
+    /// message.
+    let outcome = func(result: Result<uint8[list]>) -> [uint32, uint8[list]] {
+        return match (result) {
+            Result.Ok(reply) => [0 as uint32, reply],
+            Result.Err(problem) => [100 as uint32, strings.to_bytes(errors.message(problem))],
+        };
+    };
+
+    /// @brief Writes the Return frame of call `id`. A reply beyond D-3 is TooLarge; nothing of it is sent.
+    let answer = func(writer: Writer, id: uint32, status: uint32, reply: uint8[list]) {
+        last body: uint8[list] = new;
+        wire.put_u32(body, id);
+        if (reply.length + 13 > wire.FrameLimit) {
+            wire.put_u32(body, 16);
+        } else {
+            wire.put_u32(body, status);
+            bytes.append_range(body, reply, 0, reply.length);
+        }
+        writer.send(wire.Return, body);
+    };
+
+    /// @brief Bytes as transferable text: "t" and the text when they are UTF-8, else "x" and their hex digits.
+    let pack = func(data: uint8[list]) -> string {
+        let [valid, text] = string.from_utf8(data);
+        if (valid) {
+            return "t" + text;
+        }
+        return "x" + hex.encode(data);
+    };
+
+    /// @brief The bytes `pack` packed.
+    let unpack = func(packed: string) -> uint8[list] {
+        if (strings.starts_with(packed, "t")) {
+            return strings.to_bytes(packed.slice(1, packed.byte_length));
+        }
+        return match (hex.decode(packed.slice(1, packed.byte_length))) {
+            Result.Ok(data) => data,
+            Result.Err(_) => new uint8[list](),
+        };
     };
 
     /// @brief Whether `id` is a valid operation identifier.
@@ -745,17 +1140,14 @@ export let Desktop = module (
     /// @brief Whether a window dimension fits the host service's range.
     let valid_size = func(value: int) -> bool => value >= 0 && value <= 65535;
 
-    /// @brief Whether two byte lists are equal.
-    let same_bytes = func(a: uint8[list], b: uint8[list]) -> bool {
-        if (a.length != b.length) {
-            return false;
+    /// @brief The UTF-8 text of an answer that is exactly one text.
+    let text_answer = func(answer: uint8[list]) -> Result<string> {
+        last cursor = new wire.Cursor(answer);
+        last text = cursor.text();
+        if (!cursor.finished()) {
+            return Result<string>.Err(failure(100, "malformed host answer"));
         }
-        for (let i = 0; i < a.length; i = i + 1) {
-            if (a[i] != b[i]) {
-                return false;
-            }
-        }
-        return true;
+        return Result<string>.Ok(text);
     };
 
     /// @brief The error for host code `code`.

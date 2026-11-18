@@ -15,7 +15,7 @@ const {
 
 const fixtureOperations = ['fixture.clipboard_read', 'fixture.clipboard_write', 'fixture.close', 'fixture.data_dir',
     'fixture.echo', 'fixture.fail', 'fixture.focus', 'fixture.notify', 'fixture.open', 'fixture.open_many', 'fixture.quit',
-    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved'];
+    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved', 'fixture.wait', 'fixture.work'];
 const fixtureRegistry = Buffer.from(JSON.stringify({ operations: fixtureOperations, schema: 1 }));
 
 function u32(value) {
@@ -81,7 +81,7 @@ test('the registry is canonical and hashed as written', () => {
     const registry = parseRegistry(fixtureRegistry);
     assert.equal(registry.digest, createHash('sha256').update(fixtureRegistry).digest('hex'));
     // The digest Std.Desktop.Registry computes for the same identifiers (tests/stdlib/desktop).
-    assert.equal(registry.digest, 'e32b18f656b3c56ca135d92a59bdafc5815ee28e14cbad10eaec78dc7b5f7a3d');
+    assert.equal(registry.digest, '8b2f1075c0bfda522889711fbc75537e5731cbcbc59e2eafafd1bfe6499bdaa9');
     assert.equal(parseRegistry(Buffer.from('{"operations":[],"schema":1}')).operations.size, 0);
     for (const bad of [
         '{"schema":1,"operations":[]}', '{"operations":["b","a"],"schema":1}', '{"operations":["a","a"],"schema":1}',
@@ -175,8 +175,7 @@ test('closing a window cancels its calls in the child and leaves the others', as
 const child = process.env.NEURA_DESKTOP_TEST_CHILD;
 
 // Every write goes through one queue, as the window host's do.
-function startChild(onFrame, digest = parseRegistry(fixtureRegistry).digest, args = []) {
-    const stderr = [];
+function startChild(onFrame, digest = parseRegistry(fixtureRegistry).digest, args = [], stderr = []) {
     let queue;
     const channel = new NativeChildChannel({ executable: child, args, registryDigest: digest }, {
         onFrame: message => onFrame(message, queue), onStderr: chunk => stderr.push(chunk),
@@ -220,11 +219,14 @@ test('the Neura child: Hello, window.open, sixteen calls, exact 64-bit text, Clo
     sends.push(queue.send(Kind.Call, callBody(17, 1, 'fixture.fail', '')));
     await Promise.all(sends);
     await done.promise;
-    assert.deepEqual(returns.slice(0, 16).map(r => r.id), Array.from({ length: 16 }, (_, i) => i + 1));
-    assert.equal(returns[8].reply, big);
-    assert.equal(returns[15].reply, '#16');
-    assert.equal(returns[16].status, DesktopStatus.Other);
-    assert.equal(returns[16].reply, 'PermissionDenied: refused by the fixture');
+    // Each call runs as its own task, so replies come in the order the operations finish.
+    const byId = new Map(returns.map(r => [r.id, r]));
+    assert.equal(byId.size, 17);
+    for (let id = 1; id <= 16; id += 1) {
+        assert.deepEqual([byId.get(id).status, byId.get(id).reply], [0, id === 9 ? big : `#${id}`]);
+    }
+    assert.equal(byId.get(17).status, DesktopStatus.Other);
+    assert.equal(byId.get(17).reply, 'PermissionDenied: refused by the fixture');
     // The last window's Closed, then the end of the channel, as the window host sends them.
     await queue.send(Kind.Event, Buffer.concat([u32(0), u32(1), Buffer.alloc(16), text('')]));
     const closed = await channel.close();
@@ -232,10 +234,11 @@ test('the Neura child: Hello, window.open, sixteen calls, exact 64-bit text, Clo
     assert.equal(closed.code, 0);
 });
 
-test('the Neura child: an unserved operation, a queued call cancelled, and a call sent during a host request', { skip: !child }, async () => {
+test('the Neura child answers other calls while one waits for a host request, and an unserved operation', { skip: !child }, async () => {
     const returns = [];
     let titleCall;
     const titled = Promise.withResolvers();
+    const others = Promise.withResolvers();
     const finished = Promise.withResolvers();
     const { channel, queue } = startChild(async ({ kind, body }, ch) => {
         if (kind === Kind.HostCall) {
@@ -250,23 +253,147 @@ test('the Neura child: an unserved operation, a queued call cancelled, and a cal
             }
         } else {
             returns.push({ id: body.readUInt32LE(0), status: body.readUInt32LE(4), reply: body.subarray(8).toString() });
+            if (returns.length === 2) others.resolve();
             if (returns.length === 3) finished.resolve();
         }
     });
     await channel.ready;
     await queue.send(Kind.Call, callBody(1, 4, 'fixture.title', 'Zoë ✓'));
     await titled.promise;
-    // While the child waits for its set_title answer: a call it must keep, one it must drop, and an unserved one.
-    await queue.send(Kind.Call, callBody(2, 4, 'fixture.echo', 'kept'));
-    await queue.send(Kind.Call, callBody(3, 4, 'fixture.echo', 'dropped'));
-    await queue.send(Kind.Cancel, u32(3));
-    await queue.send(Kind.Call, callBody(4, 4, 'fixture.unserved', ''));
+    // While call 1 waits for its set_title answer, calls 2 and 3 are answered.
+    await queue.send(Kind.Call, callBody(2, 4, 'fixture.echo', 'not held up'));
+    await queue.send(Kind.Call, callBody(3, 4, 'fixture.unserved', ''));
+    await others.promise;
+    assert.deepEqual(returns.map(r => [r.id, r.status, r.reply]).sort(), [
+        [2, 0, 'not held up'], [3, DesktopStatus.Unsupported, 'unsupported: operation fixture.unserved'],
+    ]);
     await answer(queue, titleCall.id, 0);
     await finished.promise;
-    assert.deepEqual(returns.map(r => [r.id, r.status, r.reply]), [
-        [1, 0, 'titled'], [2, 0, 'kept'], [4, DesktopStatus.Unsupported, 'unsupported: operation fixture.unserved'],
-    ]);
+    assert.deepEqual([returns[2].id, returns[2].status, returns[2].reply], [1, 0, 'titled']);
     await channel.close();
+});
+
+test('the Neura child answers calls in the order they finish (case 5)', { skip: !child }, async () => {
+    const order = [];
+    const done = Promise.withResolvers();
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            order.push([body.readUInt32LE(0), body.subarray(8).toString()]);
+            if (order.length === 3) done.resolve();
+        }
+    });
+    await channel.ready;
+    await queue.send(Kind.Call, callBody(1, 1, 'fixture.wait', '600'));
+    await queue.send(Kind.Call, callBody(2, 1, 'fixture.wait', '200'));
+    await queue.send(Kind.Call, callBody(3, 1, 'fixture.echo', 'now'));
+    await done.promise;
+    assert.deepEqual(order, [[3, 'now'], [2, 'waited'], [1, 'waited']]);
+    await channel.close();
+});
+
+test('a Cancel stops a waiting and a computing operation at their cancellation points; others go on', { skip: !child }, async () => {
+    const returns = [];
+    const echoed = Promise.withResolvers();
+    const stderr = [];
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            returns.push(body.readUInt32LE(0));
+            echoed.resolve();
+        }
+    }, undefined, [], stderr);
+    await channel.ready;
+    await queue.send(Kind.Call, callBody(1, 1, 'fixture.wait', '60000'));
+    await queue.send(Kind.Call, callBody(2, 1, 'fixture.work', ''));
+    await queue.send(Kind.Call, callBody(3, 1, 'fixture.echo', 'still served'));
+    await echoed.promise;
+    // As the host does past D-4 or when the window closes: Cancel, and the caller already has its answer.
+    await queue.send(Kind.Cancel, u32(1));
+    await queue.send(Kind.Cancel, u32(2));
+    const log = () => Buffer.concat(stderr).toString();
+    await until(() => /child: wait 1 cancelled/.test(log()) && /child: work 2 stopped/.test(log()), 'both cancellations');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    // A cancelled call's Return is not written: the host has answered its caller.
+    assert.deepEqual(returns, [3]);
+    const closed = await channel.close();
+    assert.equal(closed.error, null);
+    assert.equal(closed.code, 0);
+});
+
+test('a call that waits 20 s for news returns, and does not hold up the others (case 4)', { skip: !child, timeout: 40000 }, async () => {
+    const returns = [];
+    const done = Promise.withResolvers();
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            returns.push({ id: body.readUInt32LE(0), at: Date.now(), reply: body.subarray(8).toString() });
+            if (returns.length === 2) done.resolve();
+        }
+    });
+    await channel.ready;
+    const started = Date.now();
+    await queue.send(Kind.Call, callBody(1, 1, 'fixture.wait', '20000'));
+    await queue.send(Kind.Call, callBody(2, 1, 'fixture.echo', 'meanwhile'));
+    await done.promise;
+    assert.deepEqual(returns.map(r => [r.id, r.reply]), [[2, 'meanwhile'], [1, 'waited']]);
+    assert.ok(returns[0].at - started < 5000);
+    assert.ok(returns[1].at - started >= 19900);
+    await channel.close();
+});
+
+test('thirty-two calls of D-3 from one window in flight at once, each echoed exactly', { skip: !child, timeout: 120000 }, async () => {
+    const returns = new Map();
+    const done = Promise.withResolvers();
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            returns.set(body.readUInt32LE(0), body.subarray(4));
+            if (returns.size === 32) done.resolve();
+        }
+    });
+    await channel.ready;
+    // Half UTF-8 text and half arbitrary bytes, the largest request the host forwards.
+    const request = id => {
+        const bytes = Buffer.alloc(1048576 - 37, id % 2 ? 0x61 + id : 0xff);
+        bytes.writeUInt32LE(id, 0);
+        return bytes;
+    };
+    for (let id = 1; id <= 32; id += 1) await queue.send(Kind.Call, callBody(id, 1, 'fixture.echo', request(id)));
+    await done.promise;
+    for (let id = 1; id <= 32; id += 1) {
+        const reply = returns.get(id);
+        assert.equal(reply.readUInt32LE(0), 0);
+        assert.equal(Buffer.compare(reply.subarray(4), request(id)), 0, `call ${id}`);
+    }
+    const closed = await channel.close();
+    assert.equal(closed.code, 0);
+});
+
+test('the end of input with calls running ends the child at once with the application status (case 34)', { skip: !child }, async () => {
+    const echoed = Promise.withResolvers();
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            echoed.resolve();
+        }
+    });
+    await channel.ready;
+    // One operation asks for cancellation and one never does: neither may keep the child alive.
+    await queue.send(Kind.Call, callBody(1, 1, 'fixture.work', ''));
+    await queue.send(Kind.Call, callBody(2, 1, 'fixture.spin', '1000000000000000'));
+    await queue.send(Kind.Call, callBody(3, 1, 'fixture.echo', 'x'));
+    await echoed.promise;
+    const started = Date.now();
+    const closed = await channel.close();
+    assert.equal(closed.error, null);
+    assert.equal(closed.code, 0);
+    assert.ok(Date.now() - started < 4000, 'the child waited for its calls');
 });
 
 test('the Neura child: a failed host request reaches the operation, and quit ends with its status', { skip: !child }, async () => {
@@ -291,6 +418,7 @@ test('the Neura child: a failed host request reaches the operation, and quit end
     });
     await channel.ready;
     await queue.send(Kind.Call, callBody(1, 1, 'fixture.open', ''));
+    await until(() => returns.length === 1, 'the refused window');
     await queue.send(Kind.Call, callBody(2, 1, 'fixture.quit', ''));
     await quitting.promise;
     // The host answers quit by ending the channel.

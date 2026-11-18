@@ -178,11 +178,11 @@ export let Wire = module (
             limit = frame_limit;
         };
 
-        /// @brief Adds received bytes.
+        /// @brief Adds received bytes. The bytes of frames already returned are dropped first, so the buffer
+        /// holds at most one incomplete frame and the chunk.
         export let feed = func(chunk: uint8[list]) {
-            if (start > 0 && start == buffer.length) {
-                last empty: uint8[list] = new;
-                buffer = empty;
+            if (start > 0) {
+                buffer = bytes.copy_range(buffer, start, buffer.length);
                 start = 0;
             }
             bytes.append_range(buffer, chunk, 0, chunk.length);
