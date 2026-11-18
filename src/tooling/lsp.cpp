@@ -752,6 +752,21 @@ class Server {
                     break;
                 }
             }
+            if (symbol->declaration && symbol->declaration->record) {
+                // The members lowering generates for a record.
+                std::string parameters;
+                const auto declared = session_.documents.find(symbol->file);
+                for (const auto &member : symbol->declaration->members)
+                    if (member.kind == Declaration::Kind::Function && member.name == "init" &&
+                        declared != session_.documents.end())
+                        for (const auto &parameter : member.parameters)
+                            parameters += (parameters.empty() ? "" : ", ") + parameter.name + ": " +
+                                          declared->second.source.substr(parameter.type.span.offset,
+                                                                         parameter.type.span.length);
+                markdown.insert(markdown.size() - 3, "// generated\nexport let init = func(" + parameters +
+                                ") => set;\nexport let equals = func(other: class) -> bool;\n"
+                                "export let hash_code = func() -> uint32;\nexport let to_string = func() -> string;\n");
+            }
             if (!symbol->documentation.empty())
                 markdown += "\n\n" + symbol->documentation;
             if (symbol->declaration && !symbol->declaration->accessors.empty())

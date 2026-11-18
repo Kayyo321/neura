@@ -169,6 +169,17 @@ std::string signature(const Declaration &d) {
             text += " -> " + syntax_type(*d.type);
         else
             text += " -> void";
+    } else if (d.record) {
+        // A record by its components (docs/design/Records030.md, Language server).
+        text += "record " + d.name + " (";
+        bool first = true;
+        for (const auto &member : d.members) {
+            if (member.kind != Declaration::Kind::Binding || member.static_member)
+                continue;
+            text += (first ? "" : ", ") + member.name + ": " + (member.type ? syntax_type(*member.type) : "");
+            first = false;
+        }
+        text += ")";
     } else {
         switch (d.kind) {
         case Declaration::Kind::Class:
@@ -1849,6 +1860,90 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                                                               {"newText", parameter.name + ": "}}}});
                 }
             }
+        }
+    }
+    // Inside the braces of a copy, `new with(source) { `, the fields of the
+    // source's record that are not replaced yet, also while the copy is
+    // unfinished (docs/design/Records030.md, Language server; edge case 57).
+    if (!member && before != std::string::npos && (doc.source[before] == '{' || doc.source[before] == ',')) {
+        int depth = 0;
+        std::optional<std::size_t> brace;
+        std::set<std::string> written;
+        for (std::size_t i = doc.tokens.size(); i > 0;) {
+            const auto &t = doc.tokens[--i];
+            if (t.kind == TokenKind::End || t.span.offset >= start)
+                continue;
+            if (t.text == ")" || t.text == "]" || t.text == "}")
+                ++depth;
+            else if (t.text == "(" || t.text == "[" || t.text == "{") {
+                if (depth) {
+                    --depth;
+                    continue;
+                }
+                if (t.text == "{")
+                    brace = i;
+                break;
+            } else if (!depth && t.text == ":" && i > 1 && doc.tokens[i - 1].kind == TokenKind::Identifier &&
+                       (doc.tokens[i - 2].text == "," || doc.tokens[i - 2].text == "{"))
+                written.insert(doc.tokens[i - 1].text);
+        }
+        // The '(' that matches the ')' before the brace, after `new with`.
+        std::optional<std::size_t> open;
+        if (brace && *brace > 0 && doc.tokens[*brace - 1].text == ")") {
+            int nested = 0;
+            for (std::size_t j = *brace - 1; j > 0;) {
+                const auto &t = doc.tokens[--j];
+                if (t.text == ")")
+                    ++nested;
+                else if (t.text == "(" && nested-- == 0) {
+                    if (j >= 2 && doc.tokens[j - 1].text == "with" && doc.tokens[j - 2].text == "new")
+                        open = j;
+                    break;
+                }
+            }
+        }
+        std::string record_name;
+        if (open && *open + 3 == *brace && doc.tokens[*open + 1].kind == TokenKind::Identifier) {
+            // A name: its declared or inferred type, else the type written
+            // after it in a parameter or binding of the buffer.
+            const auto &name = doc.tokens[*open + 1];
+            if (const auto *source = symbol_at(doc, name.span.offset)) {
+                if (program && source->compiler_id != no_symbol) {
+                    const auto &type = program->symbols[source->compiler_id].type;
+                    if (type.kind == TypeKind::Object && type.symbol != no_symbol)
+                        record_name = program->symbols[type.symbol].name;
+                }
+                if (record_name.empty())
+                    record_name = source->type_name;
+            }
+            for (std::size_t j = 0; record_name.empty() && j + 2 < *open; ++j) {
+                if (doc.tokens[j].text == name.text && doc.tokens[j + 1].text == ":" &&
+                    doc.tokens[j + 2].kind == TokenKind::Identifier)
+                    record_name = doc.tokens[j + 2].text;
+            }
+        } else if (open && *open + 3 < *brace && doc.tokens[*open + 1].text == "new" &&
+                   doc.tokens[*open + 2].kind == TokenKind::Identifier) {
+            record_name = doc.tokens[*open + 2].text;
+        }
+        if (const auto dot = record_name.rfind('.'); dot != std::string::npos)
+            record_name.erase(0, dot + 1);
+        if (open && !record_name.empty()) {
+            for (const auto &candidate : symbols) {
+                if (candidate.name != record_name || !candidate.declaration || !candidate.declaration->record)
+                    continue;
+                for (const auto &field : candidate.declaration->members) {
+                    if (field.kind != Declaration::Kind::Binding || field.static_member || written.contains(field.name) ||
+                        !field.name.starts_with(prefix) || !seen.insert(field.name + ":").second)
+                        continue;
+                    items.emplace_back(Json{{"label", field.name + ":"}, {"kind", 5},
+                                            {"detail", field.name + ": " + (field.type ? syntax_type(*field.type) : "")},
+                                            {"sortText", "0" + field.name},
+                                            {"textEdit", Json{{"range", replacement_range},
+                                                              {"newText", field.name + ": "}}}});
+                }
+                break;
+            }
+            return Json{{"isIncomplete", false}, {"items", items}};
         }
     }
     if (member) {

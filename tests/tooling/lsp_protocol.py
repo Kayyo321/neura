@@ -225,6 +225,43 @@ class LanguageServerTests(unittest.TestCase):
         self.assertIn('variant Mode.Quick: "Fast";', pinned[0])
         self.assertEqual(sorted(edit['newText'] for edit in edits if 'annotationId' not in edit), ['Quick', 'Quick'])
 
+    def test_record_field_rename_reaches_labels_and_copies(self):
+        # docs/design/Records030.md, Tooling: the component, the constructor's
+        # label, a copy's replacement name and a use rename together.
+        path = self.root / 'users.nra'
+        source = ('let User = record (id: int, name: string);\n'
+                  'let make = func() -> User => new User(id: 1, name: "a");\n'
+                  'let copy = func(u: User) -> User => new with(u) { name: u.name };\n')
+        self.client.open(path, source)
+        definition = self.client.request('textDocument/definition', params(path, 2, 51))
+        self.assertEqual(definition['range']['start'], {'line': 0, 'character': 28})
+        rename = self.client.request('textDocument/rename', {**params(path, 0, 29), 'newName': 'label'})
+        starts = sorted((edit['range']['start']['line'], edit['range']['start']['character'])
+                        for item in rename['documentChanges'] for edit in item['edits'])
+        self.assertEqual(starts, [(0, 28), (1, 45), (2, 50), (2, 58)])
+
+    def test_record_hover_and_copy_completion(self):
+        # Hover lists a record's generated members; completion in a copy's
+        # braces offers the fields not yet replaced, also in an unfinished
+        # copy at the end of the buffer (edge case 57).
+        path = self.root / 'records.nra'
+        self.client.open(path, 'let User = record (id: int, name: string);\n'
+                               'let copy = func(u: User) -> User => new with(u) { id: 2, };\n')
+        hover = self.client.request('textDocument/hover', params(path, 0, 5))['contents']['value']
+        self.assertIn('record User (id: int, name: string)', hover)
+        self.assertIn('export let init = func(id: int, name: string) => set;', hover)
+        self.assertIn('export let hash_code = func() -> uint32;', hover)
+        items = self.client.request('textDocument/completion', params(path, 1, 57))['items']
+        self.assertEqual([item['label'] for item in items], ['name:'])
+        unfinished = self.root / 'unfinished.nra'
+        self.client.open(unfinished, 'let User = record (id: int, name: string);\n'
+                                     'let copy = func(u: User) -> User => new with(u) {')
+        items = self.client.request('textDocument/completion', params(unfinished, 1, 50))['items']
+        self.assertEqual([item['label'] for item in items], ['id:', 'name:'])
+        reports = [n['params']['diagnostics'] for n in self.client.notifications
+                   if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == unfinished.as_uri()]
+        self.assertEqual([item['code'] for item in reports[-1]], ['E0203'])
+
     def test_incomplete_json_derivation_keeps_previous_symbols(self):
         path = self.root / 'model.nra'
         self.client.open(path, 'let visible = 1;\nlet Incomplete = derive')

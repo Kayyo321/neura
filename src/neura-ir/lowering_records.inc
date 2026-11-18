@@ -455,6 +455,8 @@ IrNode Lowering::copy(const Expr& expr, Context& context) {
                 .label("'" + name + "' is replaced again here")
                 .label(expr.label_spans[earlier->second], "'" + name + "' is first replaced here")
                 .help("replace each field once");
+        // Editor navigation and rename reach the field from its replacement.
+        program_.name_uses.emplace_back(at, *field);
     }
     const auto constructor = own_member(record, "init");
     resolve(constructor);
