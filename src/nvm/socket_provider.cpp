@@ -29,7 +29,11 @@
 #include <unistd.h>
 #endif
 #ifdef __linux__
+#include <linux/udp.h>
 #include <sys/sendfile.h>
+#endif
+#ifndef IPPROTO_MPTCP
+#define IPPROTO_MPTCP 262
 #endif
 
 namespace neura::nvm::provider {
@@ -37,6 +41,7 @@ namespace neura::nvm::provider {
 namespace {
 
 HostType address_result() { return tuple({byte_list(), text(), int32()}); }
+HostType segments_result() { return tuple({byte_list(), text(), int32(), int32()}); }
 
 } // namespace
 
@@ -58,6 +63,11 @@ void add_socket_services(const Adder& add, StandardServices::Tables&, const Capa
     add(signature("neura.net.option.get", {int64(), int32()}, int64()), unsupported);
     add(signature("neura.net.resolve", {text(), int32()}, text_list()), unsupported);
     add(signature("neura.net.send_file", {int64(), int64(), int64(), int64()}, int64()), unsupported);
+    add(signature("neura.net.udp.receive_segments", {int64(), int32(), int64()}, segments_result()), unsupported);
+    add(signature("neura.net.mptcp.listen", {text(), int32()}, int64()), unsupported);
+    add(signature("neura.net.mptcp.connect", {text(), int32(), int64()}, int64()), unsupported);
+    add(signature("neura.net.pipe", {}, tuple({int64(), int64()})), unsupported);
+    add(signature("neura.net.splice", {int64(), int64(), int64()}, int64()), unsupported);
 }
 
 #else
@@ -182,11 +192,45 @@ std::optional<OptionSpec> option_of(std::int32_t option) {
     case 10: return OptionSpec{SOL_SOCKET, SO_RCVBUF};
     case 11: return OptionSpec{SOL_SOCKET, SO_SNDBUF};
     case 12: return OptionSpec{SOL_SOCKET, SO_BROADCAST};
+#ifdef UDP_SEGMENT
+    // UDP generic segmentation: a send of more than this many bytes leaves
+    // as datagrams of this size (0 turns it off).
+    case 13: return OptionSpec{IPPROTO_UDP, UDP_SEGMENT};
+#endif
+#ifdef UDP_GRO
+    // UDP receive coalescing: neura.net.udp.receive_segments may return
+    // several datagrams of one size at once.
+    case 14: return OptionSpec{IPPROTO_UDP, UDP_GRO};
+#endif
+#ifdef SO_PROTOCOL
+    // The socket's protocol number (6 TCP, 17 UDP, 262 MPTCP); read only.
+    case 15: return OptionSpec{SOL_SOCKET, SO_PROTOCOL};
+#endif
     default: return std::nullopt;
     }
 }
 
-bool known_option(std::int32_t option) { return option >= 1 && option <= 12; }
+bool known_option(std::int32_t option) { return option >= 1 && option <= 15; }
+bool read_only_option(std::int32_t option) { return option == 15; }
+
+// Waits until `descriptor` has `events` or the deadline passes: 1 ready, 0
+// timed out, -1 failed. A zero timeout waits without limit.
+int wait_for_events(int descriptor, short events, std::int64_t timeout_nanos) {
+    const bool limited = timeout_nanos > 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(limited ? timeout_nanos : 0);
+    for (;;) {
+        int milliseconds = -1;
+        if (limited) {
+            const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                deadline - std::chrono::steady_clock::now()).count();
+            if (left <= 0) return 0;
+            milliseconds = timeout_milliseconds(left);
+        }
+        pollfd entry{descriptor, events, 0};
+        const int ready = ::poll(&entry, 1, milliseconds);
+        if (ready >= 0 || errno != EINTR) return ready;
+    }
+}
 
 } // namespace
 
@@ -363,7 +407,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         auto* socket = find(request.arguments.at(0));
         const auto option = as_int32(request.arguments.at(1));
         const auto value = as_int64(request.arguments.at(2));
-        if (!socket || !known_option(option) || value < 0 || value > INT32_MAX) return fail(host_error::invalid_input);
+        if (!socket || !known_option(option) || read_only_option(option) || value < 0 || value > INT32_MAX) {
+            return fail(host_error::invalid_input);
+        }
         const auto spec = option_of(option);
         if (!spec) return fail(host_error::unsupported);
         const int number = static_cast<int>(value);
@@ -424,6 +470,184 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         ::freeaddrinfo(found);
 #endif
         return HostCompletion::ok(std::move(list));
+    });
+
+    // A datagram, or with UDP_GRO (option 14) several coalesced datagrams of
+    // one size, and that size: the bytes, the sender's address and port, and
+    // the segment size (the byte count when the kernel did not coalesce).
+    add(signature("neura.net.udp.receive_segments", {int64(), int32(), int64()}, segments_result()),
+        [=](const HostRequest& request) {
+            if (!granted->net) return denied();
+            auto* socket = find(request.arguments.at(0));
+            const auto max = as_int32(request.arguments.at(1));
+            const auto timeout = as_int64(request.arguments.at(2));
+            if (!socket || !socket->datagram || max < 1 || timeout < 0) return fail(host_error::invalid_input);
+            const int ready = wait_readable(socket->descriptor, timeout);
+            if (ready == 0) return fail(host_error::timed_out);
+            if (ready < 0) return errno_failure();
+            std::string bytes(std::min<std::size_t>(static_cast<std::size_t>(max), max_read_bytes), '\0');
+            sockaddr_storage from{};
+            iovec vector{bytes.data(), bytes.size()};
+            alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))] = {};
+            msghdr message{};
+            message.msg_name = &from;
+            message.msg_namelen = sizeof from;
+            message.msg_iov = &vector;
+            message.msg_iovlen = 1;
+            message.msg_control = control;
+            message.msg_controllen = sizeof control;
+            ssize_t got;
+            do {
+                got = ::recvmsg(socket->descriptor, &message, 0);
+            } while (got < 0 && errno == EINTR);
+            if (got < 0) return errno_failure();
+            bytes.resize(static_cast<std::size_t>(got));
+            std::int32_t segment = static_cast<std::int32_t>(got);
+#ifdef UDP_GRO
+            for (auto* header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
+                if (header->cmsg_level == IPPROTO_UDP && header->cmsg_type == UDP_GRO) {
+                    int size = 0;
+                    std::memcpy(&size, CMSG_DATA(header), sizeof size);
+                    if (size > 0) segment = size;
+                }
+            }
+#endif
+            char host[NI_MAXHOST] = {};
+            char service[NI_MAXSERV] = {};
+            std::string address;
+            std::int32_t port = 0;
+            if (::getnameinfo(reinterpret_cast<const sockaddr*>(&from), message.msg_namelen, host, sizeof host, service,
+                              sizeof service, NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+                address = host;
+                port = std::atoi(service);
+            }
+            return HostCompletion::ok(tuple_value({bytes_value(std::move(bytes)), bytes_value(std::move(address)),
+                                                   int32_value(port), int32_value(segment)}));
+        });
+
+    // Multipath TCP (Linux 5.6 and later): a listener or a connection made
+    // with IPPROTO_MPTCP, numeric addresses only. The streams are ordinary
+    // entries of the socket table. A kernel without MPTCP, or with it turned
+    // off (net.mptcp.enabled), answers unsupported.
+    const auto mptcp_socket = [](int family) {
+#ifdef __linux__
+        const int descriptor = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_MPTCP);
+        return descriptor;
+#else
+        (void)family;
+        errno = EPROTONOSUPPORT;
+        return -1;
+#endif
+    };
+    const auto mptcp_failure = [] {
+        return errno == EPROTONOSUPPORT || errno == EINVAL || errno == ENOPROTOOPT || errno == EAFNOSUPPORT
+            ? fail(host_error::unsupported) : errno_failure();
+    };
+
+    add(signature("neura.net.mptcp.listen", {text(), int32()}, int64()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto port = as_int32(request.arguments.at(1));
+        sockaddr_storage address{};
+        socklen_t length = 0;
+        if (!valid_port(port) || !numeric_address(request.arguments.at(0).bytes, port, address, length)) {
+            return fail(host_error::invalid_input);
+        }
+        if (full()) return fail(host_error::other);
+        const int descriptor = mptcp_socket(address.ss_family);
+        if (descriptor < 0) return mptcp_failure();
+        const int one = 1;
+        ::setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        if (::bind(descriptor, reinterpret_cast<sockaddr*>(&address), length) != 0 || ::listen(descriptor, 128) != 0) {
+            const auto failure = errno_failure();
+            ::close(descriptor);
+            return failure;
+        }
+        return remember(descriptor, true, false);
+    });
+
+    add(signature("neura.net.mptcp.connect", {text(), int32(), int64()}, int64()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+        const auto port = as_int32(request.arguments.at(1));
+        const auto timeout = as_int64(request.arguments.at(2));
+        sockaddr_storage address{};
+        socklen_t length = 0;
+        if (!valid_port(port) || timeout < 0 ||
+            !numeric_address(request.arguments.at(0).bytes, port, address, length)) {
+            return fail(host_error::invalid_input);
+        }
+        if (full()) return fail(host_error::other);
+        const int descriptor = mptcp_socket(address.ss_family);
+        if (descriptor < 0) return mptcp_failure();
+        const int flags = ::fcntl(descriptor, F_GETFL);
+        ::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK);
+        if (::connect(descriptor, reinterpret_cast<sockaddr*>(&address), length) != 0) {
+            if (errno != EINPROGRESS) {
+                const auto failure = errno_failure();
+                ::close(descriptor);
+                return failure;
+            }
+            const int ready = wait_for_events(descriptor, POLLOUT, timeout);
+            int error = 0;
+            socklen_t size = sizeof error;
+            if (ready <= 0 || ::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &error, &size) != 0 || error != 0) {
+                if (ready > 0) errno = error;
+                const auto failure = ready == 0 ? fail(host_error::timed_out) : errno_failure();
+                ::close(descriptor);
+                return failure;
+            }
+        }
+        ::fcntl(descriptor, F_SETFL, flags);
+        return remember(descriptor, false, false);
+    });
+
+    // A pipe for neura.net.splice: its read end and its write end, as two
+    // entries of the socket table.
+    add(signature("neura.net.pipe", {}, tuple({int64(), int64()})), [=](const HostRequest&) {
+        if (!granted->net) return denied();
+#ifdef __linux__
+        if (sockets->sockets.size() + 2 > max_open_ids) return fail(host_error::other);
+        int ends[2];
+        if (::pipe2(ends, O_CLOEXEC) != 0) return errno_failure();
+        const auto read_end = remember(ends[0], false, false);
+        sockets->sockets[as_int64(read_end.value)].pipe = true;
+        const auto write_end = remember(ends[1], false, false);
+        sockets->sockets[as_int64(write_end.value)].pipe = true;
+        return HostCompletion::ok(tuple_value({read_end.value, write_end.value}));
+#else
+        return fail(host_error::unsupported);
+#endif
+    });
+
+    // Moves up to `count` bytes from one entry to another inside the kernel
+    // with splice(2): a stream socket into a pipe's write end, or a pipe's
+    // read end into a stream socket (or another pipe). The bytes never reach
+    // the NVM. Returns the count moved; 0 at the end of the input. Waits for
+    // the input to be readable and the output writable.
+    add(signature("neura.net.splice", {int64(), int64(), int64()}, int64()), [=](const HostRequest& request) {
+        if (!granted->net) return denied();
+#ifdef __linux__
+        auto* from = find(request.arguments.at(0));
+        auto* to = find(request.arguments.at(1));
+        const auto count = as_int64(request.arguments.at(2));
+        if (!from || !to || from == to || count < 1 || (!from->pipe && !to->pipe) || from->listener ||
+            to->listener || from->datagram || to->datagram) {
+            return fail(host_error::invalid_input);
+        }
+        const auto chunk = static_cast<std::size_t>(std::min<std::int64_t>(count, 1 << 30));
+        for (;;) {
+            const auto moved = ::splice(from->descriptor, nullptr, to->descriptor, nullptr, chunk,
+                                        SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+            if (moved >= 0) return HostCompletion::ok(int64_value(moved));
+            if (errno == EINTR) continue;
+            if (errno != EAGAIN) return errno_failure();
+            // Both sides must be ready; waiting on either alone could spin.
+            if (wait_for_events(from->descriptor, POLLIN, 0) < 0 || wait_for_events(to->descriptor, POLLOUT, 0) < 0) {
+                return errno_failure();
+            }
+        }
+#else
+        return fail(host_error::unsupported);
+#endif
     });
 
     // Sends `count` bytes of an open file from `offset` to a connected

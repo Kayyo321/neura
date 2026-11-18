@@ -18,7 +18,8 @@ export let HttpServer = module (
 
     /// @brief The request the host assigned to this execution. A second call fails with InvalidInput.
     export let next_request = func() -> RequestOutcome host("neura.http.server.next", 1);
-    /// @brief Up to `max` further bytes of the request body; an empty list at its end.
+    /// @brief Up to `max` further bytes of the request body, waiting for the client to send them; an empty list
+    /// at its end. Fails when the body cannot be read to its end.
     export let read_body = func(max: int) -> BytesOutcome host("neura.http.server.body.read", 1);
     /// @brief Sends the status, the header pairs and the first body bytes; `complete` ends the body.
     export let respond = func(status: uint32, headers: string[list], body: uint8[list], complete: bool)
@@ -33,4 +34,7 @@ export let HttpServer = module (
     /// named fields.
     export let log = func(level: uint32, message: string, fields: string[list]) -> DoneOutcome
         host("neura.app.log", 1);
+    /// @brief Adds `value` to the host counter `name` (kind 1) or sets the host gauge `name` (kind 2), shown
+    /// on the admin listener's /metrics.
+    export let metric = func(name: string, kind: uint32, value: int64) -> DoneOutcome host("neura.app.metric", 1);
 );

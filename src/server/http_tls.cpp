@@ -119,13 +119,15 @@ public:
         return TlsHandshake::TimedOut;
     }
 
-    StreamRead read(std::span<char> output, Deadline deadline) override {
+    StreamRead read(std::span<char> output, Deadline deadline) override { return read(output, deadline, -1); }
+
+    StreamRead read(std::span<char> output, Deadline deadline, int wake) override {
         while (ConnectionClock::now() < deadline) {
             std::size_t count = 0;
             ERR_clear_error();
             const int result = SSL_read_ex(ssl_.get(), output.data(), output.size(), &count);
             if (result == 1) return {StreamStatus::Ready, count};
-            const auto status = after_io(result, deadline);
+            const auto status = after_io(result, deadline, wake);
             if (status != StreamStatus::Ready) return {status};
         }
         return {StreamStatus::TimedOut};
@@ -173,10 +175,10 @@ public:
     }
 
 private:
-    StreamStatus after_io(int result, Deadline deadline) {
+    StreamStatus after_io(int result, Deadline deadline, int wake = -1) {
         switch (SSL_get_error(ssl_.get(), result)) {
-        case SSL_ERROR_WANT_READ: return socket_io::wait_for(descriptor_, POLLIN, deadline);
-        case SSL_ERROR_WANT_WRITE: return socket_io::wait_for(descriptor_, POLLOUT, deadline);
+        case SSL_ERROR_WANT_READ: return socket_io::wait_for(descriptor_, POLLIN, deadline, wake);
+        case SSL_ERROR_WANT_WRITE: return socket_io::wait_for(descriptor_, POLLOUT, deadline, wake);
         case SSL_ERROR_ZERO_RETURN: return StreamStatus::End;
         default:
             ERR_clear_error();
@@ -210,7 +212,7 @@ TlsContextHandle load_tls_context(const std::filesystem::path& certificate_chain
     return std::make_shared<const TlsContext>(std::move(context));
 }
 
-TlsConnectionEnd serve_tls_connection(int descriptor, TlsContextHandle context, const BufferedResponder& respond,
+TlsConnectionEnd serve_tls_connection(int descriptor, TlsContextHandle context, const Responder& respond,
                                      const ConnectionLimits& limits, std::chrono::milliseconds handshake_timeout) {
     Socket socket(descriptor);
     const auto deadline = ConnectionClock::now() + handshake_timeout;

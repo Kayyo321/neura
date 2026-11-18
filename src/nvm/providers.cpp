@@ -20,8 +20,11 @@
 #include <unistd.h>
 #endif
 #ifdef __linux__
+#include <filesystem>
+#include <linux/netlink.h>
 #include <sys/auxv.h>
 #include <sys/random.h>
+#include <sys/socket.h>
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #include <sys/random.h>
 #elif defined(_WIN32)
@@ -330,9 +333,56 @@ bool hardware_word(std::uint64_t&) { return false; }
 bool hardware_available() { return false; }
 #endif
 
-// The process generation for neura.process.generation: it changes in a
-// child created by fork (detected by a change of process ID). A restore of
-// a virtual machine snapshot is not detected.
+#ifdef __linux__
+// A virtual machine generation change: the vmgenid driver (Linux 5.18 and
+// later; ACPI "VM Generation ID" under QEMU, Hyper-V and VMware, or the
+// device tree "microsoft,vmgenid") sends a uevent carrying NEW_VMGENID=1 when
+// the machine is restored from a snapshot or cloned. The socket is opened
+// only when such a device exists; without one, nothing is listened to.
+int vm_generation_socket() {
+    static const int descriptor = [] {
+        namespace fs = std::filesystem;
+        bool present = false;
+        for (const char* driver : {"/sys/bus/acpi/drivers/vmgenid", "/sys/bus/platform/drivers/vmgenid"}) {
+            std::error_code error;
+            for (const auto& entry : fs::directory_iterator(driver, error)) {
+                if (entry.is_symlink(error) && entry.path().filename() != "module") present = true;
+            }
+        }
+        if (!present) return -1;
+        const int socket = ::socket(AF_NETLINK, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+        if (socket < 0) return -1;
+        sockaddr_nl address{};
+        address.nl_family = AF_NETLINK;
+        address.nl_groups = 1; // Kernel uevents.
+        if (::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) {
+            ::close(socket);
+            return -1;
+        }
+        return socket;
+    }();
+    return descriptor;
+}
+
+// How many VM generation uevents arrived since the last call.
+std::uint64_t vm_generation_events() {
+    const int socket = vm_generation_socket();
+    if (socket < 0) return 0;
+    std::uint64_t count = 0;
+    char message[8192];
+    for (;;) {
+        const auto got = ::recv(socket, message, sizeof message, MSG_DONTWAIT);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) break;
+        if (vm_generation_uevent(std::string_view(message, static_cast<std::size_t>(got)))) ++count;
+    }
+    return count;
+}
+#endif
+
+// The process generation for neura.process.generation: it grows by one in a
+// child created by fork (detected by a change of process ID) and, on Linux
+// with a vmgenid device, after each restore or clone of the virtual machine.
 std::uint64_t process_generation() {
 #ifndef _WIN32
     static std::atomic<std::uint64_t> generation{0};
@@ -340,6 +390,9 @@ std::uint64_t process_generation() {
     const long now = static_cast<long>(::getpid());
     long seen = owner.load();
     if (seen != now && owner.compare_exchange_strong(seen, now)) generation.fetch_add(1);
+#ifdef __linux__
+    if (const auto events = vm_generation_events(); events != 0) generation.fetch_add(events);
+#endif
     return generation.load();
 #else
     return 0;
@@ -347,6 +400,18 @@ std::uint64_t process_generation() {
 }
 
 } // namespace
+
+bool vm_generation_uevent(std::string_view message) {
+    // NUL-separated fields: "change@/devices/...", then KEY=VALUE pairs.
+    while (!message.empty()) {
+        const auto end = message.find('\0');
+        const auto field = message.substr(0, end);
+        if (field == "NEW_VMGENID=1") return true;
+        if (end == std::string_view::npos) break;
+        message.remove_prefix(end + 1);
+    }
+    return false;
+}
 
 StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, ConsoleSource& input,
                                    Capabilities capabilities)

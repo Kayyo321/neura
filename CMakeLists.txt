@@ -94,6 +94,7 @@ set(neura_nvm_sources
     src/nvm/driver.cpp
     src/nvm/app_provider.cpp
     src/nvm/sql_services.cpp
+    src/nvm/secret_services.cpp
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -393,6 +394,7 @@ file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pa
     CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
 
 add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
+    src/cli/serve.cpp
     src/launcher/descriptor.cpp src/tooling/debug.cpp src/tooling/inspect.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -653,6 +655,13 @@ if(BUILD_TESTING)
     neura_target_defaults(neura_wait_source_tests)
     add_test(NAME nvm-wait-source COMMAND neura_wait_source_tests)
     set_tests_properties(nvm-wait-source PROPERTIES TIMEOUT 10)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # The same waits through the epoll(7) backend (src/nvm/pending_requests.cpp).
+        add_test(NAME nvm-wait-source-epoll COMMAND neura_wait_source_tests)
+        set_tests_properties(nvm-wait-source-epoll PROPERTIES TIMEOUT 10 ENVIRONMENT "NEURA_IO_BACKEND=epoll")
+        add_test(NAME nvm-wait-source-io-uring COMMAND neura_wait_source_tests)
+        set_tests_properties(nvm-wait-source-io-uring PROPERTIES TIMEOUT 10 ENVIRONMENT "NEURA_IO_BACKEND=io_uring")
+    endif()
 
     add_executable(neura_worker_wire_tests tests/server/worker_wire_tests.cpp)
     target_link_libraries(neura_worker_wire_tests PRIVATE neura_server_worker_wire)

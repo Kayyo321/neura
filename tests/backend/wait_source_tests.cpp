@@ -2,6 +2,8 @@
 #include "nvm/providers.hpp"
 
 #include <chrono>
+#include <cstdlib>
+#include <string>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -284,6 +286,21 @@ void native_events() {
 
 int main() {
     try {
+        // NEURA_IO_BACKEND selects the backend these waits use; a requested
+        // backend this kernel has must be the one in use, or the run would
+        // test poll(2) twice.
+        const auto backend = neura::nvm::io_backend();
+        std::cout << "driver backend: " << neura::nvm::io_backend_name(backend) << '\n';
+        if (const char* wanted = std::getenv("NEURA_IO_BACKEND");
+            wanted && std::string_view(wanted) != neura::nvm::io_backend_name(backend)) {
+            // A container may forbid io_uring (kernel.io_uring_disabled, or
+            // a seccomp filter); the driver then keeps poll(2).
+            if (std::string_view(wanted) == "io_uring") {
+                std::cout << "skipped: io_uring is not available here\n";
+                return 0;
+            }
+            throw std::runtime_error(std::string("NEURA_IO_BACKEND=") + wanted + " was not selected");
+        }
         polled_and_external();
         external_cancel_and_deadline();
         native_events();

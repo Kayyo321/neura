@@ -18,6 +18,7 @@
 #include "nvm/sql_services.hpp"
 #include "server/worker_messages.hpp"
 
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -39,18 +40,28 @@ std::optional<SqlCall> decode_sql_call(std::span<const std::uint8_t> body);
 std::vector<std::uint8_t> encode_sql_return(std::uint32_t call, const nvm::SqlAnswer& answer);
 std::optional<nvm::SqlAnswer> decode_sql_return(std::uint32_t call, std::span<const std::uint8_t> body);
 
-// The worker's side: each call is one Call and its Return, within the
-// request's deadline. A failed channel answers connection_reset (11), a
-// call or answer above the channel's frame limit too_large (16).
+// The arguments of an SQL Call after its identifier and operation: the SQL
+// operation, the argument count and the encoded values.
+std::vector<std::uint8_t> encode_sql_arguments(nvm::SqlOperation operation,
+                                               const std::vector<nvm::HostValue>& arguments);
+// The answer in a Return body after its identifier and transport error.
+std::optional<nvm::SqlAnswer> decode_sql_answer(std::span<const std::uint8_t> payload);
+
+// The worker's side: each call is one Call and its Return, sent by the
+// request's exchange, which keeps the request body frames that arrive while
+// it waits. The transport takes the encoded arguments and returns the
+// Return body after its identifier and transport error, or nothing with
+// the error code to report. A call above the channel's frame limit
+// answers too_large (16) without being sent.
 class ChannelSql final : public nvm::SqlExchange {
 public:
-    ChannelSql(Channel& channel, Clock::time_point deadline) : channel_(channel), deadline_(deadline) {}
+    using Transport =
+        std::function<std::optional<std::vector<std::uint8_t>>(const std::vector<std::uint8_t>&, std::uint32_t&)>;
+    explicit ChannelSql(Transport transport) : transport_(std::move(transport)) {}
     nvm::SqlAnswer call(nvm::SqlOperation operation, const std::vector<nvm::HostValue>& arguments) override;
 
 private:
-    Channel& channel_;
-    Clock::time_point deadline_;
-    std::uint32_t calls_ = 0x10000; // Apart from the configuration calls' numbers.
+    Transport transport_;
 };
 
 } // namespace neura::server::worker

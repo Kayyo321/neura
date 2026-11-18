@@ -5,6 +5,7 @@
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
 #include "nvm/sql_services.hpp"
+#include "nvm/secret_services.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -23,6 +24,8 @@ struct Host {
     nvm::ApplicationServices application;
     // Bound in every image; answered only with an SQL exchange and the sql group.
     nvm::SqlServices sql;
+    // neura.memory.lock.*, in the entropy group.
+    nvm::SecretServices secrets;
     nvm::HostRegistry registry;
 
     explicit Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange = nullptr,

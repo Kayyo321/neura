@@ -14,6 +14,7 @@
 #include "nvm/driver.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/app_services.hpp"
+#include "nvm/secret_services.hpp"
 #include "nvm/providers.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -642,8 +643,10 @@ void Adapter::execute() {
         // A server image binds here too; without a server host its
         // application services answer error 14.
         nvm::ApplicationServices application(nullptr, false, false);
+        nvm::SecretServices secrets(capabilities.entropy);
         nvm::HostRegistry registry;
         registry.add(console); services.register_all(registry); application.register_all(registry);
+        secrets.register_all(registry);
         const auto bindings = nvm::bind(*image_, registry);
         auto modes = nvm::host_modes_for(*image_, bindings);
         nvm::RunLimits limits;

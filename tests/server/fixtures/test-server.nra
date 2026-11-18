@@ -19,8 +19,62 @@ let TestServer = module:program.Entry (
         if (refuse == "yes") {
             return Result<Unit>.Err(errors.custom("test.refuse", "configured to refuse"));
         }
+        if (optional.value_or<string>(context.config("streamed_body"), "no") == "yes") {
+            return context.serve_streamed(app.streaming_handler_of(
+                new func(request: app.Request, body: app.BodyReader) -> Result<app.Response> =>
+                    upload(context, request, body)));
+        }
         return context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
             route(context, request)));
+    };
+
+    /// @brief Counts the body as it arrives, in reads of at most 1,000 bytes, and answers the count and the
+    /// number of reads. /early answers before reading anything.
+    let upload = func(context: app.Context, request: app.Request, body: app.BodyReader) -> Result<app.Response> {
+        if (request.path == "/early") {
+            return Result<app.Response>.Ok(app.text(200, "early\n"));
+        }
+        if (request.path == "/stream-first") {
+            // 4 MB of response before any of the body is read: the worker
+            // blocks sending while the host still sends it the body.
+            last fields: [string, string][list] = new;
+            return Result<app.Response>.Ok(app.stream(200, fields, new func(writer: app.BodyWriter) -> Result<Unit> {
+                last chunk: uint8[list] = new;
+                for (let i = 0; i < 1000; i++) {
+                    chunk.append(98 as uint8);
+                }
+                for (let n = 0; n < 4000; n++) {
+                    match (writer.write(chunk)) {
+                        Result.Err(problem) => {
+                            return Result<Unit>.Err(problem);
+                        },
+                        Result.Ok(_) => {},
+                    }
+                }
+                return match (body.read_all()) {
+                    Result.Ok(all) => writer.write_text("read " + all.length.to_string()),
+                    Result.Err(problem) => Result<Unit>.Err(problem),
+                };
+            }));
+        }
+        let total = 0;
+        let reads = 0;
+        while (true) {
+            match (body.read(1000)) {
+                Result.Err(problem) => {
+                    return Result<app.Response>.Err(problem);
+                },
+                Result.Ok(chunk) => {
+                    if (chunk.length == 0) {
+                        return Result<app.Response>.Ok(app.text(200, "received " + total.to_string() + " in "
+                            + reads.to_string() + " reads\n"));
+                    }
+                    total += chunk.length;
+                    reads++;
+                },
+            }
+        }
+        return Result<app.Response>.Ok(app.text(500, "unreachable\n"));
     };
 
     /// @brief The test routes.
@@ -68,6 +122,69 @@ let TestServer = module:program.Entry (
                 content.append(120 as uint8);
             }
             return Result<app.Response>.Ok(new app.Response(200, new, content));
+        }
+        if (request.path == "/spin") {
+            last rounds = results.value_or<int32>(int32.parse(request.query), 0);
+            let total = 0;
+            for (let i = 0; i < rounds; i++) {
+                total += i % 7;
+            }
+            return Result<app.Response>.Ok(app.text(200, "spun " + total.to_string() + "\n"));
+        }
+        if (request.path == "/stream") {
+            // query: chunk count; each chunk is 1,000 bytes; one pause of 300 ms after the first.
+            last count = results.value_or<int32>(int32.parse(request.query), 0);
+            last fields: [string, string][list] = new;
+            fields.append(["Content-Type", "application/octet-stream"]);
+            return Result<app.Response>.Ok(app.stream(200, fields, new func(writer: app.BodyWriter) -> Result<Unit> {
+                last chunk: uint8[list] = new;
+                for (let i = 0; i < 1000; i++) {
+                    chunk.append(97 as uint8);
+                }
+                for (let n = 0; n < count; n++) {
+                    match (writer.write(chunk)) {
+                        Result.Err(problem) => {
+                            return Result<Unit>.Err(problem);
+                        },
+                        Result.Ok(_) => {},
+                    }
+                    if (n == 0) {
+                        last clock = new system_clock.SystemClock();
+                        match (clock.sleep(of_millis(300))) {
+                            Result.Ok(_) => {},
+                            Result.Err(_) => {},
+                        }
+                    }
+                }
+                return Result<Unit>.Ok(Unit.Value);
+            }).with_header("X-Streamed", "yes"));
+        }
+        if (request.path == "/stream-fail") {
+            last fields: [string, string][list] = new;
+            return Result<app.Response>.Ok(app.stream(200, fields, new func(writer: app.BodyWriter) -> Result<Unit> {
+                match (writer.write_text("partial")) {
+                    Result.Err(problem) => {
+                        return Result<Unit>.Err(problem);
+                    },
+                    Result.Ok(_) => {},
+                }
+                return Result<Unit>.Err(errors.custom("test.stream", "the producer failed on purpose"));
+            }));
+        }
+        if (request.path == "/metric") {
+            match (context.count("test_requests_total", 2 as int64)) {
+                Result.Err(problem) => {
+                    return Result<app.Response>.Err(problem);
+                },
+                Result.Ok(_) => {},
+            }
+            match (context.gauge("test_depth", -5 as int64)) {
+                Result.Err(problem) => {
+                    return Result<app.Response>.Err(problem);
+                },
+                Result.Ok(_) => {},
+            }
+            return Result<app.Response>.Ok(app.text(200, "counted\n"));
         }
         if (request.path == "/fail") {
             return Result<app.Response>.Err(errors.custom("test.fail", "the handler failed on purpose"));

@@ -17,7 +17,19 @@
 #include <system_error>
 #else
 #include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <map>
 #include <poll.h>
+#include <string_view>
+#include <unistd.h>
+#ifdef __linux__
+#include <linux/io_uring.h>
+#include <linux/time_types.h>
+#include <sys/epoll.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#endif
 #endif
 
 namespace neura::nvm {
@@ -109,6 +121,304 @@ short poll_events(PosixWait::Events events) {
     throw std::logic_error("invalid POSIX wait events");
 }
 
+#ifdef __linux__
+// The epoll(7) backend: one epoll instance per driver thread, kept between
+// checks. Each check registers the descriptors it waits for with the events
+// it wants and removes the rest. Readiness is level-triggered, exactly as
+// poll(2) reports it; only how the kernel is asked differs. The driver
+// applies the ready operations in request order whichever backend reported
+// them (docs/runtime/NVM.md, "Waiting for host requests").
+class EpollSet {
+public:
+    EpollSet() : descriptor_(::epoll_create1(EPOLL_CLOEXEC)) {}
+    ~EpollSet() {
+        if (descriptor_ >= 0) ::close(descriptor_);
+    }
+    EpollSet(const EpollSet&) = delete;
+    EpollSet& operator=(const EpollSet&) = delete;
+    bool usable() const { return descriptor_ >= 0; }
+
+    // Fills `revents` of each entry; false when epoll cannot serve this set
+    // (a descriptor it refuses, such as a regular file), and poll(2) must.
+    bool wait(std::vector<pollfd>& entries, int timeout_ms) {
+        std::map<int, std::uint32_t> wanted;
+        for (const auto& entry : entries) {
+            if (entry.fd < 0) continue;
+            wanted[entry.fd] |= (entry.events & POLLIN ? EPOLLIN : 0u) | (entry.events & POLLOUT ? EPOLLOUT : 0u);
+        }
+        for (auto at = registered_.begin(); at != registered_.end();) {
+            if (wanted.contains(at->first)) {
+                ++at;
+                continue;
+            }
+            ::epoll_ctl(descriptor_, EPOLL_CTL_DEL, at->first, nullptr); // It may have been closed: no check.
+            at = registered_.erase(at);
+        }
+        for (const auto& [fd, events] : wanted) {
+            epoll_event event{};
+            event.events = events;
+            event.data.fd = fd;
+            const auto found = registered_.find(fd);
+            int result = 0;
+            if (found == registered_.end()) {
+                result = ::epoll_ctl(descriptor_, EPOLL_CTL_ADD, fd, &event);
+                if (result < 0 && errno == EEXIST) result = ::epoll_ctl(descriptor_, EPOLL_CTL_MOD, fd, &event);
+            } else {
+                // A descriptor closed and reopened under the same number is
+                // no longer in the set: add it again.
+                result = ::epoll_ctl(descriptor_, EPOLL_CTL_MOD, fd, &event);
+                if (result < 0 && errno == ENOENT) result = ::epoll_ctl(descriptor_, EPOLL_CTL_ADD, fd, &event);
+            }
+            if (result < 0) {
+                registered_.erase(fd);
+                return false;
+            }
+            registered_[fd] = events;
+        }
+        std::vector<epoll_event> events(std::max<std::size_t>(wanted.size(), 1));
+        const int count = ::epoll_wait(descriptor_, events.data(), static_cast<int>(events.size()), timeout_ms);
+        for (auto& entry : entries) entry.revents = 0;
+        if (count < 0) {
+            if (errno != EINTR) throw std::runtime_error("epoll_wait failed while waiting for host requests");
+            return true;
+        }
+        std::map<int, std::uint32_t> ready;
+        for (int i = 0; i < count; ++i) ready[events[i].data.fd] |= events[i].events;
+        for (auto& entry : entries) {
+            const auto found = ready.find(entry.fd);
+            if (found == ready.end()) continue;
+            const auto got = found->second;
+            entry.revents = static_cast<short>((got & EPOLLIN ? POLLIN : 0) | (got & EPOLLOUT ? POLLOUT : 0) |
+                                               (got & EPOLLERR ? POLLERR : 0) | (got & EPOLLHUP ? POLLHUP : 0));
+        }
+        return true;
+    }
+
+private:
+    int descriptor_;
+    std::map<int, std::uint32_t> registered_;
+};
+#endif
+
+#ifdef __linux__
+// The io_uring backend: one ring per driver thread. Each check submits a
+// one-shot IORING_OP_POLL_ADD per descriptor and, for a bounded wait, an
+// IORING_OP_TIMEOUT; waits for the first completion; then removes the polls
+// and the timeout that did not complete and reaps every completion, so the
+// ring is empty again before the check returns. Raw system calls: no
+// liburing. Readiness is reported as poll(2) would report it.
+class UringSet {
+public:
+    UringSet() {
+        io_uring_params parameters{};
+        descriptor_ = static_cast<int>(::syscall(__NR_io_uring_setup, entries, &parameters));
+        if (descriptor_ < 0) return;
+        const auto sq_bytes = parameters.sq_off.array + parameters.sq_entries * sizeof(std::uint32_t);
+        const auto cq_bytes = parameters.cq_off.cqes + parameters.cq_entries * sizeof(io_uring_cqe);
+        const bool single = (parameters.features & IORING_FEAT_SINGLE_MMAP) != 0;
+        sq_bytes_ = single ? std::max(sq_bytes, cq_bytes) : sq_bytes;
+        cq_bytes_ = single ? 0 : cq_bytes;
+        sq_ring_ = ::mmap(nullptr, sq_bytes_, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, descriptor_,
+                          IORING_OFF_SQ_RING);
+        if (sq_ring_ == MAP_FAILED) {
+            close_all();
+            return;
+        }
+        cq_ring_ = single ? sq_ring_
+                          : ::mmap(nullptr, cq_bytes_, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE,
+                                   descriptor_, IORING_OFF_CQ_RING);
+        if (cq_ring_ == MAP_FAILED) {
+            close_all();
+            return;
+        }
+        sqes_bytes_ = parameters.sq_entries * sizeof(io_uring_sqe);
+        sqes_ = static_cast<io_uring_sqe*>(::mmap(nullptr, sqes_bytes_, PROT_READ | PROT_WRITE,
+                                                  MAP_SHARED | MAP_POPULATE, descriptor_, IORING_OFF_SQES));
+        if (sqes_ == MAP_FAILED) {
+            close_all();
+            return;
+        }
+        auto* sq = static_cast<char*>(sq_ring_);
+        sq_head_ = reinterpret_cast<unsigned*>(sq + parameters.sq_off.head);
+        sq_tail_ = reinterpret_cast<unsigned*>(sq + parameters.sq_off.tail);
+        sq_mask_ = *reinterpret_cast<unsigned*>(sq + parameters.sq_off.ring_mask);
+        sq_array_ = reinterpret_cast<unsigned*>(sq + parameters.sq_off.array);
+        sq_entries_ = parameters.sq_entries;
+        auto* cq = static_cast<char*>(cq_ring_);
+        cq_head_ = reinterpret_cast<unsigned*>(cq + parameters.cq_off.head);
+        cq_tail_ = reinterpret_cast<unsigned*>(cq + parameters.cq_off.tail);
+        cq_mask_ = *reinterpret_cast<unsigned*>(cq + parameters.cq_off.ring_mask);
+        cqes_ = reinterpret_cast<io_uring_cqe*>(cq + parameters.cq_off.cqes);
+        usable_ = true;
+    }
+    ~UringSet() { close_all(); }
+    UringSet(const UringSet&) = delete;
+    UringSet& operator=(const UringSet&) = delete;
+    bool usable() const { return usable_; }
+
+    // Fills `revents`; false when the ring cannot take this many polls, and
+    // poll(2) must serve the check.
+    bool wait(std::vector<pollfd>& entries, int timeout_ms) {
+        // Polls, a timeout, then as many removals: within one submission.
+        if (2 * entries.size() + 2 > sq_entries_) return false;
+        for (auto& entry : entries) entry.revents = 0;
+        std::vector<bool> done(entries.size(), false);
+        std::size_t outstanding = 0;
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            if (entries[i].fd < 0) {
+                done[i] = true;
+                continue;
+            }
+            auto& sqe = next_sqe();
+            sqe.opcode = IORING_OP_POLL_ADD;
+            sqe.fd = entries[i].fd;
+            sqe.poll32_events = static_cast<std::uint32_t>(entries[i].events);
+            sqe.user_data = i + 1;
+            ++outstanding;
+        }
+        __kernel_timespec span{};
+        bool timer = false;
+        if (timeout_ms >= 0) {
+            span.tv_sec = timeout_ms / 1000;
+            span.tv_nsec = static_cast<long long>(timeout_ms % 1000) * 1'000'000;
+            auto& sqe = next_sqe();
+            sqe.opcode = IORING_OP_TIMEOUT;
+            sqe.fd = -1;
+            sqe.addr = reinterpret_cast<std::uint64_t>(&span);
+            sqe.len = 1;
+            sqe.user_data = timeout_tag;
+            timer = true;
+            ++outstanding;
+        }
+        if (outstanding == 0) return true;
+        bool ready = false;
+        bool timer_done = !timer;
+        const auto reap = [&] {
+            unsigned head = *cq_head_;
+            const unsigned tail = __atomic_load_n(cq_tail_, __ATOMIC_ACQUIRE);
+            for (; head != tail; ++head) {
+                const auto& cqe = cqes_[head & cq_mask_];
+                if (cqe.user_data == timeout_tag) {
+                    timer_done = true;
+                    --outstanding;
+                } else if (cqe.user_data >= 1 && cqe.user_data <= entries.size()) {
+                    const auto index = static_cast<std::size_t>(cqe.user_data - 1);
+                    if (!done[index]) {
+                        done[index] = true;
+                        --outstanding;
+                        if (cqe.res > 0) {
+                            entries[index].revents = static_cast<short>(cqe.res);
+                            ready = true;
+                        } else if (cqe.res != -ECANCELED) {
+                            entries[index].revents = POLLERR;
+                            ready = true;
+                        }
+                    }
+                }
+                // Removal completions carry remove_tag and are not counted.
+            }
+            __atomic_store_n(cq_head_, head, __ATOMIC_RELEASE);
+        };
+        if (!enter(pending_submissions_, 1)) return false;
+        reap();
+        while (!ready && !timer_done) {
+            if (!enter(0, 1)) return false;
+            reap();
+        }
+        // Remove what did not complete, then reap until nothing is left.
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            if (done[i]) continue;
+            auto& sqe = next_sqe();
+            sqe.opcode = IORING_OP_POLL_REMOVE;
+            sqe.fd = -1;
+            sqe.addr = i + 1;
+            sqe.user_data = remove_tag;
+        }
+        if (!timer_done) {
+            auto& sqe = next_sqe();
+            sqe.opcode = IORING_OP_TIMEOUT_REMOVE;
+            sqe.fd = -1;
+            sqe.addr = timeout_tag;
+            sqe.user_data = remove_tag;
+        }
+        if (pending_submissions_ != 0 && !enter(pending_submissions_, 0)) return false;
+        while (outstanding != 0) {
+            if (!enter(0, 1)) return false;
+            reap();
+        }
+        // The removals' own completions.
+        reap();
+        return true;
+    }
+
+private:
+    static constexpr unsigned entries = 256;
+    static constexpr std::uint64_t timeout_tag = ~std::uint64_t{0};
+    static constexpr std::uint64_t remove_tag = ~std::uint64_t{0} - 1;
+
+    io_uring_sqe& next_sqe() {
+        const unsigned tail = *sq_tail_;
+        const unsigned index = tail & sq_mask_;
+        auto& sqe = sqes_[index];
+        std::memset(&sqe, 0, sizeof sqe);
+        sq_array_[index] = index;
+        __atomic_store_n(sq_tail_, tail + 1, __ATOMIC_RELEASE);
+        ++pending_submissions_;
+        return sqe;
+    }
+
+    bool enter(unsigned submit, unsigned wait) {
+        for (;;) {
+            const long result = ::syscall(__NR_io_uring_enter, descriptor_, submit, wait,
+                                          wait != 0 ? IORING_ENTER_GETEVENTS : 0, nullptr, 0);
+            if (result >= 0) {
+                pending_submissions_ -= std::min<unsigned>(pending_submissions_, static_cast<unsigned>(result));
+                submit -= std::min<unsigned>(submit, static_cast<unsigned>(result));
+                if (submit == 0) return true;
+                wait = 0;
+                continue;
+            }
+            if (errno == EINTR) {
+                if (submit == 0) return true; // The caller checks the ring again.
+                continue;
+            }
+            usable_ = false;
+            return false;
+        }
+    }
+
+    void close_all() {
+        if (sqes_ && sqes_ != MAP_FAILED) ::munmap(sqes_, sqes_bytes_);
+        if (cq_ring_ && cq_ring_ != MAP_FAILED && cq_ring_ != sq_ring_) ::munmap(cq_ring_, cq_bytes_);
+        if (sq_ring_ && sq_ring_ != MAP_FAILED) ::munmap(sq_ring_, sq_bytes_);
+        if (descriptor_ >= 0) ::close(descriptor_);
+        sqes_ = nullptr;
+        cq_ring_ = sq_ring_ = nullptr;
+        descriptor_ = -1;
+        usable_ = false;
+    }
+
+    int descriptor_ = -1;
+    bool usable_ = false;
+    void* sq_ring_ = nullptr;
+    void* cq_ring_ = nullptr;
+    io_uring_sqe* sqes_ = nullptr;
+    std::size_t sq_bytes_ = 0;
+    std::size_t cq_bytes_ = 0;
+    std::size_t sqes_bytes_ = 0;
+    unsigned* sq_head_ = nullptr;
+    unsigned* sq_tail_ = nullptr;
+    unsigned* sq_array_ = nullptr;
+    unsigned sq_mask_ = 0;
+    unsigned sq_entries_ = 0;
+    unsigned* cq_head_ = nullptr;
+    unsigned* cq_tail_ = nullptr;
+    unsigned cq_mask_ = 0;
+    io_uring_cqe* cqes_ = nullptr;
+    unsigned pending_submissions_ = 0;
+};
+#endif
+
 class NativeWaits {
 public:
     std::size_t add(PosixWait::Interest source) {
@@ -123,6 +433,15 @@ public:
 
     void wait(int timeout_ms) {
         if (descriptors_.empty()) return;
+#ifdef __linux__
+        if (io_backend() == IoBackend::Epoll) {
+            thread_local EpollSet set;
+            if (set.usable() && set.wait(descriptors_, timeout_ms)) return;
+        } else if (io_backend() == IoBackend::IoUring) {
+            thread_local UringSet ring;
+            if (ring.usable() && ring.wait(descriptors_, timeout_ms)) return;
+        }
+#endif
         const int count = ::poll(descriptors_.data(), static_cast<nfds_t>(descriptors_.size()), timeout_ms);
         if (count < 0) {
             if (errno != EINTR) throw std::runtime_error("poll failed while waiting for host requests");
@@ -139,6 +458,47 @@ private:
 #endif
 
 } // namespace
+
+IoBackend io_backend() {
+#if defined(__linux__)
+    static const IoBackend chosen = [] {
+        const char* text = std::getenv("NEURA_IO_BACKEND");
+        if (text && std::string_view(text) == "epoll") {
+            const int probe = ::epoll_create1(EPOLL_CLOEXEC);
+            if (probe >= 0) {
+                ::close(probe);
+                return IoBackend::Epoll;
+            }
+        }
+        if (text && std::string_view(text) == "io_uring") {
+            // A kernel without io_uring, or with it disabled
+            // (kernel.io_uring_disabled), keeps poll.
+            io_uring_params parameters{};
+            const long probe = ::syscall(__NR_io_uring_setup, 2, &parameters);
+            if (probe >= 0) {
+                ::close(static_cast<int>(probe));
+                return IoBackend::IoUring;
+            }
+        }
+        return IoBackend::Poll;
+    }();
+    return chosen;
+#elif defined(_WIN32)
+    return IoBackend::WaitForMultipleObjects;
+#else
+    return IoBackend::Poll;
+#endif
+}
+
+const char* io_backend_name(IoBackend backend) {
+    switch (backend) {
+    case IoBackend::Poll: return "poll";
+    case IoBackend::Epoll: return "epoll";
+    case IoBackend::IoUring: return "io_uring";
+    case IoBackend::WaitForMultipleObjects: return "WaitForMultipleObjects";
+    }
+    return "poll";
+}
 
 void PendingRequests::add(std::uint64_t sequence, std::variant<HostCompletion, PendingOperation> started,
                           bool cancellable) {

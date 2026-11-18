@@ -43,8 +43,10 @@ public:
     virtual ~ServerExchange() = default;
     // The assigned request. Called at most once per execution.
     virtual std::optional<ServerRequest> next() = 0;
-    // Up to `max` further bytes of the request body; empty at its end.
-    virtual std::string read_body(std::size_t max) = 0;
+    // Up to `max` further bytes of the request body into `out`, waiting for
+    // them if needed; empty at its end. Nonzero when the body cannot be read
+    // to its end (the deadline passed or the client left).
+    virtual std::uint32_t read_body(std::size_t max, std::string& out) = 0;
     // Sends the response head and its first body bytes; with `complete` the
     // body ends there.
     virtual std::uint32_t respond(std::uint32_t status, const HeaderPairs& headers, std::string_view body,
@@ -54,6 +56,9 @@ public:
     // The configuration value of `key`, when the host exposes one.
     virtual std::optional<std::string> config(std::string_view key) = 0;
     virtual void log(std::uint32_t level, std::string_view message, const HeaderPairs& fields) = 0;
+    // Adds `value` to the counter `name` (kind 1) or sets the gauge `name`
+    // (kind 2) in the host's metrics.
+    virtual std::uint32_t metric(std::string_view name, std::uint32_t kind, std::int64_t value) = 0;
 };
 
 // The most bytes of response body one execution may send (Apps030 S-7).
@@ -69,6 +74,7 @@ inline constexpr std::uint64_t default_response_bytes = 8ull * 1024 * 1024;
 // neura.http.server.body.close() -> void
 // neura.app.config(string key) -> [bool found, string value]
 // neura.app.log(uint32 level, string message, string[list] fields) -> void
+// neura.app.metric(string name, uint32 kind, int64 value) -> void
 //
 // Header and log fields are flat lists of alternating names and values.
 // All version 1 with a uint32 error. The http.server group needs the
@@ -76,7 +82,12 @@ inline constexpr std::uint64_t default_response_bytes = 8ull * 1024 * 1024;
 // order (a second next, a respond before next or after the head, a body
 // write after the body ended), a status outside 100 through 599, or a header
 // name or value the HTTP wire cannot carry answers invalid_input (4). A
-// response body beyond `response_bytes` answers too_large (16).
+// complete response body given to respond beyond `response_bytes` (S-7, the
+// buffered body) answers too_large (16); a streamed body (respond with
+// `complete` false, then body.write) is not buffered and not counted. A
+// metric name outside [A-Za-z_:][A-Za-z0-9_:]* (at most 128 bytes), a kind
+// other than 1 (counter) or 2 (gauge), or a negative counter increment
+// answers invalid_input.
 class ApplicationServices {
 public:
     ApplicationServices(ServerExchange* exchange, bool http_server, bool app,
@@ -95,5 +106,7 @@ private:
 // field value without CR, LF or NUL.
 bool valid_header_name(std::string_view name);
 bool valid_header_value(std::string_view value);
+// Whether `name` is a Prometheus metric name of at most 128 bytes.
+bool valid_metric_name(std::string_view name);
 
 } // namespace neura::nvm

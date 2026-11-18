@@ -48,6 +48,8 @@ class Host:
                 url = line.strip().split("listening on ")[1]
                 scheme, rest = url.split("://")
                 self.ports.setdefault(scheme, int(rest.rsplit(":", 1)[1]))
+            if "admin on" in line:
+                self.ports["admin"] = int(line.strip().rsplit(":", 1)[1])
             if line.strip().endswith("ready"):
                 self.ready = True
                 break
@@ -65,11 +67,14 @@ class Host:
         return self.err_path.read_text()
 
     def children(self):
-        try:
-            text = Path(f"/proc/{self.process.pid}/task/{self.process.pid}/children").read_text()
-            return [int(pid) for pid in text.split()]
-        except OSError:
-            return []
+        # Workers are children of whichever host thread spawned them.
+        pids = []
+        for task in Path(f"/proc/{self.process.pid}/task").glob("*"):
+            try:
+                pids += [int(pid) for pid in (task / "children").read_text().split()]
+            except OSError:
+                pass
+        return sorted(set(pids))
 
     def stop(self, sig=signal.SIGTERM, timeout=15):
         if self.process.poll() is None:
@@ -286,6 +291,220 @@ def test_limits(args, image):
         host.stop()
 
 
+def read_until_close(sock):
+    chunks = []
+    try:
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except (socket.timeout, ConnectionResetError):
+        pass
+    return b"".join(chunks)
+
+
+def test_streaming(args, image):
+    host = Host(args, image)
+    try:
+        port = host.port
+        # A streamed response arrives as it is written: the first chunk well
+        # before the producer's 300 ms pause ends.
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        started = time.time()
+        connection.request("GET", "/stream?50")
+        response = connection.getresponse()
+        first = response.read(1000)
+        first_at = time.time() - started
+        rest = response.read()
+        total_at = time.time() - started
+        check(response.status == 200 and response.getheader("transfer-encoding") == "chunked"
+              and response.getheader("content-length") is None and response.getheader("x-streamed") == "yes",
+              f"streamed head: {response.status} {response.getheaders()}")
+        check(first == b"a" * 1000 and len(rest) == 49000, f"streamed body: {len(first)} + {len(rest)}")
+        check(total_at - first_at > 0.25, f"the first chunk came before the pause: {first_at:.3f} of {total_at:.3f} s")
+        # Keep-alive continues after a streamed response.
+        connection.request("GET", "/hello")
+        response = connection.getresponse()
+        check(response.status == 200 and response.read() == b"hello from http\n", "keep-alive after a stream")
+        connection.close()
+
+        # A streamed download past S-7 (8 MiB): not buffered, so not limited.
+        status, headers, body = request(port, "GET", "/stream?12000", timeout=120)
+        check(status == 200 and len(body) == 12_000_000 and body.count(b"a") == 12_000_000,
+              f"12 MB streamed download: {status} {len(body)}")
+
+        status, headers, body = request(port, "HEAD", "/stream?3")
+        check(status == 200 and body == b"" and headers.get("transfer-encoding") == "chunked",
+              f"HEAD of a stream: {status} {headers}")
+
+        # A producer that fails after sending bytes: the body ends without its last chunk.
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+            sock.sendall(b"GET /stream-fail HTTP/1.1\r\nHost: t\r\n\r\n")
+            reply = read_until_close(sock)
+        check(status_of(reply) == 200 and b"7\r\npartial\r\n" in reply and not reply.endswith(b"0\r\n\r\n"),
+              f"truncated stream: {reply[-80:]!r}")
+
+        # S-6 is checked as a chunked body arrives, after the worker started.
+        big = b"%x\r\n%s\r\n" % (600_000, b"z" * 600_000)
+        reply = raw(port, b"POST /echo HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n" + big + big
+                    + b"0\r\n\r\n")
+        check(status_of(reply) == 413, f"chunked body over S-6: {reply[:80]!r}")
+        status, _, body = request(port, "POST", "/echo", body=b"q" * 1_000_000)
+        check(status == 201 and len(body) == 1_000_000, f"1 MB echo: {status} {len(body)}")
+    finally:
+        host.stop()
+    check("the producer failed on purpose" in host.stderr(), "the failed producer is logged")
+
+
+def test_streamed_request_body(args, image):
+    host = Host(args, image, "--config", "streamed_body=yes", "--max-body-bytes", "64000000")
+    try:
+        port = host.port
+
+        def pieces():
+            for _ in range(200):
+                yield b"u" * 100_000
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        connection.request("POST", "/upload", body=pieces(), encode_chunked=True)
+        response = connection.getresponse()
+        body = response.read()
+        check(response.status == 200 and body.startswith(b"received 20000000 in "),
+              f"20 MB streamed upload: {response.status} {body!r}")
+        # The handler answers before reading; the rest of the body is
+        # discarded and the connection stays usable.
+        connection.request("POST", "/early", body=b"v" * 3_000_000)
+        response = connection.getresponse()
+        check(response.status == 200 and response.read() == b"early\n", "an answer before the body")
+        connection.request("POST", "/upload", body=b"w" * 10)
+        response = connection.getresponse()
+        check(response.status == 200 and response.read() == b"received 10 in 1 reads\n", "after the early answer")
+        connection.close()
+        # The worker streams 4 MB back before it reads a 4 MB body: neither
+        # side may block the other.
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        connection.request("POST", "/stream-first", body=b"x" * 4_000_000)
+        response = connection.getresponse()
+        data = response.read()
+        check(response.status == 200 and len(data) == 4_000_000 + len(b"read 4000000")
+              and data.endswith(b"read 4000000"), f"stream before the body: {response.status} {len(data)} {data[-20:]!r}")
+        connection.close()
+        # A slow client: the handler reads the body as it comes.
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+            sock.sendall(b"POST /upload HTTP/1.1\r\nHost: t\r\nContent-Length: 6\r\nConnection: close\r\n\r\nabc")
+            time.sleep(0.5)
+            sock.sendall(b"def")
+            reply = read_until_close(sock)
+        check(status_of(reply) == 200 and reply.endswith(b"received 6 in 2 reads\n"), f"slow body: {reply!r}")
+    finally:
+        host.stop()
+
+
+def test_deadline_from_head(args, image):
+    # S-8 counts from the end of the head: a slow body plus the handler's
+    # one-second nap pass a two-second deadline.
+    host = Host(args, image, "--request-timeout", "2")
+    try:
+        started = time.time()
+        with socket.create_connection(("127.0.0.1", host.port), timeout=10) as sock:
+            sock.sendall(b"POST /nap HTTP/1.1\r\nHost: t\r\nContent-Length: 2\r\nConnection: close\r\n\r\na")
+            time.sleep(1.5)
+            sock.sendall(b"b")
+            reply = read_until_close(sock)
+        check(status_of(reply) == 504 and time.time() - started < 4, f"deadline from the head: {reply[:60]!r}")
+    finally:
+        host.stop()
+
+
+def test_keep_alive_latency(args, image):
+    # A response leaves without waiting for the client's delayed
+    # acknowledgement (TCP_NODELAY, and the head sent with a small body):
+    # with Nagle's algorithm each keep-alive response took about 40 ms.
+    host = Host(args, image)
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
+        times = []
+        for n in range(40):
+            started = time.perf_counter()
+            connection.request("GET", f"/info?n={n}")
+            response = connection.getresponse()
+            response.read()
+            times.append(time.perf_counter() - started)
+            time.sleep(0.01)
+        connection.close()
+        times.sort()
+        median = times[len(times) // 2]
+        check(median < 0.03, f"keep-alive median latency {median * 1000:.1f} ms")
+    finally:
+        host.stop()
+
+
+def test_admin(args, image):
+    host = Host(args, image, "--admin-listen", "127.0.0.1:0")
+    try:
+        admin = host.ports.get("admin")
+        check(admin is not None, f"admin listener: {host.ports}")
+        if admin is None:
+            return
+        status, _, body = request(admin, "GET", "/livez")
+        check(status == 200 and body == b"ok\n", f"/livez: {status} {body!r}")
+        status, _, body = request(admin, "GET", "/readyz")
+        check(status == 200 and body == b"ready\n", f"/readyz: {status} {body!r}")
+        status, _, _ = request(admin, "POST", "/livez", body=b"")
+        check(status == 405, f"POST /livez: {status}")
+        status, _, _ = request(admin, "GET", "/nothing")
+        check(status == 404, f"admin 404: {status}")
+        for _ in range(2):
+            status, _, _ = request(host.port, "GET", "/metric")
+            check(status == 200, f"/metric: {status}")
+        status, headers, body = request(admin, "GET", "/metrics")
+        text = body.decode()
+        check(status == 200 and headers.get("content-type", "").startswith("text/plain; version=0.0.4"),
+              f"/metrics: {status} {headers}")
+        check("test_requests_total 4" in text and "test_depth -5" in text, f"application metrics: {text[-300:]}")
+        check('neura_http_responses_total{class="2xx"}' in text and "neura_ready 1" in text, f"host metrics: {text[:400]}")
+        check("# TYPE test_requests_total counter" in text and "# TYPE test_depth gauge" in text, "metric types")
+    finally:
+        host.stop()
+
+
+def test_dead_ready_worker(args, image):
+    # A ready worker that has ended is never given a request: the host
+    # discards it and the request runs once, in another worker.
+    host = Host(args, image, "--ready-workers", "2")
+    try:
+        deadline = time.time() + 10
+        while len(host.children()) < 2 and time.time() < deadline:
+            time.sleep(0.05)
+        ready = host.children()
+        check(len(ready) == 2, f"two ready workers: {ready}")
+        for pid in ready:
+            os.kill(pid, signal.SIGKILL)
+        time.sleep(0.2)
+        status, _, body = request(host.port, "GET", "/hello")
+        check(status == 200 and body == b"hello from http\n", f"after the ready workers died: {status} {body!r}")
+    finally:
+        host.stop()
+    check("a ready worker had ended" in host.stderr(), "the discarded worker is logged")
+
+
+def test_step_limit(args, image):
+    # --max-steps bounds each request's execution; past it the execution
+    # traps, the client gets 500, and the next request runs in a new worker.
+    host = Host(args, image, "--max-steps", "2000000")
+    try:
+        status, _, body = request(host.port, "GET", "/spin?1000")
+        check(status == 200 and body.startswith(b"spun "), f"within the step limit: {status} {body!r}")
+        status, _, body = request(host.port, "GET", "/spin?5000000")
+        check(status == 500 and body == b'{"error":"internal"}', f"past the step limit: {status} {body!r}")
+        status, _, _ = request(host.port, "GET", "/hello")
+        check(status == 200, f"after the step limit: {status}")
+    finally:
+        host.stop()
+    check("2000000 steps" in host.stderr(), "the step-limit trap is logged")
+
+
 def test_drain_completes_responses(args, image):
     host = Host(args, image, "--drain-timeout", "10")
     try:
@@ -379,6 +598,12 @@ def test_tls(args, image):
                                      "curl body", f"https://127.0.0.1:{host.ports['https']}/echo"],
                                     capture_output=True, text=True, timeout=30)
             check(result.returncode == 0 and result.stdout == "curl body", f"curl POST: {result.stdout!r}")
+            # Approved decision 9: no HTTP/2. curl --http2 offers h2 and
+            # http/1.1 by ALPN; the host selects http/1.1.
+            result = subprocess.run([args.curl, "-sS", "--http2", "--cacert", str(certificate), "-o", "/dev/null",
+                                     "-w", "%{http_version}", f"https://127.0.0.1:{host.ports['https']}/hello"],
+                                    capture_output=True, text=True, timeout=30)
+            check(result.returncode == 0 and result.stdout == "1.1", f"curl --http2 negotiates 1.1: {result.stdout!r}")
         # A plain HTTP request on the TLS port fails the handshake and leaves the host serving.
         raw(host.ports["https"], b"GET / HTTP/1.1\r\nHost: t\r\n\r\n", timeout=3)
         status, _, _ = request(host.port, "GET", "/hello")
@@ -408,7 +633,8 @@ def main():
     if build.returncode != 0:
         print(build.stdout + build.stderr)
         return 1
-    tests = [test_basic, test_limits, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
+    tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:
             continue

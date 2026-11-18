@@ -27,6 +27,12 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Host services `neura.sql.*` in the new `sql` capability group, and `Call` operation 2 of the request-worker channel, which carries them to the host.
 - Host services `neura.http.server.*`, `neura.app.config` and `neura.app.log` in the new `http_server` and `app` capability groups, granted only to the server host's workers; error codes 16 to 22 for the application providers.
 - Entropy services for `Std.Crypto`: `neura.entropy.hardware` (RDSEED or RNDR bytes) and `neura.process.generation` (changes in a forked child).
+- `neura serve <file.nra | file.nvr> [host options]` builds a server program and runs it under `neura-server-host` in the foreground, on `127.0.0.1:8080` unless a listener is given ([Server host](docs/runtime/ServerHost.md)).
+- The server host streams bodies: a request is given to a worker at the end of its head and its body streams to it; a response sent with `respond(..., complete: false)` streams back with chunked transfer coding, each write as one chunk, with backpressure. `Std.App` adds `Context.serve_streamed`, `StreamingHandler`, `streaming_handler_of`, `BodyReader`, `stream`, `Response.with_stream`, `Response.is_streamed`, `Response.write_stream` and `BodyWriter`.
+- `neura-server-host --admin-listen` serves `/livez`, `/readyz` and `/metrics` (Prometheus text) outside worker admission; `neura.app.metric` and `Std.App` `Context.count` and `Context.gauge` add application counters and gauges to it.
+- `neura-server-host --max-steps`, `--worker-tier` and `--worker-jit` set each worker's step limit, highest execution tier and native compilation.
+- Secret memory for `Std.Crypto`: `neura.memory.lock.create`, `write`, `read`, `equal` and `release` keep secret bytes in host pages locked with `mlock`, excluded from core dumps and forked children, and zeroed on release and at the end of the run; bound by `Std.Crypto.Internal.LockedMemory`. A recorded run cannot create a buffer ([NVM](docs/runtime/NVM.md#host-services)).
+- `NEURA_IO_BACKEND=epoll` makes the driver wait for host requests with `epoll(7)` on Linux; `poll(2)` stays the default.
 - TLS client and server streams for the `Std.Net` library (`neura.net.tls.connect`, `accept`, `read`, `write`, `close`) with peer verification against the system trust store or a CA file, SNI, host name and address checks, and ALPN, in builds with `NEURA_ENABLE_SERVER_TLS`; other builds answer `Unsupported`.
 - Socket host services for the `Std.Net` library: UDP (`neura.net.udp.*`), Unix-domain streams and datagrams with the Linux abstract namespace (`neura.net.unix.*`), socket options (`neura.net.option.set`, `get`), system name resolution (`neura.net.resolve`) and `neura.net.send_file` ([NVM](docs/runtime/NVM.md#host-services)).
 
@@ -49,6 +55,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- The server host's request deadline (S-8) runs from the end of the request head for the worker too, not from the end of the body; S-7 bounds only a complete (buffered) response body; the `Head` frame of the worker protocol carries the body length, and a `Call` can carry a metric. A ready worker that has ended before taking its request is replaced, once.
+- `neura.http.server.body.read` waits for the client's next bytes and fails when the body cannot be read to its end.
 - `neura.entropy.fill` reads only the operating system's cryptographic generator and fails with code 100 when it cannot, instead of falling back to `std::random_device`.
 - Primitive references borrow local or explicitly owned storage. A borrow of a local or value parameter cannot escape, and accessing an instance-field borrow after destroying its owner traps. Escaping capturing lambdas use `new func`. Escaping bound methods use `new bound(receiver.method)`.
 
@@ -71,6 +79,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- `neura-server-host` no longer spins a core while a finished worker exits, and its worker channel never blocks inside `send(2)`, so the request deadline also bounds a write to a worker and a worker that streams a large response before it reads a large request body cannot block the host.
+- `neura-server-host` sends each response without waiting about 40 ms for the client's delayed acknowledgement: accepted connections set `TCP_NODELAY`, and a head with a body of at most 64 KiB leaves in one write with it.
 - `neura run --task-dump` wrote the dump twice, the first time naming a block the task had already left, when a check failed inside a tier 2 region (an index out of bounds, for example) and tier 1 ran the block again and trapped. The dump is now written once, when the failure becomes the run's trap, as at tier 0.
 - Editor tooling in 0.2.1-rc.2: readable documentation hovers, valid outline names and ranges, completion for declaration modifiers, eligible inherited overrides, promoted exports, import paths and typed/primitive/collection receivers, and quiet formatting of incomplete editor buffers. CLI formatting continues to reject invalid source.
 - The website places one skill-copy button above its prompt with feedback that keeps the page in place, keeps the front page's frame fitted during mobile scrolling, and gives diagnostic codes a compact Reading Room overview.

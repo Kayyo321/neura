@@ -116,28 +116,241 @@ ConnectionEnd write_failure(StreamStatus status) {
     return status == StreamStatus::TimedOut ? ConnectionEnd::RequestTimeout : ConnectionEnd::StreamFailure;
 }
 
+// The body of one request, decoded from the connection as it is read.
+class ConnectionBody final : public RequestBody {
+public:
+    ConnectionBody(ConnectionStream& stream, RequestDecoder& decoder, std::span<char> buffer,
+                   std::string_view& unread, ConnectionClock::time_point deadline)
+        : stream_(stream), decoder_(decoder), buffer_(buffer), unread_(unread), deadline_(deadline) {}
+
+    Piece read() override {
+        if (ended_) return last_;
+        for (;;) {
+            if (ConnectionClock::now() >= deadline_) return end({Status::TimedOut});
+            const auto result = decoder_.consume(unread_);
+            unread_.remove_prefix(result.consumed);
+            switch (result.event) {
+            case ReadEvent::Complete:
+                return end({Status::End});
+            case ReadEvent::BodyData:
+                if (result.body_data.empty()) continue;
+                return {Status::Data, result.body_data};
+            case ReadEvent::Rejected:
+                return end({Status::Rejected, {}, result.status});
+            case ReadEvent::NeedInput: {
+                const auto read = stream_.read(buffer_, deadline_, wake_);
+                switch (read.status) {
+                case StreamStatus::Woken:
+                    return {Status::Woken};
+                case StreamStatus::Ready:
+                    if (read.size == 0 || read.size > buffer_.size()) return end({Status::Failed});
+                    unread_ = {buffer_.data(), read.size};
+                    continue;
+                case StreamStatus::End:
+                    (void)decoder_.finish_input();
+                    truncated_ = true;
+                    return end({Status::Failed});
+                case StreamStatus::TimedOut:
+                    return end({Status::TimedOut});
+                case StreamStatus::Failed:
+                    return end({Status::Failed});
+                }
+                return end({Status::Failed});
+            }
+            default:
+                return end({Status::Failed});
+            }
+        }
+    }
+
+    void wake_on(int descriptor) override { wake_ = descriptor; }
+    bool ended() const { return ended_; }
+    Status outcome() const { return last_.status; }
+    int rejection() const { return last_.status_code; }
+    bool truncated() const { return truncated_; }
+
+private:
+    Piece end(Piece piece) {
+        ended_ = true;
+        last_ = piece;
+        return piece;
+    }
+
+    ConnectionStream& stream_;
+    RequestDecoder& decoder_;
+    std::span<char> buffer_;
+    std::string_view& unread_;
+    ConnectionClock::time_point deadline_;
+    bool ended_ = false;
+    bool truncated_ = false;
+    int wake_ = -1;
+    Piece last_{Status::End};
+};
+
+std::string hex(std::size_t value) {
+    constexpr std::string_view digits = "0123456789abcdef";
+    std::string text;
+    do {
+        text.insert(text.begin(), digits[value % 16]);
+        value /= 16;
+    } while (value != 0);
+    return text;
+}
+
+// The response of one request, written to the connection as it is produced.
+class ConnectionWriter final : public ResponseWriter {
+public:
+    ConnectionWriter(ConnectionStream& stream, bool head_method, bool close, ConnectionClock::time_point deadline)
+        : stream_(stream), head_method_(head_method), close_(close), deadline_(deadline) {}
+
+    StreamStatus start(int status, const std::vector<Header>& headers,
+                       std::optional<std::uint64_t> length) override {
+        if (started_) return fail();
+        started_ = true;
+        const bool no_content = status == 204 || status == 304;
+        if (status < 200 || status > 599 || !valid_fields(headers) ||
+            ((no_content || status == 205) && length && *length != 0)) {
+            invalid_ = true;
+            (void)close_with_status(stream_, 500, ConnectionEnd::ResponseClosed);
+            return fail();
+        }
+        length_ = length;
+        suppress_ = head_method_ || no_content;
+        chunked_ = !no_content && !length;
+        std::string head = "HTTP/1.1 " + std::to_string(status) + " ";
+        head += reason_phrase(status);
+        head += "\r\n";
+        for (const auto& header : headers) {
+            if (framing_field(header.name)) continue;
+            head += header.name;
+            head += ": ";
+            head += header.value;
+            head += "\r\n";
+        }
+        if (chunked_) head += "Transfer-Encoding: chunked\r\n";
+        else if (!no_content) head += "Content-Length: " + std::to_string(*length) + "\r\n";
+        if (close_) head += "Connection: close\r\n";
+        head += "\r\n";
+        // A head with a known, small body is held back and sent with it, so
+        // a buffered response leaves in one write.
+        if (!chunked_ && !suppress_ && *length_ != 0 && *length_ <= coalesce_bytes) {
+            pending_ = std::move(head);
+            return StreamStatus::Ready;
+        }
+        return result(stream_.write_all(head, deadline_));
+    }
+
+    StreamStatus write(std::string_view bytes) override {
+        if (!started_ || finished_ || failed_) return fail();
+        if (length_ && bytes.size() > *length_ - written_) return fail();
+        written_ += bytes.size();
+        if (suppress_ || bytes.empty()) return StreamStatus::Ready;
+        if (!pending_.empty()) {
+            pending_.append(bytes);
+            if (written_ < *length_) return StreamStatus::Ready;
+            const auto status = stream_.write_all(pending_, deadline_);
+            pending_.clear();
+            return result(status);
+        }
+        if (!chunked_) return result(stream_.write_all(bytes, deadline_));
+        std::string frame = hex(bytes.size());
+        frame += "\r\n";
+        frame.append(bytes);
+        frame += "\r\n";
+        return result(stream_.write_all(frame, deadline_));
+    }
+
+    StreamStatus finish() override {
+        if (!started_ || finished_ || failed_) return fail();
+        if (length_ && written_ != *length_) return fail();
+        finished_ = true;
+        if (!pending_.empty()) {
+            const auto status = stream_.write_all(pending_, deadline_);
+            pending_.clear();
+            if (status != StreamStatus::Ready) return fail(status);
+        }
+        if (chunked_ && !suppress_) return result(stream_.write_all("0\r\n\r\n", deadline_));
+        return StreamStatus::Ready;
+    }
+
+    bool started() const override { return started_; }
+    bool finished() const { return finished_ && !failed_; }
+    bool failed() const { return failed_; }
+    bool invalid() const { return invalid_; }
+    StreamStatus failure() const { return failure_; }
+
+private:
+    StreamStatus fail(StreamStatus status = StreamStatus::Failed) {
+        failed_ = true;
+        failure_ = status;
+        return status;
+    }
+    StreamStatus result(StreamStatus status) { return status == StreamStatus::Ready ? status : fail(status); }
+
+    ConnectionStream& stream_;
+    bool head_method_;
+    bool close_;
+    ConnectionClock::time_point deadline_;
+    bool started_ = false;
+    bool finished_ = false;
+    bool failed_ = false;
+    bool invalid_ = false;
+    bool suppress_ = false;
+    bool chunked_ = false;
+    static constexpr std::uint64_t coalesce_bytes = 64 * 1024;
+    StreamStatus failure_ = StreamStatus::Ready;
+    std::string pending_;
+    std::optional<std::uint64_t> length_;
+    std::uint64_t written_ = 0;
+};
+
 } // namespace
+
+Responder buffered(BufferedResponder respond, std::size_t response_bytes) {
+    return [respond = std::move(respond), response_bytes](const RequestHead& head, RequestBody& body,
+                                                          ResponseWriter& writer,
+                                                          ConnectionClock::time_point deadline) {
+        std::string content;
+        for (;;) {
+            const auto piece = body.read();
+            if (piece.status == RequestBody::Status::Data) {
+                content.append(piece.data);
+                continue;
+            }
+            if (piece.status == RequestBody::Status::End) break;
+            if (piece.status == RequestBody::Status::Woken) continue;
+            return;
+        }
+        const auto response = respond(head, content);
+        // Unstarted: answered 504 past the deadline, and 500 otherwise.
+        if (ConnectionClock::now() >= deadline || response.body.size() > response_bytes) return;
+        if (writer.start(response.status, response.headers, response.body.size()) != StreamStatus::Ready) return;
+        if (writer.write(response.body) != StreamStatus::Ready) return;
+        (void)writer.finish();
+    };
+}
 
 ConnectionEnd serve_connection(ConnectionStream& stream, const BufferedResponder& respond,
                                const ConnectionLimits& limits) {
+    return serve_connection(stream, buffered(respond, limits.response_bytes), limits);
+}
+
+ConnectionEnd serve_connection(ConnectionStream& stream, const Responder& respond, const ConnectionLimits& limits) {
     std::array<char, 16 * 1024> buffer;
     std::string_view unread;
     for (;;) {
         RequestDecoder decoder(limits.request);
-        std::string body;
-        bool reading_head = true;
         auto deadline = ConnectionClock::now() + limits.head_timeout;
 
-        for (;;) {
-            if (ConnectionClock::now() >= deadline) {
-                if (reading_head) return ConnectionEnd::HeadTimeout;
-                return close_with_status(stream, 504, ConnectionEnd::RequestTimeout);
-            }
+        // The head.
+        for (bool head_ready = false; !head_ready;) {
+            if (ConnectionClock::now() >= deadline) return ConnectionEnd::HeadTimeout;
             const auto result = decoder.consume(unread);
             unread.remove_prefix(result.consumed);
-            if (result.event == ReadEvent::Complete) break;
-
             switch (result.event) {
+            case ReadEvent::HeadReady:
+                head_ready = true;
+                break;
             case ReadEvent::NeedInput: {
                 const auto read = stream.read(buffer, deadline);
                 switch (read.status) {
@@ -149,24 +362,13 @@ ConnectionEnd serve_connection(ConnectionStream& stream, const BufferedResponder
                     return decoder.finish_input().event == ReadEvent::Closed
                         ? ConnectionEnd::PeerClosed : ConnectionEnd::TruncatedRequest;
                 case StreamStatus::TimedOut:
-                    if (reading_head) return ConnectionEnd::HeadTimeout;
-                    return close_with_status(stream, 504, ConnectionEnd::RequestTimeout);
+                    return ConnectionEnd::HeadTimeout;
                 case StreamStatus::Failed:
+                case StreamStatus::Woken:
                     return ConnectionEnd::StreamFailure;
                 }
                 break;
             }
-            case ReadEvent::HeadReady:
-                reading_head = false;
-                deadline = ConnectionClock::now() + limits.request_timeout;
-                if (decoder.head().expect_continue) {
-                    const auto sent = stream.write_all(continue_reply, deadline);
-                    if (sent != StreamStatus::Ready) return write_failure(sent);
-                }
-                break;
-            case ReadEvent::BodyData:
-                body.append(result.body_data);
-                break;
             case ReadEvent::Rejected:
                 return close_with_status(stream, result.status, ConnectionEnd::RejectedRequest);
             default:
@@ -174,23 +376,61 @@ ConnectionEnd serve_connection(ConnectionStream& stream, const BufferedResponder
             }
         }
 
+        // S-8 runs from the end of the head.
+        deadline = ConnectionClock::now() + limits.request_timeout;
         const auto& head = decoder.head();
-        struct Finished {
-            const std::function<void()>& notify;
-            ~Finished() {
-                if (notify) notify();
-            }
-        } finished{limits.response_finished};
-        const auto response = respond(head, body);
-        if (ConnectionClock::now() >= deadline) return close_with_status(stream, 504, ConnectionEnd::RequestTimeout);
-        const bool no_content = response.status == 204 || response.status == 205 || response.status == 304;
-        if (response.status < 200 || response.status > 599 || response.body.size() > limits.response_bytes ||
-            (no_content && !response.body.empty()) || !valid_fields(response.headers)) {
-            return close_with_status(stream, 500, ConnectionEnd::ResponseClosed);
+        if (head.expect_continue) {
+            const auto sent = stream.write_all(continue_reply, deadline);
+            if (sent != StreamStatus::Ready) return write_failure(sent);
         }
-        const auto sent = write_response(stream, response.status, response.body, head.method == "HEAD",
-                                         head.connection_close, deadline, response.headers);
-        if (sent != StreamStatus::Ready) return write_failure(sent);
+
+        ConnectionBody body(stream, decoder, buffer, unread, deadline);
+        ConnectionWriter writer(stream, head.method == "HEAD", head.connection_close, deadline);
+        {
+            struct Finished {
+                const std::function<void()>& notify;
+                ~Finished() {
+                    if (notify) notify();
+                }
+            } finished{limits.response_finished};
+            respond(head, body, writer, deadline);
+
+            if (!writer.started()) {
+                if (body.ended()) {
+                    switch (body.outcome()) {
+                    case RequestBody::Status::Rejected:
+                        return close_with_status(stream, body.rejection(), ConnectionEnd::RejectedRequest);
+                    case RequestBody::Status::TimedOut:
+                        return close_with_status(stream, 504, ConnectionEnd::RequestTimeout);
+                    case RequestBody::Status::Failed:
+                        return body.truncated() ? ConnectionEnd::TruncatedRequest : ConnectionEnd::StreamFailure;
+                    default:
+                        break;
+                    }
+                }
+                if (ConnectionClock::now() >= deadline) {
+                    return close_with_status(stream, 504, ConnectionEnd::RequestTimeout);
+                }
+                return close_with_status(stream, 500, ConnectionEnd::ResponseClosed);
+            }
+            if (writer.invalid()) return ConnectionEnd::ResponseClosed;
+            if (writer.failed() || !writer.finished()) {
+                // A response cut short: the client sees an incomplete body.
+                if (writer.failure() == StreamStatus::TimedOut || ConnectionClock::now() >= deadline) {
+                    return ConnectionEnd::RequestTimeout;
+                }
+                return ConnectionEnd::StreamFailure;
+            }
+        }
+
+        // What the responder left of the body is read and discarded; a body
+        // that cannot be read to its end closes the connection.
+        body.wake_on(-1);
+        while (!body.ended()) (void)body.read();
+        if (body.outcome() != RequestBody::Status::End) {
+            stream.close_after_response();
+            return ConnectionEnd::ResponseClosed;
+        }
         if (head.connection_close) {
             stream.close_after_response();
             return ConnectionEnd::ResponseClosed;

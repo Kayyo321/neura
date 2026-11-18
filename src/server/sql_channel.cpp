@@ -78,14 +78,23 @@ private:
 
 } // namespace
 
+std::vector<std::uint8_t> encode_sql_arguments(nvm::SqlOperation operation,
+                                               const std::vector<nvm::HostValue>& arguments) {
+    Writer writer;
+    writer.u32(static_cast<std::uint32_t>(operation));
+    writer.u32(static_cast<std::uint32_t>(arguments.size()));
+    for (const auto& argument : arguments) writer.value(argument);
+    return std::move(writer.out);
+}
+
 std::vector<std::uint8_t> encode_sql_call(const SqlCall& call) {
     Writer writer;
     writer.u32(call.call);
     writer.u32(sql_call_operation);
-    writer.u32(static_cast<std::uint32_t>(call.operation));
-    writer.u32(static_cast<std::uint32_t>(call.arguments.size()));
-    for (const auto& argument : call.arguments) writer.value(argument);
-    return std::move(writer.out);
+    auto out = std::move(writer.out);
+    const auto rest = encode_sql_arguments(call.operation, call.arguments);
+    out.insert(out.end(), rest.begin(), rest.end());
+    return out;
 }
 
 std::optional<SqlCall> decode_sql_call(std::span<const std::uint8_t> body) {
@@ -116,46 +125,42 @@ std::vector<std::uint8_t> encode_sql_return(std::uint32_t call, const nvm::SqlAn
     return std::move(writer.out);
 }
 
-std::optional<nvm::SqlAnswer> decode_sql_return(std::uint32_t call, std::span<const std::uint8_t> body) {
-    Reader reader(body);
-    std::uint32_t returned = 0, transport = 0;
+std::optional<nvm::SqlAnswer> decode_sql_answer(std::span<const std::uint8_t> payload) {
+    Reader reader(payload);
     std::uint8_t success = 0;
     nvm::SqlAnswer answer;
-    if (!reader.u32(returned) || returned != call || !reader.u32(transport) || transport != 0 || !reader.u8(success) ||
-        success > 1 || !reader.value(answer.completion.value) || !reader.text(answer.detail) || reader.left() != 0) {
+    if (!reader.u8(success) || success > 1 || !reader.value(answer.completion.value) || !reader.text(answer.detail) ||
+        reader.left() != 0) {
         return std::nullopt;
     }
     answer.completion.success = success == 1;
     return answer;
 }
 
+std::optional<nvm::SqlAnswer> decode_sql_return(std::uint32_t call, std::span<const std::uint8_t> body) {
+    Reader reader(body);
+    std::uint32_t returned = 0, transport = 0;
+    if (!reader.u32(returned) || returned != call || !reader.u32(transport) || transport != 0) return std::nullopt;
+    return decode_sql_answer(body.subspan(8));
+}
+
 nvm::SqlAnswer ChannelSql::call(nvm::SqlOperation operation, const std::vector<nvm::HostValue>& arguments) {
     const auto failed = [](std::uint32_t code, std::string detail) {
         return nvm::SqlAnswer{nvm::HostCompletion::failed(nvm::HostValue{code, {}, {}}), std::move(detail)};
     };
-    const auto number = ++calls_;
-    const auto body = encode_sql_call({number, operation, arguments});
-    if (body.size() + frame_header_bytes > default_frame_bytes) {
+    const auto body = encode_sql_arguments(operation, arguments);
+    // The Call adds its identifier and operation (8 bytes) to the arguments.
+    if (body.size() + 8 + frame_header_bytes > default_frame_bytes) {
         return failed(nvm::host_error::too_large, "the statement and its parameters exceed the channel's 1 MiB frame");
     }
-    if (channel_.send(FrameKind::Call, body, deadline_) != Channel::Status::Ok) {
-        return failed(channel_.status() == Channel::Status::TimedOut ? nvm::host_error::timed_out
-                                                                     : nvm::host_error::connection_reset,
-                      "the host channel failed");
+    std::uint32_t code = 0;
+    const auto payload = transport_(body, code);
+    if (!payload) {
+        return failed(code != 0 ? code : nvm::host_error::connection_reset, "the host channel failed");
     }
-    for (;;) {
-        auto frame = channel_.receive(deadline_);
-        if (!frame) {
-            return failed(channel_.status() == Channel::Status::TimedOut ? nvm::host_error::timed_out
-                                                                         : nvm::host_error::connection_reset,
-                          "the host channel failed");
-        }
-        if (frame->kind == FrameKind::Cancel) continue;
-        if (frame->kind != FrameKind::Return) return failed(nvm::host_error::connection_reset, "unexpected frame");
-        auto answer = decode_sql_return(number, frame->body);
-        if (!answer) return failed(nvm::host_error::connection_reset, "malformed SQL answer");
-        return std::move(*answer);
-    }
+    auto answer = decode_sql_answer(*payload);
+    if (!answer) return failed(nvm::host_error::connection_reset, "malformed SQL answer");
+    return std::move(*answer);
 }
 
 } // namespace neura::server::worker
