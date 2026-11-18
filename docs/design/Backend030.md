@@ -372,7 +372,7 @@ Each step is one commit with its targeted tests. None changes the image of a pro
 | 2 | The wait-source change to `PendingOperation` and the driver; the new error codes and capability groups | Existing concurrency and host suites unchanged; a unit test per wait form available on the platform |
 | 3 | The host: listeners, HTTP/1.1 wire, limits, TLS; a fixed in-process responder in place of workers | Wire tests of cases 1 to 3, 6, 19 to 22, 44 |
 | 4 | The worker protocol, ready pool, assignment, trap handling, drain; `neura.http.server.*`; `Std.Net.Http` requests, responses, router, middleware | Cases 4, 5, 8, 9, 23 to 29, 46, 47; the isolation journey |
-| 5 | `neura.sql.*` with SQLite; `Std.Data.Sql`; transactions and cursors | Cases 10 to 13, 34, 36 to 40 on a temporary database (done: `stdlib-sql`, `server-sql`; case 34 is not tested) |
+| 5 | `neura.sql.*` with SQLite; `Std.Data.Sql`; transactions and cursors | Cases 10 to 13, 34, 36 to 40 on a temporary database (done: `stdlib-sql`, `server-sql`) |
 | 6 | PostgreSQL; cancellation; outcome unknown with a proxy that cuts the connection | Cases 14, 30, 35 against servers 16 and 18 in containers (done for 14 and for cancellation at the deadline, against 16, 17 and 18: `server-sql-postgres`; 30 needs disconnection, 35 the proxy) |
 | 7 | Migrations and `E1044` | Cases 15, 41 to 43 (done for 41 and 42 and the manual refusal of 43 in `server-sql`; 15 is not tested) |
 | 8 | Configuration, secrets, health, metrics, logs, authentication helpers, trusted proxies | Cases 7, 16, 31 to 33 |
