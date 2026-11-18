@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
-const { promises: fs } = require('node:fs');
+const { existsSync, promises: fs } = require('node:fs');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { app, BrowserWindow } = require('electron');
@@ -216,4 +216,71 @@ async function run() {
     console.log('Verified Electron bundle, offline assets, isolation, navigation, and integrity failure');
 }
 
-run().then(() => app.exit(0), error => { console.error(error); app.exit(1); });
+async function runNative(mode) {
+    assert.equal(process.versions.electron, '45.3.3');
+    const { settings } = await makeBundle();
+    const latch = path.join(scratch, 'permit-hello');
+    const registryDigest = digest('{"operations":[]}\n');
+    const reported = [];
+    const launch = launchDesktopShell(settings, {
+        nativeChild: {
+            executable: process.env.NEURA_DESKTOP_TEST_NODE,
+            args: [path.join(__dirname, 'native_child_helper.js'), mode === 'child-mismatch' ? 'shell-mismatch' : 'shell',
+                   registryDigest, String(1024 * 1024), latch],
+            registryDigest,
+        },
+        onNativeFailure(error, result) {
+            assert.equal(BrowserWindow.getAllWindows().length, 0);
+            reported.push({ error, result });
+        },
+    });
+    let startupError;
+    launch.catch(error => { startupError = error; });
+    const mismatch = mode === 'child-mismatch';
+    await waitFor(() => {
+        if (startupError) throw startupError;
+        return existsSync(`${latch}.pid`);
+    }, 'the child did not receive the host Hello');
+    const pid = Number(await fs.readFile(`${latch}.pid`, 'utf8'));
+    await delay(30);
+    assert.equal(BrowserWindow.getAllWindows().length, 0, 'window created before Hello');
+    await fs.writeFile(latch, 'ready');
+    if (mismatch) {
+        await assert.rejects(launch, /registry SHA-256/);
+        assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+        assert.equal(reported.length, 1);
+        console.log('Verified desktop child-mismatch');
+        app.exit(0);
+        return;
+    }
+
+    const window = await launch;
+    assert.equal(window.webContents.getURL(), home);
+    assert.equal(BrowserWindow.getAllWindows().length, 1);
+    app.on('quit', (_event, code) => {
+        try {
+            assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+            if (mode === 'child-crash') {
+                assert.equal(code, 1);
+                assert.equal(reported.length, 1);
+                assert.equal(reported[0].error.code, 'ChildExited');
+                assert.equal(reported[0].result.code, 73);
+            } else {
+                assert.equal(code, 0);
+                assert.equal(reported.length, 0);
+                assert.equal(existsSync(`${latch}.eof`), true);
+            }
+            console.log(`Verified desktop ${mode}`);
+        } catch (error) {
+            console.error(error);
+        }
+    });
+    if (mode === 'child-crash') await fs.writeFile(`${latch}.trap`, 'crash');
+    else if (mode === 'child-quit') app.quit();
+    else window.close();
+}
+
+const caseName = process.env.NEURA_DESKTOP_TEST_CASE;
+const fail = error => { console.error(error); app.exit(1); };
+if (caseName && caseName !== 'shell') runNative(caseName).catch(fail);
+else run().then(() => app.exit(0), fail);

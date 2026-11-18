@@ -67,6 +67,12 @@ A bridge call carries the JSON bytes of a contract operation ([Components](Compo
 | The host and the child speak over the child's standard input and output: frames of a 4-byte little-endian length, a 1-byte kind and a body, with the kinds `Hello`, `Call`, `Return`, `Cancel`, `HostCall`, `HostReturn` and `Event`. The child's standard error is its log. | proposed |
 | The implementation receives a `desktop.Call` with the window and nothing of the page: no URL, no script, no path. Browser input never selects a program to run, a file to open or a library to load. | proposed |
 
+The host-side channel in `main.js` counts the kind byte and body in the little-endian length. D-3 bounds the complete frame, including its four-byte length field. Version 1 assigns kind bytes 1 through 7 to `Hello`, `Call`, `Return`, `Cancel`, `HostCall`, `HostReturn`, and `Event` in that order. `Hello` has a four-byte little-endian version and the 32 raw SHA-256 bytes of `registry.json`. `Hello` travels both ways. The host writes `Call`, `Cancel`, `HostReturn` and `Event`, and reads `Return` and `HostCall`. Application bodies remain opaque at this transport boundary.
+
+The trusted package bootstrap can pass `nativeChild` to `launchDesktopShell` once it has verified the installed runner, its launch configuration and the registry digest. `nativeChild` takes the absolute `executable`, `args`, optional `environment`, `registryDigest` in lowercase hex and optional `frameLimit`. The shell waits for the exchange before it creates a window. Startup has a five-second Hello deadline. A normal shutdown closes stdin and allows up to five seconds for the child to exit. A protocol failure terminates the child, and the host waits for process exit and closed streams before finishing. The channel accepts one pipe write at a time. The future typed dispatcher owns request IDs, per-window call limits, call deadlines and cancellation.
+
+Run `node --test tests/desktop/native_child_test.js` for the pipe tests. The pinned Electron fixture accepts `--case child-mismatch`, `--case child-close`, `--case child-quit` and `--case child-crash`. Those cases use a separate test helper process supplied by the fixture. The packaged runner and desktop bundle loader are still needed for the application path.
+
 ## Windows, menus and dialogs
 
 All are operations of the native child, through host services of the `desktop` capability group. Every service is version 1 and answers a `uint32` error code on failure; types are written as in [Backend](Backend030.md#provider-abi).

@@ -4,6 +4,7 @@ import argparse
 import ctypes
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -38,7 +39,7 @@ def stop_children():
     raise RuntimeError("the Electron fixture left running subprocesses")
 
 
-def run(engine):
+def run(engine, case):
     # Chromium may orphan zygotes and crash handlers during shutdown. Adopt
     # them for this test so we can distinguish and reap exited children.
     libc = ctypes.CDLL(None, use_errno=True)
@@ -48,7 +49,14 @@ def run(engine):
     with tempfile.TemporaryDirectory(prefix="neura-desktop-") as scratch:
         (Path(scratch) / "profile").mkdir()
         command = ["xvfb-run", "-a", engine, "--disable-background-networking", str(fixture)]
-        env = {**os.environ, "NEURA_DESKTOP_TEST_SCRATCH": scratch}
+        env = {**os.environ, "NEURA_DESKTOP_TEST_SCRATCH": scratch, "NEURA_DESKTOP_TEST_CASE": case}
+        if case != "shell":
+            node = shutil.which("node")
+            if node is None:
+                raise RuntimeError("the native child fixture needs Node")
+            env["NEURA_DESKTOP_TEST_NODE"] = subprocess.check_output(
+                [node, "-p", "process.execPath"], text=True, timeout=5
+            ).strip()
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, start_new_session=True, env=env) as process:
             try:
@@ -61,13 +69,17 @@ def run(engine):
                 raise RuntimeError("the Electron shell fixture timed out")
             finally:
                 stop_children()
-        if process.returncode != 0:
+        expected = 1 if case == "child-crash" else 0
+        verified = case == "shell" or f"Verified desktop {case}\n" in stdout
+        if process.returncode != expected or not verified:
             print(stderr, end="", file=sys.stderr)
         print(stdout, end="")
-        return process.returncode
+        return 0 if process.returncode == expected and verified else 1
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("electron", type=lambda value: str(Path(value).resolve()), help="path to the pinned Electron 45.3.3 executable")
-    sys.exit(run(parser.parse_args().electron))
+    parser.add_argument("--case", action="append", choices=("shell", "child-close", "child-quit", "child-crash", "child-mismatch"))
+    args = parser.parse_args()
+    sys.exit(any(run(args.electron, case) for case in args.case or ["shell"]))
