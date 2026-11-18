@@ -1,0 +1,17 @@
+// status: 134
+// stderr: IoSlice[.]slice: range outside the view
+// IoSlice.slice traps when the range does not fit inside the view.
+let console = import:Std.Io.Console;
+let io = import:Std.Net.Core.IoSlice;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        last bytes: uint8[list] = new;
+        bytes.append(1);
+        bytes.append(2);
+        console.print_line(io.of(bytes).slice(1, 3).to_string());
+        return program.ExitCode.Ok;
+    };
+);

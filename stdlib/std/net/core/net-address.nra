@@ -1,0 +1,20 @@
+/// @brief The root of the network address hierarchy: the address families and the interface that
+/// `Ipv4Addr`, `Ipv6Addr`, `SocketAddr` and `UnixAddr` implement.
+///
+/// The address types are immutable classes, so each value is one heap object: this runtime does not provide
+/// zero-allocation value types, and the NVM reclaims addresses with its tracing collector (nothing is
+/// reference-counted). `to_string` is universal and gives each address's canonical text.
+/// @see [Std.Net.Core.NetAddress](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-NetAddress)
+#Since("0.3.0")
+export let NetAddress = module (
+    /// @brief The family of a network address.
+    #Since("0.3.0")
+    export let AddressFamily = enum (Ipv4, Ipv6, Unix);
+
+    /// @brief Any network address: it names its family, and `to_string` gives its text.
+    #Since("0.3.0")
+    export let NetAddress = interface (
+        /// @brief The address family.
+        let family = func -> AddressFamily;
+    );
+);

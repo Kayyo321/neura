@@ -1,0 +1,96 @@
+let cidr = import:Std.Net.Core.CidrBlock;
+let ips = import:Std.Net.Core.IpAddr;
+let optional = import:Std.Core.Optional;
+let tries = import:Std.Net.Core.PrefixTrie;
+let test = import:Std.Test;
+
+// PrefixTrie: longest-prefix match over IPv4 and IPv6 blocks, exact lookup, replace, remove and size.
+let PrefixTrieTests = module (
+    let block = func(text: string) -> cidr.CidrBlock => test.assert_ok<cidr.CidrBlock>(cidr.parse(text));
+
+    let ip = func(text: string) -> ips.IpAddr => test.assert_ok<ips.IpAddr>(ips.parse(text));
+
+    // The table of lpm.py; each block maps to its own text.
+    let table = func -> tries.PrefixTrie<string> {
+        last trie = new tries.PrefixTrie<string>();
+        last texts: string[] = ["0.0.0.0/0", "10.0.0.0/8", "10.1.0.0/16", "10.1.2.0/24", "10.1.2.3/32",
+            "192.168.0.0/16", "::/0", "2001:db8::/32", "2001:db8::/64", "2001:db8:0:0:8000::/65", "2001:db8::1/128",
+            "fe80::/10"];
+        for (let text in texts) {
+            test.assert(trie.insert(block(text), text));
+        }
+        return trie;
+    };
+
+    let expect_match = func(trie: tries.PrefixTrie<string>, query: string, expected: string) {
+        test.assert_equal_string(expected, test.assert_some<string>(trie.longest_match(ip(query))));
+        last found = test.assert_some<cidr.CidrBlock>(trie.longest_match_block(ip(query)));
+        test.assert_equal_string(expected, found.to_string());
+    };
+
+    // Generated with python3 -I lpm.py (Python 3.13.5): for each query a it prints the network n of the table with
+    // the same version, a in n, and the greatest prefixlen.
+    export let test_python_longest_match = func {
+        last trie = table();
+        test.assert_equal_int64(12, trie.size() as int64);
+        expect_match(trie, "10.1.2.3", "10.1.2.3/32");
+        expect_match(trie, "10.1.2.4", "10.1.2.0/24");
+        expect_match(trie, "10.1.3.1", "10.1.0.0/16");
+        expect_match(trie, "10.2.0.0", "10.0.0.0/8");
+        expect_match(trie, "11.0.0.0", "0.0.0.0/0");
+        expect_match(trie, "192.168.255.255", "192.168.0.0/16");
+        expect_match(trie, "192.169.0.0", "0.0.0.0/0");
+        expect_match(trie, "2001:db8::1", "2001:db8::1/128");
+        expect_match(trie, "2001:db8::2", "2001:db8::/64");
+        expect_match(trie, "2001:db8::8000:0:0:1", "2001:db8:0:0:8000::/65");
+        expect_match(trie, "2001:db8:0:1::", "2001:db8::/32");
+        expect_match(trie, "2001:db9::", "::/0");
+        expect_match(trie, "fe80::1", "fe80::/10");
+        // An IPv4-mapped address is an IPv6 query: it reaches ::/0, not 10.0.0.0/8.
+        expect_match(trie, "::ffff:10.0.0.1", "::/0");
+        // The query's zone is ignored.
+        expect_match(trie, "fe80::1%eth0", "fe80::/10");
+    };
+
+    // Expected matches from the brute force of lpm.py (largest prefixlen among networks n with a in n) over the
+    // table [10.0.0.0/8, 2001:db8::/32]: 11.0.0.1, ::ffff:10.0.0.1 and 2001:db9:: give None; 10.255.255.255 gives
+    // 10.0.0.0/8 and 2001:db8:ffff:: gives 2001:db8::/32.
+    export let test_no_default_route = func {
+        last trie = new tries.PrefixTrie<int>();
+        test.assert(trie.insert(block("10.0.0.0/8"), 8));
+        test.assert(trie.insert(block("2001:db8::/32"), 32));
+        test.assert_none<int>(trie.longest_match(ip("11.0.0.1")));
+        test.assert_none<cidr.CidrBlock>(trie.longest_match_block(ip("11.0.0.1")));
+        test.assert_none<int>(trie.longest_match(ip("::ffff:10.0.0.1")));
+        test.assert_none<int>(trie.longest_match(ip("2001:db9::")));
+        test.assert_equal_int64(8, test.assert_some<int>(trie.longest_match(ip("10.255.255.255"))) as int64);
+        test.assert_equal_int64(32, test.assert_some<int>(trie.longest_match(ip("2001:db8:ffff::"))) as int64);
+        test.assert_equal_string("PrefixTrie(size 2)", trie.to_string());
+    };
+
+    // After removing 10.1.0.0/16 the same brute force gives 10.0.0.0/8 for 10.1.3.1 and 10.1.2.0/24 for 10.1.2.9;
+    // after also removing 0.0.0.0/0 and ::/0 it gives None for 11.0.0.0 and 2001:db9::.
+    export let test_exact_replace_remove = func {
+        last trie = table();
+        test.assert_equal_string("10.1.0.0/16", test.assert_some<string>(trie.exact(block("10.1.0.0/16"))));
+        // A path node that holds no value, and a path that does not exist.
+        test.assert_none<string>(trie.exact(block("10.1.0.0/17")));
+        test.assert_none<string>(trie.exact(block("172.16.0.0/12")));
+        test.assert(!trie.insert(block("10.1.0.0/16"), "replaced"));
+        test.assert_equal_int64(12, trie.size() as int64);
+        test.assert_equal_string("replaced", test.assert_some<string>(trie.longest_match(ip("10.1.3.1"))));
+        test.assert(trie.remove(block("10.1.0.0/16")));
+        test.assert(!trie.remove(block("10.1.0.0/16")));
+        test.assert(!trie.remove(block("172.16.0.0/12")));
+        test.assert_equal_int64(11, trie.size() as int64);
+        test.assert_equal_string("10.0.0.0/8", test.assert_some<string>(trie.longest_match(ip("10.1.3.1"))));
+        test.assert_equal_string("10.1.2.0/24", test.assert_some<string>(trie.longest_match(ip("10.1.2.9"))));
+        test.assert(trie.remove(block("0.0.0.0/0")));
+        test.assert_none<string>(trie.longest_match(ip("11.0.0.0")));
+        test.assert(trie.remove(block("::/0")));
+        test.assert_none<string>(trie.longest_match(ip("2001:db9::")));
+        test.assert(trie.insert(block("::/0"), "back"));
+        test.assert_equal_string("back", test.assert_some<string>(trie.longest_match(ip("2001:db9::"))));
+        test.assert_equal_int64(10, trie.size() as int64);
+    };
+);
