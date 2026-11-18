@@ -24,19 +24,19 @@ The following public declarations are taken from the module source; each links t
   A cursor one step deeper.
 - **ValueCursor.ValueCursor** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L35)
 - **ValueCursor.ValueCursor** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L36)
-- **ValueCursor.ValueCursor** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L42)
-- **ValueCursor** · [`export let ValueCursorMut = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L48)
+- **ValueCursor.ValueCursor** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L43)
+- **ValueCursor** · [`export let ValueCursorMut = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L49)
   A position whose field can be written: the last step names a field of the object the rest of the path reaches. Since 0.3.0.
-- **ValueCursor.ValueCursorMut** · [`export last root: model.Variant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L49)
-- **ValueCursor.ValueCursorMut** · [`export last path: int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L50)
-- **ValueCursor.ValueCursorMut** · [`export let init = func(value: model.Variant, steps: int[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L52)
-- **ValueCursor.ValueCursorMut** · [`export let value = func -> model.Variant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L58)
+- **ValueCursor.ValueCursorMut** · [`export last root: model.Variant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L50)
+- **ValueCursor.ValueCursorMut** · [`export last path: int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L51)
+- **ValueCursor.ValueCursorMut** · [`export let init = func(value: model.Variant, steps: int[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L53)
+- **ValueCursor.ValueCursorMut** · [`export let value = func -> model.Variant`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L59)
   The value at the cursor.
-- **ValueCursor.ValueCursorMut** · [`export let write = func(replacement: model.Variant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L61)
+- **ValueCursor.ValueCursorMut** · [`export let write = func(replacement: model.Variant)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L62)
   Writes the field at the cursor; an empty path or a value of another type traps.
-- **ValueCursor.ValueCursorMut** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L72)
-- **ValueCursor.ValueCursorMut** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L73)
-- **ValueCursor.ValueCursorMut** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L79)
-- **ValueCursor** · [`export let at = func(value: model.Variant) -> ValueCursor`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L84)
+- **ValueCursor.ValueCursorMut** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L73)
+- **ValueCursor.ValueCursorMut** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L74)
+- **ValueCursor.ValueCursorMut** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L81)
+- **ValueCursor** · [`export let at = func(value: model.Variant) -> ValueCursor`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/member/value-cursor.nra#L86)
   A cursor at the root of `value`. Since 0.3.0.
 <!-- END SOURCE API -->

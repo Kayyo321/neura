@@ -51,20 +51,20 @@ The following public declarations are taken from the module source; each links t
 - **Abi.AbiLayout** · [`export let offset = func(name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L116)
   The byte offset of the member named `name`; an unknown name traps.
 - **Abi.AbiLayout** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L126)
-- **Abi.AbiLayout** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L133)
-- **Abi.AbiLayout** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L139)
-- **Abi** · [`export let ArgumentClass = enum (Integer, Sse, FloatRegisters, GeneralRegisters, Memory, Indirect)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L146)
+- **Abi.AbiLayout** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L134)
+- **Abi.AbiLayout** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L141)
+- **Abi** · [`export let ArgumentClass = enum (Integer, Sse, FloatRegisters, GeneralRegisters, Memory, Indirect)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L148)
   How an aggregate argument is passed: per eightbyte in integer or SSE registers (System V), in floating-point registers (an AAPCS64 homogeneous floating-point aggregate), in general registers, or in memory (on the stack, or by a hidden reference on AAPCS64 and Windows x64). Since 0.3.0.
-- **Abi** · [`export let target = func(triple: string) -> Optional<Target>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L151)
+- **Abi** · [`export let target = func(triple: string) -> Optional<Target>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L153)
   The target a triple names: `x86_64-...-linux-gnu`, `x86_64-apple-darwin`, `aarch64-...`, `arm64-apple-darwin`, `x86_64-pc-windows-msvc` or `-gnu`, `wasm32-...`. Another triple returns None. Since 0.3.0.
-- **Abi** · [`export let size_of = func(type: CType, on: Target) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L171)
+- **Abi** · [`export let size_of = func(type: CType, on: Target) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L173)
   The size of a scalar in bytes on the target. Since 0.3.0.
-- **Abi** · [`export let align_of = func(type: CType, on: Target) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L200)
+- **Abi** · [`export let align_of = func(type: CType, on: Target) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L202)
   The alignment of a scalar in bytes on the target (its size on every supported target). Since 0.3.0.
-- **Abi** · [`export let is_float = func(type: CType) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L204)
+- **Abi** · [`export let is_float = func(type: CType) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L206)
   Whether a scalar is a floating-point type. Since 0.3.0.
-- **Abi** · [`export let layout = func(shape: CStruct, on: Target) -> AbiLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L210)
+- **Abi** · [`export let layout = func(shape: CStruct, on: Target) -> AbiLayout`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L212)
   The layout of `shape` on `on`, with C's rules: each member at the next multiple of its alignment, the struct aligned to its strictest member and padded to a multiple of that alignment. An empty struct traps (C has none). Since 0.3.0.
-- **Abi** · [`export let classify = func(shape: CStruct, on: Target) -> ArgumentClass[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L231)
+- **Abi** · [`export let classify = func(shape: CStruct, on: Target) -> ArgumentClass[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/ffi/abi.nra#L233)
   How `shape` is passed as an argument on `on`: one class per eightbyte on System V x86-64, and one class for the whole value on the other targets. Since 0.3.0.
 <!-- END SOURCE API -->

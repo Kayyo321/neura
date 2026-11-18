@@ -211,39 +211,75 @@ export let JsonBridge = module (
     let decode_number = func(text: string, type: model.TypeDescriptor, path: string) -> Result<model.Variant> {
         last bad = failure("reflect.json.range", path, text .. " is not a " .. type.name);
         if (type.name == "int8") {
-            return match (int8s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (int8s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "int16") {
-            return match (int16s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (int16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "int32") {
-            return match (int32s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (int32s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "int64") {
-            return match (int64s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (int64s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "uint8") {
-            return match (uint8s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (uint8s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "uint16") {
-            return match (uint16s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (uint16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "uint32") {
-            return match (uint32s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (uint32s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "uint64") {
-            return match (uint64s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (uint64s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "float16") {
-            return match (float16s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (float16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "bfloat16") {
-            return match (bfloat16s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (bfloat16s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
         if (type.name == "float32") {
-            return match (float32s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+            return match (float32s.parse(text)) {
+                Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+                Result.Err(_) => bad,
+            };
         }
-        return if (type.name == "float64") -> match (float64s.parse(text)) { Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)), Result.Err(_) => bad, };
+        return if (type.name == "float64") -> match (float64s.parse(text)) {
+            Result.Ok(v) => Result<model.Variant>.Ok(model.variant_of(v)),
+            Result.Err(_) => bad,
+        };
         else -> failure("reflect.json.type", path, "a number is not a " .. type.name);
     };
 
@@ -291,7 +327,7 @@ export let JsonBridge = module (
         last payload = items_of(json.member(members, "payload"));
         if (payload.length != chosen.payloads.length) {
             return failure("reflect.json.variant", path, "variant " .. name .. " takes " ..
-                           chosen.payloads.length.to_string() .. " payloads");
+                chosen.payloads.length.to_string() .. " payloads");
         }
         last types: int[list] = new;
         for (let item in chosen.payloads) {
@@ -361,7 +397,7 @@ export let JsonBridge = module (
                 if (not readable(field)) {
                     // Encoding left the value out or wrote a placeholder, so nothing can rebuild it.
                     return failure("reflect.json.missing", at, "a #Sensitive, #Skip, unexported or any field is not " ..
-                                   "written as JSON, so " .. type.name .. " cannot be rebuilt by its constructor");
+                        "written as JSON, so " .. type.name .. " cannot be rebuilt by its constructor");
                 }
                 match (wire_member(members, field)) {
                     Optional.Some(item) => {
@@ -406,7 +442,7 @@ export let JsonBridge = module (
                             },
                         }
                     },
-                    Optional.None => { },
+                    Optional.None => {},
                 }
             }
             return Result<model.Variant>.Ok(made);

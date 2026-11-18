@@ -11,7 +11,7 @@ let Reflection = module (
         export let owner: string = "";
         #Sensitive
         export let pin: string = "0000";
-        export let init = func { };
+        export let init = func {};
     );
 
     export let Named = interface (

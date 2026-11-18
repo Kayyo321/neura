@@ -29,7 +29,7 @@ export let ForeignCall = module (
         export last parameters: abi.CType[list];
 
         export let init = func(label: string, at: segments.MemorySegment, on: abi.Target, no_result: bool,
-                               result_type: abi.CType, parameter_types: abi.CType[list]) {
+            result_type: abi.CType, parameter_types: abi.CType[list]) {
             name = label;
             address = at;
             target = on;
@@ -74,7 +74,7 @@ export let ForeignCall = module (
         export let invoke = func -> model.Variant {
             if (arguments.length != symbol.parameters.length) {
                 trap_with_message("invalid argument: " .. symbol.name .. " takes " ..
-                                  symbol.parameters.length.to_string() .. " argument(s)");
+                    symbol.parameters.length.to_string() .. " argument(s)");
             }
             last values: foreign_values.ForeignValue[list] = new;
             for (let i in 0 .. arguments.length) {
@@ -93,13 +93,13 @@ export let ForeignCall = module (
     /// program's own native code), or None.
     #Since("0.3.0")
     export let lookup = func(name: string, on: abi.Target, returns_void: bool, result: abi.CType,
-                             parameters: abi.CType[list]) -> Optional<ForeignSymbol> =>
-        lookup_in(lookups.default_lookup(), name, on, returns_void, result, parameters);
+        parameters: abi.CType[list]) -> Optional<ForeignSymbol> =>
+            lookup_in(lookups.default_lookup(), name, on, returns_void, result, parameters);
 
     /// @brief The native function `name` in `library`, or None.
     #Since("0.3.0")
     export let lookup_in = func(library: lookups.SymbolLookup, name: string, on: abi.Target, returns_void: bool,
-                                result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol> {
+        result: abi.CType, parameters: abi.CType[list]) -> Optional<ForeignSymbol> {
         match (library.find(name)) {
             Optional.Some(address) => {
                 return Optional<ForeignSymbol>.Some(new ForeignSymbol(name, address, on, returns_void, result, parameters));
@@ -148,7 +148,7 @@ export let ForeignCall = module (
             layouts.append(value_layout(type, symbol.target));
         }
         last result = symbol.returns_void ? Optional<memory_layouts.MemoryLayout>.None
-                                          : Optional<memory_layouts.MemoryLayout>.Some(value_layout(symbol.result, symbol.target));
+            : Optional<memory_layouts.MemoryLayout>.Some(value_layout(symbol.result, symbol.target));
         return new descriptors.FunctionDescriptor(result, layouts);
     };
 

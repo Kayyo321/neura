@@ -23,7 +23,7 @@ export let SchemaBuilder = module (
                     members.append(item);
                 }
             },
-            _ => { },
+            _ => {},
         }
         if (definitions.length > 0) {
             members.append(["$defs", JsonValue.Object(definitions)]);
@@ -77,7 +77,7 @@ export let SchemaBuilder = module (
                 nullable = true;
             }
             text ..= (first ? "\n    " : ",\n    ") .. attributes.serial_name(field) .. " " .. sql_type(column, field.name) ..
-                     (nullable ? "" : " NOT NULL");
+                (nullable ? "" : " NOT NULL");
             first = false;
         }
         return text .. "\n);";
@@ -144,7 +144,7 @@ export let SchemaBuilder = module (
             for (let variant in type.variants) {
                 if (variant.payloads.length > 0) {
                     trap_with_message("invalid argument: field " .. field .. ": the enum " .. type.name +
-                                      " has payloads, which proto3 enums cannot hold");
+                        " has payloads, which proto3 enums cannot hold");
                 }
             }
             if (not contains(done, proto_name(type))) {
@@ -152,7 +152,7 @@ export let SchemaBuilder = module (
                 let text = "enum " .. proto_name(type) .. " {\n";
                 for (let variant in type.variants) {
                     text ..= "    " .. proto_name(type).to_upper_case() .. "_" .. variant.name.to_upper_case() .. " = " ..
-                           variant.index.to_string() .. ";\n";
+                        variant.index.to_string() .. ";\n";
                 }
                 parts.append(text .. "}\n");
             }
@@ -193,7 +193,7 @@ export let SchemaBuilder = module (
                 element = model.descriptor_of(field_type.variants[1].payloads[0].type_ordinal);
             }
             text ..= "    " .. prefix .. proto_type(element, done, parts, field.name) .. " " ..
-                     attributes.serial_name(field) .. " = " .. number.to_string() .. ";\n";
+                attributes.serial_name(field) .. " = " .. number.to_string() .. ";\n";
             number = number + 1;
         }
         parts.append(text .. "}\n");

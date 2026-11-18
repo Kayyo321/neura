@@ -39,6 +39,7 @@ export let ValueCursor = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => path_text(path).hash_code();
     );
 
@@ -76,6 +77,7 @@ export let ValueCursor = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => path_text(path).hash_code();
     );
 

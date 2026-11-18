@@ -42,8 +42,8 @@ export let Members = module (
     #Since("0.3.0")
     export let flags = func(field: FieldInfo) -> FieldFlags =>
         new FieldFlags(field.is_const, field.is_last, field.is_property(),
-                       model.find_attribute(field.attributes, "Sensitive") != nil,
-                       model.find_attribute(field.attributes, "Skip") != nil);
+            model.find_attribute(field.attributes, "Sensitive") != nil,
+            model.find_attribute(field.attributes, "Skip") != nil);
 
     /// @brief The fields that are properties: read and written through accessor clauses rather than storage.
     #Since("0.3.0")

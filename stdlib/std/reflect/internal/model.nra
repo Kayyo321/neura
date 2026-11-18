@@ -81,6 +81,7 @@ export let Model = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 =>
             hashing.combine(hashing.combine(index as uint32, name.hash_code()), type_ordinal as uint32);
     );
@@ -103,7 +104,7 @@ export let Model = module (
         export last attributes: Attribute[list];
 
         export let init = func(owner_ordinal: int, position: int, label: string, ordinal: int, flags: string,
-                               tags: Attribute[list]) {
+            tags: Attribute[list]) {
             owner = owner_ordinal;
             index = position;
             name = label;
@@ -136,6 +137,7 @@ export let Model = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32);
     );
 
@@ -149,7 +151,7 @@ export let Model = module (
         export last attributes: Attribute[list];
 
         export let init = func(owner_ordinal: int, position: int, label: string, items: ParamInfo[list],
-                               tags: Attribute[list]) {
+            tags: Attribute[list]) {
             owner = owner_ordinal;
             index = position;
             name = label;
@@ -167,12 +169,14 @@ export let Model = module (
             }
             return text .. ")";
         };
+
         export let.override equals = func(other: class) -> bool {
             if (other is that: VariantInfo) {
                 return owner == that.owner && index == that.index;
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32);
     );
 
@@ -198,6 +202,7 @@ export let Model = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32 + 7919);
     );
 
@@ -216,7 +221,7 @@ export let Model = module (
         export last attributes: Attribute[list];
 
         export let init = func(owner_ordinal: int, position: int, label: string, result: int, flags: string,
-                               items: ParamInfo[list], tags: Attribute[list]) {
+            items: ParamInfo[list], tags: Attribute[list]) {
             owner = owner_ordinal;
             index = position;
             name = label;
@@ -237,6 +242,7 @@ export let Model = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32 + 104729);
     );
 
@@ -278,7 +284,7 @@ export let Model = module (
             identity = unescape(head[4]);
             id = type_ids.of_identity(identity);
             layout = new layouts.MemoryLayout(number(head[5]), layouts.form_of_text(head[6]), head[7] == "1",
-                                              number(head[8]));
+                number(head[8]));
             policy = policies.of_text(head[9]);
             base_ordinal = number(head[10]);
             generic_origin = unescape(head[11]);
@@ -306,7 +312,7 @@ export let Model = module (
                         last argument = parts[j];
                         last equal = index_of_byte(argument, 61);
                         values.append([unescape(argument.slice(0, equal)),
-                                       unescape(argument.slice(equal + 1, argument.byte_length))]);
+                            unescape(argument.slice(equal + 1, argument.byte_length))]);
                     }
                     tags.append(new Attribute(unescape(parts[1]), values));
                 } else if (tag == "G") {
@@ -318,7 +324,7 @@ export let Model = module (
                 } else if (tag == "F") {
                     last field_tags: Attribute[list] = new;
                     fields.append(new FieldInfo(ordinal, fields.length, unescape(parts[1]), number(parts[2]),
-                                                parts.length > 3 ? parts[3] : "", field_tags));
+                        parts.length > 3 ? parts[3] : "", field_tags));
                     tags = field_tags;
                 } else if (tag == "V") {
                     last variant_tags: Attribute[list] = new;
@@ -328,13 +334,13 @@ export let Model = module (
                 } else if (tag == "C") {
                     params = new;
                     constructors.append(new ConstructorInfo(ordinal, constructors.length, parts.length > 2 ? parts[2] : "",
-                                                            params));
+                        params));
                     tags = new;
                 } else if (tag == "M") {
                     last method_tags: Attribute[list] = new;
                     params = new;
                     methods.append(new MethodInfo(ordinal, methods.length, unescape(parts[1]), number(parts[2]),
-                                                  parts.length > 3 ? parts[3] : "", params, method_tags));
+                        parts.length > 3 ? parts[3] : "", params, method_tags));
                     tags = method_tags;
                 } else if (tag == "P") {
                     last param_tags: Attribute[list] = new;
@@ -406,6 +412,7 @@ export let Model = module (
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => identity.hash_code();
     );
 

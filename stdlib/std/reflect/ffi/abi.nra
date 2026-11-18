@@ -130,12 +130,14 @@ export let Abi = module (
             }
             return text;
         };
+
         export let.override equals = func(other: class) -> bool {
             if (other is that: AbiLayout) {
                 return to_string() == that.to_string() && target === that.target;
             }
             return false;
         };
+
         export let.override hash_code = func -> uint32 => to_string().hash_code();
     );
 
@@ -270,7 +272,7 @@ export let Abi = module (
         // wasm32 (the C ABI of clang's wasm32 target): a struct with one scalar is passed as that scalar,
         // anything else by reference.
         result.append(scalars.length == 1 ? (is_float(scalars[0][0]) ? ArgumentClass.Sse : ArgumentClass.Integer)
-                                          : ArgumentClass.Indirect);
+            : ArgumentClass.Indirect);
         return result;
     };
 
