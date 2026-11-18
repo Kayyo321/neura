@@ -109,7 +109,7 @@ jobs:
             runner: ubuntu-24.04-arm
             minimum: 180
             exclude: "^$"
-            timeout-scale: 8
+            timeout-scale: 12
           # macOS has no native launcher, so the six native-* tests are not
           # registered there. Its runners have no Docker, which the
           # PostgreSQL provider's test starts its servers in: there it is
@@ -118,12 +118,18 @@ jobs:
             runner: macos-15
             minimum: 174
             exclude: "^server-sql-postgres$"
-            timeout-scale: 8
+            timeout-scale: 12
+          # The Intel runner is about twice as slow as the arm one, and its
+          # suite is projected to reach the 360-minute job limit: the pure-Neura suites
+          # stdlib-crypto-asymmetric and stdlib-crypto-pqc (hours each without
+          # the JIT) run on the other three targets, including arm macOS with
+          # the same compiler, library and interpreter without the JIT
+          # (docs/ContinuousIntegration.md, "Tests that run on fewer targets").
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
             minimum: 174
-            exclude: "^server-sql-postgres$"
-            timeout-scale: 8
+            exclude: "^(server-sql-postgres|stdlib-crypto-asymmetric|stdlib-crypto-pqc)$"
+            timeout-scale: 12
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       NEURA_USERNS_REQUIRED: "1"
@@ -402,7 +408,49 @@ jobs:
               esac
             done
           fi
-          rm -rf early
+
+      # Trials only: evidence before the hours of the full suite, whose log
+      # can be read only once the job ends. The tests that were red in
+      # earlier trials, and the qualification checks on the archives packed
+      # above (on this runner, not a new one as the qualify job does), are
+      # uploaded at once. Neither decides the job: the full suite and the
+      # qualify job do.
+      - name: Run the earlier trials' red tests (trials only)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        continue-on-error: true
+        run: >
+          ctest --test-dir build --parallel "$JOBS" --output-on-failure
+          -R '^(project-resolve|stdlib-net-socket|server-http-tls|server-worker-channel|server-host|server-host-h2c|server-sql|service-protocol|service-run|service-login|service-worker)$'
+          2>&1 | tee early/red-tests.txt; test "${PIPESTATUS[0]}" = 0
+
+      - name: Qualify the packed archives on this runner (trials only)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for tag in v0.2.1-rc.3 v0.2.0; do
+            mkdir -p "early/bridge/$tag"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "early/bridge/$tag" --pattern "neura-${tag#v}-$TRIPLE.tar.gz"
+          done
+          rc3="early/bridge/v0.2.1-rc.3/neura-0.2.1-rc.3-$TRIPLE.tar.gz"
+          sh packaging/qualify.sh --archive "early/dist/neura-$FULL-$TRIPLE.tar.gz" \
+            --sdk-archive "early/dist/neura-sdk-$FULL-$TRIPLE.tar.gz" \
+            --runtime-archive "early/dist/neura-runtime-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" \
+            --examples examples --bridge "$rc3" --bridge "early/bridge/v0.2.0/neura-0.2.0-$TRIPLE.tar.gz" \
+            --size-reference "$rc3" --previous "$rc3" --require-previous --require-bridge --server-components \
+            2>&1 | tee early/qualify.txt; test "${PIPESTATUS[0]}" = 0
+
+      - name: Upload the early evidence (trials only)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && github.ref_type != 'tag' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-early-${{ matrix.triple }}
+          path: |
+            early/red-tests.txt
+            early/qualify.txt
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Allow unprivileged user namespaces
         if: ${{ runner.os == 'Linux' }}
