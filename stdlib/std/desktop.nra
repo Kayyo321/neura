@@ -172,7 +172,7 @@ export let Desktop = module (
 
         /// @brief Built by `run_application` and `Context`; shares the connection's handles.
         export let init = func(frames: Writer, requests: atomics.AtomicInt64, registrations: channels.Sender<Waiter>,
-                status: atomics.AtomicInt64, windows: atomics.AtomicInt64) {
+            status: atomics.AtomicInt64, windows: atomics.AtomicInt64) {
             writer = frames;
             ids = requests;
             waiters = registrations;
@@ -194,9 +194,9 @@ export let Desktop = module (
         /// @brief Opens a window with a minimum size and the bundle route it starts on. Sizes are 0 to 65,535; a
         /// route starts with `/`. Busy when D-1 windows are open.
         export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int,
-                route: string) -> Result<Window> {
+            route: string) -> Result<Window> {
             if (!valid_size(width) || !valid_size(height) || !valid_size(min_width) || !valid_size(min_height) ||
-                    !strings.starts_with(route, "/")) {
+                !strings.starts_with(route, "/")) {
                 return Result<Window>.Err(failure(4, "invalid window size or route"));
             }
             if (window_count.load() >= MaxWindows as int64) {
@@ -304,13 +304,13 @@ export let Desktop = module (
         /// @brief Asks the user where to save, over `window`, suggesting the file name `suggested_name`: Chosen
         /// with a write grant, or Cancelled. Choosing an existing file asks the system's own confirmation first.
         export let save_file_dialog = func(window: Window, suggested_name: string, filters: FileFilter[list])
-                -> Result<DialogOutcome<GrantedFile>> =>
-            file_dialog("neura.desktop.dialog.save_file", window, suggested_name, filters);
+            -> Result<DialogOutcome<GrantedFile>> =>
+                file_dialog("neura.desktop.dialog.save_file", window, suggested_name, filters);
 
         /// @brief Runs a file dialog service. Used by the two dialogs.
         #Hidden
         export let file_dialog = func(service: string, window: Window, suggested_name: string, filters: FileFilter[list])
-                -> Result<DialogOutcome<GrantedFile>> {
+            -> Result<DialogOutcome<GrantedFile>> {
             last args: uint8[list] = new;
             wire.put_u32(args, window.handle);
             wire.put_text(args, suggested_name);
@@ -367,7 +367,7 @@ export let Desktop = module (
         /// @brief Runs a window request that answers nothing. Used by `Window`.
         #Hidden
         export let window_request = func(service: string, handle: uint32, title: string, with_title: bool)
-                -> Result<Unit> {
+            -> Result<Unit> {
             last args: uint8[list] = new;
             wire.put_u32(args, handle);
             if (with_title) {
@@ -407,8 +407,8 @@ export let Desktop = module (
                     Answer.Reply(code, packed) => code == 0
                         ? Result<uint8[list]>.Ok(unpack(packed))
                         : Result<uint8[list]>.Err(code == EndedCode
-                            ? failure(code, "the window host closed the channel")
-                            : failure(code, service + " failed")),
+                        ? failure(code, "the window host closed the channel")
+                        : failure(code, service + " failed")),
                 },
                 channels.Received.Cancelled => Result<uint8[list]>.Err(failure(15, service + " cancelled")),
                 channels.Received.Closed => Result<uint8[list]>.Err(failure(EndedCode, "the window host closed the channel")),
@@ -434,6 +434,7 @@ export let Desktop = module (
         /// @brief The host's handle; never reused while the application runs.
         export last handle: uint32;
             | get: handle;
+
         /// @brief The services the window's requests go through.
         last services: Host;
 
@@ -529,7 +530,7 @@ export let Desktop = module (
 
         /// @brief Use `action`, `role_item`, `separator` or `submenu`.
         export let init = func(entry_kind: string, entry_id: string, text: string, shortcut: string, system_role: string,
-                active: bool, destination: MenuTarget, entries: MenuItem[list]) {
+            active: bool, destination: MenuTarget, entries: MenuItem[list]) {
             kind = entry_kind;
             id = entry_id;
             label = text;
@@ -566,7 +567,7 @@ export let Desktop = module (
             trap_with_message("invalid argument: menu item id " + id);
         }
         if (role != "copy" && role != "paste" && role != "cut" && role != "undo" && role != "redo" &&
-                role != "select_all" && role != "quit" && role != "about") {
+            role != "select_all" && role != "quit" && role != "about") {
             trap_with_message("invalid argument: menu role " + role);
         }
         return new MenuItem("item", id, label, "", role, true, MenuTarget.Native, new MenuItem[list]());
@@ -590,12 +591,15 @@ export let Desktop = module (
         /// @brief The host's handle of the grant.
         export last handle: uint32;
             | get: handle;
+
         /// @brief The chosen file's name, without its directory.
         export last name: string;
             | get: name;
+
         /// @brief Whether this is a write grant.
         export last writable: bool;
             | get: writable;
+
         /// @brief The services the grant's requests go through.
         last services: Host;
         /// @brief Whether `close` was called.
@@ -671,12 +675,15 @@ export let Desktop = module (
         /// @brief The host's request identifier.
         export last id: uint32;
             | get: id;
+
         /// @brief The registry operation identifier.
         export last operation: string;
             | get: operation;
+
         /// @brief Nanoseconds the caller still waited when the host forwarded the call (at most D-4).
         export last deadline_nanos: int64;
             | get: deadline_nanos;
+
         /// @brief The handle of the window whose main frame made the call.
         last window_handle: uint32;
         /// @brief The request bytes, packed for the task: "t" and the text when they are UTF-8, else "x" and hex.
@@ -885,7 +892,7 @@ export let Desktop = module (
         /// @brief Opens a window with a minimum size and the bundle route it starts on. Sizes are 0 to 65,535; a
         /// route starts with `/`. Busy when D-1 windows are open.
         export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int,
-                route: string) -> Result<Window> {
+            route: string) -> Result<Window> {
             match (services.open_window_at(title, width, height, min_width, min_height, route)) {
                 Result.Ok(window) => {
                     windows.append(window);
@@ -925,7 +932,7 @@ export let Desktop = module (
 
         /// @brief Asks the user where to save (see `Host.save_file_dialog`).
         export let save_file_dialog = func(window: Window, suggested_name: string, filters: FileFilter[list])
-                -> Result<DialogOutcome<GrantedFile>> => services.save_file_dialog(window, suggested_name, filters);
+            -> Result<DialogOutcome<GrantedFile>> => services.save_file_dialog(window, suggested_name, filters);
 
         /// @brief The next window event, waiting for one. Bridge calls that arrive first wait for `run`.
         /// UnexpectedEnd once the host has closed the channel.
@@ -936,8 +943,12 @@ export let Desktop = module (
                 }
                 last message = take();
                 match (message) {
-                    Inbound.Call(id, handle, operation, nanos, packed) => { queued.append(message); },
-                    Inbound.Cancel(id) => { drop_queued(id); },
+                    Inbound.Call(id, handle, operation, nanos, packed) => {
+                        queued.append(message);
+                    },
+                    Inbound.Cancel(id) => {
+                        drop_queued(id);
+                    },
                     _ => {},
                 }
             }
@@ -1029,8 +1040,12 @@ export let Desktop = module (
                 match (inbound.receive()) {
                     channels.Received.Value(message) => {
                         match (message) {
-                            Inbound.Connected => { return bytes.ok(); },
-                            Inbound.Refused(reason) => { return Result<Unit>.Err(failure(100, reason)); },
+                            Inbound.Connected => {
+                                return bytes.ok();
+                            },
+                            Inbound.Refused(reason) => {
+                                return Result<Unit>.Err(failure(100, reason));
+                            },
                             Inbound.End => {
                                 ended = true;
                                 return Result<Unit>.Err(failure(EndedCode, "the window host closed the channel before Hello"));
@@ -1071,7 +1086,9 @@ export let Desktop = module (
                         Inbound.Event(kind, handle, first, second, identifier) => {
                             events.append(event_of(kind, handle, first, second, identifier));
                         },
-                        Inbound.End => { ended = true; },
+                        Inbound.End => {
+                            ended = true;
+                        },
                         _ => {},
                     }
                     return message;
@@ -1135,7 +1152,9 @@ export let Desktop = module (
                             }
                         }
                     },
-                    _ => { return; },
+                    _ => {
+                        return;
+                    },
                 }
             }
         };
@@ -1156,8 +1175,12 @@ export let Desktop = module (
             match (context.connect()) {
                 Result.Ok(_) => {
                     match (start(context)) {
-                        Result.Ok(_) => { status = context.exit_status(); },
-                        Result.Err(problem) => { console.eprintln("desktop: {}", errors.message(problem)); },
+                        Result.Ok(_) => {
+                            status = context.exit_status();
+                        },
+                        Result.Err(problem) => {
+                            console.eprintln("desktop: {}", errors.message(problem));
+                        },
                     }
                 },
                 Result.Err(problem) => {
@@ -1174,7 +1197,7 @@ export let Desktop = module (
     /// requests by identifier, and passes calls, cancels and events to the application in order. At the end of
     /// input it answers every waiting request with UnexpectedEnd and passes End.
     let read_channel = func(digest: string, waiters: channels.Receiver<Waiter>, waiter_closer: channels.Closer<Waiter>,
-            inbound: channels.Sender<Inbound>, window_count: atomics.AtomicInt64) {
+        inbound: channels.Sender<Inbound>, window_count: atomics.AtomicInt64) {
         last reader = new wire.Reader(wire.FrameLimit);
         let pending: Waiter[list] = new;
         let backlog: Inbound[list] = new;
@@ -1280,7 +1303,9 @@ export let Desktop = module (
                         }
                         backlog = deliver(inbound, backlog);
                     },
-                    Optional.None => { break; },
+                    Optional.None => {
+                        break;
+                    },
                 }
             }
         }
@@ -1291,12 +1316,14 @@ export let Desktop = module (
     /// @brief Ends the reader: no request can register any more, every waiting request answers UnexpectedEnd,
     /// and the messages not yet taken reach the application, waiting for it to take them.
     let finish = func(waiters: channels.Receiver<Waiter>, waiter_closer: channels.Closer<Waiter>, pending: Waiter[list],
-            inbound: channels.Sender<Inbound>, backlog: Inbound[list]) {
+        inbound: channels.Sender<Inbound>, backlog: Inbound[list]) {
         waiter_closer.close();
         last all = registered(waiters, pending);
         for (let waiter in all) {
             match (waiter) {
-                Waiter.Waiting(id, reply) => { reply.try_send(Answer.Reply(EndedCode, "x")); },
+                Waiter.Waiting(id, reply) => {
+                    reply.try_send(Answer.Reply(EndedCode, "x"));
+                },
             }
         }
         for (let message in backlog) {
@@ -1308,8 +1335,12 @@ export let Desktop = module (
     let registered = func(waiters: channels.Receiver<Waiter>, pending: Waiter[list]) -> Waiter[list] {
         while (true) {
             match (waiters.try_receive()) {
-                channels.TryReceived.Value(waiter) => { pending.append(waiter); },
-                _ => { return pending; },
+                channels.TryReceived.Value(waiter) => {
+                    pending.append(waiter);
+                },
+                _ => {
+                    return pending;
+                },
             }
         }
         return pending;
@@ -1319,8 +1350,12 @@ export let Desktop = module (
     let deliver = func(inbound: channels.Sender<Inbound>, backlog: Inbound[list]) -> Inbound[list] {
         while (backlog.length > 0) {
             match (inbound.try_send(backlog[0])) {
-                channels.TrySendOutcome.Sent => { backlog.remove_at(0); },
-                _ => { return backlog; },
+                channels.TrySendOutcome.Sent => {
+                    backlog.remove_at(0);
+                },
+                _ => {
+                    return backlog;
+                },
             }
         }
         return backlog;
@@ -1330,7 +1365,7 @@ export let Desktop = module (
     /// frame, and reports finishing. A message on `stop` cancels the scope; the Return of a cancelled call is
     /// not written, because the host has already answered its caller.
     let serve = func(handler: func(Call) -> Result<uint8[list]>, call: Call, stop: channels.Receiver<bool>,
-            finished: channels.Sender<uint32>, writer: Writer) {
+        finished: channels.Sender<uint32>, writer: Writer) {
         scope (work) {
             last task = spawn handler(call);
             select {
