@@ -16,14 +16,20 @@ let PinnedJson = derive json.Codec<Wide> {
 
 let result_line = func<T>(value: Result<T>) {
     match (value) {
-        Result.Ok(_) => { console.print_line("ok"); },
+        Result.Ok(_) => {
+            console.print_line("ok");
+        },
         Result.Err(e) => {
             match (e) {
-                errors.Error.Custom(detail) => { console.print_line(detail.code() + " " + detail.message()); },
+                errors.Error.Custom(detail) => {
+                    console.print_line(detail.code() + " " + detail.message());
+                },
                 errors.Error.Parse { kind, offset, message: _ } => {
                     console.print_line("parse " + kind.to_string() + " " + offset.to_string());
                 },
-                _ => { console.print_line("unexpected error"); },
+                _ => {
+                    console.print_line("unexpected error");
+                },
             }
         },
     }
@@ -41,8 +47,12 @@ let App = module:program.Entry (
         console.print_line(encoded);
         console.print_line(text_of(PinnedJson.encode(wide)));
         match (WideJson.decode(encoded)) {
-            Result.Ok(decoded) => { console.print_line(decoded.equals(wide) ? "round trip" : "changed"); },
-            Result.Err(_) => { return program.ExitCode.Failure; },
+            Result.Ok(decoded) => {
+                console.print_line(decoded.equals(wide) ? "round trip" : "changed");
+            },
+            Result.Err(_) => {
+                return program.ExitCode.Failure;
+            },
         }
         result_line(PinnedJson.decode(encoded));
         result_line(WideJson.decode("{\"low\":0,\"high\":9223372036854775808,\"zero\":0,\"top\":0,\"small\":0}"));

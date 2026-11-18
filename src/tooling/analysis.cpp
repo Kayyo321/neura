@@ -1438,6 +1438,45 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         add("set", 14, "class hook or accessor clause", "`| set: value;` runs when a reference is stored or passed.");
         return Json{{"isIncomplete", false}, {"items", items}};
     }
+    // After `| get.` or `| set.`, the dispatch word of an accessor clause:
+    // `override:` under `let.override`, `virtual:` under any other member
+    // (docs/design/Records030.md, edge case 144).
+    if (before != std::string::npos && doc.source[before] == '.') {
+        std::optional<std::size_t> dot;
+        for (std::size_t i = doc.tokens.size(); i > 0;) {
+            const auto &t = doc.tokens[--i];
+            if (t.kind == TokenKind::End || t.span.offset >= start)
+                continue;
+            if (t.span.offset == before)
+                dot = i;
+            break;
+        }
+        if (dot && *dot >= 2 && (doc.tokens[*dot - 1].text == "get" || doc.tokens[*dot - 1].text == "set") &&
+            doc.tokens[*dot - 2].text == "|") {
+            // The member is the declaration that ends at the ';' before the
+            // clause; it begins after the ';', '(' or '{' before that.
+            std::size_t first = *dot - 2;
+            while (first > 0 && doc.tokens[first - 1].text != ";")
+                --first;
+            // Earlier clauses of the same member are skipped.
+            std::size_t begin = first;
+            do {
+                begin = begin > 0 ? begin - 1 : 0;
+                while (begin > 0 && doc.tokens[begin - 1].text != ";" && doc.tokens[begin - 1].text != "(" &&
+                       doc.tokens[begin - 1].text != "{")
+                    --begin;
+            } while (begin > 0 && doc.tokens[begin].text == "|" && doc.tokens[begin - 1].text == ";");
+            bool overriding = false;
+            for (std::size_t i = begin; i + 2 < first; ++i)
+                overriding = overriding || (doc.tokens[i].text == "let" && doc.tokens[i + 1].text == "." &&
+                                            doc.tokens[i + 2].text == "override");
+            if (overriding)
+                add("override:", 14, "accessor clause", "`| get.override:` replaces the inherited accessor.");
+            else
+                add("virtual:", 14, "accessor clause", "`| get.virtual:` lets a subclass override the accessor.");
+            return Json{{"isIncomplete", false}, {"items", items}};
+        }
+    }
     if (before != std::string::npos && doc.source[before] == '#') {
         for (const auto &tag : tag_registry()) {
             if (tag.status == TagStatus::Reserved) continue;

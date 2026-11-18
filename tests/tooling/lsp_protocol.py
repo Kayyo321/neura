@@ -262,6 +262,35 @@ class LanguageServerTests(unittest.TestCase):
                    if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == unfinished.as_uri()]
         self.assertEqual([item['code'] for item in reports[-1]], ['E0203'])
 
+    def test_unfinished_record_call_declares_nothing(self):
+        # Edge case 142: `record (id` is an expression by the lookahead.
+        path = self.root / 'partial.nra'
+        self.client.open(path, 'let other = 1;\nlet P = record (id')
+        response = self.client.request('textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        self.assertEqual([symbol['name'] for symbol in response], ['other'])
+        reports = [n['params']['diagnostics'] for n in self.client.notifications
+                   if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+        self.assertEqual([item['code'] for item in reports[-1]], ['E0203'])
+
+    def test_accessor_dispatch_word_completion(self):
+        # Edge case 144: after `| get.`, `override:` under `let.override`
+        # and `virtual:` under an ordinary field.
+        base = ('let Shape = class (\n    export let label: string = "s";\n        | get.virtual: label;\n);\n'
+                'let Circle = class: Shape (\n    export let.override label: string;\n')
+        for name, source, line, expected in (
+                ('override.nra', base + '        | get.', 6, 'override:'),
+                ('second.nra', base + '        | get.override: "c";\n        | set.', 7, 'override:'),
+                ('virtual.nra', 'let Shape = class (\n    export let label: string = "s";\n        | get.', 2,
+                 'virtual:')):
+            with self.subTest(name=name):
+                path = self.root / name
+                self.client.open(path, source)
+                items = self.client.request('textDocument/completion', params(path, line, 14))['items']
+                self.assertEqual([item['label'] for item in items], [expected])
+                reports = [n['params']['diagnostics'] for n in self.client.notifications
+                           if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+                self.assertEqual([item['code'] for item in reports[-1]], ['E0202'])
+
     def test_incomplete_json_derivation_keeps_previous_symbols(self):
         path = self.root / 'model.nra'
         self.client.open(path, 'let visible = 1;\nlet Incomplete = derive')
