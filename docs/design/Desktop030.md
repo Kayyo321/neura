@@ -136,6 +136,12 @@ All are operations of the native child, through host services of the `desktop` c
 | There is no updater. A package carries its version; installing a newer one replaces the older. Updating the SDK or the runtime service never touches an installed or running application. | proposed |
 | The runner for each system is built on that system and delivered in its target component. The Windows runner needs only pipes, clocks and entropy from the system, because windows, files and fetches go through the host; the services that answer `unsupported` on Windows today stay so. | proposed |
 
+### Linux package (A5)
+
+`python3 scripts/package-desktop.py --engine <electron directory> --package <package directory> --name <name> -o <file>.tar.gz` assembles the Linux x86-64 `.tar.gz`: the engine with its executable renamed to `<name>` and without `default_app.asar`, `resources/app/` holding `package.json`, `main.js`, `preload.js` and the package directory, and `LICENSES/` with the engine's license, the Chromium notices and Neura's license. It refuses a package directory that holds `.nra` source. Entries are sorted, owned by 0:0 and dated at `SOURCE_DATE_EPOCH` (default 0), and gzip records no name or time, so two builds from the same inputs are byte-identical; the tool prints the archive's and the file tree's SHA-256 and says the package is unsigned. Any other format is refused with a message naming it. `tests/desktop/run_package_test.py` builds the fixture package twice and compares the bytes, installs it under a path with spaces and non-ASCII characters, and launches it under Xvfb with a fresh home and no SDK on the path: the page's bridge call makes the native child retitle the window, no process of the tree holds a listening socket, and after SIGTERM the application exits 0 with no process left. The fixture package is 126,129,890 bytes, under B-D3.
+
+This tool stands in for `neura package` until project targets exist ([Projects](Projects030.md)); `E1033`, `.deb`, `.zip`, `.dmg`, `.msix`, icons and signing are not implemented.
+
 ## Lowering and artifacts
 
 No NeuraIR, NVR or tier change. The desktop image is an ordinary image; the renderer's image is the web target's. The versions of the bridge protocol and of each `neura.desktop.*` service are independent axes ([overview](Apps030.md#version-axes)).
