@@ -1,0 +1,50 @@
+// test-options: --gpu=off --max-steps 1000000000
+let algorithms = import:Std.Crypto.Algorithm;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let paseto = import:Std.Crypto.Token.Paseto;
+let test = import:Std.Test;
+let vectors = import:PasetoVectors;
+
+let PasetoPublicTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_official_public_known_answers = func {
+        last rows = vectors.public_tokens;
+        last key = new ed25519.Ed25519PrivateKey(bytes(rows[1]));
+        last sign = new paseto.PublicSigner(key);
+        last public_key = test.assert_ok(ed25519.parse_public_key(bytes(rows[2])));
+        last verify = new paseto.PublicVerifier(public_key);
+        test.assert(sign.algorithm() == algorithms.Algorithm.Ed25519);
+        test.assert(verify.algorithm() == algorithms.Algorithm.Ed25519);
+        test.assert(verify.public_key().equals(public_key));
+        test.assert_equal_string("Paseto.PublicSigner(<redacted>)", sign.to_string());
+        test.assert_equal_string("Paseto.PublicVerifier", verify.to_string());
+        for (let i = 0; i < rows.length; i += 7) {
+            test.assert_equal_string(rows[1], rows[i + 1]);
+            test.assert_equal_string(rows[2], rows[i + 2]);
+            last message = bytes(rows[i + 3]);
+            last assertion = bytes(rows[i + 5]);
+            last token = i == 0 ? sign.sign(message) : sign.sign_with(message, bytes(rows[i + 4]), assertion);
+            test.assert_equal_string(rows[i + 6], token);
+            last opened = test.assert_ok(verify.open(rows[i + 6], assertion));
+            test.assert_equal_string(rows[i + 3], hex.encode(opened.payload()));
+            test.assert_equal_string(rows[i + 4], hex.encode(opened.footer()));
+        }
+        test.assert(verify.verify(bytes(rows[3]), rows[6]));
+    };
+
+    export let test_official_wrong_purpose_and_bad_assertion = func {
+        last rows = vectors.reject;
+        for (let i = 0; i < rows.length; i += 5) {
+            if (rows[i + 1] == "public") {
+                last verify = new paseto.PublicVerifier(test.assert_ok(ed25519.parse_public_key(bytes(rows[i + 2]))));
+                let _ = test.assert_err(verify.open(rows[i + 4], bytes(rows[i + 3])));
+            }
+        }
+        last good = vectors.public_tokens;
+        last verify = new paseto.PublicVerifier(test.assert_ok(ed25519.parse_public_key(bytes(good[2]))));
+        let _ = test.assert_err(verify.open(good[6], new([0])));
+        let _ = test.assert_err(verify.open(good[6] + ".YQ", new));
+    };
+);

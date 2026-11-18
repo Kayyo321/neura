@@ -1,0 +1,155 @@
+// test-options: --gpu=off --max-steps 100000000
+let base64 = import:Std.Encoding.Base64;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let jwe = import:Std.Crypto.Token.Jwe;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:JweVectors;
+
+let JweTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let ascii = func(text: string) -> string => test.assert_ok(utf8.decode(bytes(text)));
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let enc = func(name: string) -> jwe.ContentEncryption {
+        if (name == "A128GCM") {
+            return jwe.ContentEncryption.A128Gcm;
+        }
+        if (name == "A192GCM") {
+            return jwe.ContentEncryption.A192Gcm;
+        }
+        if (name == "A256GCM") {
+            return jwe.ContentEncryption.A256Gcm;
+        }
+        if (name == "A128CBC-HS256") {
+            return jwe.ContentEncryption.A128CbcHs256;
+        }
+        if (name == "A192CBC-HS384") {
+            return jwe.ContentEncryption.A192CbcHs384;
+        }
+        if (name == "A256CBC-HS512") {
+            return jwe.ContentEncryption.A256CbcHs512;
+        }
+        test.fail("unknown fixture algorithm " + name);
+        return jwe.ContentEncryption.A128Gcm;
+    };
+
+    let alg = func(name: string) -> jwe.WrapAlgorithm {
+        if (name == "A128KW") {
+            return jwe.WrapAlgorithm.A128Kw;
+        }
+        if (name == "A192KW") {
+            return jwe.WrapAlgorithm.A192Kw;
+        }
+        if (name == "A256KW") {
+            return jwe.WrapAlgorithm.A256Kw;
+        }
+        test.fail("unknown fixture algorithm " + name);
+        return jwe.WrapAlgorithm.A128Kw;
+    };
+
+    export let test_direct_vectors = func {
+        last rows = vectors.direct;
+        for (let i = 0; i < rows.length; i += 7) {
+            last key = new jwe.DirectKey(enc(rows[i + 1]), bytes(rows[i + 2]));
+            test.assert_equal_string(rows[i + 4], hex.encode(test.assert_ok(jwe.open(key, rows[i + 6]))));
+            last sealed = jwe.seal_with(key, bytes(rows[i + 4]), bytes(rows[i + 3]), ascii(rows[i + 5]));
+            test.assert_equal_string(rows[i + 6], test.assert_ok(sealed));
+        }
+    };
+
+    export let test_wrapped_vectors = func {
+        last rows = vectors.wrapped;
+        for (let i = 0; i < rows.length; i += 9) {
+            last key = new jwe.WrappingKey(alg(rows[i + 1]), enc(rows[i + 2]), bytes(rows[i + 3]));
+            test.assert_equal_string(rows[i + 6], hex.encode(test.assert_ok(jwe.open(key, rows[i + 8]))));
+            last sealed = jwe.seal_with(key, bytes(rows[i + 6]), bytes(rows[i + 4]), bytes(rows[i + 5]),
+                ascii(rows[i + 7]));
+            test.assert_equal_string(rows[i + 8], test.assert_ok(sealed));
+        }
+    };
+
+    export let test_key_and_header_algorithm_binding = func {
+        last wrapped = vectors.wrapped;
+        last direct = vectors.direct;
+        last wrapped_key = new jwe.WrappingKey(alg(wrapped[1]), enc(wrapped[2]), bytes(wrapped[3]));
+        last direct_key = new jwe.DirectKey(enc(direct[1]), bytes(direct[2]));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(wrapped_key, direct[6]))));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(direct_key, wrapped[8]))));
+        last same_length_wrong_algorithm = new jwe.DirectKey(jwe.ContentEncryption.A128CbcHs256, bytes(direct[16]));
+        test.assert_equal_string("crypto.invalid_jwe",
+            code(test.assert_err(jwe.open(same_length_wrong_algorithm, direct[20]))));
+
+        last headers = [
+            "{\"alg\":\"none\",\"enc\":\"A128GCM\"}",
+            "{\"alg\":\"dir\",\"enc\":\"A128CBC-HS256\"}",
+            "{\"alg\":\"none\",\"\\u0061lg\":\"dir\",\"enc\":\"A128GCM\"}",
+            "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"crit\":[\"other\"],\"other\":true}",
+            "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"crit\":[]}",
+            "{\"alg\":\"dir\",\"enc\":\"A128GCM\",\"zip\":\"DEF\"}"
+        ];
+        for (let protected in headers) {
+            let segments = strings.split(direct[6], ".");
+            segments[0] = base64.encode_url_unpadded(utf8.encode(protected));
+            test.assert_equal_string("crypto.invalid_jwe",
+                code(test.assert_err(jwe.open(direct_key, strings.join(segments, ".")))));
+        }
+
+        last legacy = vectors.unsupported;
+        last oaep_key = new jwe.DirectKey(jwe.ContentEncryption.A256Gcm, bytes(direct[16]));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(oaep_key, legacy[0]))));
+        test.assert_equal_string("crypto.invalid_jwe",
+            code(test.assert_err(jwe.open(same_length_wrong_algorithm, legacy[1]))));
+    };
+
+    export let test_bad_serialization_or_authentication = func {
+        last direct = vectors.direct;
+        last key = new jwe.DirectKey(enc(direct[1]), bytes(direct[2]));
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(key, direct[6] + "."))));
+        let segments = strings.split(direct[6], ".");
+        segments[1] = "AA";
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(key, strings.join(segments, ".")))));
+
+        segments = strings.split(direct[6], ".");
+        segments[4] = segments[4].slice(0, segments[4].byte_length - 1) + "B";
+        test.assert_equal_string("crypto.invalid_jwe", code(test.assert_err(jwe.open(key, strings.join(segments, ".")))));
+
+        segments = strings.split(direct[6], ".");
+        // Semantically equivalent protected algorithms do not authenticate with different header bytes.
+        segments[0] = base64.encode_url_unpadded(utf8.encode("{ \"alg\": \"dir\", \"enc\": \"A128GCM\" }"));
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(key, strings.join(segments, ".")))));
+
+        segments = strings.split(direct[6], ".");
+        let tag = test.assert_ok(base64.decode_url_unpadded(segments[4]));
+        tag[0] = tag[0] ^ 1;
+        segments[4] = base64.encode_url_unpadded(tag);
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(key, strings.join(segments, ".")))));
+
+        last wrapped = vectors.wrapped;
+        last wrapping_key = new jwe.WrappingKey(alg(wrapped[1]), enc(wrapped[2]), bytes(wrapped[3]));
+        segments = strings.split(wrapped[8], ".");
+        let encrypted = test.assert_ok(base64.decode_url_unpadded(segments[1]));
+        encrypted[0] = encrypted[0] ^ 1;
+        segments[1] = base64.encode_url_unpadded(encrypted);
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(wrapping_key, strings.join(segments, ".")))));
+
+        segments[1] = "=";
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(wrapping_key, strings.join(segments, ".")))));
+        segments[1] = "AA";
+        test.assert_equal_string("crypto.authentication_failed",
+            code(test.assert_err(jwe.open(wrapping_key, strings.join(segments, ".")))));
+
+        last padding = vectors.bad_padding;
+        last padding_key = new jwe.DirectKey(enc(padding[0]), bytes(padding[1]));
+        test.assert_equal_string("crypto.authentication_failed", code(test.assert_err(jwe.open(padding_key, padding[2]))));
+    };
+);

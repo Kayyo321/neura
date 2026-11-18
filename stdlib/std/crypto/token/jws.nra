@@ -1,0 +1,60 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let jwk = import:Std.Crypto.Token.Jwk;
+let json = import:Std.Encoding.Json;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Compact JSON Web Signatures (RFC 7515), with caller-selected verification keys.
+/// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jws)
+#Since("0.3.0")
+export let Jws = module (
+    const InvalidHeader = "jws.header";
+    const InvalidFormat = "jws.format";
+
+    let check_header = func(encoded: string, expected: string) -> Result<Unit> {
+        last bytes = jose.decode(encoded, InvalidHeader, "the protected header must be base64url")?;
+        last members = jose.parse_object_bytes(bytes, InvalidHeader)?;
+        return require_algorithm(members, expected);
+    };
+
+    let require_algorithm = func(members: [string, json.JsonValue][list], expected: string) -> Result<Unit> {
+        if (jose.has(members, "crit") || jose.has(members, "b64")) {
+            return jose.fail<Unit>(InvalidHeader, "critical extensions and the b64 option are unsupported");
+        }
+        last alg = jose.required_text(members, "alg", InvalidHeader)?;
+        if (alg != expected || alg == "none") {
+            return jose.fail<Unit>(InvalidHeader, "the protected algorithm does not match the verification key");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Verifies a compact JWS and returns the authenticated payload. The key sets the only allowed
+    /// algorithm. Unknown critical extensions, unsecured tokens, duplicate header members and noncanonical
+    /// base64url fail. Header-supplied keys and key locators do not grant trust.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func<Alg>(token: string, key: jwk.VerifierKey<Alg>) -> Result<uint8[list]> {
+        last parts = jose.split_dots(token);
+        if (parts.length != 3) {
+            return jose.fail<uint8[list]>(InvalidFormat, "a compact JWS must have exactly three parts");
+        }
+        check_header(parts[0], key.jose_algorithm())?;
+        last signature = jose.decode(parts[2], InvalidFormat, "the signature must be base64url")?;
+        if (!key.verify_signature(words.utf8(parts[0] + "." + parts[1]), signature)) {
+            return jose.fail<uint8[list]>("jws.signature", "signature verification failed");
+        }
+        return jose.decode(parts[1], InvalidFormat, "the payload must be base64url");
+    };
+
+    /// @brief Signs a compact JWS with the caller's Ed25519 private key and a standard EdDSA protected header.
+    /// @see [Std.Crypto.Token.Jws](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jws)
+    #[NoDiscard, Since("0.3.0")]
+    export let sign_ed25519 = func(payload: uint8[list], key: ed25519.Ed25519PrivateKey) -> string {
+        last signer = new ed25519.Ed25519Signer(key);
+        last header = jose.encode(words.utf8("{\"alg\":\"EdDSA\"}"));
+        last input = header + "." + jose.encode(payload);
+        return input + "." + jose.encode(signer.sign(words.utf8(input)));
+    };
+);

@@ -1,0 +1,13 @@
+// test-options: --gpu=off
+// run-options: --gpu=off
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: wrong length for JWE direct key
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new jwe.DirectKey(jwe.ContentEncryption.A128Gcm, new);
+        return program.ExitCode.Ok;
+    };
+);

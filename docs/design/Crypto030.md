@@ -94,6 +94,18 @@ Verification runs in Neura and shares the asymmetric and post-quantum primitives
 | HashML-DSA SHA-512 and composite ML-DSA-65 with Ed25519 (2.9) | KAT | NIST ACVP and OpenSSL HashML-DSA, plus official composite -19 raw and X.509 vectors. | implemented |
 | Default verification for certificate paths, CSRs, OCSP and CT (2.9) | logic + KAT | Independent RSA-PSS, ECDSA, and Ed25519 fixtures through the public entry points. | implemented |
 
+### Token
+
+| Item (spec section) | Tier | Vectors and notes | Status |
+| --- | --- | --- | --- |
+| JWK and compact JWS (2.10) | KAT | RFC 7515 A.1–A.5, RFC 7517 A.1/A.3, RFC 7520 4.1–4.4 and RFC 8037. Algorithm substitution, HMAC/RSA confusion, unsecured tokens, malformed critical headers and tampered tags are refused. | implemented |
+| JWT time claims (2.10) | logic + KAT | RFC 7519 claims, an authenticated RFC 7515 token, a fixed clock, and clock capability denial. | implemented |
+| Compact JWE direct and AES Key Wrap (2.10) | KAT | RFC 3394, RFC 7516 A.3, RFC 7518 CBC-HMAC, RFC 7520 5.6, and independent Python cryptography checks. Tests include failed authentication and AES-CBC padding failure. | implemented |
+| PASETO v4.local and v4.public (2.10) | KAT | All 17 pinned official v4 records. Exact local encryption and public signatures, plus rejection of altered tags, footer and assertion mismatches, wrong purpose, and invalid encodings. | implemented |
+| Macaroons v1/v2 wire format (2.10) | KAT | 16 libmacaroons vectors and independent PyMacaroons vectors for first-party and nested third-party caveats. | implemented |
+
+JOSE verification keys bind the caller's choice of algorithm and key family. The header only confirms that choice. Critical header extensions and unencoded JWS payloads are outside this profile. For JWT, integer time claims avoid numeric rounding, and future-issued tokens follow the same leeway as not-before claims. The RSA1_5 and SHA-1 OAEP modes of JWE are refused. PASETO authenticates bytes and leaves claim validation to its caller. Macaroons authenticate the caveat chain and require a caller to decide which first-party predicates hold.
+
 ## Runtime needs
 
 Each stub below waits on a host operation that the runtime does not yet offer. A runtime lane is to add it. The library keeps the full API and logic, so only the body of the host call changes.

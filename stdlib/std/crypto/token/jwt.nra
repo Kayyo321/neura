@@ -1,0 +1,89 @@
+let int64s = import:Std.Core.Int64;
+let json = import:Std.Encoding.Json;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Time.Clock;
+
+/// @brief The time claims of an authenticated JWT payload (RFC 7519, section 4.1).
+/// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwt)
+#Since("0.3.0")
+export let Jwt = module (
+    /// @brief Returns the members of an authenticated JWT payload after evaluating its time claims.
+    ///
+    /// First authenticate the payload with the caller's chosen JWS or JWE API, then validate the claims here.
+    /// The payload must be a UTF-8 JSON object with unique claim names. The optional exp, nbf, and iat claims
+    /// must be JSON integers in the int64 range, in Unix seconds. This profile requires iat to be at or before
+    /// the current time, with the same clock-skew allowance as nbf. The exp boundary is exclusive.
+    ///
+    /// The clock is read once when time claims are present and its errors propagate. Negative leeway traps.
+    /// Application-specific requirements such as issuer, audience, or maximum token age use the returned members.
+    /// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwt)
+    #[NoDiscard, Since("0.3.0")]
+    export let validate_claims = func(payload: uint8[list], clock: Clock, leeway_seconds: int64)
+            -> Result<[string, json.JsonValue][list]> {
+        if (leeway_seconds < 0) {
+            trap_with_message("invalid argument: negative JWT leeway");
+        }
+        last claims = jose.parse_object_bytes(payload, "jwt.claims")?;
+        let dates: [string, int64][list] = new;
+        for (let claim in claims) {
+            last name = claim[0];
+            if (name == "exp" || name == "nbf" || name == "iat") {
+                last seconds = numeric_date(name, claim[1])?;
+                dates.append([name, seconds]);
+            }
+        }
+        if (dates.length > 0) {
+            last now = clock.now()?;
+            // The fractional part of a normalized Instant cannot move it across an integer boundary.
+            // A lower bound below int64.Min makes every representable exp valid.
+            last earliest = int64s.checked_sub(now.epoch_seconds, leeway_seconds);
+            // An upper bound above int64.Max makes every representable nbf and iat valid.
+            last latest = int64s.saturating_add(now.epoch_seconds, leeway_seconds);
+            for (let date in dates) {
+                if (date[0] == "exp") {
+                    match (earliest) {
+                        Optional.Some(bound) => {
+                            if (date[1] <= bound) {
+                                return jose.fail<[string, json.JsonValue][list]>("jwt.expired", "JWT has expired");
+                            }
+                        },
+                        Optional.None => {},
+                    }
+                } else if (date[1] > latest) {
+                    if (date[0] == "nbf") {
+                        return jose.fail<[string, json.JsonValue][list]>("jwt.not_before", "JWT is not yet valid");
+                    }
+                    return jose.fail<[string, json.JsonValue][list]>("jwt.issued_at", "JWT was issued in the future");
+                }
+            }
+        }
+        return Result<[string, json.JsonValue][list]>.Ok(claims);
+    };
+
+    /// @brief Verifies a compact signed JWT with the caller's key before validating its time claims.
+    /// @see [Std.Crypto.Token.Jwt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwt)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func<Alg>(token: string, key: jwk.VerifierKey<Alg>, clock: Clock, leeway_seconds: int64)
+            -> Result<[string, json.JsonValue][list]> {
+        return validate_claims(jws.verify<Alg>(token, key)?, clock, leeway_seconds);
+    };
+
+    let numeric_date = func(name: string, value: json.JsonValue) -> Result<int64> {
+        match (value) {
+            json.JsonValue.Number(text) => {
+                match (json.number_to_int64(text)) {
+                    Optional.Some(seconds) => {
+                        return Result<int64>.Ok(seconds);
+                    },
+                    Optional.None => {},
+                }
+            },
+            _ => {},
+        }
+        return jose.fail<int64>("jwt.claims", name + " must be an integer Unix timestamp in the int64 range");
+    };
+);

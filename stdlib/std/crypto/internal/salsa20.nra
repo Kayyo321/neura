@@ -1,6 +1,6 @@
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief The Salsa20/8 core of RFC 7914, section 3, applied in place to 16 words. Internal: scrypt uses it.
+/// @brief The Salsa20 core shared by scrypt (RFC 7914) and the Macaroons XSalsa20-Poly1305 secret box.
 #Since("0.3.0")
 export let Salsa20 = module (
     let step = func(x: uint32[list], target: int, a: int, b: int, shift: int) {
@@ -13,7 +13,24 @@ export let Salsa20 = module (
         for (let i = 0; i < 16; i++) {
             x[i] = block[offset + i];
         }
-        for (let round = 0; round < 8; round += 2) {
+        rounds(x, 8);
+        for (let i = 0; i < 16; i++) {
+            block[offset + i] = words.add32(block[offset + i], x[i]);
+        }
+    };
+
+    /// @brief The Salsa20 permutation of a 16-word input without the final additions.
+    export let permute20 = func(input: uint32[list]) -> uint32[list] {
+        let state: uint32[list] = new;
+        for (let word in input) {
+            state.append(word);
+        }
+        rounds(state, 20);
+        return state;
+    };
+
+    let rounds = func(x: uint32[list], count: int) {
+        for (let round = 0; round < count; round += 2) {
             step(x, 4, 0, 12, 7);
             step(x, 8, 4, 0, 9);
             step(x, 12, 8, 4, 13);
@@ -46,9 +63,6 @@ export let Salsa20 = module (
             step(x, 13, 12, 15, 9);
             step(x, 14, 13, 12, 13);
             step(x, 15, 14, 13, 18);
-        }
-        for (let i = 0; i < 16; i++) {
-            block[offset + i] = words.add32(block[offset + i], x[i]);
         }
     };
 );

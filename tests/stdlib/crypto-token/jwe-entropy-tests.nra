@@ -1,0 +1,37 @@
+// test-options: --gpu=off --deny-entropy
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let jwe = import:Std.Crypto.Token.Jwe;
+let test = import:Std.Test;
+
+let JweEntropyTests = module (
+    let seed = func(count: int) -> uint8[list] {
+        let bytes: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            bytes.append(i as uint8);
+        }
+        return bytes;
+    };
+
+    export let test_injected_randomness = func {
+        last direct_key = new jwe.DirectKey(jwe.ContentEncryption.A256Gcm, seed(32));
+        last wrapping_key = new jwe.WrappingKey(jwe.WrapAlgorithm.A192Kw, jwe.ContentEncryption.A256CbcHs512, seed(24));
+        let _ = test.assert_err(jwe.seal(direct_key, new));
+        let _ = test.assert_err(jwe.seal(wrapping_key, new));
+
+        last message = seed(20);
+        last direct = test.assert_ok(jwe.seal(direct_key, message, new drbg.ChaCha20Drbg(seed(32))));
+        last wrapped = test.assert_ok(jwe.seal(wrapping_key, message, new drbg.ChaCha20Drbg(seed(32))));
+        test.assert_equal_string(hex.encode(message), hex.encode(test.assert_ok(jwe.open(direct_key, direct))));
+        test.assert_equal_string(hex.encode(message), hex.encode(test.assert_ok(jwe.open(wrapping_key, wrapped))));
+
+        let revealed_key = direct_key.expose();
+        revealed_key[0] = 255;
+        test.assert_equal_string(hex.encode(seed(32)), hex.encode(direct_key.expose()));
+        test.assert_equal_string("Jwe.DirectKey(<redacted>)", direct_key.to_string());
+        test.assert_equal_string("Jwe.WrappingKey(<redacted>)", wrapping_key.to_string());
+        direct_key.wipe();
+        wrapping_key.wipe();
+        test.assert(direct_key.is_wiped() && wrapping_key.is_wiped());
+    };
+);

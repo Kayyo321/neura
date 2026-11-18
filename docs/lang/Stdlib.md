@@ -1666,3 +1666,16 @@ Path validation, CSR signature checks, OCSP, and Certificate Transparency use `A
 | `CrLite` | Mozilla filter-cascade format v1/v2 (`parse`, `FilterCascade.has`) with MurmurHash3, SHA-256 low-32 and SHA-256 counter layers, salt and inversion; `key_of(cert, issuer)` = SHA-256(issuer SPKI) ‖ serial; `check(cascade, cert, issuer, covered_issuers) -> Decision` (`Revoked`, `NotRevoked`, `NotCovered`). |
 
 HashML-DSA dispatch follows the NIST Computer Security Objects Register and requires a matching HashML-DSA key OID. RFC 9881 profiles pure ML-DSA for Internet X.509. The HashML-DSA dispatch is a library extension outside that profile.
+
+### 21.11 `Std.Crypto.Token`
+
+| Module | Contract |
+| --- | --- |
+| `Jwk` | Imports verification keys from RFC 7517 JWK objects. The caller selects a sealed `VerifierKey<Alg>` for `oct` HMAC, RSA, EC, or Ed25519 OKP. The declared `kty`, curve, and optional `alg`, `use`, and `key_ops` must permit that use. HMAC keys must be at least the hash output size. RSA keys must be at least 2048 bits. Ed25519 public keys have RFC 7638 SHA-256 thumbprints. |
+| `Jws` | `verify<Alg>(compact, key)` authenticates a compact JWS and returns its payload. It supports HS256/384/512, RS256/384/512, PS256/384/512, ES256/384/512, ES256K, and EdDSA with Ed25519. The protected algorithm must match the key, and `none`, unhandled critical extensions, duplicate headers, and noncanonical base64url fail. `sign_ed25519` emits compact JWS with the standard EdDSA header. |
+| `Jwt` | `verify<Alg>(compact, key, clock, leeway_seconds)` verifies the signature before validating claims. `validate_claims(payload, clock, leeway_seconds)` validates an already authenticated payload. Optional `exp`, `nbf`, and `iat` are exact signed 64-bit integer Unix times. `exp` is exclusive. `nbf` and `iat` cannot be in the future beyond leeway. The caller supplies the clock and applies any issuer, audience, and required-claim rules. |
+| `Jwe` | Compact encryption with a `DirectKey` (`dir`) or `WrappingKey` (A128KW, A192KW, A256KW). Both bind the content algorithm to AES-GCM or AES-CBC-HMAC-SHA-2 at 128, 192, or 256 bits of AES key. `seal_with` accepts caller-supplied IV and, where applicable, CEK. `seal` uses OS entropy or a caller's DRBG. `open` verifies the protected header and authentication before releasing any plaintext. JWE compression and critical extensions are refused. |
+| `Paseto` | `Local` implements v4.local with XChaCha20 and keyed BLAKE2b. It accepts caller-supplied deterministic nonces, OS entropy, or a caller's DRBG. `PublicSigner` and `PublicVerifier` implement v4.public with Ed25519. Both modes authenticate the footer and caller-supplied implicit assertion. The payload is returned as bytes. |
+| `Macaroon` | Libmacaroons v1/v2 binary and unpadded base64url serialization. The holder can append first-party caveats or third-party caveats with XSalsa20-Poly1305 and combine the result with explicitly bound discharges. Verification checks every caveat, fails closed on missing, duplicate, wrongly bound, or cyclic discharges, and uses the caller's first-party predicate. |
+
+JOSE support in this release uses compact serialization. JWE refuses RSA1_5 and RSA-OAEP with SHA-1. Macaroon serialization uses the v1 and v2 binary formats. Token authentication alone does not apply an application's authorization policy.
