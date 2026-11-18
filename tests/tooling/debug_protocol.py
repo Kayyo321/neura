@@ -173,8 +173,9 @@ let App = module:program.Entry (
 
     def test_records_and_getters_show_raw_fields(self):
         # docs/design/Records030.md, Tooling: a record's fields are shown
-        # raw, and a field with a getter shows its stored value; inspecting
-        # runs no getter, adapter or to_string (the getter would print).
+        # raw, and a field with a getter or a virtual accessor shows its
+        # stored value; inspecting runs no getter, override, adapter or
+        # to_string (the getter and the override would print).
         path = self.source('records.nra', '''let console = import:Std.Io.Console;
 let program = import:Std.Program;
 let User = record (id: int64, name: string);
@@ -185,17 +186,29 @@ let Badge = class (
             return "read " + label;
         };
 );
+let Shape = class (
+    export let kind: string = "shape";
+        | get.virtual: kind;
+);
+let Circle = class: Shape (
+    export let.override kind: string;
+        | get.override: {
+            console.print_line("override ran");
+            return "circle of " + kind;
+        };
+);
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let user = new User(7 as int64, "ada");
         let badge = new Badge();
+        let circle: Shape = new Circle();
         console.print_line(user.name);
         return program.ExitCode.Ok;
     };
 );
 ''')
         self.launch(path)
-        self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 15}]})
+        self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 27}]})
         self.client.request('configurationDone')
         self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
         frame = self.frame()
@@ -208,6 +221,9 @@ let App = module:program.Entry (
         self.assertEqual(user['id'], '7')
         self.assertIn('ada', user['name'])
         self.assertIn('stored', fields('badge')['label'])
+        self.assertIn('shape', fields('circle')['kind'])
+        self.assertIn('shape', self.client.request('evaluate', {'frameId': frame['id'],
+                                                                'expression': 'circle.kind'})['result'])
         self.assertIn('stored', self.client.request('evaluate', {'frameId': frame['id'],
                                                                  'expression': 'badge.label'})['result'])
         self.client.request('continue')
