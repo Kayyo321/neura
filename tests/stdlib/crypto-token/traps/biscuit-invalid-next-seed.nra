@@ -1,0 +1,17 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: Biscuit next seed must be 32 bytes
+// run-options: --gpu=off
+let biscuit = import:Std.Crypto.Token.Biscuit;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let samples = import:BiscuitMintVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let root: ed25519.Ed25519PrivateKey = new(test.assert_ok(hex.decode(samples.chain[0])));
+        let _ = biscuit.mint_with("", root, new);
+        return program.ExitCode.Ok;
+    };
+);

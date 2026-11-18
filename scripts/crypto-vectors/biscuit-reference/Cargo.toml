@@ -1,0 +1,8 @@
+[package]
+name = "neura-biscuit-reference"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+biscuit-auth = "=6.0.0"

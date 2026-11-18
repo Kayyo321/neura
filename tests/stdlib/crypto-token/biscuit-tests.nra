@@ -15,8 +15,12 @@ let BiscuitTests = module (
 
     let code_of = func(error: Error) -> string {
         match (error) {
-            Error.Custom(detail) => { return detail.code(); },
-            _ => { return "not custom"; },
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
         }
         return "";
     };
@@ -45,7 +49,9 @@ let BiscuitTests = module (
         last rows = vectors.rejections;
         for (let i = 0; i < rows.length; i += 3) {
             match (biscuit.verify(decode(rows[i + 1]), root)) {
-                Result.Ok(_) => { test.fail("accepted " + rows[i]); },
+                Result.Ok(_) => {
+                    test.fail("accepted " + rows[i]);
+                },
                 Result.Err(error) => {
                     if (rows[i + 2] == "unsupported") {
                         test.assert_with(code_of(error) == "biscuit.unsupported", rows[i] + ": " + error.to_string());
@@ -93,9 +99,9 @@ let BiscuitTests = module (
     export let test_authorizer_fail_closed = func {
         last root = key();
         last token = decode(vectors.tagged[0]);
-        for (let code in ["allow if true trusting previous;", "allow if !false;", "allow if unknown(1), 1 + 1 == 2;",
-            "deny if revocation_id($id, $sig); allow if true;", "r($unbound) <- right($x, \"read\"); allow if true;",
-            "allow if true", "check all r(1); allow if true;"]) {
+        for (let code in ["allow if $unbound;",
+            "revocation_id(0, hex:abcd); allow if true;", "revocation_id($id, $sig) <- denied($id, $sig); allow if true;",
+            "r($unbound) <- right($x, \"read\"); allow if true;", "allow if true", "check all ; allow if true;"]) {
             test.assert_equal_string("biscuit.authorizer", code_of(test.assert_err(biscuit.authorize(token, root, code))));
         }
         let duplicate = decode(vectors.tagged[0]);

@@ -21,7 +21,7 @@ PIN = "b3d3fe2d744ea8ee964ab0eba96dbc8c9bde1639"
 DEFAULT = pathlib.Path("/home/dev/neura-gate/030/crypto2/sources/token/biscuit")
 SUPPORTED = {1, 7, 8, 10, 11, 12, 15, 16, 19, 20, 22, 23}
 BAD_SIGNATURE = {2, 3, 4, 5, 6}
-UNSUPPORTED = {13, 24}
+UNSUPPORTED = set()
 INVALID_RULE = 18
 
 
@@ -124,6 +124,37 @@ def v1_example(root_seed: bytes, authority: bytes) -> tuple[bytes, bytes]:
     return signed + blob(4, blob(1, last_seed)), signed + blob(4, blob(1, bytes(32)))
 
 
+def mint_append_seal(sources: pathlib.Path, root_seed: bytes, root_public: bytes) -> list[str]:
+    root = Ed25519PrivateKey.from_private_bytes(root_seed)
+    next_seed = hashlib.sha256(b"Neura Biscuit test next").digest()
+    final_seed = hashlib.sha256(b"Neura Biscuit test last").digest()
+    next_key = Ed25519PrivateKey.from_private_bytes(next_seed)
+    final_key = Ed25519PrivateKey.from_private_bytes(final_seed)
+    authority_token = (sources / "test001_basic.bc").read_bytes()
+    authority_block = dict(fields(dict(fields(authority_token))[2]))[1]
+    check_token = (sources / "test012_authority_caveats.bc").read_bytes()
+    check_data = dict(fields(dict(fields(check_token))[2]))[1]
+    # Use the official resource("file1") check bytes unchanged. The authority has already defined file1.
+    attenuation = scalar(3, 3) + blob(6, dict(fields(check_data))[6])
+
+    def record(data, signer, next_public, previous):
+        signature = signer.sign(tagged_payload(data, next_public, previous))
+        encoded = blob(1, data) + blob(2, scalar(1, 0) + blob(2, next_public)) + blob(3, signature) + scalar(5, 1)
+        return encoded, signature
+
+    next_public = next_key.public_key().public_bytes_raw()
+    final_public = final_key.public_key().public_bytes_raw()
+    block0, sig0 = record(authority_block, root, next_public, b"")
+    minted = blob(2, block0) + blob(4, blob(1, next_seed))
+    block1, sig1 = record(attenuation, next_key, final_public, sig0)
+    prefix = blob(2, block0) + blob(3, block1)
+    appended = prefix + blob(4, blob(1, final_seed))
+    sealed = prefix + blob(4, blob(2, final_key.sign(attenuation + bytes(4) + final_public + sig1)))
+    for token in (minted, appended, sealed):
+        verify_reference(token, root_public)
+    return [value.hex() for value in (root_seed, next_seed, final_seed, minted, appended, sealed)]
+
+
 def main() -> None:
     sources = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT
     source = json.loads((sources / "samples.json").read_bytes())
@@ -162,6 +193,18 @@ def main() -> None:
         ("rejections", ["official case", "token", "reason group"], rejected),
         ("tagged", ["version 1 signed token", "version 1 token with wrong proof"], [[tagged.hex(), bad_proof.hex()]]),
     ])
+    write_module("crypto-token", "biscuit-mint-vectors.nra", "BiscuitMintVectors", [
+        "python3 scripts/crypto-vectors/gen-token-biscuit.py",
+        f"Eclipse Biscuit official block bytes, samples at commit {PIN}.",
+        "The public test keys, block v1 signatures, and seal are independently generated using cryptography.",
+    ], [
+        ("chain", ["root seed", "next seed", "final seed", "minted", "appended", "sealed"],
+         [mint_append_seal(sources, bytes.fromhex(source["root_private_key"]), root)]),
+        ("legacy_seal", ["official open v0 token", "official sealed v0 token"], [
+            [original.hex(), (sources / "test020_sealed.bc").read_bytes().hex()],
+        ]),
+    ])
+
 
 
 if __name__ == "__main__":

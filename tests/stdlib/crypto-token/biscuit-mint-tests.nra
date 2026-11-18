@@ -1,0 +1,87 @@
+// test-options: --gpu=off --deny-entropy --max-steps 4000000000
+let biscuit = import:Std.Crypto.Token.Biscuit;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let samples = import:BiscuitMintVectors;
+let.promote _ = import:Std.Core.Error;
+
+let BiscuitMintTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let authority = func -> string =>
+        "right(\"file1\", \"read\"); right(\"file2\", \"read\"); right(\"file1\", \"write\");";
+
+    let code = func(error: Error) -> string {
+        match (error) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    export let test_known_answers_for_mint_append_and_seal = func {
+        last chain = samples.chain;
+        let secret: ed25519.Ed25519PrivateKey = new(decode(chain[0]));
+        last root = secret.public_key();
+        last minted = test.assert_ok(biscuit.mint_with(authority(), secret, decode(chain[1])));
+        test.assert_equal_string(chain[3], hex.encode(minted));
+        secret.wipe();
+        last read_file2 = "resource(\"file2\"); allow if right(\"file2\", \"read\");";
+        let _ = test.assert_ok(biscuit.authorize(minted, root, read_file2));
+
+        last attenuated = test.assert_ok(biscuit.append_with(minted, root, "check if resource(\"file1\");", decode(chain[2])));
+        test.assert_equal_string(chain[4], hex.encode(attenuated));
+        let _ = test.assert_ok(biscuit.authorize(attenuated, root,
+            "resource(\"file1\"); allow if right(\"file1\", \"read\");"));
+        test.assert_equal_string("biscuit.check", code(test.assert_err(biscuit.authorize(attenuated, root, read_file2))));
+
+        last sealed = test.assert_ok(biscuit.seal(attenuated, root));
+        test.assert_equal_string(chain[5], hex.encode(sealed));
+        let _ = test.assert_ok(biscuit.verify(sealed, root));
+        let _ = test.assert_err(biscuit.append_with(sealed, root, "check if resource(\"file1\");", decode(chain[2])));
+    };
+
+    export let test_seal_official_legacy_token = func {
+        let secret: ed25519.Ed25519PrivateKey = new(decode(samples.chain[0]));
+        last root = secret.public_key();
+        secret.wipe();
+        last sealed = test.assert_ok(biscuit.seal(decode(samples.legacy_seal[0]), root));
+        test.assert_equal_string(samples.legacy_seal[1], hex.encode(sealed));
+        let _ = test.assert_err(biscuit.seal(sealed, root));
+    };
+
+    export let test_reject_reused_keys_and_non_check_attenuation = func {
+        last chain = samples.chain;
+        let secret: ed25519.Ed25519PrivateKey = new(decode(chain[0]));
+        last root = secret.public_key();
+        let _ = test.assert_err(biscuit.mint_with(authority(), secret, decode(chain[0])));
+        secret.wipe();
+        last minted = decode(chain[3]);
+        let _ = test.assert_err(biscuit.append_with(minted, root, "check if resource(\"file1\");", decode(chain[1])));
+        test.assert_equal_string("biscuit.authorizer", code(test.assert_err(
+            biscuit.append_with(minted, root, "right(\"file3\", \"read\");", decode(chain[2])))));
+    };
+
+    export let test_entropy_capability_returns_error = func {
+        let secret: ed25519.Ed25519PrivateKey = new(decode(samples.chain[0]));
+        last root = secret.public_key();
+        last mint_error = test.assert_err(biscuit.mint(authority(), secret));
+        secret.wipe();
+        last append_error = test.assert_err(biscuit.append(decode(samples.chain[3]), root, "check if resource(\"file1\");"));
+        for (let error in new Error[list]([mint_error, append_error])) {
+            match (error) {
+                Error.Io { kind, message: _, path: _ } => {
+                    test.assert(kind == IoErrorKind.CapabilityDenied);
+                },
+                _ => {
+                    test.fail("expected denied entropy capability");
+                },
+            }
+        }
+    };
+);
