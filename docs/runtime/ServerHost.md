@@ -1,8 +1,8 @@
 # Server host
 
-`neura-server-host` serves a Neura server image over HTTP/1.1 and HTTPS. It owns the listeners, TLS and the HTTP wire, and runs no application code: each request is executed by a fresh worker process that loads the image, runs the whole program once for that one request, and exits. Nothing a program holds survives between requests; data that must outlive a request belongs in a file or a database the program reaches through its host services. The contract is [the backend design note](../design/Backend030.md); this page describes what the 0.3.0 host does.
+`neura-server-host` serves a Neura server image over HTTP/1.1, HTTPS and, in builds with it, HTTP/2 ([below](#http2)). It owns the listeners, TLS and the HTTP wire, and runs no application code: each request is executed by a fresh worker process that loads the image, runs the whole program once for that one request, and exits. Nothing a program holds survives between requests; data that must outlive a request belongs in a file or a database the program reaches through its host services. The contract is [the backend design note](../design/Backend030.md); this page describes what the 0.3.0 host does.
 
-The host is built with every build on POSIX systems; this release tests it on Linux x86-64 only, and macOS builds are unqualified. HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`.
+The host is built with every build on POSIX systems; this release tests it on Linux x86-64 only, and macOS builds are unqualified. HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` with `-DNEURA_NGHTTP2_ROOT=<prefix>`, the install prefix of the static nghttp2 build the lock pins.
 
 ## A server image
 
@@ -99,6 +99,9 @@ neura-server-host [options] <image.nvr>
 | `--listen <address>:<port>` | A plain HTTP listener on a numeric IPv4 or IPv6 address; port 0 asks for a free one. Repeatable | |
 | `--tls-listen <address>:<port>` | An HTTPS listener (TLS 1.2 and 1.3). Repeatable | |
 | `--cert <file>`, `--key <file>` | PEM certificate chain and private key for the TLS listeners. A missing file or a key that does not match fails the start | |
+| `--no-http2` | TLS listeners offer only `http/1.1` by ALPN (builds with HTTP/2, below) | `h2` and `http/1.1` |
+| `--h2c` | Plain listeners also accept HTTP/2 with prior knowledge (builds with HTTP/2) | off |
+| `--max-streams N` | S-14, concurrent HTTP/2 streams on one connection (1 to 1,000) | 100 |
 | `--config <key>=<value>` | A configuration value. Repeatable | |
 | `--config-file <file>` | `key=value` lines; `#` starts a comment | |
 | `--config-env-prefix <prefix>` | The environment variable `<prefix><key>` overrides the file and `--config` | |
@@ -145,6 +148,20 @@ A failed request affects no other request: each runs in its own process.
 
 Each worker runs the image with the limits of `neura run`: `--max-steps` (default 100,000,000), 10,000 frames, and the default heap. The step limit is one value for every request: neither design note defines a per-route limit, and the host does not know the routes, which the program's router resolves. Each worker always has the console, clock and entropy services and the application services. Files, network and environment are denied unless the host grants them; native code is always denied. A worker's console output goes to the host's standard error.
 
+## HTTP/2
+
+In builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0, linked statically) the host also speaks HTTP/2:
+
+- On a TLS listener, ALPN offers `h2` before `http/1.1`; a client that picks `h2` is served HTTP/2, one that picks `http/1.1` or offers neither, HTTP/1.1. `--no-http2` offers `http/1.1` only.
+- On a plain listener, `--h2c` accepts HTTP/2 with prior knowledge: a connection that starts with the HTTP/2 client preface is HTTP/2, any other HTTP/1.1. Use it behind a reverse proxy that speaks h2c to the host. `Upgrade: h2c` is not supported (the request is served as HTTP/1.1), and the host never pushes.
+- Each stream is one request, served exactly as an HTTP/1.1 request is: the same admission (S-1, S-3; 503 as an HTTP/2 response), deadline, limits, worker and answers. Streams on one connection run at once, up to S-14 (`--max-streams`); a stream past it is refused with `RST_STREAM(REFUSED_STREAM)`, which a client may retry.
+- S-5 bounds the decoded header list (each field counts its name, its value and 32 bytes), advertised as `SETTINGS_MAX_HEADER_LIST_SIZE`; past it the answer is 431. The HPACK table is 4,096 bytes.
+- Flow control is the backpressure: a client that stops reading stops that stream's worker, within S-8, and not the other streams. The host reopens a stream's receive window only as its worker reads the body.
+- A client that resets a stream (`RST_STREAM`), or closes the connection, cancels the request: its worker is killed at once and the request is not retried.
+- On `SIGTERM` each connection sends `GOAWAY`; the streams already accepted finish within S-12, new ones are refused. An idle connection is closed with `GOAWAY` after the keep-alive time. `SIGHUP` reloads the certificate and keeps offering `h2`. The admin listener speaks HTTP/1.1 only.
+
+A build without the option speaks HTTP/1.1 only: TLS listeners select `http/1.1`, and `--h2c` fails the start.
+
 ## Configuration, logs and signals
 
 `Context.config(key)` reads the environment variable `<prefix><key>` when `--config-env-prefix` is set, then the `--config` values, then the configuration file. The worker asks the host for each value over its channel; it never receives the whole configuration.
@@ -177,4 +194,4 @@ Under `neura run` without a trace, a server image binds its application services
 
 ## Not in 0.3.0
 
-HTTP/2, HTTP/3 and WebSocket upgrades (approved decision 9 of the design note), SQL pools and migrations (a separate change), trusted proxies, a per-route step limit, and running a project bundle with `neura run`. See the [implementation status](../design/Backend030.md#implementation-status-2026-11-17).
+HTTP/3, WebSocket and other upgrades, `Upgrade: h2c` and server push (approved decision 9 of the design note, as amended for HTTP/2), SQL pools and migrations (a separate change), trusted proxies, a per-route step limit, and running a project bundle with `neura run`. See the [implementation status](../design/Backend030.md#implementation-status-2026-11-17).

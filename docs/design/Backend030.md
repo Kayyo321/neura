@@ -80,7 +80,7 @@ The runtime side of the `Std.Net` and `Std.Crypto` stubs. Every service is in [N
 | `sendfile`, `neura.net.send_file` | implemented: `sendfile(2)` on Linux, a copy elsewhere | `backend-host` |
 | `splice` with pipe handles, `neura.net.pipe` and `neura.net.splice` | implemented on Linux (`splice(2)`, the bytes never reach the NVM); 13 elsewhere | `backend-host` |
 | System name resolution, `neura.net.resolve` | implemented with `getaddrinfo`; blocks every task while it waits | `backend-host` |
-| HTTP/2 over TLS through ALPN, and h2c | not provided: approved decision 9 excludes HTTP/2 from 0.3.0 and allows no flag; see "HTTP/2 and decision 9" below | |
+| HTTP/2 over TLS through ALPN `h2` (on by default, `--no-http2`), and h2c with prior knowledge (`--h2c`) | implemented in builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0), by the owner's amendment of decision 9; see "HTTP/2 and decision 9" below | `server-host` (`test_http2_curl`, `test_http2_streams`, `test_http2_reload`), `server-host-h2c` |
 | `MSG_ZEROCOPY` | not provided, after measurement: see "MSG_ZEROCOPY" below | |
 | UDP GSO and GRO: options 13 `UDP_SEGMENT` and 14 `UDP_GRO`, `neura.net.udp.receive_segments` with the segment size | implemented on Linux; 13 elsewhere | `backend-host` (loopback: a 2,500-byte send arrives as 1,000, 1,000 and 500; with GRO, coalesced with segment size 1,000) |
 | MPTCP: `neura.net.mptcp.listen`, `neura.net.mptcp.connect`, option 15 `SO_PROTOCOL` | implemented on Linux 5.6 and later; 13 when the kernel has none or `net.mptcp.enabled` is 0 | `backend-host` (262 read back on this kernel) |
@@ -132,14 +132,33 @@ Measured on this machine with a standalone loopback benchmark (2 GiB per run, th
 
 ### HTTP/2 and decision 9
 
-Approved decision 9 reads "No WebSocket, HTTP/2 or connection upgrade in 0.3.0". It names no configuration under which HTTP/2 may be offered, so this branch does not offer it, not even behind a build option or a host flag: an option that turns it on would ship HTTP/2 in 0.3.0. The TLS listener's ALPN callback selects `http/1.1` only; a client that offers only `h2` gets no ALPN answer and either speaks HTTP/1.1 or gives up. `curl --http2` against the host negotiates HTTP/1.1, which `server-host` checks. Operators who need HTTP/2 or HTTP/3 terminate it in a reverse proxy, as the HTTP table says.
+*Status:* decision 9 amended by the owner on 2026-11-17 ("Yes, add HTTP/2"); implemented by autonomous agents on the `http2-server` branch, awaiting owner confirmation of the scope below.
 
-What changing it needs, in order:
+Decision 9 now reads: no WebSocket and no connection upgrade in 0.3.0; HTTP/2 is in 0.3.0. The scope:
 
-1. The owner amends decision 9, here, with the scope: HTTP/2 over TLS (ALPN `h2`) only, or also cleartext h2c (prior knowledge, or the `Upgrade: h2c` that decision 9 also excludes); and whether it is on by default.
-2. A pinned HTTP/2 framing library in [the server component lock](../../packaging/server-components.lock.toml), with its digest, signature and license, linked statically like OpenSSL. nghttp2 1.64 is what this machine's curl uses; a hand-written HPACK and frame layer is not reasonable to qualify for this release.
-3. In the host: the ALPN callback selects `h2` when it is enabled; an HTTP/2 connection maps each stream to the same `Responder` the HTTP/1.1 loop calls (request head at `HEADERS`, body by `DATA`, response through a `ResponseWriter` whose chunks become `DATA` frames with flow control as backpressure). S-4 counts connections, and a new limit bounds concurrent streams per connection (`SETTINGS_MAX_CONCURRENT_STREAMS`), each stream still admitted by S-1 and S-3. Header limits S-5 apply to the decoded header list; HPACK table size is bounded.
-4. Tests: an HTTP/2 wire suite with `curl --http2` and `nghttp`, interleaved streams, flow-control stalls, `RST_STREAM` cancelling a worker, and the existing host suite over both protocols.
+| Rule | Status |
+| --- | --- |
+| HTTP/2 over TLS through ALPN: a TLS listener offers `h2` before `http/1.1`, by default, whenever the build has HTTP/2. `--no-http2` offers `http/1.1` only. A client that offers neither is served HTTP/1.1. | implemented |
+| Cleartext h2c with prior knowledge only, off by default, enabled by `--h2c` (for use behind a reverse proxy). A plain connection that starts with the HTTP/2 client preface is HTTP/2; any other is HTTP/1.1 on the same listener. | implemented |
+| No `Upgrade: h2c` (RFC 9113 deprecates it): such a request is served as HTTP/1.1. No server push (the host never sends `PUSH_PROMISE`). WebSocket and other upgrades stay excluded. | implemented |
+| The framing library is nghttp2 1.71.0, pinned in [the server component lock](../../packaging/server-components.lock.toml) with its digest, signature and license, and linked statically. The build option is `NEURA_ENABLE_SERVER_HTTP2`, with `NEURA_NGHTTP2_ROOT`; configure refuses a version other than the locked one. Without the option the host is HTTP/1.1 only and refuses `--h2c`. | implemented |
+| Each stream maps to the `Responder` the HTTP/1.1 loop calls, on a thread of its own: the request head at `HEADERS`, checked by the HTTP/1.1 decoder's rules (`check_request_head`: at most 100 fields, one `host`, which `:authority` stands for, a known method, an origin-form target, `Content-Length`, `Expect`); the body from `DATA`, streamed to the worker, with the stream's window reopened only as the responder reads (flow control is the backpressure); the response through a `ResponseWriter` whose writes become `DATA` frames sent as the client's window allows. A buffered response of at most 64 KiB leaves with its head. | implemented |
+| S-4 counts connections. S-14 (`--max-streams`) bounds concurrent streams per connection and is sent as `SETTINGS_MAX_CONCURRENT_STREAMS`; a stream past it, counting responders still running after a reset, gets `RST_STREAM(REFUSED_STREAM)`. Each stream is still admitted by S-1 and S-3: 503 with `Retry-After: 1` as an HTTP/2 response. | implemented |
+| S-5 applies to the decoded header list, measured as `SETTINGS_MAX_HEADER_LIST_SIZE` measures it (name, value and 32 bytes per field), and is advertised as that setting; past it the answer is 431. The HPACK dynamic table is 4,096 bytes in both directions. | implemented |
+| `RST_STREAM` from the client, or the end of the connection, cancels the stream: the host kills its worker at once (the `ResponseWriter::on_cancel` hook) and does not retry it. | implemented |
+| On drain (`SIGTERM`) each HTTP/2 connection sends `GOAWAY` with the last stream it accepted; those streams finish, later ones are refused. An idle connection gets `GOAWAY` after the keep-alive time and is closed. | implemented |
+| `SIGHUP` TLS reload keeps offering `h2`. The admin listener stays HTTP/1.1. | implemented |
+
+Decisions taken without the owner, within the owner's yes:
+
+1. nghttp2 1.71.0, the current release, rather than the 1.64 the system curl uses.
+2. S-14 is 100 by default and at most 1,000; it counts responders that still run, so streams reset at once cannot pile up threads (the "rapid reset" attack).
+3. S-5 counts name + value + 32 per field, the same measure the setting uses, and is the value of `SETTINGS_MAX_HEADER_LIST_SIZE`.
+4. The HPACK table is the protocol default, 4,096 bytes.
+5. An idle HTTP/2 connection is closed after the HTTP/1.1 keep-alive time, with `GOAWAY`.
+6. Request trailers are discarded, as the HTTP/1.1 decoder discards them; responses have no trailers (`Std.App` has none).
+7. The TLS 1.2 cipher suites RFC 9113 (9.2.2 and Appendix A) prohibits for HTTP/2 are not refused: the TLS context keeps OpenSSL's default TLS 1.2 list, which still contains some of them (CBC suites, for example), so a TLS 1.2 client that negotiates one of them together with `h2` may end the connection with `INADEQUATE_SECURITY`. TLS 1.3 is unaffected. Restricting the TLS 1.2 list would also change HTTP/1.1 clients and is left to the owner; it is listed as a gap.
+8. A response that completes before the request body has arrived ends the request stream with `RST_STREAM(NO_ERROR)` (RFC 9113, 8.1), and the rest of the body is discarded.
 
 ### Handler interface for `Std.Net.Http`
 
@@ -234,7 +253,7 @@ Calls may overlap. Each `Return` requires an outstanding `Call`, and call and re
 
 | Rule | Status |
 | --- | --- |
-| The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS. HTTP/2 and HTTP/3 are terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | implemented for HTTP/1.1 over TCP and TLS |
+| The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS, and HTTP/2 (decision 9 as amended; see "HTTP/2 and decision 9"). HTTP/3 is terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | implemented for HTTP/1.1 over TCP and TLS, and for HTTP/2 over TLS (ALPN) and h2c in builds with `NEURA_ENABLE_SERVER_HTTP2` |
 | The host rejects before any worker: a head over `S-5` (431), more than 100 header fields (431), a body over `S-6` (413), both `Content-Length` and `Transfer-Encoding` (400), a transfer coding other than `chunked` (501), a folded header line, a missing or repeated `Host` (400), and a method it does not know (501). A head that takes more than 10 s is closed. | implemented (A4 decoder) and tested through the host |
 | Requests on one connection are served one at a time, in order. | implemented |
 | `http.Request` is immutable: `method`, `path`, `query`, `headers`, `client`, `scheme`, `request_id`, and the body, which is read whole within `S-6` (`body()`) or in chunks under a `using` owner (`open_body()`). | proposed for `Std.Net.Http`; the host side and `Std.App` (`serve_streamed`, `BodyReader`) are implemented |
@@ -428,7 +447,7 @@ Each step is one commit with its targeted tests. None changes the image of a pro
 
 - HTTP and HTTPS both serve the reference application's contract, with SQLite and with PostgreSQL.
 - With 8 requests in flight and one trapping, the other 7 complete, the trapped one is answered or closed once, its leases are revoked, a new worker serves only later requests, startup runs in each worker, and no request is executed twice. The same holds with a commit of unknown outcome, and with the host killed.
-- Every limit `S-1` to `S-13` has a test at the limit and one past it.
+- Every limit `S-1` to `S-14` has a test at the limit and one past it.
 - Denied capabilities answer 14; a forged handle is refused; no secret appears in any bundle file or log.
 - Cancellation reaches a running statement on both databases.
 - The budgets B-S1 to B-S6 are met on the machine and commands [the overview](Apps030.md#budgets) names.
@@ -448,5 +467,5 @@ A 0.2 server built on `TcpListener` and hand-written parsing keeps working uncha
 6. Migrations are forward-only SQL files, manual by default, and a changed checksum refuses the start.
 7. Health and metrics are served by the host on a loopback admin listener.
 8. There is no shutdown callback in application code: a request sees its own cancellation only.
-9. No WebSocket, HTTP/2 or connection upgrade in 0.3.0.
+9. No WebSocket or connection upgrade in 0.3.0. HTTP/2 is in 0.3.0 (amended by the owner on 2026-11-17; scope in "HTTP/2 and decision 9").
 10. `PendingOperation` gains a platform-neutral wait source; nothing else in the host interface changes.
