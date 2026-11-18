@@ -136,6 +136,15 @@ Hashes, MACs, key derivation, authenticated encryption, and secure random genera
 | [`Std.Crypto.SecretMemory`](Stdlib-Crypto-SecretMemory) | [Contracts](Stdlib-Crypto-SecretMemory#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretMemory#exported-declarations) |
 | [`Std.Crypto.Signer`](Stdlib-Crypto-Signer) | [Contracts](Stdlib-Crypto-Signer#detailed-contracts) | [Declarations](Stdlib-Crypto-Signer#exported-declarations) |
 | [`Std.Crypto.StreamingDigest`](Stdlib-Crypto-StreamingDigest) | [Contracts](Stdlib-Crypto-StreamingDigest#detailed-contracts) | [Declarations](Stdlib-Crypto-StreamingDigest#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesBlock`](Stdlib-Crypto-AesBlock) | [Contracts](Stdlib-Crypto-AesBlock#detailed-contracts) | [Declarations](Stdlib-Crypto-AesBlock#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesGcmSiv`](Stdlib-Crypto-AesGcmSiv) | [Contracts](Stdlib-Crypto-AesGcmSiv#detailed-contracts) | [Declarations](Stdlib-Crypto-AesGcmSiv#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesGcm`](Stdlib-Crypto-AesGcm) | [Contracts](Stdlib-Crypto-AesGcm#detailed-contracts) | [Declarations](Stdlib-Crypto-AesGcm#exported-declarations) |
+| [`Std.Crypto.Symmetric.AesSiv`](Stdlib-Crypto-AesSiv) | [Contracts](Stdlib-Crypto-AesSiv#detailed-contracts) | [Declarations](Stdlib-Crypto-AesSiv#exported-declarations) |
+| [`Std.Crypto.Symmetric.ChaCha20Poly1305`](Stdlib-Crypto-ChaCha20Poly1305) | [Contracts](Stdlib-Crypto-ChaCha20Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-ChaCha20Poly1305#exported-declarations) |
+| [`Std.Crypto.Symmetric.ChaCha20`](Stdlib-Crypto-ChaCha20) | [Contracts](Stdlib-Crypto-ChaCha20#detailed-contracts) | [Declarations](Stdlib-Crypto-ChaCha20#exported-declarations) |
+| [`Std.Crypto.Symmetric.Ff1`](Stdlib-Crypto-Ff1) | [Contracts](Stdlib-Crypto-Ff1#detailed-contracts) | [Declarations](Stdlib-Crypto-Ff1#exported-declarations) |
+| [`Std.Crypto.Symmetric.OnlineCipher`](Stdlib-Crypto-OnlineCipher) | [Contracts](Stdlib-Crypto-OnlineCipher#detailed-contracts) | [Declarations](Stdlib-Crypto-OnlineCipher#exported-declarations) |
+| [`Std.Crypto.Symmetric.XChaCha20Poly1305`](Stdlib-Crypto-XChaCha20Poly1305) | [Contracts](Stdlib-Crypto-XChaCha20Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-XChaCha20Poly1305#exported-declarations) |
 | [`Std.Crypto.SymmetricKey`](Stdlib-Crypto-SymmetricKey) | [Contracts](Stdlib-Crypto-SymmetricKey#detailed-contracts) | [Declarations](Stdlib-Crypto-SymmetricKey#exported-declarations) |
 | [`Std.Crypto.Verifier`](Stdlib-Crypto-Verifier) | [Contracts](Stdlib-Crypto-Verifier#detailed-contracts) | [Declarations](Stdlib-Crypto-Verifier#exported-declarations) |
 
@@ -365,3 +374,4 @@ The [complete specification](Stdlib-Design) has these sections.
   - [20.4 `Std.Crypto.Hash`](Stdlib-Design#204-stdcryptohash)
   - [20.5 `Std.Crypto.Mac`](Stdlib-Design#205-stdcryptomac)
   - [20.6 `Std.Crypto.Kdf`](Stdlib-Design#206-stdcryptokdf)
+  - [20.7 `Std.Crypto.Symmetric`](Stdlib-Design#207-stdcryptosymmetric)

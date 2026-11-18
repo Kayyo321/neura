@@ -58,6 +58,16 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | Balloon hashing (2.8) | logic | no standard vectors exist; an independent Python reference from the paper's Algorithm 1 (`balloon_reference.py`), 5 cases over SHA-256, SHA-512 and SHA3-256 | implemented |
 | PHC strings, `needs_rehash`, password hashing and verification (2.8) | logic | round trips, 11 rejections, verification against an `openssl` tag | implemented |
 | Calibration to a target latency (2.8) | logic over host data | a deterministic test clock | implemented over a caller-supplied `Std.Time` clock |
+| AES-128/192/256 block, `AesBlock` (2.5) | KAT | `cryptography` ECB: the FIPS 197 Appendix C plaintext and a pattern block, encrypted and decrypted | implemented |
+| AES-GCM with 96-bit nonces (2.5) | KAT | `cryptography`: 18 cases, all three key sizes, 0 to 100 bytes, with and without associated data | implemented |
+| AES-GCM-SIV (2.5) | KAT | all 50 vectors of RFC 8452 Appendix C, including the counter-wrap tests, and 8 `cryptography` cases | implemented |
+| AES-SIV deterministic AEAD (2.5) | KAT | RFC 5297 A.1 and A.2 and 12 `cryptography` cases: 32-, 48- and 64-byte keys, 0 to 3 associated-data items | implemented |
+| ChaCha20, XChaCha20, HChaCha20 (2.5) | KAT | `cryptography`, including a counter near 2^32; draft-irtf-cfrg-xchacha-03 sections 2.2.1 and A.3.2.1 | implemented |
+| ChaCha20-Poly1305 (2.5) | KAT | `cryptography`: 6 cases | implemented |
+| XChaCha20-Poly1305 (2.5) | KAT | draft-irtf-cfrg-xchacha-03 A.3.1, and 6 cases computed with `cryptography`'s ChaCha20 for HChaCha20 and its ChaCha20-Poly1305 | implemented |
+| STREAM online AEAD, `OnlineCipher` (2.5) | logic | no standard vectors exist for this nonce layout; an independent Python reference (`gen-stream.py`) over `cryptography`'s GCM, GCM-SIV, ChaCha20-Poly1305 and XChaCha20-Poly1305; truncated, reordered, appended and altered streams are rejected | implemented |
+| FF1 (2.5) | KAT | all 9 NIST FF1 samples (AES-128/192/256, radix 10 and 36, with and without a tweak); radix 2 and 65536 round trips | implemented |
+| Raw ECB and CBC modes (2.5) | not exposed | | by design |
 
 ## Runtime needs
 
@@ -75,3 +85,7 @@ Each stub below waits on a host operation that the runtime does not yet offer. A
 4. Balloon hashing fixes the encodings the paper leaves open: 8-byte little-endian integers, concatenated hash inputs, and `to_int` as the first 8 digest bytes little-endian modulo `space_cost`.
 5. Only Argon2id is offered, not Argon2d or Argon2i. `needs_rehash` asks for a rehash on any parameter difference, not only on an upgrade. PHC strings cover argon2id and scrypt, not passlib's PBKDF2 form.
 6. Calibration takes a `Clock` and tunes memory before passes, as RFC 9106, section 4 recommends. It stops at 10 passes.
+7. AES-GCM takes only 96-bit nonces. AES-SIV used as an `AeadCipher` puts its associated data and nonce in the item vector `[data, nonce]`, and it reports a nonce length of 0, meaning any length.
+8. STREAM's segment nonce (prefix ‖ big-endian `uint32` counter ‖ last-segment byte) and its prefix length (the AEAD's nonce length less 5) are defined here, as Tink's nonce-prefix segmented AEAD does. No standard fixes them.
+9. FF1 uses the minimum domain of SP 800-38G Revision 1 (radix^minlen ≥ 10^6). Its text forms return `Result`, and misuse of the numeral API traps.
+10. Neither RFC 5297 nor `cryptography` provides an empty-plaintext AES-SIV case, so there is none here. The empty-plaintext GCM-SIV cases come from RFC 8452.

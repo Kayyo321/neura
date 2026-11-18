@@ -1,0 +1,12 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: AES-GCM nonce must be 12 bytes
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let cipher = new aes_gcm.AesGcm(new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]));
+        let _ = cipher.seal(new([1, 2, 3]), new, new);
+        return program.ExitCode.Ok;
+    };
+);

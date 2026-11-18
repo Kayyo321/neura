@@ -1,0 +1,56 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+let aes = import:Std.Crypto.Internal.Aes;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+
+/// @brief The raw AES block cipher of FIPS 197 (Stdlib.md section 20.7). A building block, not a mode.
+///
+/// Encrypting a message block by block with this class is ECB, which leaks equal blocks: use an AEAD of
+/// Std.Crypto.Symmetric for data. The library offers no ECB or CBC mode. The S-box is a table indexed by
+/// secret bytes, so this code is not constant-time on cached hardware, and the runtime promises no constant
+/// time anyway.
+/// @see [Std.Crypto.Symmetric.AesBlock](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesBlock)
+#Since("0.3.0")
+export let AesBlock = module (
+    /// @brief An expanded AES-128, AES-192 or AES-256 key.
+    #[Final, Since("0.3.0")]
+    export let AesBlock = class implements CryptographicPrimitive<AesBlock> (
+        let cipher: aes.Cipher;
+        let alg: Algorithm = Algorithm.Aes256;
+
+        /// @brief Expands a 16-, 24- or 32-byte key; another length traps. Checks the policy for Aes128,
+        /// Aes192 or Aes256.
+        export let init = func(key: uint8[list]) {
+            if (key.length == 16) {
+                alg = Algorithm.Aes128;
+            } else if (key.length == 24) {
+                alg = Algorithm.Aes192;
+            }
+            crypto_policy.require(alg);
+            cipher = new(key);
+        };
+
+        /// @brief `Aes128`, `Aes192` or `Aes256`.
+        export let algorithm = func -> Algorithm => alg;
+
+        /// @brief The encryption of one 16-byte block; another length traps.
+        export let encrypt_block = func(block: uint8[list]) -> uint8[list] {
+            check(block);
+            return cipher.encrypt(block, 0);
+        };
+
+        /// @brief The decryption of one 16-byte block; another length traps.
+        export let decrypt_block = func(block: uint8[list]) -> uint8[list] {
+            check(block);
+            return cipher.decrypt(block, 0);
+        };
+
+        let check = func(block: uint8[list]) {
+            if (block.length != 16) {
+                trap_with_message("invalid argument: AES block must be 16 bytes");
+            }
+        };
+
+        export let.override to_string = func -> string => "AesBlock(<redacted>)";
+    );
+);

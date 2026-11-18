@@ -1,0 +1,183 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.AeadCipher;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let error = import:Std.Core.Error;
+let words = import:Std.Crypto.Internal.Words;
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief Streaming authenticated encryption: the STREAM construction of Hoang, Reyhanitabar, Rogaway and Vizar
+/// over any AEAD with a nonce of at least 12 bytes (Stdlib.md section 20.7).
+///
+/// A stream is a sequence of segments, each sealed separately by the AEAD with the nonce prefix ||
+/// big-endian uint32(segment index) || last-segment flag (0x01 on the last segment, 0x00 otherwise) and with
+/// the stream's associated data. Encrypting and decrypting hold one segment at a time, so a stream of any
+/// size needs memory for one segment. A decryptor rejects a changed, reordered, dropped or appended segment and
+/// a stream cut short: the final flag is part of the last segment's nonce, so a stream truncated at a segment
+/// boundary has no segment that opens as last. The prefix must be random or unique per stream under one key,
+/// and a stream holds at most 2^32 segments.
+/// @see [Std.Crypto.Symmetric.OnlineCipher](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-OnlineCipher)
+#Since("0.3.0")
+export let OnlineCipher = module (
+    /// @brief The nonce of segment `index`.
+    let segment_nonce = func(prefix: uint8[list], index: uint64, final_segment: bool) -> uint8[list] {
+        let nonce = words.copy(prefix);
+        words.append32_be(nonce, index as uint32);
+        nonce.append(final_segment ? 1 : 0);
+        return nonce;
+    };
+
+    /// @brief Traps unless the prefix has the AEAD's nonce length less 5 bytes, and that is at least 7.
+    let check_prefix = func(nonce_length: int, prefix: uint8[list]) {
+        if (nonce_length < 12) {
+            trap_with_message("invalid argument: STREAM needs an AEAD with a nonce of at least 12 bytes");
+        }
+        if (prefix.length != nonce_length - 5) {
+            trap_with_message("invalid argument: STREAM nonce prefix must be " + (nonce_length - 5).to_string()
+                + " bytes");
+        }
+    };
+
+    /// @brief Seals a stream segment by segment.
+    #[Final, Since("0.3.0")]
+    export let StreamEncryptor = class<K> (
+        last cipher: AeadCipher<K, uint8[list], uint8[list]>;
+        last prefix: uint8[list];
+        last data: uint8[list];
+        let index: uint64 = 0;
+        let ended: bool = false;
+
+        /// @brief A stream under the AEAD with the nonce prefix (the AEAD's nonce length less 5 bytes) and the
+        /// associated data that every segment authenticates.
+        export let init = func(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
+                associated_data: uint8[list]) {
+            crypto_policy.require(Algorithm.Stream);
+            check_prefix(aead.nonce_length(), nonce_prefix);
+            cipher = aead;
+            prefix = words.copy(nonce_prefix);
+            data = words.copy(associated_data);
+        };
+
+        /// @brief The sealed next segment; `last_segment` marks the final one. A segment after the final one,
+        /// or a 2^32nd segment, traps.
+        #NoDiscard
+        export let seal_segment = func(plaintext: uint8[list], last_segment: bool) -> uint8[list] {
+            if (ended) {
+                trap_with_message("invalid state: stream already ended");
+            }
+            if (index > 4294967295) {
+                trap_with_message("invalid state: stream has 2^32 segments");
+            }
+            last sealed = cipher.seal(segment_nonce(prefix, index, last_segment), plaintext, data);
+            index += 1;
+            ended = last_segment;
+            return sealed;
+        };
+
+        /// @brief Whether the final segment was sealed.
+        export let is_ended = func -> bool => ended;
+
+        export let.override to_string = func -> string => "StreamEncryptor(" + index.to_string() + " segments)";
+    );
+
+    /// @brief Opens a stream segment by segment, in order.
+    #[Final, Since("0.3.0")]
+    export let StreamDecryptor = class<K> (
+        last cipher: AeadCipher<K, uint8[list], uint8[list]>;
+        last prefix: uint8[list];
+        last data: uint8[list];
+        let index: uint64 = 0;
+        let ended: bool = false;
+        let failed: bool = false;
+
+        /// @brief The decryptor matching a StreamEncryptor with the same AEAD key, prefix and data.
+        export let init = func(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
+                associated_data: uint8[list]) {
+            crypto_policy.require(Algorithm.Stream);
+            check_prefix(aead.nonce_length(), nonce_prefix);
+            cipher = aead;
+            prefix = words.copy(nonce_prefix);
+            data = words.copy(associated_data);
+        };
+
+        /// @brief The plaintext of the next segment; `last_segment` says whether the caller's framing shows it is
+        /// the final one. A segment that fails, a segment after the final one, and every call after a failure
+        /// give the "crypto.authentication" error.
+        #NoDiscard
+        export let open_segment = func(sealed: uint8[list], last_segment: bool) -> Result<uint8[list]> {
+            if (failed || ended || index > 4294967295) {
+                failed = true;
+                return Result<uint8[list]>.Err(error.custom("crypto.authentication", "authentication failed"));
+            }
+            last opened = cipher.open(segment_nonce(prefix, index, last_segment), sealed, data);
+            match (opened) {
+                Result.Ok(_) => {
+                    index += 1;
+                    ended = last_segment;
+                },
+                Result.Err(_) => {
+                    failed = true;
+                },
+            }
+            return opened;
+        };
+
+        /// @brief `Ok` once the final segment opened; the "crypto.authentication" error for a stream that was
+        /// cut short or failed.
+        #NoDiscard
+        export let finish = func -> Result<Unit> {
+            if (ended && !failed) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+            return Result<Unit>.Err(error.custom("crypto.authentication", "stream truncated or not authentic"));
+        };
+
+        export let.override to_string = func -> string => "StreamDecryptor(" + index.to_string() + " segments)";
+    );
+
+    /// @brief The plaintext cut into segments of `segment_length` bytes (the last may be shorter; an empty
+    /// plaintext is one empty segment), each sealed.
+    #[NoDiscard, Since("0.3.0")]
+    export let seal_segments = func<K>(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
+            associated_data: uint8[list], plaintext: uint8[list], segment_length: int) -> uint8[list][list] {
+        if (segment_length < 1) {
+            trap_with_message("invalid argument: segment length must be positive");
+        }
+        let encryptor = new StreamEncryptor<K>(aead, nonce_prefix, associated_data);
+        let out: uint8[list][list] = new;
+        let start = 0;
+        while (true) {
+            last end = start + segment_length < plaintext.length ? start + segment_length : plaintext.length;
+            last final_segment = end == plaintext.length;
+            out.append(encryptor.seal_segment(words.slice(plaintext, start, end), final_segment));
+            if (final_segment) {
+                return out;
+            }
+            start = end;
+        }
+        return out;
+    };
+
+    /// @brief The plaintext of a whole stream, or the "crypto.authentication" error.
+    #[NoDiscard, Since("0.3.0")]
+    export let open_segments = func<K>(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
+            associated_data: uint8[list], segments: uint8[list][list]) -> Result<uint8[list]> {
+        let decryptor = new StreamDecryptor<K>(aead, nonce_prefix, associated_data);
+        let out: uint8[list] = new;
+        for (let i = 0; i < segments.length; i++) {
+            match (decryptor.open_segment(segments[i], i == segments.length - 1)) {
+                Result.Ok(bytes) => {
+                    words.append_all(out, bytes);
+                },
+                Result.Err(e) => {
+                    return Result<uint8[list]>.Err(e);
+                },
+            }
+        }
+        return match (decryptor.finish()) {
+            Result.Ok(_) => Result<uint8[list]>.Ok(out),
+            Result.Err(e) => Result<uint8[list]>.Err(e),
+        };
+    };
+);
