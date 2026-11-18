@@ -44,7 +44,7 @@ Ada
 | `Std.Digest` | `Crc32`, `Sha256` |
 | `Std.Io` | `Console`, `Closeable`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer` |
 | `Std.Fs` | `Path`, `File`, `Fs` |
-| `Std.Net` | `TcpStream`, `TcpListener` |
+| `Std.Net` | `TcpStream`, `TcpListener`; in 0.3.0 the contracts (`Endpoint`, `Listener`, `Connector`, `Transport`, `Service`, `Filter`) and the packages `Core`, `Socket`, `Dns`, `Tls`, `Quic`, `Http`, `Rpc`, `Realtime`, `Resilience` and `Mesh`, some of whose host calls are stubs ([Stdlib](Stdlib-Design#114-stdnet)) |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |
 | `Std.Test` | The assertions of [Testing](Testing) |
