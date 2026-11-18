@@ -1,3 +1,4 @@
+let hashing = import:Std.Core.Hash;
 let atomics = import:Std.Concurrent.AtomicInt64;
 let bytes = import:Std.Io.Internal.Bytes;
 let channels = import:Std.Concurrent.Channel;
@@ -503,6 +504,29 @@ export let Desktop = module (
             extensions = types;
         };
 
+        /// @brief Filters are equal when the label and the extensions, in order, are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: FileFilter) {
+                return false;
+            }
+            if (label != that.label || extensions.length != that.extensions.length) {
+                return false;
+            }
+            for (let i = 0; i < extensions.length; i += 1) {
+                return false unless extensions[i] == that.extensions[i];
+            }
+            return true;
+        };
+
+        /// @brief Combines the label and the extensions into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, label.hash_code());
+            for (let extension in extensions) {
+                code = hashing.combine(code, extension.hash_code());
+            }
+            return code;
+        };
+
         export let.override to_string = func -> string => "FileFilter(" .. label .. ")";
     );
 
@@ -548,6 +572,37 @@ export let Desktop = module (
         /// @brief The same entry, enabled or not.
         export let with_enabled = func(active: bool) -> MenuItem =>
             new MenuItem(kind, id, label, accelerator, role, active, target, items);
+
+        /// @brief Entries are equal when every component, and every submenu entry in order, is.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: MenuItem) {
+                return false;
+            }
+            if (kind != that.kind || id != that.id || label != that.label || accelerator != that.accelerator ||
+                role != that.role || enabled != that.enabled || target != that.target ||
+                items.length != that.items.length) {
+                return false;
+            }
+            for (let i = 0; i < items.length; i += 1) {
+                return false unless items[i].equals(that.items[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines every component and submenu entry into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, kind.hash_code());
+            code = hashing.combine(code, id.hash_code());
+            code = hashing.combine(code, label.hash_code());
+            code = hashing.combine(code, accelerator.hash_code());
+            code = hashing.combine(code, role.hash_code());
+            code = hashing.combine(code, enabled.hash_code());
+            code = hashing.combine(code, target.hash_code());
+            for (let item in items) {
+                code = hashing.combine(code, item.hash_code());
+            }
+            return code;
+        };
 
         export let.override to_string = func -> string => "MenuItem(" .. kind .. ", " .. id .. ", " .. label .. ")";
     );
