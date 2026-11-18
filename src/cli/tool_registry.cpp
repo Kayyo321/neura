@@ -36,6 +36,8 @@ constexpr std::array<std::string_view, 1> tags_words{"tags"};
 constexpr std::array<std::string_view, 1> debug_words{"debug"};
 constexpr std::array<std::string_view, 1> lsp_words{"lsp"};
 constexpr std::array<std::string_view, 1> fmt_words{"fmt"};
+constexpr std::array<std::string_view, 1> new_words{"new"};
+constexpr std::array<std::string_view, 1> package_words{"package"};
 constexpr std::array<std::string_view, 1> doctor_words{"doctor"};
 constexpr std::array<std::string_view, 1> update_words{"update"};
 constexpr std::array<std::string_view, 1> uninstall_words{"uninstall"};
@@ -43,7 +45,7 @@ constexpr std::array<std::string_view, 1> uninstall_words{"uninstall"};
 constexpr std::array<std::string_view, 0> server_host_words{};
 
 // The executables next to `neura`, core first (Products030.md, "Binary map").
-constexpr std::array<Tool, 18> tool_table{{
+constexpr std::array<Tool, 20> tool_table{{
     {"neura-run", Component::Core, run_words},
     {"neura-inspect", Component::Core, inspect_words},
     {"neura-doctor", Component::Core, doctor_words},
@@ -62,11 +64,13 @@ constexpr std::array<Tool, 18> tool_table{{
     {"neura-debug", Component::Sdk, debug_words},
     {"neura-lsp", Component::Sdk, lsp_words},
     {"neura-fmt", Component::Sdk, fmt_words},
+    {"neura-new", Component::Sdk, new_words},
+    {"neura-package", Component::Sdk, package_words},
 }};
 
 // Every `neura` command that a tool serves. version, help and capabilities
 // are built into `neura` itself.
-constexpr std::array<Command, 23> command_table{{
+constexpr std::array<Command, 25> command_table{{
     {"check", "neurac", "check", Component::Sdk},
     {"docs", "neura-doc", "docs", Component::Sdk},
     {"emit-ir", "neurac", "emit-ir", Component::Sdk},
@@ -87,6 +91,8 @@ constexpr std::array<Command, 23> command_table{{
     {"tags", "neura-tags", "tags", Component::Sdk},
     {"lsp", "neura-lsp", "lsp", Component::Sdk},
     {"fmt", "neura-fmt", "fmt", Component::Sdk},
+    {"new", "neura-new", "new", Component::Sdk},
+    {"package", "neura-package", "package", Component::Sdk},
     {"debug", "neura-debug", "debug", Component::Sdk},
     {"inspect-image", "neura-inspect", "inspect-image", Component::Core},
     // The seam of the service component: forwarded once neurad is installed.
@@ -216,6 +222,9 @@ const char* usage_text() {
            "       neura emit-ir [--no-optimize] <file.nir>\n"
            "       neura build [-I source-root] [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nra>... -o <file.nvr>\n"
            "       neura build [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nir> -o <file.nvr>\n"
+           "       neura build --project <neura.toml> --target <name> [--out <directory>] [--update-lock]\n"
+           "       neura package --project <neura.toml> --target <name> [--format tar.gz|deb|zip] [-o <file>]\n"
+           "       neura new <directory> --template fullstack|web|server|desktop [--name <name>] [--id <id>]\n"
            "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
            "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura inspect <file> [-o <file.nvr>]\n"
@@ -223,6 +232,7 @@ const char* usage_text() {
            "[--jit=off|on|auto] [--tier-stats] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
+           "       neura run <bundle directory> [-- host arguments...]\n"
            "       neura run --runtime=off|auto|required [--detach --stdout=<file> --stderr=<file> [--stdin=<file>]]\n"
            "                 [--runtime-report=<file>] [run options] <file.nvr> [-- args...]\n"
            "       neura runtime start | status [--json] | ps [--json] [--all] | inspect <id> [--json]\n"

@@ -368,6 +368,7 @@ Errors about projects and their artifacts.
 | [E1029](E1029.md) | bundle cannot be written |
 | [E1031](E1031.md) | unknown or incompatible provider |
 | [E1032](E1032.md) | dependency not pinned or not found |
+| [E1033](E1033.md) | package cannot be built here |
 
 ## Warnings
 

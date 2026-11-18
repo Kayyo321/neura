@@ -1,0 +1,67 @@
+// The stock page: the starting parts from the shared contract and a counter of parts restocked, mounted on
+// the element #app. A click renders the counter alone.
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let parts = import:Contracts.Parts;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+let web = import:Std.Web;
+
+const PageStyles = css {
+    .page { font-family: system-ui, sans-serif; max-width: 30rem; margin: 3rem auto; }
+    .count { font-size: 2rem; color: #2a5db0; }
+};
+
+let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <p>
+        <span class="count" id="count">{count}</span>
+        <button type="button" id="add" on:click={on_add}>Restock</button>
+    </p>
+};
+
+let page_view = html(title: string, counter: ui.View) {
+    <main class="page">
+        <h1>{title}</h1>
+        {counter}
+    </main>
+};
+
+let make_counter = func -> ui.Component {
+    last count = new ui.State<int32>(0);
+    last add = new func(event: ui.ClickEvent) {
+        count.update(func(value: int32) -> int32 => value + 1);
+    };
+    return ui.component<int32>(count, new func(value: int32) -> ui.View => counter_view(value, add));
+};
+
+/// @brief The page title: the starting parts, separated by commas.
+let title_text = func -> string {
+    let text = "Stock:";
+    for (let name: string in parts.starter_names()) {
+        text = text + " " + name;
+    }
+    return text;
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last counter = make_counter();
+        last title = new ui.State<string>(title_text());
+        last page = ui.component<string>(title, new func(value: string) -> ui.View =>
+            page_view(value, ui.slot(counter)));
+        let status = program.ExitCode.Ok;
+        scope (tasks) {
+            match (web.mount("#app", page, tasks)) {
+                result.Result.Ok(root) => {
+                    root.run();
+                },
+                result.Result.Err(problem) => {
+                    console.print_line("mount failed: " + error.message(problem));
+                    status = program.ExitCode.Failure;
+                },
+            }
+        }
+        return status;
+    };
+);

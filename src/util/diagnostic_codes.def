@@ -328,6 +328,7 @@ NEURA_DIAGNOSTIC(E1028, "limit out of range")
 NEURA_DIAGNOSTIC(E1029, "bundle cannot be written")
 NEURA_DIAGNOSTIC(E1031, "unknown or incompatible provider")
 NEURA_DIAGNOSTIC(E1032, "dependency not pinned or not found")
+NEURA_DIAGNOSTIC(E1033, "package cannot be built here")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

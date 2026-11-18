@@ -10,7 +10,9 @@ let Main = module:program.Entry (
     let start = func(context: desktop.Context) -> Result<Unit> {
         match (context.open_window("Counter", 640, 480)) {
             Result.Ok(_) => {},
-            Result.Err(problem) => { return Result<Unit>.Err(problem); },
+            Result.Err(problem) => {
+                return Result<Unit>.Err(problem);
+            },
         }
         last dispatcher = new desktop.Dispatcher(new desktop.Registry(new(["counter.rename"])));
         dispatcher.add("counter.rename", rename);

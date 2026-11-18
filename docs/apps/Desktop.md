@@ -2,7 +2,7 @@
 
 This page is the reference for Neura desktop applications as implemented: the window host's application runner, the native child written with [`Std.Desktop`](../lang/Stdlib.md#115-stddesktop), bridge calls, windows, menus, dialogs and granted files, packages, and the measured budgets. The [desktop design](../design/Desktop030.md) keeps the rules not yet implemented and the reasons; the wire formats and host services are in [Providers](../runtime/Providers.md).
 
-*Status:* Neura 0.3.0, qualified on Linux x86-64 under Xvfb with the pinned Electron 45.3.3, implemented by autonomous agents and awaiting owner confirmation. **No Neura component renders in a desktop window yet:** the renderer's NVM and components (`desktop.mount`) need the browser runtime and components of the application platform, so the pages of the tests are fixture scripts that call the bridge. Windows and macOS runners, `.dmg`, `.msix`, signing, `neura package` and `neura contracts` (generated dispatchers) are not implemented.
+*Status:* Neura 0.3.0, qualified on Linux x86-64 under Xvfb with the pinned Electron 45.3.3, implemented by autonomous agents and awaiting owner confirmation. **No Neura component renders in a desktop window yet:** the renderer's NVM and components (`desktop.mount`) need the browser runtime and components of the application platform, so the pages of the tests are fixture scripts that call the bridge. Windows and macOS runners, `.dmg`, `.msix`, signing and `neura contracts` (generated dispatchers) are not implemented.
 
 ## Writing the native child
 
@@ -97,7 +97,7 @@ The dialog services take a window handle, a suggested file name (a name, not a p
 
 `--test-hooks` adds `test-dialogs.json` and names it in `desktop.json` (`testHooks.dialogs`); the host follows it in place of the system's dialogs, and the tool prints that the package is not a release. A release build refuses a `desktop.json` that names test hooks. `tests/desktop/run_package_test.py` runs all of the above. The fixture packages are about 127 MB, under B-D3.
 
-This tool stands in for `neura package` until project targets exist ([Projects](../design/Projects030.md)); `E1033` belongs to that command and is not reported by the tool, which ends with status 1 and a message.
+`neura package --target <desktop target>` runs this tool on a project's desktop bundle and reports `E1033` for what it cannot build here ([Projects and bundles](Projects.md#packaging)); run directly, the tool ends with status 1 and a message.
 
 ## Budgets
 

@@ -117,7 +117,8 @@ int run_desktop(const fs::path& root, const std::vector<std::string>& arguments,
     if (const char* env = std::getenv("NEURA_DESKTOP_ENGINE"); env && *env) engine = fs::path(env);
     else if (const auto installed = install_prefix() / "lib/neura/desktop/electron/electron"; fs::exists(installed))
         engine = installed;
-    fs::path host = install_prefix() / "share/neura/desktop/main.js";
+    fs::path host = install_prefix() / "share/neura/hosts/desktop/main.js";
+    if (!fs::exists(host)) host = install_prefix() / "hosts/desktop/main.js";
     if (const char* env = std::getenv("NEURA_DESKTOP_HOST"); env && *env) host = fs::path(env) / "main.js";
     if (!engine || !fs::exists(*engine)) {
         err << "neura run: the desktop engine target component is not installed: set NEURA_DESKTOP_ENGINE to the "

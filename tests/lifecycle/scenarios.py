@@ -44,7 +44,7 @@ SYSTEM_PATH = "/usr/bin:/bin"
 
 CORE_TOOLS = ["neura", "neura-doctor", "neura-inspect", "neura-run", "neura-server-host", "neura-uninstall", "neura-update"]
 SDK_TOOLS = ["neura-asm", "neura-cbind", "neura-debug", "neura-decompile", "neura-disasm", "neura-doc", "neura-explain",
-             "neura-fmt", "neura-lsp", "neura-tags", "neura-test", "neurac"]
+             "neura-fmt", "neura-lsp", "neura-new", "neura-package", "neura-tags", "neura-test", "neurac"]
 
 
 def check(condition: bool, message: str) -> bool:

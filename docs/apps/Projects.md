@@ -4,6 +4,10 @@ This page is the reference for Neura projects as implemented in 0.3.0: the manif
 
 A directory is a project when it holds `neura.toml`. Without one, every command behaves as in 0.2: a single-file `neura build app.nra -o app.nvr` is a single-file build even in a project directory.
 
+## Creating a project
+
+`neura new <directory> --template <name>` writes a project from a template of the SDK: `fullstack` (packages `contracts`, `ui`, `server` and `desktop`, with web, server and desktop targets), `web`, `server` or `desktop` (a web target and the desktop target that embeds it). The directory must not exist or be empty; a directory that holds anything is refused and nothing is written. The project name is the directory's name unless `--name`, and the id `example.<name>` unless `--id`. The tool then writes `neura.lock`. The templates are installed in `share/neura/templates`; the output depends only on the template, the name, the id and the SDK version. `examples/apps/stock` is `neura new stock --template fullstack` without its lock. [Your first Neura project](FirstProject.md) walks through one.
+
 ## Packages and entries
 
 A package is a source directory, `root`, with optional `assets` directories and `depends`. Modules follow files as everywhere in Neura, and the import root of a package is its root's parent: the package with `root = "ui"` holds the module `Ui.Main` in `ui/main.nra` and `Ui.Parts.List` in `ui/parts/list.nra`. A target's `entry` names a program module (`module:program.Entry` with `main`) of the target's package; a name with no file there is [E1024](../diagnostics/E1024.md).
@@ -92,3 +96,19 @@ A server bundle then runs under `neura-server-host`, beside `neura-run` or on `P
 A desktop bundle runs under the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE` (or installed as `lib/neura/desktop/electron/electron`) with the desktop host's `main.js` from `share/neura/desktop` (or `NEURA_DESKTOP_HOST`), which loads the bundle as a package directory. The `desktop` capability grants the clipboard services.
 
 A web bundle is not runnable: `neura run` names `neura dev` and a static file host instead.
+
+## Packaging
+
+```sh
+neura package --target server
+neura package --target desktop --format deb
+```
+
+`neura package [--project <manifest>] --target <name> [--format <format>] [--bundle <directory>] [-o <file>]` wraps a target's built bundle, `dist/<target>` unless `--bundle`, for delivery; build it first with `neura build`. The bundle is verified as a host would before anything is copied, and a bundle built by `neura dev` is refused (`E1029`). The lock is compared as by `neura build`. The command prints the package's SHA-256, the bundle's identity, and that the package is unsigned.
+
+A server target gives `dist/<name>-<version>-<target>.tar.gz` holding `<name>-<version>/bundle/`, `bin/neura-run`, `bin/neura-server-host`, `lib/neura/libneura-core-<version>` (which holds the SQL and TLS providers) and `run`, a shell script that runs `neura-run run bundle -- "$@"`: the bundle is verified at every start, and the arguments go to the server host. Entries are sorted, owned by 0:0 and dated at `SOURCE_DATE_EPOCH` (default 0), and the gzip stream records no name or time and stores the data uncompressed, so the same bundle and tools give the same bytes.
+
+A desktop target gives a `.tar.gz` or `.deb` through the [desktop packager](Desktop.md#packages), with the format from `--format` or the first of the target's `packaging.formats`. It needs the target's `packaging.icon` (a 1,024-pixel PNG) and the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE`. A web target is delivered as its directory and is not packaged.
+
+`E1033` reports what cannot be built here: `.dmg` and `.msix` (built on macOS and Windows), `--sign` (Neura 0.3.0 signs nothing on Linux), a web target, a target with no built bundle, a desktop target without its icon or engine, and a server package in a format other than `.tar.gz`. `--report` is not implemented.
+

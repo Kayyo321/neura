@@ -85,7 +85,7 @@ fi
 # The tools of each component (docs/design/Products030.md), as
 # src/cli/tool_registry.cpp lists them.
 core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall neura-server-host"
-sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
+sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt neura-new neura-package"
 
 failed=0
 not_run=0

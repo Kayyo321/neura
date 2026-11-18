@@ -194,6 +194,15 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["fmt"], None, []),
     (["lsp", "--stdio"], lsp_session(), []),
     (["lsp"], None, []),
+    # The project tools (docs/apps/Projects.md): usage, refusals, and a project written from a template.
+    (["build", "--target", "web"], None, []),
+    (["new"], None, []),
+    (["new", "--help"], None, []),
+    (["new", "app", "--template", "mobile"], None, []),
+    (["new", "app", "--template", "server"], None, ["app/neura.toml", "app/neura.lock", "app/server/main.nra"]),
+    (["package"], None, []),
+    (["package", "--help"], None, []),
+    (["package", "--target", "server"], None, []),
     (["debug", "--stdio"], dap_session(), []),
     (["debug"], None, []),
 ]

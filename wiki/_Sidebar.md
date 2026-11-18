@@ -48,6 +48,7 @@
 - [Kernels](Kernels)
 - [Desktop host services](Providers)
 - [Desktop applications](Apps-Desktop)
+- [Your first project](FirstProject)
 - [Projects and bundles](Apps-Projects)
 - [Wall-clock benchmarks](Benchmarks)
 - [Decompiler](Decompiler)

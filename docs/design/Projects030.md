@@ -106,7 +106,7 @@ formats = ["deb", "tar.gz"]
 | `providers` lists the provider components a server or desktop target links; a name the installed target component does not have, or a version outside what it supports, is `E1031`. | implemented for names: `sqlite` always, `postgresql` and `tls` in builds with them |
 | `[targets.name.limits]` sets limits by their identifier ([overview](Apps030.md#finite-limits)). A single bound takes an integer. S-10, S-12 and S-13 take an array of exactly two integers in the order listed in the overview. U and W limits belong to web targets, S to server, D to desktop, and C to all three. A desktop bundle inherits the embedded web bundle's U and W limits. A value above its maximum, below 1, or for a limit of another target kind reports `E1028`. | manifest model implemented, enforcement proposed |
 | `[targets.name.origins]` lists absolute origins by use. `connect` governs fetch, `load` images and media, `style` remote stylesheets, and `external` links a desktop application opens in the system browser. Each has a scheme, a DNS host or IP literal, and an optional decimal port. An IPv6 literal uses brackets. A path or a wildcard reports `E1020`. Anything outside the lists is unreachable. | shape check implemented, host enforcement proposed |
-| A manifest contains no command, script or hook. No tool runs anything a manifest names, except the signing tools of `neura package --sign`. | proposed |
+| A manifest contains no command, script or hook. No tool runs anything a manifest names, except the signing tools of `neura package --sign`. | implemented: the manifest model has no such key, and `--sign` is refused in 0.3.0 |
 
 | Kind | Further keys |
 | --- | --- |
@@ -153,8 +153,8 @@ strings, and uses LF line endings with a final newline.
 | Rule | Status |
 | --- | --- |
 | It records `schema = 1`, the language version, each external dependency with its digest, each target component a target uses (the browser runtime, the desktop engine, each provider) with its version and digest, and the digest of `contracts.lock`. It records no source state, paths, timestamps or machine names. | lock model implemented |
-| `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, a missing or extra entry, or a mismatch with a manifest pin or installed component metadata reports `E1022`. | `neura build` implemented; component metadata is the identity digest of each component (decision 12) |
-| `neura build --update-lock` and `neura new` write it. `neura dev` writes it only when it is missing. | `neura build --update-lock` implemented |
+| `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, a missing or extra entry, or a mismatch with a manifest pin or installed component metadata reports `E1022`. | `neura build` and `neura package` implemented; component metadata is the identity digest of each component (decision 12) |
+| `neura build --update-lock` and `neura new` write it. `neura dev` writes it only when it is missing. | `neura build --update-lock` and `neura new` implemented |
 | A digest that differs from resolved dependency or `contracts.lock` content reports `E1026`, with the expected and found digests. A build never downloads anything. | file resolution and lock comparison implemented, command integration proposed |
 
 The resolver anchors path resolution at the manifest's canonical parent directory. It
@@ -207,7 +207,7 @@ dist/web/                          dist/server/
 | The build verifies a web bundle before writing `bundle.json`: no file of a package outside the target's closure, no host service among the image's imports outside the groups a web target may have, no provider, no configuration value not marked `expose`, and no development endpoint (`E1029`). | partial: host imports outside the web groups are `E1027`, native code and callbacks are refused; package closure, configuration and endpoint checks wait for `E1030`, `expose` and `neura dev` |
 | `nvm.js` instantiates `nvm.wasm` by streaming when the host sends `application/wasm`, and from bytes otherwise, so a host with a wrong media type still works. | implemented by the browser runtime |
 | A file over `W-1` is `E1029`. | implemented |
-| A packaged archive is a bundle directory in a container; a host extracts and validates it as a directory. An arbitrary directory, or one whose `bundle.json` fails validation, is never executed. | proposed |
+| A packaged archive is a bundle directory in a container; a host extracts and validates it as a directory. An arbitrary directory, or one whose `bundle.json` fails validation, is never executed. | implemented for the server package, whose `run` verifies the bundle through `neura-run`; the desktop package's host verifies the embedded web bundle |
 
 ## Commands
 
@@ -228,7 +228,7 @@ Each command is a tool of its own, reachable as `neura <command>` and directly, 
 | Builds are reproducible: the same sources, manifest, lock and components give the same bundle bytes on any supported host. | proposed |
 | `neura dev` owns what it starts: a watcher that compares digests every 250 ms, a static HTTP server on `127.0.0.1` for a web target (port 4310 unless `--port`; a busy port is an error, `--port 0` asks the system for one), the server host for a server target, the desktop host for a desktop target. On exit, on end of input and on an interrupt it stops and reaps them all. It registers nothing with the system. | proposed |
 | On a change, `neura dev` rebuilds and then reloads the page, or restarts the host. A change to stylesheet files alone replaces the stylesheet links in place, in their fixed order. State of the running program is not kept; replacing live Neura state is outside 0.3.0. | proposed |
-| A build made by `neura dev` is marked `dev` in `bundle.json` and carries the reload endpoint. `neura package` refuses a `dev` bundle (`E1029`). | proposed |
+| A build made by `neura dev` is marked `dev` in `bundle.json` and carries the reload endpoint. `neura package` refuses a `dev` bundle (`E1029`). | `neura package` and `neura run` refuse a `dev` bundle |
 | `neura check`, the editor and `neura docs` understand a project: a file inside a project directory is checked with its package's roots and its target's rules, without `--project`. | proposed |
 
 ## Lowering and artifacts
@@ -314,6 +314,8 @@ Rejected:
 
 One project, built by `neura new --template fullstack` and kept in `examples/apps/stock/`, is the fixture every milestone's acceptance and every budget uses.
 
+Status (2026-11-18): `examples/apps/stock` is the `fullstack` template of `neura new` as far as the libraries allow: `Contracts.Parts` (starting parts and the name rule), a page with a counter over the contract, a server answering `GET /parts` and `POST /parts?name=` with the shared rule, and a desktop child with one window and `parts.export` as CSV. The records, `PartsApi`, generated adapter, SQL repository, migrations, sessions and the journeys below are not implemented.
+
 | Part | Content |
 | --- | --- |
 | Contracts | `Part` (an `int64` id, a name, an `int32` count, a position), a page record holding a `FrozenList<Part>`, replies with a `Rejected` variant, the interface `PartsApi` with `list`, `add`, `rename`, `restock`, `move` and `export`, shared validation of names |
@@ -376,3 +378,5 @@ Taken by the A6 lane on 2026-11-18, awaiting owner confirmation:
 13. Files a host finds by name keep their names: a server bundle's `server.json` (the manifest's host settings) and `migrations/<pool>/NNNN_name.sql` (the host orders migrations by number), and a desktop bundle's `desktop.json`, `registry.json` and embedded `web/` directory, which together are the package directory the desktop host loads. A desktop bundle's `image` is its native child, `bin/app-<sha256>`.
 14. The import root of a package is the parent of its root, so modules are named from the root's own name (`ui/main.nra` is `Ui.Main`) and a project needs no extra directory level. The entry is a program module with `main` until the entry functions of the table above are implemented.
 15. `bundle.json` names host interfaces `browser_adapter`, `ui_host`, `server_host`, `desktop_host` and `provider.<name>`, all at version 1.
+16. A server package is a `.tar.gz` of `<name>-<version>/` holding `bundle/`, `bin/neura-run`, `bin/neura-server-host`, `lib/neura/libneura-core-<version>` (which holds the providers) and a `run` script that serves the bundle through `neura-run run`, so the bundle is verified at every start. The gzip stream uses stored deflate blocks: it is reproducible without a compression library, and larger than a compressed one.
+17. A desktop package is built by the desktop packager of A5 (`scripts/package-desktop.py`, installed in `share/neura/scripts`) from the desktop bundle, which is the package directory the host loads; the target's `packaging.icon` and the engine named by `NEURA_DESKTOP_ENGINE` are its inputs.

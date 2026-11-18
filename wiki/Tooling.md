@@ -53,6 +53,7 @@ The two listings for this fixture share a symbol table, so the diff shows rewrit
 | `decompile`, `assemble`, `disassemble` | `neura-decompile`, `neura-asm`, `neura-disasm` | SDK |
 | `explain`, `tags` | `neura-explain`, `neura-tags` | SDK |
 | `debug`, `lsp`, `fmt` | `neura-debug`, `neura-lsp`, `neura-fmt` | SDK |
+| `new`, `package` | `neura-new`, `neura-package` | SDK |
 | `doctor`, `update`, `uninstall` | `neura-doctor`, `neura-update`, `neura-uninstall` | core |
 | `--version`, `version`, `help`, `--help`, `capabilities --json` | `neura` itself | core |
 
@@ -145,6 +146,10 @@ For an image with tasks, `--stats` adds the peak numbers of live tasks, queued m
 ### Build and run a project
 
 A directory with `neura.toml` is a project ([Projects and bundles](Apps-Projects)). `neura build --project <manifest> --target <name>` builds one target into its bundle, `dist/<name>` unless `--out <directory>`; without `--project` the manifest is `neura.toml` of the current directory. `--update-lock` writes `neura.lock`, which the build otherwise only compares (`E1022`). A desktop target builds its web target first and embeds it. The command prints the bundle directory and its identity, the SHA-256 of `bundle.json`. Two builds of the same sources, manifest, lock and components give the same bytes, from any directory.
+
+`neura new <directory> --template fullstack|web|server|desktop` writes a project from a template of the SDK into a directory that does not exist or is empty, with its `neura.lock`; `--name` and `--id` set the project's name and id ([Your first Neura project](FirstProject)).
+
+`neura package --target <name> [--format <format>]` wraps a built server bundle with its hosts in a reproducible `.tar.gz`, or a desktop bundle in a `.tar.gz` or `.deb` through the desktop packager ([Packaging](Apps-Projects#packaging)).
 
 `neura run <bundle directory> [-- arguments]` verifies the bundle and then runs a server bundle under `neura-server-host` or a desktop bundle under the desktop host, passing the arguments after `--` to the host. A web bundle is refused with the ways to serve it. A single-file `neura build app.nra -o app.nvr` is unchanged, in a project directory too.
 
