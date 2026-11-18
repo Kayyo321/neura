@@ -2,6 +2,7 @@
 
 #include "server/http_wire.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -12,6 +13,14 @@ namespace neura::server::http {
 
 using ConnectionClock = std::chrono::steady_clock;
 
+// HTTP/2 on the host's listeners (Backend030, "HTTP/2 and decision 9"),
+// in builds with NEURA_ENABLE_SERVER_HTTP2; other builds speak HTTP/1.1 only.
+struct Http2Settings {
+    bool tls = true;        // Offer `h2` by ALPN on TLS listeners, before `http/1.1`.
+    bool cleartext = false; // Accept h2c with prior knowledge on plain listeners.
+    std::uint32_t max_concurrent_streams = 100; // Apps030 S-14, per connection.
+};
+
 struct ConnectionLimits {
     RequestLimits request;
     std::size_t response_bytes = 8 * 1024 * 1024; // Apps030 S-7
@@ -21,6 +30,10 @@ struct ConnectionLimits {
     // written, or has failed to be written. The server host counts a
     // request as in flight until then, so a drain never cuts a response off.
     std::function<void()> response_finished{};
+    Http2Settings http2{};
+    // When set and true, an HTTP/2 connection sends GOAWAY, lets the streams
+    // it has accepted finish, and accepts no new ones.
+    const std::atomic<bool>* draining = nullptr;
 };
 
 // Woken: a read given a wake descriptor returned because that descriptor
@@ -107,6 +120,12 @@ public:
     // connection without completing its body.
     virtual StreamStatus finish() = 0;
     virtual bool started() const = 0;
+    // Registers the function that cancels the work behind this response (the
+    // server host kills the request's worker); an empty function clears it.
+    // A connection that can learn the client gave the request up (HTTP/2
+    // RST_STREAM, or the connection ending) calls it once, at once if that
+    // has already happened. The default never calls it.
+    virtual void on_cancel(std::function<void()> cancel) { (void)cancel; }
 };
 
 // Called once per request at the end of its head, in connection order, with

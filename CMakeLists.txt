@@ -540,6 +540,59 @@ if(NEURA_ENABLE_SERVER_TLS)
     neura_configure_server_tls()
 endif()
 
+# HTTP/2 in the server host (docs/design/Backend030.md, "HTTP/2 and decision
+# 9"): ALPN h2 on the TLS listeners and h2c with prior knowledge, framed by
+# the static nghttp2 the server component lock pins. Off by default; the host
+# then speaks HTTP/1.1 only. NEURA_NGHTTP2_ROOT is the install prefix of that
+# build; the version must be the locked one, so a system libnghttp2 is never
+# linked by accident (NEURA_NGHTTP2_ALLOW_UNPINNED is for comparison builds).
+option(NEURA_ENABLE_SERVER_HTTP2 "Build HTTP/2 into the server host with the pinned nghttp2" OFF)
+set(NEURA_NGHTTP2_ROOT "" CACHE PATH "Install prefix of the pinned static nghttp2")
+option(NEURA_NGHTTP2_ALLOW_UNPINNED "Accept an nghttp2 other than the locked version (never for release)" OFF)
+if(NEURA_ENABLE_SERVER_HTTP2)
+    if(NOT UNIX OR EMSCRIPTEN)
+        message(FATAL_ERROR "The Neura server HTTP/2 transport requires POSIX sockets")
+    endif()
+    if(NOT NEURA_NGHTTP2_ROOT)
+        message(FATAL_ERROR "NEURA_ENABLE_SERVER_HTTP2 needs NEURA_NGHTTP2_ROOT, the install prefix of the "
+            "nghttp2 build packaging/server-components.lock.toml pins")
+    endif()
+    find_path(NEURA_NGHTTP2_INCLUDE_DIR nghttp2/nghttp2.h PATHS "${NEURA_NGHTTP2_ROOT}/include" NO_DEFAULT_PATH)
+    find_library(NEURA_NGHTTP2_LIBRARY NAMES libnghttp2.a
+        PATHS "${NEURA_NGHTTP2_ROOT}/lib" "${NEURA_NGHTTP2_ROOT}/lib64" NO_DEFAULT_PATH)
+    if(NOT NEURA_NGHTTP2_INCLUDE_DIR OR NOT NEURA_NGHTTP2_LIBRARY)
+        message(FATAL_ERROR "No static nghttp2 (include/nghttp2/nghttp2.h and lib/libnghttp2.a) under "
+            "${NEURA_NGHTTP2_ROOT}")
+    endif()
+    file(STRINGS "${NEURA_NGHTTP2_INCLUDE_DIR}/nghttp2/nghttp2ver.h" neura_nghttp2_version_line
+        REGEX "^#define NGHTTP2_VERSION \"")
+    string(REGEX REPLACE "^#define NGHTTP2_VERSION \"([^\"]*)\".*" "\\1" neura_nghttp2_version
+        "${neura_nghttp2_version_line}")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/packaging/server-components.lock.toml" neura_component_lock)
+    string(REGEX MATCH "\\[providers\\.nghttp2\\][^[]*version = \"([^\"]*)\"" neura_nghttp2_entry
+        "${neura_component_lock}")
+    set(neura_nghttp2_locked "${CMAKE_MATCH_1}")
+    if(NOT neura_nghttp2_version STREQUAL neura_nghttp2_locked)
+        if(NEURA_NGHTTP2_ALLOW_UNPINNED)
+            message(WARNING "nghttp2 ${neura_nghttp2_version} is not the locked ${neura_nghttp2_locked}: "
+                "this build is for comparison only")
+        else()
+            message(FATAL_ERROR "nghttp2 ${neura_nghttp2_version} under ${NEURA_NGHTTP2_ROOT} is not the "
+                "locked ${neura_nghttp2_locked}")
+        endif()
+    endif()
+    message(STATUS "Server HTTP/2: nghttp2 ${neura_nghttp2_version} (${NEURA_NGHTTP2_LIBRARY})")
+
+    find_package(Threads REQUIRED)
+    add_library(neura_nghttp2 STATIC IMPORTED)
+    set_target_properties(neura_nghttp2 PROPERTIES
+        IMPORTED_LOCATION "${NEURA_NGHTTP2_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NEURA_NGHTTP2_INCLUDE_DIR}")
+    target_sources(neura_server_http PRIVATE src/server/http2_connection.cpp)
+    target_link_libraries(neura_server_http PUBLIC neura_nghttp2 Threads::Threads)
+    target_compile_definitions(neura_server_http PUBLIC NEURA_SERVER_HTTP2_ENABLED)
+endif()
+
 # The server host (docs/design/Backend030.md): listeners, TLS when
 # NEURA_ENABLE_SERVER_TLS is on, and one request-worker process per request.
 # The same executable is the worker, in its --worker mode.

@@ -63,12 +63,15 @@ using worker::FrameKind;
 constexpr std::string_view usage =
     "usage: neura-server-host [options] <image.nvr>\n"
     "\n"
-    "Serves a server image over HTTP/1.1 (docs/runtime/ServerHost.md). Each request runs in a fresh\n"
-    "worker process that executes the whole image once.\n"
+    "Serves a server image over HTTP/1.1, and HTTP/2 in builds with it (docs/runtime/ServerHost.md).\n"
+    "Each request runs in a fresh worker process that executes the whole image once.\n"
     "\n"
     "  --listen <address>:<port>      plain HTTP listener (repeatable; port 0 asks for one)\n"
     "  --tls-listen <address>:<port>  HTTPS listener; needs --cert and --key (repeatable)\n"
     "  --cert <file> --key <file>     PEM certificate chain and private key, reread on SIGHUP\n"
+    "  --no-http2                     TLS listeners offer only http/1.1 (default: h2 and http/1.1)\n"
+    "  --h2c                          plain listeners also accept HTTP/2 with prior knowledge\n"
+    "  --max-streams N                S-14, concurrent HTTP/2 streams per connection (default 100)\n"
     "  --admin-listen <address>:<port> admin listener for GET /livez, /readyz and /metrics\n"
     "                                 (default: none; give it a loopback address)\n"
     "  --config <key>=<value>         a configuration value for neura.app.config (repeatable)\n"
@@ -116,6 +119,7 @@ struct HostOptions {
     neura::nvm::Capabilities capabilities;
     std::optional<fs::path> record_directory;
     bool startup_check = true;
+    bool h2c = false;
     std::optional<std::uint64_t> max_steps;
     std::optional<std::uint8_t> worker_tier;
     std::optional<std::string> worker_jit;
@@ -256,6 +260,14 @@ HostOptions read_options(int argc, char** argv) {
             options.record_directory = fs::absolute(value_of(i, arg, "--record-dir"));
         } else if (arg == "--no-startup-check") {
             options.startup_check = false;
+        } else if (arg == "--no-http2") {
+            options.limits.http.http2.tls = false;
+        } else if (arg == "--h2c") {
+            options.h2c = true;
+            options.limits.http.http2.cleartext = true;
+        } else if (is(arg, "--max-streams")) {
+            options.limits.http.http2.max_concurrent_streams =
+                static_cast<std::uint32_t>(parse_count(arg, value_of(i, arg, "--max-streams"), 1, 1000));
         } else if (arg.starts_with('-')) {
             throw std::runtime_error("unknown option: " + std::string(arg) + "\n" + std::string(usage));
         } else if (!options.image.empty()) {
@@ -265,6 +277,9 @@ HostOptions read_options(int argc, char** argv) {
         }
     }
     if (options.image.empty()) throw std::runtime_error(std::string(usage));
+#ifndef NEURA_SERVER_HTTP2_ENABLED
+    if (options.h2c) throw std::runtime_error("--h2c: this server build has no HTTP/2");
+#endif
     if (options.endpoints.empty()) throw std::runtime_error("at least one --listen or --tls-listen is required");
     if (!tls_endpoints.empty()) {
         if (!options.certificate || !options.key) throw std::runtime_error("--tls-listen needs --cert and --key");
@@ -430,11 +445,20 @@ public:
         // slot never stands for two processes.
         Outcome outcome;
         std::optional<Worker> worker;
+        // An HTTP/2 client that resets the stream cancels the request: the
+        // writer calls this, and the worker is killed at once.
+        std::atomic<bool> cancelled{false};
         for (int attempt = 0; attempt < 2; ++attempt) {
             worker = attempt == 0 ? take_worker() : spawn();
             if (!worker) break;
+            writer.on_cancel([pid = worker->pid, &cancelled] {
+                cancelled = true;
+                ::kill(pid, SIGKILL);
+            });
             outcome = exchange(*worker, request, &body, writer, deadline);
-            if (!outcome.unassigned) break;
+            writer.on_cancel({});
+            // A request the client cancelled is not given a new worker.
+            if (!outcome.unassigned || cancelled.load()) break;
             log(attempt == 0 ? 3 : 4, request.request_id,
                 attempt == 0 ? "a worker refused its assignment; using a new one"
                              : "the new worker refused its assignment too");
@@ -459,6 +483,10 @@ public:
         worker->channel.reset();
         hand_to_reaper(pid, request.request_id, outcome.done, true);
         slot_held = false;
+        if (cancelled.load()) {
+            log(3, request.request_id, "the client cancelled the request; worker killed");
+            return;
+        }
         if (outcome.timed_out) {
             ++metrics_.timeouts;
             log(4, request.request_id, "request deadline passed; worker killed");
@@ -1316,6 +1344,7 @@ int serve(HostOptions options, const char* argv0) {
     std::optional<http::ListenerSet> listeners;
     Host* counted = host.get();
     options.limits.http.response_finished = [counted] { counted->response_written(); };
+    options.limits.http.draining = &draining;
     try {
         listeners.emplace(options.endpoints, options.limits);
     } catch (const std::exception& error) {
