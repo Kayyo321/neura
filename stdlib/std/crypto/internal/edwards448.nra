@@ -1,0 +1,233 @@
+let.promote _ = import:Std.Core.Optional;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The edwards448 group of RFC 8032, section 5.2: points, the scalar field modulo L, the 57-byte point
+/// and scalar encodings, and equality. Internal: Ed448, and later FROST, build on it.
+///
+/// Points are projective (X : Y : Z) with x = X/Z, y = Y/Z, field elements in Montgomery form. The formulas of
+/// RFC 8032, section 5.2.4 are complete on this curve, so scalar multiplication adds a table entry for every
+/// window, including the identity. That is branch-free in source; the runtime does not guarantee constant
+/// time. Decoding works on public data. The constants come from
+/// scripts/crypto-vectors/gen-asymmetric-constants.py.
+#Since("0.3.0")
+export let Edwards448 = module (
+    /// @brief A point in projective coordinates (Montgomery-form field elements). Immutable by convention.
+    #Final
+    export let Point = class (
+        export last x: uint32[list];
+        export last y: uint32[list];
+        export last z: uint32[list];
+
+        export let init = func(px: uint32[list], py: uint32[list], pz: uint32[list]) {
+            x = px;
+            y = py;
+            z = pz;
+        };
+
+        export let.override to_string = func -> string => "Edwards448.Point";
+    );
+
+    /// @brief The group: the field modulo p = 2^448 - 2^224 - 1, the scalars modulo L, and d = -39081. Build one
+    /// per operation (it holds scratch state, so a task must not share it).
+    #Final
+    export let Group = class (
+        /// @brief The field modulo p.
+        export last field: mp.Modulus;
+        /// @brief The scalars modulo L.
+        export last order: mp.Modulus;
+        /// @brief d in Montgomery form.
+        last d: uint32[list];
+        /// @brief (p - 3) / 4.
+        last exponent: uint32[list];
+
+        export let init = func {
+            field = new(mp.from_hex(
+                "fffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                14));
+            order = new(mp.from_hex(
+                "3fffffffffffffffffffffffffffffffffffffffffffffffffffffff7cca23e9c44edb49aed63690216cc2728dc58f552378c292ab5844f3",
+                14));
+            d = field.to_mont(mp.from_hex(
+                "fffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffff6756",
+                14));
+            exponent = mp.shift_right(mp.plain_sub(field.m, mp.small(3, 14)), 2);
+        };
+
+        /// @brief The neutral element (0, 1).
+        export let identity = func -> Point => new(mp.zeros(14), field.one, field.one);
+
+        /// @brief The base point B of RFC 8032.
+        export let base = func -> Point => new(
+            field.to_mont(mp.from_hex(
+                "4f1970c66bed0ded221d15a622bf36da9e146570470f1767ea6de324a3d3a46412ae1af72ab66511433b80e18b00938e2626a82bc70cc05e",
+                14)),
+            field.to_mont(mp.from_hex(
+                "693f46716eb6bc248876203756c9c7624bea73736ca3984087789c1e05a0c2d73ad3ff1ce67c39c4fdbd132c4ed7c8ad9808795bf230fa14",
+                14)),
+            field.one);
+
+        /// @brief P + Q (RFC 8032, section 5.2.4).
+        export let add = func(p: Point, q: Point) -> Point {
+            last f = field;
+            last a = f.mul(p.z, q.z);
+            last b = f.sqr(a);
+            last c = f.mul(p.x, q.x);
+            last dd = f.mul(p.y, q.y);
+            last e = f.mul(f.mul(d, c), dd);
+            last ff = f.sub(b, e);
+            last g = f.add(b, e);
+            last h = f.mul(f.add(p.x, p.y), f.add(q.x, q.y));
+            return new(f.mul(f.mul(a, ff), f.sub(f.sub(h, c), dd)), f.mul(f.mul(a, g), f.sub(dd, c)), f.mul(ff, g));
+        };
+
+        /// @brief 2 P (RFC 8032, section 5.2.4).
+        export let double = func(p: Point) -> Point {
+            last f = field;
+            last b = f.sqr(f.add(p.x, p.y));
+            last c = f.sqr(p.x);
+            last dd = f.sqr(p.y);
+            last e = f.add(c, dd);
+            last h = f.sqr(p.z);
+            last j = f.sub(e, f.add(h, h));
+            return new(f.mul(f.sub(b, e), j), f.mul(e, f.sub(c, dd)), f.mul(e, j));
+        };
+
+        /// @brief -P.
+        export let negate = func(p: Point) -> Point => new(field.neg(p.x), p.y, p.z);
+
+        /// @brief P - Q.
+        export let subtract = func(p: Point, q: Point) -> Point => add(p, negate(q));
+
+        /// @brief Selects `a` when `choice` is 1 and `b` when it is 0.
+        export let select = func(choice: uint32, a: Point, b: Point) -> Point =>
+            new(mp.select(choice, a.x, b.x), mp.select(choice, a.y, b.y), mp.select(choice, a.z, b.z));
+
+        /// @brief k P for a scalar of any limb count, with a fixed 4-bit window.
+        export let multiply = func(k: uint32[list], p: Point) -> Point {
+            last table = window_table(p);
+            let acc = identity();
+            for (let window = k.length * 8 - 1; window >= 0; window--) {
+                acc = double(double(double(double(acc))));
+                last digit = (k[window / 8] >> ((window % 8) * 4)) & 15;
+                let chosen = identity();
+                for (let i = 0; i < 16; i++) {
+                    chosen = select(mp.eq32(i as uint32, digit), table[i], chosen);
+                }
+                acc = add(acc, chosen);
+            }
+            return acc;
+        };
+
+        /// @brief k B.
+        export let multiply_base = func(k: uint32[list]) -> Point => multiply(k, base());
+
+        /// @brief k1 P1 + k2 P2 with shared doublings (Straus), scalars of one limb count. Table entries are
+        /// read by index, so use it for verification, where the scalars are public.
+        export let multiply_two = func(k1: uint32[list], p1: Point, k2: uint32[list], p2: Point) -> Point {
+            last first = window_table(p1);
+            last second = window_table(p2);
+            let acc = identity();
+            for (let window = k1.length * 8 - 1; window >= 0; window--) {
+                acc = double(double(double(double(acc))));
+                acc = add(acc, first[((k1[window / 8] >> ((window % 8) * 4)) & 15) as int]);
+                acc = add(acc, second[((k2[window / 8] >> ((window % 8) * 4)) & 15) as int]);
+            }
+            return acc;
+        };
+
+        /// @brief [0 P, 1 P, ..., 15 P].
+        let window_table = func(p: Point) -> Point[list] {
+            let table: Point[list] = new;
+            table.append(identity());
+            table.append(p);
+            for (let i = 2; i < 16; i++) {
+                table.append(i % 2 == 0 ? double(table[i / 2]) : add(table[i - 1], p));
+            }
+            return table;
+        };
+
+        /// @brief Whether P is the neutral element (X = 0 and Y = Z).
+        export let is_identity = func(p: Point) -> bool => mp.is_zero(p.x) == 1 && mp.equal(p.y, p.z) == 1;
+
+        /// @brief Whether P and Q are the same point.
+        export let equal = func(p: Point, q: Point) -> bool {
+            last f = field;
+            last same_x = mp.equal(f.mul(p.x, q.z), f.mul(q.x, p.z));
+            last same_y = mp.equal(f.mul(p.y, q.z), f.mul(q.y, p.z));
+            return (same_x & same_y) == 1;
+        };
+
+        /// @brief Whether 4 P is the neutral element (the cofactor of edwards448 is 4).
+        export let is_small_order = func(p: Point) -> bool => is_identity(double(double(p)));
+
+        /// @brief The 57-byte encoding of RFC 8032, section 5.2.2.
+        export let encode = func(p: Point) -> uint8[list] {
+            last f = field;
+            last zi = f.inv(p.z);
+            last ax = f.from_mont(f.mul(p.x, zi));
+            last ay = f.from_mont(f.mul(p.y, zi));
+            let out = mp.to_bytes_le(ay, 57);
+            out[56] = ((ax[0] & 1) << 7) as uint8;
+            return out;
+        };
+
+        /// @brief The point of a 57-byte encoding (RFC 8032, section 5.2.3), or None when y is not below p, x
+        /// has no square root, or x is zero with its sign bit set.
+        export let decode = func(bytes: uint8[list]) -> Optional<Point> {
+            if (bytes.length != 57 || (bytes[56] & 127) != 0) {
+                return Optional<Point>.None;
+            }
+            last f = field;
+            last sign = ((bytes[56] >> 7) & 1) as uint32;
+            last yv = mp.from_bytes_le(words.slice(bytes, 0, 56), 14);
+            if (mp.less(yv, f.m) == 0) {
+                return Optional<Point>.None;
+            }
+            last y = f.to_mont(yv);
+            last yy = f.sqr(y);
+            last u = f.sub(yy, f.one);
+            last v = f.sub(f.mul(d, yy), f.one);
+            last u2 = f.sqr(u);
+            last u3 = f.mul(u2, u);
+            last u5 = f.mul(u3, u2);
+            last v3 = f.mul(f.sqr(v), v);
+            let x = f.mul(f.mul(u3, v), f.pow(f.mul(u5, v3), exponent));
+            if (mp.equal(f.mul(v, f.sqr(x)), u) == 0) {
+                return Optional<Point>.None;
+            }
+            last plain = f.from_mont(x);
+            if (mp.is_zero(plain) == 1 && sign == 1) {
+                return Optional<Point>.None;
+            }
+            if ((plain[0] & 1) != sign) {
+                x = f.neg(x);
+            }
+            return Optional<Point>.Some(new(x, y, f.one));
+        };
+
+        /// @brief The little-endian bytes (up to 114) reduced modulo L, as 14 limbs.
+        export let scalar_reduce = func(bytes: uint8[list]) -> uint32[list] => order.reduce_bytes_le(bytes);
+
+        /// @brief (a b + c) mod L for scalars of 14 limbs or more for a (a may exceed L, b and c are below it).
+        export let scalar_mul_add = func(a: uint32[list], b: uint32[list], c: uint32[list]) -> uint32[list] =>
+            order.add(order.mul(order.reduce(a), order.to_mont(b)), c);
+
+        /// @brief The scalar of 57 little-endian bytes when it is below L, else None.
+        export let scalar_canonical = func(bytes: uint8[list]) -> Optional<uint32[list]> {
+            if (bytes.length != 57 || bytes[56] != 0) {
+                return Optional<uint32[list]>.None;
+            }
+            last s = mp.from_bytes_le(words.slice(bytes, 0, 56), 14);
+            if (mp.less(s, order.m) == 0) {
+                return Optional<uint32[list]>.None;
+            }
+            return Optional<uint32[list]>.Some(s);
+        };
+
+        /// @brief The 57 little-endian bytes of a scalar.
+        export let scalar_bytes = func(s: uint32[list]) -> uint8[list] => mp.to_bytes_le(s, 57);
+
+        export let.override to_string = func -> string => "Edwards448.Group";
+    );
+);

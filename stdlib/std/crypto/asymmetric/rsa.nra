@@ -1,0 +1,548 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let mp = import:Std.Crypto.Internal.Mp;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief RSA keys and key generation (FIPS 186-5, appendix A.1.3; RFC 8017) for Std.Crypto.Asymmetric.RsaPss,
+/// RsaOaep and RsaPkcs1v15 (Stdlib.md section 20.8).
+///
+/// A modulus has at least 1024 and at most 16384 bits. One below 2048 bits counts as `Algorithm.Rsa1024`,
+/// which the `Modern` policy denies, so only legacy policies can load it; every key also needs the policy of
+/// the scheme that uses it. A private key keeps the CRT form (p, q, dP, dQ, qInv): the private operation
+/// works modulo p and q and checks its result with e. Key generation follows FIPS 186-5, appendix A.1.3 with
+/// e = 65537: random probable primes of nlen/2 bits with the two top bits set, p = 3 mod 4 and q = 3 mod 4,
+/// trial division by the primes below 2000, Miller-Rabin rounds from FIPS 186-5 Table B.1 (5 for a 2048-bit
+/// modulus, 4 above), |p - q| > 2^(nlen/2 - 100), and d = e^-1 mod lcm(p - 1, q - 1). The private arithmetic
+/// is branch-free in source; candidate rejection during generation is not, and the runtime does not guarantee
+/// constant time.
+/// @see [Std.Crypto.Asymmetric.Rsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Rsa)
+#Since("0.3.0")
+export let Rsa = module (
+    /// @brief The smallest and largest modulus sizes accepted.
+    const MinBits = 1024;
+    const MaxBits = 16384;
+
+    /// @brief Checks the size policy: below 2048 bits the key counts as `Rsa1024`.
+    let require_size = func(bits: int) {
+        if (bits < 2048) {
+            crypto_policy.require(Algorithm.Rsa1024);
+        }
+    };
+
+    /// @brief Whether the current policy allows a modulus of this size (below 2048 bits needs `Rsa1024`).
+    let size_allowed = func(modulus: uint8[list]) -> bool {
+        last n = rsa_core.strip(modulus);
+        return mp.bit_length(mp.from_bytes_be(n, (n.length + 3) / 4)) >= 2048 || crypto_policy.allows(Algorithm.Rsa1024);
+    };
+
+    let size_denied = func -> string =>
+        "an RSA modulus below 2048 bits counts as Rsa1024, which the " + crypto_policy.policy().to_string()
+            + " policy denies";
+
+    /// @brief Why public numbers are unusable, or an empty text.
+    let public_problem = func(modulus: uint8[list], exponent: uint8[list]) -> string {
+        last n = rsa_core.strip(modulus);
+        last e = rsa_core.strip(exponent);
+        last n_limbs = mp.from_bytes_be(n, (n.length + 3) / 4);
+        last bits = mp.bit_length(n_limbs);
+        if (bits < MinBits || bits > MaxBits) {
+            return "RSA modulus must have 1024 to 16384 bits";
+        }
+        if ((n[n.length - 1] & 1) == 0) {
+            return "RSA modulus must be odd";
+        }
+        last e_limbs = mp.from_bytes_be(e, (e.length + 3) / 4);
+        if ((e[e.length - 1] & 1) == 0 || mp.bit_length(e_limbs) < 2 || e.length > n.length
+                || (e.length == n.length && mp.less(mp.resize(e_limbs, n_limbs.length), n_limbs) == 0)) {
+            return "RSA public exponent must be odd, at least 3 and below n";
+        }
+        return "";
+    };
+
+    /// @brief An RSA public key (n, e). Equal keys have equal numbers.
+    #[Final, Since("0.3.0")]
+    export let RsaPublicKey = class (
+        /// @brief The numbers and their arithmetic (library use).
+        export last core: rsa_core.PublicCore;
+
+        /// @brief The key of the big-endian n and e. A modulus outside 1024 to 16384 bits, an even modulus, or
+        /// an exponent that is even, below 3 or not below n traps (use `parse_public_key` for outside input).
+        export let init = func(modulus: uint8[list], exponent: uint8[list]) {
+            last problem = public_problem(modulus, exponent);
+            if (problem != "") {
+                trap_with_message("invalid argument: " + problem);
+            }
+            core = new(modulus, exponent);
+            require_size(core.bits);
+        };
+
+        /// @brief The bit length of n.
+        export let bits = func -> int => core.bits;
+
+        /// @brief n as big-endian bytes without leading zeros.
+        #NoDiscard
+        export let modulus = func -> uint8[list] => words.copy(core.n_bytes);
+
+        /// @brief e as big-endian bytes without leading zeros.
+        #NoDiscard
+        export let exponent = func -> uint8[list] => rsa_core.strip(mp.to_bytes_be(core.e, core.e.length * 4));
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is RsaPublicKey)) {
+                return false;
+            }
+            last key = other as RsaPublicKey;
+            return constant_time.ct_eq(modulus(), key.modulus()) && constant_time.ct_eq(exponent(), key.exponent());
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = 65537;
+            for (let b in core.n_bytes) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string => "RsaPublicKey(" + core.bits.to_string() + " bits)";
+    );
+
+    /// @brief An RSA private key in CRT form. `expose` gives the concatenated big-endian numbers d, p, q, dP, dQ
+    /// and qInv, each of n's byte length (or half of it for the last five), in secret memory. `to_string` never
+    /// prints them.
+    #[Final, Since("0.3.0")]
+    export let RsaPrivateKey = class implements PrivateKey<RsaPrivateKey> (
+        /// @brief The public key.
+        export last public_key: RsaPublicKey;
+        /// @brief The CRT arithmetic (library use).
+        export last core: rsa_core.PrivateCore;
+        last material: SecretBytes;
+
+        /// @brief The key of n, e, d, p and q (big-endian); dP, dQ and qInv are computed. Numbers that are not
+        /// a consistent key trap (use `parse_private_key` for outside input).
+        export let init = func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list],
+                prime_p: uint8[list], prime_q: uint8[list]) {
+            public_key = new(modulus, exponent);
+            last parts = complete(public_key, private_exponent, prime_p, prime_q);
+            if (parts.length == 0) {
+                trap_with_message("invalid argument: inconsistent RSA private key");
+            }
+            core = new(public_key.core, parts[0], parts[1], parts[2], parts[3], parts[4]);
+            material = new(serialize(public_key.core, parts, private_exponent));
+            if (!self_check(core)) {
+                trap_with_message("invalid argument: inconsistent RSA private key");
+            }
+        } or func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list],
+                prime_p: uint8[list], prime_q: uint8[list], exponent_p: uint8[list], exponent_q: uint8[list],
+                coefficient: uint8[list]) {
+            public_key = new(modulus, exponent);
+            last parts = given(public_key, prime_p, prime_q, exponent_p, exponent_q, coefficient);
+            if (parts.length == 0) {
+                trap_with_message("invalid argument: inconsistent RSA private key");
+            }
+            core = new(public_key.core, parts[0], parts[1], parts[2], parts[3], parts[4]);
+            material = new(serialize(public_key.core, parts, private_exponent));
+            if (!self_check(core)) {
+                trap_with_message("invalid argument: inconsistent RSA private key");
+            }
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+
+        /// @brief n || e as big-endian bytes, n padded to its byte length (the public numbers are not secret).
+        export let public_key_bytes = func -> uint8[list] {
+            let out = public_key.modulus();
+            words.append_all(out, public_key.exponent());
+            return out;
+        };
+
+        /// @brief The bit length of n.
+        export let bits = func -> int => public_key.bits();
+
+        /// @brief A fixed placeholder with the size, never a number.
+        export let.override to_string = func -> string =>
+            "RsaPrivateKey(" + public_key.bits().to_string() + " bits, <redacted>)";
+    );
+
+    /// @brief d || p || q || dP || dQ || qInv, d at k bytes and the others at ceil(k / 2) bytes.
+    let serialize = func(key: rsa_core.PublicCore, parts: uint32[list][list], private_exponent: uint8[list]) -> uint8[list] {
+        last half = (key.k + 1) / 2;
+        let out = mp.to_bytes_be(mp.from_bytes_be(rsa_core.strip(private_exponent), key.n.length), key.k);
+        for (let part in parts) {
+            words.append_all(out, mp.to_bytes_be(part, half));
+        }
+        return out;
+    };
+
+    /// @brief [p, q, dP, dQ, qInv] from d, p and q when p q = n, or an empty list.
+    let complete = func(key: RsaPublicKey, private_exponent: uint8[list], prime_p: uint8[list], prime_q: uint8[list])
+            -> uint32[list][list] {
+        last n = key.core.n;
+        last half_limbs = (n.length + 1) / 2 + 1;
+        last p = mp.from_bytes_be(rsa_core.strip(prime_p), half_limbs);
+        last q = mp.from_bytes_be(rsa_core.strip(prime_q), half_limbs);
+        if (!product_is(p, q, n) || (p[0] & 1) == 0 || (q[0] & 1) == 0) {
+            return new;
+        }
+        last d = mp.from_bytes_be(rsa_core.strip(private_exponent), n.length);
+        last p_minus_1 = mp.plain_sub(p, mp.small(1, half_limbs));
+        last q_minus_1 = mp.plain_sub(q, mp.small(1, half_limbs));
+        let [_, d_p] = mp.divmod(d, p_minus_1);
+        let [_, d_q] = mp.divmod(d, q_minus_1);
+        return new([p, q, d_p, d_q, inverse_mod_prime(q, p)]);
+    };
+
+    /// @brief [p, q, dP, dQ, qInv] as given when p q = n, or an empty list.
+    let given = func(key: RsaPublicKey, prime_p: uint8[list], prime_q: uint8[list], exponent_p: uint8[list],
+            exponent_q: uint8[list], coefficient: uint8[list]) -> uint32[list][list] {
+        last n = key.core.n;
+        last half_limbs = (n.length + 1) / 2 + 1;
+        last p = mp.from_bytes_be(rsa_core.strip(prime_p), half_limbs);
+        last q = mp.from_bytes_be(rsa_core.strip(prime_q), half_limbs);
+        if (!product_is(p, q, n) || (p[0] & 1) == 0 || (q[0] & 1) == 0 || coefficient.length > 4 * half_limbs
+                || exponent_p.length > 4 * half_limbs || exponent_q.length > 4 * half_limbs) {
+            return new;
+        }
+        last q_inv = mp.from_bytes_be(rsa_core.strip(coefficient), half_limbs);
+        if (mp.less(q_inv, p) == 0) {
+            return new;
+        }
+        return new([p, q, mp.from_bytes_be(rsa_core.strip(exponent_p), half_limbs),
+            mp.from_bytes_be(rsa_core.strip(exponent_q), half_limbs), q_inv]);
+    };
+
+    /// @brief Whether p q = n (p and q are trimmed to their nonzero limbs first).
+    let product_is = func(p: uint32[list], q: uint32[list], n: uint32[list]) -> bool {
+        if (mp.bit_length(p) < 2 || mp.bit_length(q) < 2) {
+            return false;
+        }
+        last product = mp.mul_full(p, q);
+        for (let i = 0; i < product.length; i++) {
+            if (product[i] != (i < n.length ? n[i] : 0)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief a^-1 mod p for a prime p, as an ordinary value of p's limb count (Fermat).
+    let inverse_mod_prime = func(a: uint32[list], p: uint32[list]) -> uint32[list] {
+        last field = new mp.Modulus(trim(p));
+        return mp.resize(field.from_mont(field.inv(field.to_mont(field.reduce(a)))), p.length);
+    };
+
+    /// @brief The number without zero limbs at the top (at least one limb).
+    let trim = func(a: uint32[list]) -> uint32[list] {
+        let length = a.length;
+        while (length > 1 && a[length - 1] == 0) {
+            length--;
+        }
+        let out: uint32[list] = new;
+        for (let i = 0; i < length; i++) {
+            out.append(a[i]);
+        }
+        return out;
+    };
+
+    /// @brief Whether the private operation of 2 gives a value whose e-th power is 2 (it checks itself).
+    let self_check = func(core: rsa_core.PrivateCore) -> bool =>
+        core.apply(mp.small(2, core.public_core.n.length)).length > 0;
+
+    /// @brief A public key from outside the program. Unusable numbers are `Custom` code `crypto.invalid_key`; a
+    /// modulus below 2048 bits under a policy that denies `Rsa1024` is `Custom` code `crypto.policy`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(modulus: uint8[list], exponent: uint8[list]) -> Result<RsaPublicKey> {
+        if (modulus.length == 0 || exponent.length == 0) {
+            return Result<RsaPublicKey>.Err(error.custom("crypto.invalid_key", "empty RSA number"));
+        }
+        last problem = public_problem(modulus, exponent);
+        if (problem != "") {
+            return Result<RsaPublicKey>.Err(error.custom("crypto.invalid_key", problem));
+        }
+        if (!size_allowed(modulus)) {
+            return Result<RsaPublicKey>.Err(error.custom("crypto.policy", size_denied()));
+        }
+        return Result<RsaPublicKey>.Ok(new RsaPublicKey(modulus, exponent));
+    };
+
+    /// @brief A private key from outside the program: n, e, d, p, q and the optional dP, dQ, qInv (pass empty
+    /// lists to compute them). Numbers that are not a consistent key are `Custom` code `crypto.invalid_key`; a
+    /// modulus below 2048 bits under a policy that denies `Rsa1024` is `Custom` code `crypto.policy`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_private_key = func(modulus: uint8[list], exponent: uint8[list], private_exponent: uint8[list],
+            prime_p: uint8[list], prime_q: uint8[list], exponent_p: uint8[list], exponent_q: uint8[list],
+            coefficient: uint8[list]) -> Result<RsaPrivateKey> {
+        if (modulus.length == 0 || exponent.length == 0 || private_exponent.length == 0 || prime_p.length == 0
+                || prime_q.length == 0) {
+            return Result<RsaPrivateKey>.Err(error.custom("crypto.invalid_key", "empty RSA number"));
+        }
+        last problem = public_problem(modulus, exponent);
+        if (problem != "") {
+            return Result<RsaPrivateKey>.Err(error.custom("crypto.invalid_key", problem));
+        }
+        if (!size_allowed(modulus)) {
+            return Result<RsaPrivateKey>.Err(error.custom("crypto.policy", size_denied()));
+        }
+        last public_key = new RsaPublicKey(modulus, exponent);
+        last crt = exponent_p.length > 0 && exponent_q.length > 0 && coefficient.length > 0;
+        last parts = crt ? given(public_key, prime_p, prime_q, exponent_p, exponent_q, coefficient)
+            : complete(public_key, private_exponent, prime_p, prime_q);
+        if (parts.length == 0 || !self_check(new rsa_core.PrivateCore(public_key.core, parts[0], parts[1], parts[2],
+                parts[3], parts[4]))) {
+            return Result<RsaPrivateKey>.Err(error.custom("crypto.invalid_key", "inconsistent RSA private key"));
+        }
+        if (crt) {
+            return Result<RsaPrivateKey>.Ok(new RsaPrivateKey(modulus, exponent, private_exponent, prime_p, prime_q,
+                exponent_p, exponent_q, coefficient));
+        }
+        return Result<RsaPrivateKey>.Ok(new RsaPrivateKey(modulus, exponent, private_exponent, prime_p, prime_q));
+    };
+
+    /// @brief The Miller-Rabin rounds of FIPS 186-5 Table B.1 (error probability 2^-112 and below) for primes
+    /// of a modulus of `bits` bits.
+    let rounds = func(bits: int) -> int => bits <= 2048 ? 5 : 4;
+
+    /// @brief The odd primes below 2000, by a sieve.
+    let small_primes = func -> uint32[list] {
+        let composite: bool[list] = new;
+        for (let i = 0; i < 2000; i++) {
+            composite.append(false);
+        }
+        let out: uint32[list] = new;
+        for (let i = 3; i < 2000; i += 2) {
+            if (!composite[i]) {
+                out.append(i as uint32);
+                for (let j = i * i; j < 2000; j += 2 * i) {
+                    composite[j] = true;
+                }
+            }
+        }
+        return out;
+    };
+
+    /// @brief A source of random bytes: a generator, or the operating system.
+    #Final
+    let ByteSource = class (
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        export let init = func {
+        } or func(random: drbg.ChaCha20Drbg) {
+            generator = random;
+            has_generator = true;
+        };
+
+        export let take = func(count: int) -> Result<uint8[list]> {
+            if (has_generator) {
+                return Result<uint8[list]>.Ok(generator.fill(count));
+            }
+            return entropy.os_bytes(count);
+        };
+
+        export let.override to_string = func -> string => "ByteSource";
+    );
+
+    /// @brief Miller-Rabin (FIPS 186-5, appendix B.3.1) on odd w with `iterations` random bases.
+    let probably_prime = func(w: uint32[list], iterations: int, source: ByteSource) -> Result<bool> {
+        last field = new mp.Modulus(w);
+        last w_minus_1 = mp.plain_sub(w, mp.small(1, w.length));
+        let a = 0;
+        while (mp.bit(w_minus_1, a) == 0) {
+            a++;
+        }
+        last m = mp.shift_right(w_minus_1, a);
+        last minus_one = field.to_mont(w_minus_1);
+        last wlen = field.bits;
+        for (let i = 0; i < iterations; i++) {
+            let b = mp.zeros(w.length);
+            while (true) {
+                match (source.take((wlen + 7) / 8)) {
+                    Result.Ok(bytes) => {
+                        b = mp.shift_right(mp.from_bytes_be(bytes, w.length), (bytes.length * 8) - wlen);
+                    },
+                    Result.Err(e) => {
+                        return Result<bool>.Err(e);
+                    },
+                }
+                if (mp.bit_length(b) > 1 && mp.less(b, w_minus_1) == 1) {
+                    break;
+                }
+            }
+            let z = field.pow(field.to_mont(b), m);
+            if (mp.equal(z, field.one) == 1 || mp.equal(z, minus_one) == 1) {
+                continue;
+            }
+            let passed = false;
+            for (let j = 1; j < a; j++) {
+                z = field.sqr(z);
+                if (mp.equal(z, minus_one) == 1) {
+                    passed = true;
+                    break;
+                }
+                if (mp.equal(z, field.one) == 1) {
+                    break;
+                }
+            }
+            if (!passed) {
+                return Result<bool>.Ok(false);
+            }
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    /// @brief A probable prime of `half` bits per FIPS 186-5, appendix A.1.3, step 4 or 5: top two bits set,
+    /// = 3 mod 4, gcd(w - 1, e) = 1, trial division, Miller-Rabin; and |p - q| > 2^(half - 100) against
+    /// `other` when it is not empty.
+    let generate_prime = func(half: int, nlen: int, other: uint32[list], source: ByteSource)
+            -> Result<uint32[list]> {
+        last limbs = (half + 31) / 32;
+        last primes = small_primes();
+        for (let attempt = 0; attempt < 10 * nlen; attempt++) {
+            let w = mp.zeros(limbs);
+            match (source.take((half + 7) / 8)) {
+                Result.Ok(bytes) => {
+                    w = mp.from_bytes_be(bytes, limbs);
+                    words.wipe(bytes);
+                },
+                Result.Err(e) => {
+                    return Result<uint32[list]>.Err(e);
+                },
+            }
+            w = mp.shift_right(w, ((half + 7) / 8) * 8 - half);
+            w[(half - 1) / 32] = w[(half - 1) / 32] | ((1 as uint32) << ((half - 1) % 32));
+            w[(half - 2) / 32] = w[(half - 2) / 32] | ((1 as uint32) << ((half - 2) % 32));
+            w[0] = w[0] | 3;
+            if (other.length > 0) {
+                // Step 5.5: reject |p - q| <= 2^(nlen/2 - 100).
+                last difference = mp.less(w, other) == 1 ? mp.plain_sub(other, w) : mp.plain_sub(w, other);
+                if (mp.is_zero(difference) == 1
+                        || mp.bit_length(mp.plain_sub(difference, mp.small(1, limbs))) <= half - 100) {
+                    continue;
+                }
+            }
+            if (mp.rem_small(w, 65537) == 1) {
+                continue;
+            }
+            let divisible = false;
+            for (let prime in primes) {
+                if (mp.rem_small(w, prime) == 0) {
+                    divisible = true;
+                    break;
+                }
+            }
+            if (divisible) {
+                continue;
+            }
+            match (probably_prime(w, rounds(nlen), source)) {
+                Result.Ok(prime) => {
+                    if (prime) {
+                        return Result<uint32[list]>.Ok(w);
+                    }
+                },
+                Result.Err(e) => {
+                    return Result<uint32[list]>.Err(e);
+                },
+            }
+        }
+        return Result<uint32[list]>.Err(error.custom("crypto.key_generation", "no RSA prime found"));
+    };
+
+    /// @brief gcd(a, b) for odd b, by a binary method with a fixed count of steps and masks (2 * 32 * limbs
+    /// steps), so its steps do not depend on the values.
+    let odd_gcd = func(first: uint32[list], second: uint32[list]) -> uint32[list] {
+        let a = mp.copy(first);
+        let b = mp.copy(second);
+        let difference = mp.zeros(a.length);
+        for (let step = 0; step < 64 * a.length; step++) {
+            last odd = a[0] & 1;
+            mp.cswap(odd & mp.less(a, b), a, b);
+            let _ = mp.sub_into(difference, a, b);
+            mp.assign_if(odd, a, difference);
+            a = mp.shift_right_small(a, 1);
+        }
+        return b;
+    };
+
+    /// @brief The key of n = p q with e = 65537 and d = e^-1 mod lcm(p - 1, q - 1) (FIPS 186-5, appendix
+    /// A.1.1), or an empty list when d is not above 2^(nlen/2).
+    let assemble = func(p: uint32[list], q: uint32[list], nlen: int) -> RsaPrivateKey[list] {
+        last limbs = p.length;
+        last one = mp.small(1, limbs);
+        last p1 = mp.plain_sub(p, one);
+        last q1 = mp.plain_sub(q, one);
+        // p = q = 3 mod 4, so (p - 1) / 2 and (q - 1) / 2 are odd and lcm = (p - 1)(q - 1) / (2 g).
+        last g = odd_gcd(mp.shift_right_small(p1, 1), mp.shift_right_small(q1, 1));
+        let [lambda, _] = mp.divmod(mp.mul_full(p1, q1), mp.plain_add(g, g));
+        // d = (1 + k lambda) / e with k = -lambda^-1 mod e.
+        last e: uint32 = 65537;
+        last r = mp.rem_small(lambda, e) as uint64;
+        let inverse: uint64 = 1;
+        let base = r;
+        for (let bit = 0; bit < 17; bit++) {
+            if (((65535 >> bit) & 1) == 1) {
+                inverse = (inverse * base) % 65537;
+            }
+            base = (base * base) % 65537;
+        }
+        last k = (65537 - inverse) % 65537;
+        let numerator = mp.mul_full(lambda, mp.small(k as uint32, 1));
+        let _ = mp.add_into(numerator, numerator, mp.small(1, numerator.length));
+        let [d, rest] = mp.divmod_small(numerator, e);
+        if (rest != 0 || mp.bit_length(d) <= nlen / 2) {
+            return new;
+        }
+        last n = mp.mul_full(p, q);
+        last k_bytes = (nlen + 7) / 8;
+        last half_bytes = (nlen / 2 + 7) / 8;
+        last key = new RsaPrivateKey(mp.to_bytes_be(n, k_bytes), new([1, 0, 1]), mp.to_bytes_be(d, k_bytes),
+            mp.to_bytes_be(p, half_bytes), mp.to_bytes_be(q, half_bytes));
+        return new([key]);
+    };
+
+    /// @brief A new key of `bits` bits (2048, 3072 or 4096; another size traps) with e = 65537, from
+    /// `Entropy.os_bytes` or from the given generator (deterministic for a seeded one). Fails when the entropy
+    /// source fails, or with `Custom` code `crypto.key_generation` after FIPS 186-5's bound on attempts.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func(bits: int) -> Result<RsaPrivateKey> => generate_with(bits, new ByteSource())
+        or func(bits: int, random: drbg.ChaCha20Drbg) -> Result<RsaPrivateKey> => generate_with(bits, new ByteSource(random));
+
+    let generate_with = func(bits: int, source: ByteSource) -> Result<RsaPrivateKey> {
+        if (bits != 2048 && bits != 3072 && bits != 4096) {
+            trap_with_message("invalid argument: RSA key size must be 2048, 3072 or 4096 bits");
+        }
+        while (true) {
+            last p = generate_prime(bits / 2, bits, new, source);
+            match (p) {
+                Result.Err(e) => {
+                    return Result<RsaPrivateKey>.Err(e);
+                },
+                Result.Ok(prime_p) => {
+                    match (generate_prime(bits / 2, bits, prime_p, source)) {
+                        Result.Err(e) => {
+                            return Result<RsaPrivateKey>.Err(e);
+                        },
+                        Result.Ok(prime_q) => {
+                            last keys = assemble(prime_p, prime_q, bits);
+                            if (keys.length == 1) {
+                                return Result<RsaPrivateKey>.Ok(keys[0]);
+                            }
+                        },
+                    }
+                },
+            }
+        }
+        return Result<RsaPrivateKey>.Err(error.custom("crypto.key_generation", "unreachable"));
+    };
+);

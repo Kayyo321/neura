@@ -1,0 +1,81 @@
+// test-options: --gpu=off --max-steps 40000000000
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:EcxVectors;
+let x448 = import:Std.Crypto.Asymmetric.X448;
+
+// X448 against RFC 7748 sections 5.2 and 6.1 and a Wycheproof subset (support/ecx-vectors.nra,
+// scripts/crypto-vectors/gen-asymmetric-ecx.py).
+let X448Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_rfc7748_function = func {
+        last rows = vectors.x_function;
+        let seen = 0;
+        for (let i = 0; i < rows.length; i += 4) {
+            if (rows[i] == "x448") {
+                test.assert_equal_string(rows[i + 3], hex.encode(x448.x448(decode(rows[i + 1]), decode(rows[i + 2]))));
+                seen++;
+            }
+        }
+        test.assert_equal_int32(2, seen);
+    };
+
+    export let test_rfc7748_one_iteration = func {
+        let k = decode("0500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+        last u = x448.x448(k, k);
+        last rows = vectors.x_iterations;
+        test.assert_equal_string(rows[8], hex.encode(u));
+    };
+
+    export let test_rfc7748_diffie_hellman = func {
+        last rows = vectors.x_diffie_hellman;
+        last base = 6;
+        last alice = new x448.X448PrivateKey(decode(rows[base + 1]));
+        last bob = new x448.X448PrivateKey(decode(rows[base + 3]));
+        test.assert_equal_string(rows[base + 2], hex.encode(alice.public_key_bytes()));
+        test.assert_equal_string(rows[base + 4], hex.encode(bob.public_key().to_bytes()));
+        last k1 = test.assert_ok(alice.diffie_hellman(bob.public_key()));
+        last k2 = test.assert_ok(new x448.X448().diffie_hellman(bob, alice.public_key()));
+        test.assert_equal_string(rows[base + 5], hex.encode(k1.expose()));
+        test.assert_equal_string(rows[base + 5], hex.encode(k2.expose()));
+    };
+
+    // Wycheproof: the raw function gives the expected value, and diffie_hellman fails exactly when it is all
+    // zero. Invalid cases have a public key of the wrong length, which parse_public_key rejects.
+    export let test_wycheproof = func {
+        last rows = vectors.x448_wycheproof;
+        let zero_cases = 0;
+        for (let i = 0; i < rows.length; i += 5) {
+            last public_bytes = decode(rows[i + 2]);
+            if (rows[i + 4] == "invalid") {
+                test.assert_err(x448.parse_public_key(public_bytes));
+                continue;
+            }
+            last private_bytes = decode(rows[i + 1]);
+            test.assert_equal_string(rows[i + 3], hex.encode(x448.x448(private_bytes, public_bytes)));
+            last key = new x448.X448PrivateKey(private_bytes);
+            last outcome = key.diffie_hellman(test.assert_ok(x448.parse_public_key(public_bytes)));
+            if (rows[i + 3] == "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000") {
+                test.assert_err(outcome);
+                zero_cases++;
+            } else {
+                test.assert_equal_string(rows[i + 3], hex.encode(test.assert_ok(outcome).expose()));
+            }
+        }
+        test.assert(zero_cases > 0);
+    };
+
+    export let test_keys = func {
+        last key = new x448.X448PrivateKey(decode(vectors.x_diffie_hellman[7]));
+        test.assert_equal_string("X448PrivateKey(<redacted>)", key.to_string());
+        test.assert_equal_string("X448PublicKey(56 bytes)", key.public_key().to_string());
+        test.assert(key.public_key().equals(new x448.X448PublicKey(decode(vectors.x_diffie_hellman[8]))));
+        test.assert(!key.public_key().equals(new x448.X448PublicKey(decode(vectors.x_diffie_hellman[10]))));
+        test.assert(key.public_key().hash_code() ==
+            new x448.X448PublicKey(decode(vectors.x_diffie_hellman[8])).hash_code());
+        test.assert_err(x448.parse_public_key(new([1, 2, 3])));
+        key.wipe();
+        test.assert(key.is_wiped());
+    };
+);

@@ -1,0 +1,145 @@
+// test-options: --gpu=off --max-steps 100000000000
+let.promote _ = import:Std.Crypto.Algorithm;
+let hex = import:Std.Encoding.Hex;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_oaep = import:Std.Crypto.Asymmetric.RsaOaep;
+let rsa_pkcs1v15 = import:Std.Crypto.Asymmetric.RsaPkcs1v15;
+let rsa_pss = import:Std.Crypto.Asymmetric.RsaPss;
+let test = import:Std.Test;
+let vectors = import:RsaVectors;
+
+// RSA-PSS, RSA-OAEP and PKCS #1 v1.5 verification against an independent RFC 8017 computation checked by
+// cryptography, cryptography's PKCS #1 v1.5 signatures, and Wycheproof (support/rsa-vectors.nra,
+// scripts/crypto-vectors/gen-asymmetric-rsa.py).
+let RsaTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let hash_of = func(text: string) -> Algorithm {
+        if (text == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (text == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (text == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        if (text == "Sha512") {
+            return Algorithm.Sha512;
+        }
+        if (text == "Sha512_256") {
+            return Algorithm.Sha512_256;
+        }
+        if (text == "Sha3_256") {
+            return Algorithm.Sha3_256;
+        }
+        return Algorithm.Sha3_512;
+    };
+
+    /// @brief The private key of the keys row with `bits`, from n, e, d, p, q only (dP, dQ, qInv computed).
+    let private_key = func(bits: string) -> rsa.RsaPrivateKey {
+        last rows = vectors.keys;
+        for (let i = 0; i < rows.length; i += 9) {
+            if (rows[i] == bits) {
+                return new(decode(rows[i + 1]), decode(rows[i + 2]), decode(rows[i + 3]), decode(rows[i + 4]),
+                    decode(rows[i + 5]));
+            }
+        }
+        test.fail("no key");
+        return new(decode(rows[1]), decode(rows[2]), decode(rows[3]), decode(rows[4]), decode(rows[5]));
+    };
+
+    export let test_keys_import_both_forms = func {
+        last rows = vectors.keys;
+        last full = test.assert_ok(rsa.parse_private_key(decode(rows[1]), decode(rows[2]), decode(rows[3]),
+            decode(rows[4]), decode(rows[5]), decode(rows[6]), decode(rows[7]), decode(rows[8])));
+        last computed = private_key("2048");
+        test.assert_equal_string(hex.encode(full.expose()), hex.encode(computed.expose()));
+        test.assert(full.public_key.equals(computed.public_key));
+        test.assert_equal_int32(2048, full.bits());
+        test.assert_equal_string("RsaPrivateKey(2048 bits, <redacted>)", full.to_string());
+        test.assert_equal_string("RsaPublicKey(2048 bits)", full.public_key.to_string());
+        // A wrong d or swapped CRT numbers are inconsistent.
+        test.assert_err(rsa.parse_private_key(decode(rows[1]), decode(rows[2]), decode(rows[3]), decode(rows[4]),
+            decode(rows[5]), decode(rows[7]), decode(rows[6]), decode(rows[8])));
+        test.assert_err(rsa.parse_private_key(decode(rows[1]), decode(rows[2]), decode(rows[3]), decode(rows[4]),
+            decode(rows[4]), new, new, new));
+        test.assert_err(rsa.parse_public_key(decode(rows[1]), new([1, 0, 0])));
+        test.assert_err(rsa.parse_public_key(new([1, 2, 3]), decode(rows[2])));
+    };
+
+    export let test_pss_known_salts = func {
+        last rows = vectors.pss;
+        for (let i = 0; i < rows.length; i += 6) {
+            last key = private_key(rows[i]);
+            last salt_length = test.assert_ok(int.parse(rows[i + 2]));
+            last signer = new rsa_pss.RsaPssSigner(key, hash_of(rows[i + 1]), salt_length);
+            last message = decode(rows[i + 3]);
+            last signature = test.assert_ok(signer.sign_with_salt(message, decode(rows[i + 4])));
+            test.assert_equal_string(rows[i + 5], hex.encode(signature));
+            last verifier = new rsa_pss.RsaPssVerifier(key.public_key, hash_of(rows[i + 1]), salt_length);
+            test.assert(verifier.verify(message, signature));
+            test.assert(new rsa_pss.RsaPssVerifier(key.public_key, hash_of(rows[i + 1]), -1).verify(message, signature));
+            test.assert(!verifier.verify(new([7]), signature));
+        }
+    };
+
+    export let test_oaep_known_seeds = func {
+        last rows = vectors.oaep;
+        for (let i = 0; i < rows.length; i += 6) {
+            last key = private_key(rows[i]);
+            last oaep = new rsa_oaep.RsaOaep(hash_of(rows[i + 1]));
+            last message = decode(rows[i + 2]);
+            last label = decode(rows[i + 3]);
+            last ciphertext = oaep.encrypt_with_seed(key.public_key, message, label, decode(rows[i + 4]));
+            test.assert_equal_string(rows[i + 5], hex.encode(ciphertext));
+            test.assert_equal_string(rows[i + 2], hex.encode(test.assert_ok(oaep.decrypt(key, ciphertext, label))));
+            test.assert_err(oaep.decrypt(key, ciphertext, new([1, 2])));
+        }
+    };
+
+    export let test_pkcs1v15_cryptography = func {
+        last rows = vectors.pkcs1v15;
+        last key = private_key("2048");
+        for (let i = 0; i < rows.length; i += 4) {
+            last verifier = new rsa_pkcs1v15.RsaPkcs1v15Verifier(key.public_key, hash_of(rows[i + 1]));
+            test.assert(verifier.verify(decode(rows[i + 2]), decode(rows[i + 3])));
+            test.assert(!verifier.verify(new([1]), decode(rows[i + 3])));
+        }
+    };
+
+    export let test_wycheproof_signatures = func {
+        last rows = vectors.signatures;
+        last keys = vectors.public_keys;
+        for (let i = 0; i < rows.length; i += 8) {
+            last index = test.assert_ok(int.parse(rows[i + 4])) * 2;
+            last key = test.assert_ok(rsa.parse_public_key(decode(keys[index]), decode(keys[index + 1])));
+            last message = decode(rows[i + 5]);
+            last signature = decode(rows[i + 6]);
+            last verdict: bool;
+            if (rows[i].starts_with("rsa_pss")) {
+                last salt_length = test.assert_ok(int.parse(rows[i + 3]));
+                verdict = new rsa_pss.RsaPssVerifier(key, hash_of(rows[i + 2]), salt_length).verify(message, signature);
+            } else {
+                verdict = new rsa_pkcs1v15.RsaPkcs1v15Verifier(key, hash_of(rows[i + 2])).verify(message, signature);
+            }
+            if (verdict != (rows[i + 7] == "1")) {
+                test.fail(rows[i] + " tcId " + rows[i + 1]);
+            }
+        }
+    };
+
+    export let test_wycheproof_oaep = func {
+        last rows = vectors.oaep_wycheproof;
+        last keys: rsa.RsaPrivateKey[list] = new([private_key("2048"), private_key("3072"), private_key("4096")]);
+        for (let i = 0; i < rows.length; i += 7) {
+            last key = keys[rows[i + 1] == "2048" ? 0 : (rows[i + 1] == "3072" ? 1 : 2)];
+            last outcome = new rsa_oaep.RsaOaep(hash_of(rows[i + 2])).decrypt(key, decode(rows[i + 3]), decode(rows[i + 4]));
+            if (rows[i + 6] == "valid") {
+                test.assert_equal_string(rows[i + 5], hex.encode(test.assert_ok(outcome)));
+            } else {
+                test.assert_err(outcome);
+            }
+        }
+    };
+);

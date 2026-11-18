@@ -1,0 +1,80 @@
+// test-options: --gpu=off --max-steps 20000000000
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let vectors = import:EcxVectors;
+let x25519 = import:Std.Crypto.Asymmetric.X25519;
+
+// X25519 against RFC 7748 sections 5.2 and 6.1 and a Wycheproof subset (support/ecx-vectors.nra,
+// scripts/crypto-vectors/gen-asymmetric-ecx.py).
+let X25519Tests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_rfc7748_function = func {
+        last rows = vectors.x_function;
+        let seen = 0;
+        for (let i = 0; i < rows.length; i += 4) {
+            if (rows[i] == "x25519") {
+                test.assert_equal_string(rows[i + 3], hex.encode(x25519.x25519(decode(rows[i + 1]), decode(rows[i + 2]))));
+                seen++;
+            }
+        }
+        test.assert_equal_int32(2, seen);
+    };
+
+    export let test_rfc7748_one_iteration = func {
+        let k = decode("0900000000000000000000000000000000000000000000000000000000000000");
+        last u = x25519.x25519(k, k);
+        last rows = vectors.x_iterations;
+        test.assert_equal_string(rows[2], hex.encode(u));
+    };
+
+    export let test_rfc7748_diffie_hellman = func {
+        last rows = vectors.x_diffie_hellman;
+        last alice = new x25519.X25519PrivateKey(decode(rows[1]));
+        last bob = new x25519.X25519PrivateKey(decode(rows[3]));
+        test.assert_equal_string(rows[2], hex.encode(alice.public_key_bytes()));
+        test.assert_equal_string(rows[4], hex.encode(bob.public_key().to_bytes()));
+        last k1 = test.assert_ok(alice.diffie_hellman(bob.public_key()));
+        last k2 = test.assert_ok(new x25519.X25519().diffie_hellman(bob, alice.public_key()));
+        test.assert_equal_string(rows[5], hex.encode(k1.expose()));
+        test.assert_equal_string(rows[5], hex.encode(k2.expose()));
+    };
+
+    // Wycheproof: the raw function gives the expected value, and diffie_hellman fails exactly when it is all
+    // zero. Invalid cases have a public key of the wrong length, which parse_public_key rejects.
+    export let test_wycheproof = func {
+        last rows = vectors.x25519_wycheproof;
+        let zero_cases = 0;
+        for (let i = 0; i < rows.length; i += 5) {
+            last public_bytes = decode(rows[i + 2]);
+            if (rows[i + 4] == "invalid") {
+                test.assert_err(x25519.parse_public_key(public_bytes));
+                continue;
+            }
+            last private_bytes = decode(rows[i + 1]);
+            test.assert_equal_string(rows[i + 3], hex.encode(x25519.x25519(private_bytes, public_bytes)));
+            last key = new x25519.X25519PrivateKey(private_bytes);
+            last outcome = key.diffie_hellman(test.assert_ok(x25519.parse_public_key(public_bytes)));
+            if (rows[i + 3] == "0000000000000000000000000000000000000000000000000000000000000000") {
+                test.assert_err(outcome);
+                zero_cases++;
+            } else {
+                test.assert_equal_string(rows[i + 3], hex.encode(test.assert_ok(outcome).expose()));
+            }
+        }
+        test.assert(zero_cases > 0);
+    };
+
+    export let test_keys = func {
+        last key = new x25519.X25519PrivateKey(decode(vectors.x_diffie_hellman[1]));
+        test.assert_equal_string("X25519PrivateKey(<redacted>)", key.to_string());
+        test.assert_equal_string("X25519PublicKey(32 bytes)", key.public_key().to_string());
+        test.assert(key.public_key().equals(new x25519.X25519PublicKey(decode(vectors.x_diffie_hellman[2]))));
+        test.assert(!key.public_key().equals(new x25519.X25519PublicKey(decode(vectors.x_diffie_hellman[4]))));
+        test.assert(key.public_key().hash_code() ==
+            new x25519.X25519PublicKey(decode(vectors.x_diffie_hellman[2])).hash_code());
+        test.assert_err(x25519.parse_public_key(new([1, 2, 3])));
+        key.wipe();
+        test.assert(key.is_wiped());
+    };
+);

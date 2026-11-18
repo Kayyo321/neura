@@ -74,7 +74,8 @@ export let CryptoPolicy = module (
     };
 
     // FIPS 180-4, FIPS 202, SP 800-185, FIPS 198-1, SP 800-38B/D/G, FIPS 197, SP 800-56C (HKDF),
-    // SP 800-132 (PBKDF2), FIPS 186-5, FIPS 203 to 205, and approved entropy sources.
+    // SP 800-132 (PBKDF2), FIPS 186-5 (including PKCS #1 v1.5 signatures), FIPS 203 to 205, and approved entropy
+    // sources.
     let fips = func(algorithm: Algorithm) -> bool => match (algorithm) {
         Algorithm.Sha224 => true,
         Algorithm.Sha256 => true,
@@ -113,6 +114,7 @@ export let CryptoPolicy = module (
         Algorithm.P521 => true,
         Algorithm.RsaPss => true,
         Algorithm.RsaOaep => true,
+        Algorithm.RsaPkcs1v15 => true,
         Algorithm.MlKem512 => true,
         Algorithm.MlKem768 => true,
         Algorithm.MlKem1024 => true,

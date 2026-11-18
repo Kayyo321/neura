@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: Ed25519 context must be 1 to 255 bytes
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(i as uint8);
+        }
+        let signer = new ed25519.Ed25519Signer(new ed25519.Ed25519PrivateKey(seed));
+        let _ = signer.sign_with_context(new([1]), new);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,623 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let asym_hash = import:Std.Crypto.Internal.AsymHash;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let mp = import:Std.Crypto.Internal.Mp;
+let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief ECDSA over P-256, P-384, P-521 and secp256k1 with deterministic nonces (RFC 6979), and the elliptic-
+/// curve keys that Std.Crypto.Asymmetric.Ecdh and Hpke share (Stdlib.md section 20.8).
+///
+/// Signing derives its nonce from the private key and the message digest with HMAC_DRBG (RFC 6979, section
+/// 3.2), so no random generator is needed and a faulty one cannot leak the key. A signature is a DER
+/// `Ecdsa-Sig-Value` (`sign`, `verify`) or the fixed-length r || s of IEEE P1363 and JOSE (`sign_raw`,
+/// `verify_raw`). Verification parses DER strictly: one definite minimal length per element, minimal
+/// positive integers, no trailing bytes, and r and s from 1 to n - 1. Public keys are SEC1 points that are
+/// checked to lie on the curve; the identity is refused. The hash defaults to SHA-256, SHA-384, SHA-512 and
+/// SHA-256 for the four curves; any SHA-2 or SHA-3 hash can be chosen. For secp256k1 a signer can normalize
+/// s to the lower half (`low_s`) and a verifier can require it, as Bitcoin does. The point arithmetic uses
+/// complete formulas and is branch-free in source; the runtime does not guarantee constant time.
+/// @see [Std.Crypto.Asymmetric.Ecdsa](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ecdsa)
+#Since("0.3.0")
+export let Ecdsa = module (
+    /// @brief The curves.
+    #Since("0.3.0")
+    export let Curve = enum (P256, P384, P521, Secp256k1);
+
+    /// @brief The policy identifier of a curve: `P256`, `P384`, `P521` or `Secp256k1`.
+    #[NoDiscard, Since("0.3.0")]
+    export let algorithm_of = func(curve: Curve) -> Algorithm => match (curve) {
+        Curve.P256 => Algorithm.P256,
+        Curve.P384 => Algorithm.P384,
+        Curve.P521 => Algorithm.P521,
+        Curve.Secp256k1 => Algorithm.Secp256k1,
+    };
+
+    /// @brief The default hash of a curve: SHA-256, SHA-384, SHA-512 or SHA-256.
+    #[NoDiscard, Since("0.3.0")]
+    export let default_hash = func(curve: Curve) -> Algorithm => match (curve) {
+        Curve.P256 => Algorithm.Sha256,
+        Curve.P384 => Algorithm.Sha384,
+        Curve.P521 => Algorithm.Sha512,
+        Curve.Secp256k1 => Algorithm.Sha256,
+    };
+
+    /// @brief The byte length of a scalar or a field element: 32, 48, 66 or 32.
+    #[NoDiscard, Since("0.3.0")]
+    export let scalar_length = func(curve: Curve) -> int => match (curve) {
+        Curve.P384 => 48,
+        Curve.P521 => 66,
+        _ => 32,
+    };
+
+    /// @brief The internal group of a curve, built for one operation.
+    #NoDiscard
+    export let group = func(curve: Curve) -> weierstrass.Curve => new(match (curve) {
+        Curve.P256 => weierstrass.CurveId.P256,
+        Curve.P384 => weierstrass.CurveId.P384,
+        Curve.P521 => weierstrass.CurveId.P521,
+        Curve.Secp256k1 => weierstrass.CurveId.Secp256k1,
+    });
+
+    let name = func(curve: Curve) -> string => match (curve) {
+        Curve.P256 => "P-256",
+        Curve.P384 => "P-384",
+        Curve.P521 => "P-521",
+        Curve.Secp256k1 => "secp256k1",
+    };
+
+    /// @brief An elliptic-curve public key: a point of the curve, held as its uncompressed SEC1 encoding.
+    /// Equal keys have equal curves and points.
+    #[Final, Since("0.3.0")]
+    export let EcPublicKey = class (
+        /// @brief The curve.
+        export last curve: Curve;
+        last encoded: uint8[list];
+
+        /// @brief The key of a SEC1 point, compressed or not. An encoding that is not a point of the curve traps
+        /// (use `parse_public_key` for outside input).
+        export let init = func(key_curve: Curve, sec1: uint8[list]) {
+            crypto_policy.require(algorithm_of(key_curve));
+            last g = group(key_curve);
+            match (g.decode(sec1)) {
+                Optional.None => {
+                    trap_with_message("invalid argument: not a " + name(key_curve) + " public key");
+                },
+                Optional.Some(point) => {
+                    curve = key_curve;
+                    encoded = g.encode(point, false);
+                },
+            }
+        };
+
+        /// @brief The SEC1 encoding: 0x04 || x || y, or 0x02 / 0x03 || x when compressed.
+        #NoDiscard
+        export let to_sec1 = func(compressed: bool) -> uint8[list] {
+            if (!compressed) {
+                return words.copy(encoded);
+            }
+            last size = scalar_length(curve);
+            let out: uint8[list] = new([(2 + (encoded[2 * size] & 1)) as uint8]);
+            words.append_all(out, words.slice(encoded, 1, 1 + size));
+            return out;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is EcPublicKey)) {
+                return false;
+            }
+            last key = other as EcPublicKey;
+            return key.curve == curve && constant_time.ct_eq(encoded, key.to_sec1(false));
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = hashing.combine(256, (curve as int) as uint32);
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string => "EcPublicKey(" + name(curve) + ")";
+    );
+
+    /// @brief An elliptic-curve private key: the scalar d (1 <= d < n) as big-endian bytes of the curve's
+    /// scalar length in secret memory, with its public key. `to_string` never prints it.
+    #[Final, Since("0.3.0")]
+    export let EcPrivateKey = class implements PrivateKey<EcdsaSigner> (
+        /// @brief The curve.
+        export last curve: Curve;
+        last material: SecretBytes;
+        last public_encoded: uint8[list];
+
+        /// @brief The key of the scalar's big-endian bytes (exactly the curve's scalar length). A scalar outside
+        /// 1 to n - 1 or a wrong length traps (use `parse_private_key` for outside input).
+        export let init = func(key_curve: Curve, bytes: uint8[list]) {
+            crypto_policy.require(algorithm_of(key_curve));
+            if (bytes.length != scalar_length(key_curve)) {
+                trap_with_message("invalid argument: " + name(key_curve) + " private key must be "
+                    + scalar_length(key_curve).to_string() + " bytes");
+            }
+            last g = group(key_curve);
+            match (g.scalar_in_range(bytes)) {
+                Optional.None => {
+                    trap_with_message("invalid argument: " + name(key_curve) + " private key is not from 1 to n - 1");
+                },
+                Optional.Some(d) => {
+                    curve = key_curve;
+                    material = new(bytes);
+                    public_encoded = g.encode(g.multiply_generator(d), false);
+                },
+            }
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+        export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> EcPublicKey => new(curve, public_encoded);
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "EcPrivateKey(" + name(curve) + ", <redacted>)";
+    );
+
+    /// @brief Signs with RFC 6979 deterministic ECDSA; it also verifies against the matching public key.
+    #[Final, Since("0.3.0")]
+    export let EcdsaSigner = class implements Signer<EcPrivateKey, uint8[list]>, Verifier<EcPublicKey, uint8[list]> (
+        last key: EcPrivateKey;
+        /// @brief The hash of the message and of HMAC_DRBG.
+        export last hash: Algorithm;
+        /// @brief Whether s is normalized to at most (n - 1) / 2.
+        export last low_s: bool;
+
+        /// @brief A signer with the curve's default hash, or the given SHA-2 or SHA-3 hash, and optionally low-S
+        /// normalization. Another hash traps.
+        export let init = func(private_key: EcPrivateKey) {
+            key = private_key;
+            hash = default_hash(private_key.curve);
+            low_s = false;
+            check();
+        } or func(private_key: EcPrivateKey, digest: Algorithm) {
+            key = private_key;
+            hash = digest;
+            low_s = false;
+            check();
+        } or func(private_key: EcPrivateKey, digest: Algorithm, normalize: bool) {
+            key = private_key;
+            hash = digest;
+            low_s = normalize;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(algorithm_of(key.curve));
+            asym_hash.check(hash);
+            crypto_policy.require(hash);
+        };
+
+        /// @brief The curve's identifier.
+        export let algorithm = func -> Algorithm => algorithm_of(key.curve);
+
+        /// @brief The public key.
+        export let public_key = func -> EcPublicKey => key.public_key();
+
+        /// @brief The DER signature of the message.
+        export let sign = func(message: uint8[list]) -> uint8[list] =>
+            encode_der(key.curve, sign_core(key, asym_hash.digest(hash, message), hash, low_s));
+
+        /// @brief The r || s signature of the message, each the curve's scalar length.
+        #NoDiscard
+        export let sign_raw = func(message: uint8[list]) -> uint8[list] =>
+            encode_raw(key.curve, sign_core(key, asym_hash.digest(hash, message), hash, low_s));
+
+        /// @brief The DER signature of a digest computed elsewhere (of any length; RFC 6979's bits2int takes
+        /// its leftmost bits). The nonce still uses this signer's hash.
+        #NoDiscard
+        export let sign_digest = func(digest: uint8[list]) -> uint8[list] =>
+            encode_der(key.curve, sign_core(key, digest, hash, low_s));
+
+        /// @brief Whether the DER signature is valid for the message under the matching public key.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            new EcdsaVerifier(key.public_key(), hash, low_s).verify(message, signature);
+
+        export let.override to_string = func -> string => "EcdsaSigner(" + name(key.curve) + ", <redacted>)";
+    );
+
+    /// @brief Verifies ECDSA signatures under a public key.
+    #[Final, Since("0.3.0")]
+    export let EcdsaVerifier = class implements Verifier<EcPublicKey, uint8[list]> (
+        last key: EcPublicKey;
+        /// @brief The hash of the message.
+        export last hash: Algorithm;
+        /// @brief Whether s above (n - 1) / 2 is refused.
+        export last require_low_s: bool;
+
+        /// @brief A verifier with the curve's default hash, or the given hash, and optionally the low-S rule.
+        export let init = func(public_key: EcPublicKey) {
+            key = public_key;
+            hash = default_hash(public_key.curve);
+            require_low_s = false;
+            check();
+        } or func(public_key: EcPublicKey, digest: Algorithm) {
+            key = public_key;
+            hash = digest;
+            require_low_s = false;
+            check();
+        } or func(public_key: EcPublicKey, digest: Algorithm, low_s_only: bool) {
+            key = public_key;
+            hash = digest;
+            require_low_s = low_s_only;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(algorithm_of(key.curve));
+            asym_hash.check(hash);
+            crypto_policy.require(hash);
+        };
+
+        /// @brief The curve's identifier.
+        export let algorithm = func -> Algorithm => algorithm_of(key.curve);
+
+        /// @brief The public key.
+        export let public_key = func -> EcPublicKey => key;
+
+        /// @brief Whether the DER signature is valid for the message. Malformed DER is false.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_digest(asym_hash.digest(hash, message), signature);
+
+        /// @brief Whether the r || s signature is valid for the message. A wrong length is false.
+        #NoDiscard
+        export let verify_raw = func(message: uint8[list], signature: uint8[list]) -> bool {
+            last g = group(key.curve);
+            last parts = decode_raw(g, signature);
+            return parts.length == 2 && verify_core(g, key, asym_hash.digest(hash, message), parts[0], parts[1], require_low_s);
+        };
+
+        /// @brief Whether the DER signature is valid for a digest computed elsewhere.
+        #NoDiscard
+        export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
+            last g = group(key.curve);
+            last parts = decode_der(g, signature);
+            return parts.length == 2 && verify_core(g, key, digest, parts[0], parts[1], require_low_s);
+        };
+
+        export let.override to_string = func -> string => "EcdsaVerifier(" + name(key.curve) + ")";
+    );
+
+    /// @brief bits2int of RFC 6979, section 2.3.2: the leftmost qlen bits of the bytes as an integer of the
+    /// order's limb count.
+    let bits2int = func(g: weierstrass.Curve, bytes: uint8[list]) -> uint32[list] {
+        last qlen = g.order.bits;
+        let value = mp.from_bytes_be(bytes, (bytes.length + 3) / 4 + 1);
+        if (bytes.length * 8 > qlen) {
+            value = mp.shift_right(value, bytes.length * 8 - qlen);
+        }
+        return mp.resize(value, g.order.n);
+    };
+
+    /// @brief [r, s] by ECDSA with the RFC 6979 nonce over HMAC with `hash`.
+    let sign_core = func(key: EcPrivateKey, digest: uint8[list], hash: Algorithm, low_s: bool) -> uint32[list][list] {
+        last g = group(key.curve);
+        last q = g.order;
+        last rolen = (q.bits + 7) / 8;
+        let x_octets = key.expose();
+        let d = mp.from_bytes_be(x_octets, q.n);
+        last e = q.reduce_limbs(bits2int(g, digest));
+        last h_octets = mp.to_bytes_be(e, rolen);
+        last hlen = asym_hash.output_length(hash);
+        let v: uint8[list] = new;
+        let k_key: uint8[list] = new;
+        for (let i = 0; i < hlen; i++) {
+            v.append(1);
+            k_key.append(0);
+        }
+        k_key = asym_hash.mac(hash, k_key, join(v, 0, x_octets, h_octets));
+        v = asym_hash.mac(hash, k_key, v);
+        k_key = asym_hash.mac(hash, k_key, join(v, 1, x_octets, h_octets));
+        v = asym_hash.mac(hash, k_key, v);
+        while (true) {
+            let t: uint8[list] = new;
+            while (t.length * 8 < q.bits) {
+                v = asym_hash.mac(hash, k_key, v);
+                words.append_all(t, v);
+            }
+            let k = bits2int(g, t);
+            if (mp.is_zero(k) == 0 && mp.less(k, q.m) == 1) {
+                last r = q.reduce_limbs(g.affine_x(g.multiply_generator(k)));
+                if (mp.is_zero(r) == 0) {
+                    last kinv = q.inv(q.to_mont(k));
+                    let s = q.mul(kinv, q.add(e, q.mul(q.to_mont(r), d)));
+                    if (mp.is_zero(s) == 0) {
+                        if (low_s) {
+                            last half = mp.shift_right(q.m, 1);
+                            s = mp.select(mp.less(half, s), q.neg(s), s);
+                        }
+                        words.wipe(t);
+                        for (let i = 0; i < d.length; i++) {
+                            d[i] = 0;
+                            k[i] = 0;
+                        }
+                        return new([r, s]);
+                    }
+                }
+            }
+            let extended = words.copy(v);
+            extended.append(0);
+            k_key = asym_hash.mac(hash, k_key, extended);
+            v = asym_hash.mac(hash, k_key, v);
+        }
+        return new;
+    };
+
+    /// @brief V || marker || x || h.
+    let join = func(v: uint8[list], marker: uint8, x: uint8[list], h: uint8[list]) -> uint8[list] {
+        let out = words.copy(v);
+        out.append(marker);
+        words.append_all(out, x);
+        words.append_all(out, h);
+        return out;
+    };
+
+    /// @brief ECDSA verification of [r, s], both from 1 to n - 1.
+    let verify_core = func(g: weierstrass.Curve, key: EcPublicKey, digest: uint8[list], r: uint32[list],
+            s: uint32[list], require_low_s: bool) -> bool {
+        last q = g.order;
+        if (require_low_s && mp.less(mp.shift_right(q.m, 1), s) == 1) {
+            return false;
+        }
+        match (g.decode(key.to_sec1(false))) {
+            Optional.None => {
+                return false;
+            },
+            Optional.Some(point) => {
+                last e = q.reduce_limbs(bits2int(g, digest));
+                last w = q.inv(q.to_mont(s));
+                last u1 = q.mul(e, w);
+                last u2 = q.mul(r, w);
+                last sum = g.multiply_two(u1, g.generator(), u2, point);
+                if (g.is_identity(sum)) {
+                    return false;
+                }
+                return mp.equal(q.reduce_limbs(g.affine_x(sum)), r) == 1;
+            },
+        }
+    };
+
+    /// @brief The minimal DER INTEGER of a non-negative number.
+    let der_integer = func(value: uint32[list], length: int) -> uint8[list] {
+        last bytes = mp.to_bytes_be(value, length);
+        let start = 0;
+        while (start < bytes.length - 1 && bytes[start] == 0) {
+            start++;
+        }
+        let content: uint8[list] = new;
+        if ((bytes[start] & 128) != 0) {
+            content.append(0);
+        }
+        words.append_all(content, words.slice(bytes, start, bytes.length));
+        let out: uint8[list] = new([2]);
+        append_length(out, content.length);
+        words.append_all(out, content);
+        return out;
+    };
+
+    let append_length = func(out: uint8[list], length: int) {
+        if (length < 128) {
+            out.append(length as uint8);
+        } else {
+            out.append(129);
+            out.append(length as uint8);
+        }
+    };
+
+    let encode_der = func(curve: Curve, parts: uint32[list][list]) -> uint8[list] {
+        last size = scalar_length(curve);
+        let body = der_integer(parts[0], size);
+        words.append_all(body, der_integer(parts[1], size));
+        let out: uint8[list] = new([48]);
+        append_length(out, body.length);
+        words.append_all(out, body);
+        return out;
+    };
+
+    let encode_raw = func(curve: Curve, parts: uint32[list][list]) -> uint8[list] {
+        last size = scalar_length(curve);
+        let out = mp.to_bytes_be(parts[0], size);
+        words.append_all(out, mp.to_bytes_be(parts[1], size));
+        return out;
+    };
+
+    /// @brief The length at `at` and the offset after it, or [-1, 0] when it is not a minimal definite DER
+    /// length of at most two bytes.
+    let read_length = func(der: uint8[list], at: int) -> int[list] {
+        let fail: int[list] = new([-1, 0]);
+        if (at >= der.length) {
+            return fail;
+        }
+        last first = der[at] as int;
+        if (first < 128) {
+            return new([first, at + 1]);
+        }
+        if (first == 129 && at + 1 < der.length && der[at + 1] >= 128) {
+            return new([der[at + 1] as int, at + 2]);
+        }
+        if (first == 130 && at + 2 < der.length && der[at + 1] != 0) {
+            return new([(der[at + 1] as int) * 256 + (der[at + 2] as int), at + 3]);
+        }
+        return fail;
+    };
+
+    /// @brief [r, s] of a strict DER Ecdsa-Sig-Value with both from 1 to n - 1, or an empty list.
+    let decode_der = func(g: weierstrass.Curve, der: uint8[list]) -> uint32[list][list] {
+        let fail: uint32[list][list] = new;
+        if (der.length < 2 || der[0] != 48) {
+            return fail;
+        }
+        last sequence = read_length(der, 1);
+        if (sequence[0] < 0 || sequence[1] + sequence[0] != der.length) {
+            return fail;
+        }
+        let at = sequence[1];
+        let out: uint32[list][list] = new;
+        for (let index = 0; index < 2; index++) {
+            if (at >= der.length || der[at] != 2) {
+                return fail;
+            }
+            last field = read_length(der, at + 1);
+            if (field[0] < 1 || field[1] + field[0] > der.length) {
+                return fail;
+            }
+            last start = field[1];
+            last end = start + field[0];
+            if ((der[start] & 128) != 0 || (der[start] == 0 && field[0] > 1 && der[start + 1] < 128)) {
+                return fail;
+            }
+            last skip = der[start] == 0 ? 1 : 0;
+            match (g.scalar_in_range(words.slice(der, start + skip, end))) {
+                Optional.None => {
+                    return fail;
+                },
+                Optional.Some(value) => {
+                    out.append(value);
+                },
+            }
+            at = end;
+        }
+        if (at != der.length) {
+            return fail;
+        }
+        return out;
+    };
+
+    /// @brief [r, s] of r || s with both from 1 to n - 1, or an empty list.
+    let decode_raw = func(g: weierstrass.Curve, raw: uint8[list]) -> uint32[list][list] {
+        let fail: uint32[list][list] = new;
+        last size = g.size;
+        if (raw.length != 2 * size) {
+            return fail;
+        }
+        let out: uint32[list][list] = new;
+        for (let index = 0; index < 2; index++) {
+            match (g.scalar_in_range(words.slice(raw, index * size, (index + 1) * size))) {
+                Optional.None => {
+                    return fail;
+                },
+                Optional.Some(value) => {
+                    out.append(value);
+                },
+            }
+        }
+        return out;
+    };
+
+    /// @brief The r || s form of a DER signature. Malformed DER or values outside 1 to n - 1 are `Custom` code
+    /// `crypto.invalid_signature`.
+    #[NoDiscard, Since("0.3.0")]
+    export let der_to_raw = func(curve: Curve, der: uint8[list]) -> Result<uint8[list]> {
+        last parts = decode_der(group(curve), der);
+        if (parts.length != 2) {
+            return Result<uint8[list]>.Err(error.custom("crypto.invalid_signature", "malformed ECDSA DER signature"));
+        }
+        return Result<uint8[list]>.Ok(encode_raw(curve, parts));
+    };
+
+    /// @brief The DER form of an r || s signature. A wrong length or values outside 1 to n - 1 are `Custom` code
+    /// `crypto.invalid_signature`.
+    #[NoDiscard, Since("0.3.0")]
+    export let raw_to_der = func(curve: Curve, raw: uint8[list]) -> Result<uint8[list]> {
+        last parts = decode_raw(group(curve), raw);
+        if (parts.length != 2) {
+            return Result<uint8[list]>.Err(error.custom("crypto.invalid_signature", "malformed ECDSA r || s signature"));
+        }
+        return Result<uint8[list]>.Ok(encode_der(curve, parts));
+    };
+
+    /// @brief A public key from a SEC1 point. A point that is not on the curve, or a malformed encoding, is
+    /// `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(curve: Curve, sec1: uint8[list]) -> Result<EcPublicKey> {
+        crypto_policy.require(algorithm_of(curve));
+        if (optional_is_none(group(curve).decode(sec1))) {
+            return Result<EcPublicKey>.Err(error.custom("crypto.invalid_key", "not a " + name(curve) + " public key"));
+        }
+        return Result<EcPublicKey>.Ok(new EcPublicKey(curve, sec1));
+    };
+
+    /// @brief A private key from big-endian scalar bytes. A wrong length or a scalar outside 1 to n - 1 is
+    /// `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_private_key = func(curve: Curve, bytes: uint8[list]) -> Result<EcPrivateKey> {
+        crypto_policy.require(algorithm_of(curve));
+        if (bytes.length != scalar_length(curve) || optional_is_none(group(curve).scalar_in_range(bytes))) {
+            return Result<EcPrivateKey>.Err(error.custom("crypto.invalid_key", "not a " + name(curve) + " private key"));
+        }
+        return Result<EcPrivateKey>.Ok(new EcPrivateKey(curve, bytes));
+    };
+
+    let optional_is_none = func<T>(value: Optional<T>) -> bool => match (value) {
+        Optional.None => true,
+        Optional.Some(_) => false,
+    };
+
+    /// @brief A new private key by rejection sampling (FIPS 186-5, appendix A.4.2): scalar-length bytes, with
+    /// the bits above n's length cleared, until the value is from 1 to n - 1. The bytes come from
+    /// `Entropy.os_bytes` or from the given generator; an entropy failure is returned.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func(curve: Curve) -> Result<EcPrivateKey> {
+        crypto_policy.require(algorithm_of(curve));
+        last g = group(curve);
+        while (true) {
+            match (entropy.os_bytes(g.size)) {
+                Result.Ok(bytes) => {
+                    clear_high_bits(g, bytes);
+                    if (!optional_is_none(g.scalar_in_range(bytes))) {
+                        last key = new EcPrivateKey(curve, bytes);
+                        words.wipe(bytes);
+                        return Result<EcPrivateKey>.Ok(key);
+                    }
+                },
+                Result.Err(e) => {
+                    return Result<EcPrivateKey>.Err(e);
+                },
+            }
+        }
+        return Result<EcPrivateKey>.Err(error.custom("crypto.invalid_key", "unreachable"));
+    } or func(curve: Curve, random: drbg.ChaCha20Drbg) -> Result<EcPrivateKey> {
+        crypto_policy.require(algorithm_of(curve));
+        last g = group(curve);
+        while (true) {
+            let bytes = random.fill(g.size);
+            clear_high_bits(g, bytes);
+            if (!optional_is_none(g.scalar_in_range(bytes))) {
+                last key = new EcPrivateKey(curve, bytes);
+                words.wipe(bytes);
+                return Result<EcPrivateKey>.Ok(key);
+            }
+        }
+        return Result<EcPrivateKey>.Err(error.custom("crypto.invalid_key", "unreachable"));
+    };
+
+    let clear_high_bits = func(g: weierstrass.Curve, bytes: uint8[list]) {
+        last extra = g.size * 8 - g.order.bits;
+        if (extra > 0) {
+            bytes[0] = bytes[0] & ((255 >> extra) as uint8);
+        }
+    };
+);

@@ -1,0 +1,171 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let montgomery = import:Std.Crypto.Internal.Montgomery;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief X25519 key agreement of RFC 7748 (Stdlib.md section 20.8).
+///
+/// A private key is 32 random bytes; the function clamps them, as RFC 7748, section 5 says. A shared secret
+/// that is all zero, which a small-order peer key forces, is an error (RFC 7748, section 6.1), so a caller can
+/// never use it as a key by mistake. Any 32 bytes are a public key: the top bit is ignored and values at or
+/// above p are reduced, as the RFC requires. The ladder is branch-free in source; the runtime does not
+/// guarantee constant time.
+/// @see [Std.Crypto.Asymmetric.X25519](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519)
+#Since("0.3.0")
+export let X25519 = module (
+    /// @brief The X25519 key-agreement primitive, for the policy and for `PrivateKey<X25519>`.
+    #[Final, Since("0.3.0")]
+    export let X25519 = class implements CryptographicPrimitive<X25519> (
+        /// @brief Checks the policy.
+        export let init = func {
+            crypto_policy.require(Algorithm.X25519);
+        };
+
+        /// @brief `Algorithm.X25519`.
+        export let algorithm = func -> Algorithm => Algorithm.X25519;
+
+        /// @brief The shared secret of the private key and the peer's public key; see
+        /// `X25519PrivateKey.diffie_hellman`.
+        #NoDiscard
+        export let diffie_hellman = func(private_key: X25519PrivateKey, peer: X25519PublicKey) -> Result<SecretBytes> =>
+            private_key.diffie_hellman(peer);
+
+        export let.override to_string = func -> string => "X25519";
+    );
+
+    /// @brief An X25519 public key: 32 bytes, the u-coordinate little-endian. Equal keys have equal bytes.
+    #[Final, Since("0.3.0")]
+    export let X25519PublicKey = class (
+        last encoded: uint8[list];
+
+        /// @brief Copies the 32 bytes; another length traps (use `parse_public_key` for outside input).
+        export let init = func(bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.X25519);
+            if (bytes.length != 32) {
+                trap_with_message("invalid argument: X25519 public key must be 32 bytes");
+            }
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the 32 bytes.
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is X25519PublicKey)) {
+                return false;
+            }
+            return constant_time.ct_eq(encoded, (other as X25519PublicKey).to_bytes());
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = 25519;
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string => "X25519PublicKey(32 bytes)";
+    );
+
+    /// @brief An X25519 private key: 32 bytes in secret memory, with its public key. `to_string` never prints
+    /// it.
+    #[Final, Since("0.3.0")]
+    export let X25519PrivateKey = class implements PrivateKey<X25519> (
+        last material: SecretBytes;
+        last public_encoded: uint8[list];
+
+        /// @brief Copies the 32 bytes and computes the public key; another length traps.
+        export let init = func(bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.X25519);
+            if (bytes.length != 32) {
+                trap_with_message("invalid argument: X25519 private key must be 32 bytes");
+            }
+            material = new(bytes);
+            public_encoded = montgomery.x25519(bytes, base_point());
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+        export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> X25519PublicKey => new(public_encoded);
+
+        /// @brief X25519(this key, the peer's key). An all-zero result is `Custom` code `crypto.key_agreement`:
+        /// the peer sent a small-order point.
+        #NoDiscard
+        export let diffie_hellman = func(peer: X25519PublicKey) -> Result<SecretBytes> {
+            let shared = montgomery.x25519(material.expose(), peer.to_bytes());
+            if (constant_time.ct_eq(shared, words.zeros(32))) {
+                return Result<SecretBytes>.Err(error.custom("crypto.key_agreement",
+                    "X25519 shared secret is all zero (small-order public key)"));
+            }
+            last secret = new SecretBytes(shared);
+            words.wipe(shared);
+            return Result<SecretBytes>.Ok(secret);
+        };
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "X25519PrivateKey(<redacted>)";
+    );
+
+    /// @brief The u-coordinate 9 of the base point.
+    let base_point = func -> uint8[list] {
+        let u = words.zeros(32);
+        u[0] = 9;
+        return u;
+    };
+
+    /// @brief A new private key from 32 bytes of `Entropy.os_bytes`, or from the given generator. Fails when
+    /// the entropy source fails.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func -> Result<X25519PrivateKey> {
+        match (entropy.os_bytes(32)) {
+            Result.Ok(bytes) => {
+                last key = new X25519PrivateKey(bytes);
+                words.wipe(bytes);
+                return Result<X25519PrivateKey>.Ok(key);
+            },
+            Result.Err(e) => {
+                return Result<X25519PrivateKey>.Err(e);
+            },
+        }
+    } or func(random: drbg.ChaCha20Drbg) -> Result<X25519PrivateKey> {
+        let bytes = random.fill(32);
+        last key = new X25519PrivateKey(bytes);
+        words.wipe(bytes);
+        return Result<X25519PrivateKey>.Ok(key);
+    };
+
+    /// @brief A public key from outside the program. A wrong length is `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(bytes: uint8[list]) -> Result<X25519PublicKey> {
+        if (bytes.length != 32) {
+            return Result<X25519PublicKey>.Err(error.custom("crypto.invalid_key", "X25519 public key must be 32 bytes"));
+        }
+        return Result<X25519PublicKey>.Ok(new X25519PublicKey(bytes));
+    };
+
+    /// @brief The X25519 function of RFC 7748, section 5, on raw 32-byte strings: the scalar is clamped, the
+    /// result is returned even when it is all zero. Other lengths trap.
+    #[NoDiscard, Since("0.3.0")]
+    export let x25519 = func(scalar: uint8[list], u: uint8[list]) -> uint8[list] {
+        crypto_policy.require(Algorithm.X25519);
+        return montgomery.x25519(scalar, u);
+    };
+);

@@ -1,0 +1,84 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let error = import:Std.Core.Error;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Elliptic-curve Diffie-Hellman over P-256, P-384, P-521 and secp256k1 (SP 800-56A, SEC 1 section
+/// 3.3.1) with the keys of Std.Crypto.Asymmetric.Ecdsa (Stdlib.md section 20.8).
+///
+/// The shared secret is the x-coordinate of d Q as big-endian bytes of the curve's field length, the value
+/// that TLS, HPKE and JOSE feed to their key derivation. The peer's key was checked to be a point of the curve
+/// when it was parsed (the "full public-key validation" of SP 800-56A, section 5.6.2.3.3: the curves have
+/// cofactor 1). The scalar multiplication is branch-free in source; the runtime does not guarantee constant
+/// time.
+/// @see [Std.Crypto.Asymmetric.Ecdh](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ecdh)
+#Since("0.3.0")
+export let Ecdh = module (
+    /// @brief The ECDH primitive of one curve, for the policy.
+    #[Final, Since("0.3.0")]
+    export let Ecdh = class implements CryptographicPrimitive<Ecdh> (
+        /// @brief The curve.
+        export last curve: ecdsa.Curve;
+
+        /// @brief Checks the policy for the curve.
+        export let init = func(key_curve: ecdsa.Curve) {
+            crypto_policy.require(ecdsa.algorithm_of(key_curve));
+            curve = key_curve;
+        };
+
+        /// @brief The curve's identifier.
+        export let algorithm = func -> Algorithm => ecdsa.algorithm_of(curve);
+
+        /// @brief See the module function `diffie_hellman`; keys of another curve trap.
+        #NoDiscard
+        export let diffie_hellman = func(private_key: ecdsa.EcPrivateKey, peer: ecdsa.EcPublicKey) -> Result<SecretBytes> {
+            if (private_key.curve != curve) {
+                trap_with_message("invalid argument: the key is for another curve");
+            }
+            return shared_secret(private_key, peer);
+        };
+
+        export let.override to_string = func -> string => "Ecdh(" + curve.to_string() + ")";
+    );
+
+    /// @brief The x-coordinate of d Q. Keys on different curves trap with `invalid argument`. A result at
+    /// infinity, which a validated key on these prime-order curves cannot give, would be `Custom` code
+    /// `crypto.key_agreement`.
+    #[NoDiscard, Since("0.3.0")]
+    export let diffie_hellman = func(private_key: ecdsa.EcPrivateKey, peer: ecdsa.EcPublicKey) -> Result<SecretBytes> =>
+        shared_secret(private_key, peer);
+
+    let shared_secret = func(private_key: ecdsa.EcPrivateKey, peer: ecdsa.EcPublicKey) -> Result<SecretBytes> {
+        crypto_policy.require(ecdsa.algorithm_of(private_key.curve));
+        if (private_key.curve != peer.curve) {
+            trap_with_message("invalid argument: ECDH keys are on different curves");
+        }
+        last g = ecdsa.group(private_key.curve);
+        match (g.decode(peer.to_sec1(false))) {
+            Optional.None => {
+                return Result<SecretBytes>.Err(error.custom("crypto.key_agreement", "peer key is not a curve point"));
+            },
+            Optional.Some(point) => {
+                let d = mp.from_bytes_be(private_key.expose(), g.limbs());
+                last shared = g.multiply(d, point);
+                for (let i = 0; i < d.length; i++) {
+                    d[i] = 0;
+                }
+                if (g.is_identity(shared)) {
+                    return Result<SecretBytes>.Err(error.custom("crypto.key_agreement", "ECDH result is the point at infinity"));
+                }
+                let x = mp.to_bytes_be(g.affine_x(shared), g.size);
+                last secret = new SecretBytes(x);
+                words.wipe(x);
+                return Result<SecretBytes>.Ok(secret);
+            },
+        }
+    };
+);

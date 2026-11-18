@@ -19,6 +19,7 @@ export let Algorithm = module (
         Hkdf, Pbkdf2, Scrypt, Argon2id, Balloon,
         ChaCha20Drbg, OsEntropy,
         X25519, X448, Ed25519, Ed448, P256, P384, P521, Secp256k1, Rsa1024, RsaPss, RsaOaep, Hpke,
-        MlKem512, MlKem768, MlKem1024, MlDsa44, MlDsa65, MlDsa87, SlhDsa, FnDsa, X25519MlKem768, Ed25519MlDsa65
+        MlKem512, MlKem768, MlKem1024, MlDsa44, MlDsa65, MlDsa87, SlhDsa, FnDsa, X25519MlKem768, Ed25519MlDsa65,
+        RsaPkcs1v15, Blake2b, Ristretto255, Shamir, Frost, RsaBlindSignature, Oprf, Bulletproofs
     );
 );

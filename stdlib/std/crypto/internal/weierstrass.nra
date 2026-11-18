@@ -1,0 +1,354 @@
+let.promote _ = import:Std.Core.Optional;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The prime-order short Weierstrass groups P-256, P-384, P-521 (FIPS 186-5, SP 800-186) and secp256k1
+/// (SEC 2): points, the scalar field modulo n, and the SEC1 point codec. Internal: ECDSA, ECDH, HPKE, and later
+/// FROST, OPRF and PKI build on it.
+///
+/// Points are projective (X : Y : Z) with x = X/Z, y = Y/Z and the identity (0 : 1 : 0), field elements in
+/// Montgomery form. Addition is the complete formula of Renes, Costello and Batina (Eurocrypt 2016,
+/// Algorithms 1 and 3 for any a, with the multiplications by a = -3 or 0 done by additions), which handle
+/// doubling and the identity, so scalar multiplication adds a table entry for every window with no branch on
+/// the scalar. That is branch-free in source; the runtime does not
+/// guarantee constant time. Decoding works on public data. The constants come from
+/// scripts/crypto-vectors/gen-asymmetric-constants.py.
+#Since("0.3.0")
+export let Weierstrass = module (
+    /// @brief The curves.
+    export let CurveId = enum (P256, P384, P521, Secp256k1);
+
+    /// @brief A point in projective coordinates (Montgomery-form field elements). Immutable by convention.
+    #Final
+    export let Point = class (
+        export last x: uint32[list];
+        export last y: uint32[list];
+        export last z: uint32[list];
+
+        export let init = func(px: uint32[list], py: uint32[list], pz: uint32[list]) {
+            x = px;
+            y = py;
+            z = pz;
+        };
+
+        export let.override to_string = func -> string => "Weierstrass.Point";
+    );
+
+    /// @brief The hexadecimal constants of a curve: p, a, b, n, Gx, Gy.
+    let constants = func(id: CurveId) -> string[list] => match (id) {
+        CurveId.P256 => new([
+            "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+            "ffffffff00000001000000000000000000000000fffffffffffffffffffffffc",
+            "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b",
+            "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+            "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
+            "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"]),
+        CurveId.P384 => new([
+            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
+            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc",
+            "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
+            "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
+            "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
+            "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f"]),
+        CurveId.P521 => new([
+            "1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "1fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc",
+            "51953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00",
+            "1fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+            "c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66",
+            "11839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650"]),
+        CurveId.Secp256k1 => new([
+            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+            "0",
+            "7",
+            "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+            "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+            "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"]),
+    };
+
+    /// @brief One curve: its field modulo p, its scalars modulo n, and the coefficients. Build one per operation
+    /// (it holds scratch state, so a task must not share it).
+    #Final
+    export let Curve = class (
+        /// @brief The curve.
+        export last id: CurveId;
+        /// @brief The field modulo p.
+        export last field: mp.Modulus;
+        /// @brief The scalars modulo n.
+        export last order: mp.Modulus;
+        /// @brief The byte length of a field element and of a scalar: 32, 48, 66 or 32.
+        export last size: int;
+        last b: uint32[list];
+        last b3: uint32[list];
+        last gx: uint32[list];
+        last gy: uint32[list];
+        /// @brief (p + 1) / 4: every curve here has p = 3 mod 4.
+        last sqrt_exponent: uint32[list];
+        /// @brief Whether a = 0 (secp256k1); otherwise a = -3 (the NIST curves).
+        last a_is_zero: bool;
+
+        export let init = func(curve: CurveId) {
+            id = curve;
+            last c = constants(curve);
+            last limbs = curve == CurveId.P256 || curve == CurveId.Secp256k1 ? 8 : (curve == CurveId.P384 ? 12 : 17);
+            field = new(mp.from_hex(c[0], limbs));
+            order = new(mp.from_hex(c[3], limbs));
+            size = (field.bits + 7) / 8;
+            b = field.to_mont(mp.from_hex(c[2], limbs));
+            b3 = field.add(field.add(b, b), b);
+            gx = field.to_mont(mp.from_hex(c[4], limbs));
+            gy = field.to_mont(mp.from_hex(c[5], limbs));
+            sqrt_exponent = mp.shift_right(mp.plain_add(field.m, mp.small(1, limbs)), 2);
+            a_is_zero = curve == CurveId.Secp256k1;
+        };
+
+        /// @brief a x: -3 x by additions on the NIST curves, 0 on secp256k1. Which one is public.
+        let mul_a = func(value: uint32[list]) -> uint32[list] {
+            if (a_is_zero) {
+                return mp.zeros(field.n);
+            }
+            return field.neg(field.add(field.add(value, value), value));
+        };
+
+        /// @brief The limb count of field elements and scalars.
+        export let limbs = func -> int => field.n;
+
+        /// @brief The neutral element (0 : 1 : 0).
+        export let identity = func -> Point => new(mp.zeros(field.n), field.one, mp.zeros(field.n));
+
+        /// @brief The generator G.
+        export let generator = func -> Point => new(gx, gy, field.one);
+
+        /// @brief P + Q by the complete formula (Renes, Costello, Batina 2016, Algorithm 1). It also gives 2 P
+        /// for Q = P and works with the identity.
+        export let add = func(p: Point, q: Point) -> Point {
+            last f = field;
+            let t0 = f.mul(p.x, q.x);
+            let t1 = f.mul(p.y, q.y);
+            let t2 = f.mul(p.z, q.z);
+            let t3 = f.add(p.x, p.y);
+            let t4 = f.add(q.x, q.y);
+            t3 = f.mul(t3, t4);
+            t4 = f.add(t0, t1);
+            t3 = f.sub(t3, t4);
+            t4 = f.add(p.x, p.z);
+            let t5 = f.add(q.x, q.z);
+            t4 = f.mul(t4, t5);
+            t5 = f.add(t0, t2);
+            t4 = f.sub(t4, t5);
+            t5 = f.add(p.y, p.z);
+            let x3 = f.add(q.y, q.z);
+            t5 = f.mul(t5, x3);
+            x3 = f.add(t1, t2);
+            t5 = f.sub(t5, x3);
+            let z3 = mul_a(t4);
+            x3 = f.mul(b3, t2);
+            z3 = f.add(x3, z3);
+            x3 = f.sub(t1, z3);
+            z3 = f.add(t1, z3);
+            let y3 = f.mul(x3, z3);
+            t1 = f.add(t0, t0);
+            t1 = f.add(t1, t0);
+            t2 = mul_a(t2);
+            t4 = f.mul(b3, t4);
+            t1 = f.add(t1, t2);
+            t2 = f.sub(t0, t2);
+            t2 = mul_a(t2);
+            t4 = f.add(t4, t2);
+            t0 = f.mul(t1, t4);
+            y3 = f.add(y3, t0);
+            t0 = f.mul(t5, t4);
+            x3 = f.mul(t3, x3);
+            x3 = f.sub(x3, t0);
+            t0 = f.mul(t3, t1);
+            z3 = f.mul(t5, z3);
+            z3 = f.add(z3, t0);
+            return new(x3, y3, z3);
+        };
+
+        /// @brief 2 P by the complete doubling formula (Renes, Costello, Batina 2016, Algorithm 3).
+        export let double = func(p: Point) -> Point {
+            last f = field;
+            let t0 = f.sqr(p.x);
+            let t1 = f.sqr(p.y);
+            let t2 = f.sqr(p.z);
+            let t3 = f.mul(p.x, p.y);
+            t3 = f.add(t3, t3);
+            let z3 = f.mul(p.x, p.z);
+            z3 = f.add(z3, z3);
+            let x3 = mul_a(z3);
+            let y3 = f.mul(b3, t2);
+            y3 = f.add(x3, y3);
+            x3 = f.sub(t1, y3);
+            y3 = f.add(t1, y3);
+            y3 = f.mul(x3, y3);
+            x3 = f.mul(t3, x3);
+            z3 = f.mul(b3, z3);
+            t2 = mul_a(t2);
+            t3 = f.sub(t0, t2);
+            t3 = mul_a(t3);
+            t3 = f.add(t3, z3);
+            z3 = f.add(t0, t0);
+            t0 = f.add(z3, t0);
+            t0 = f.add(t0, t2);
+            t0 = f.mul(t0, t3);
+            y3 = f.add(y3, t0);
+            t2 = f.mul(p.y, p.z);
+            t2 = f.add(t2, t2);
+            t0 = f.mul(t2, t3);
+            x3 = f.sub(x3, t0);
+            z3 = f.mul(t2, t1);
+            z3 = f.add(z3, z3);
+            z3 = f.add(z3, z3);
+            return new(x3, y3, z3);
+        };
+
+        /// @brief -P.
+        export let negate = func(p: Point) -> Point => new(p.x, field.neg(p.y), p.z);
+
+        /// @brief Selects `a` when `choice` is 1 and `b` when it is 0.
+        export let select = func(choice: uint32, first: Point, second: Point) -> Point =>
+            new(mp.select(choice, first.x, second.x), mp.select(choice, first.y, second.y),
+                mp.select(choice, first.z, second.z));
+
+        /// @brief k P for a scalar of any limb count, with a fixed 4-bit window; the steps depend only on the
+        /// scalar's limb count.
+        export let multiply = func(k: uint32[list], p: Point) -> Point {
+            last table = window_table(p);
+            let acc = identity();
+            for (let window = k.length * 8 - 1; window >= 0; window--) {
+                acc = double(double(double(double(acc))));
+                last digit = (k[window / 8] >> ((window % 8) * 4)) & 15;
+                let chosen = identity();
+                for (let i = 0; i < 16; i++) {
+                    chosen = select(mp.eq32(i as uint32, digit), table[i], chosen);
+                }
+                acc = add(acc, chosen);
+            }
+            return acc;
+        };
+
+        /// @brief k G.
+        export let multiply_generator = func(k: uint32[list]) -> Point => multiply(k, generator());
+
+        /// @brief k1 P1 + k2 P2 with shared doublings (Straus), scalars of one limb count; the steps depend only
+        /// on that count. Table entries are read by index, so use it for verification, where the scalars are
+        /// public.
+        export let multiply_two = func(k1: uint32[list], p1: Point, k2: uint32[list], p2: Point) -> Point {
+            last first = window_table(p1);
+            last second = window_table(p2);
+            let acc = identity();
+            for (let window = k1.length * 8 - 1; window >= 0; window--) {
+                acc = double(double(double(double(acc))));
+                acc = add(acc, first[((k1[window / 8] >> ((window % 8) * 4)) & 15) as int]);
+                acc = add(acc, second[((k2[window / 8] >> ((window % 8) * 4)) & 15) as int]);
+            }
+            return acc;
+        };
+
+        /// @brief [0 P, 1 P, ..., 15 P].
+        let window_table = func(p: Point) -> Point[list] {
+            let table: Point[list] = new;
+            table.append(identity());
+            table.append(p);
+            for (let i = 2; i < 16; i++) {
+                table.append(i % 2 == 0 ? double(table[i / 2]) : add(table[i - 1], p));
+            }
+            return table;
+        };
+
+        /// @brief Whether P is the identity (Z = 0).
+        export let is_identity = func(p: Point) -> bool => mp.is_zero(p.z) == 1;
+
+        /// @brief Whether P and Q are the same point.
+        export let equal = func(p: Point, q: Point) -> bool {
+            last f = field;
+            last same_x = mp.equal(f.mul(p.x, q.z), f.mul(q.x, p.z));
+            last same_y = mp.equal(f.mul(p.y, q.z), f.mul(q.y, p.z));
+            return (same_x & same_y) == 1;
+        };
+
+        /// @brief The affine x-coordinate of a point other than the identity, as an ordinary value.
+        export let affine_x = func(p: Point) -> uint32[list] => field.from_mont(field.mul(p.x, field.inv(p.z)));
+
+        /// @brief The SEC1 encoding (SEC 1 v2, section 2.3.3) of a point other than the identity: 0x04 || x || y,
+        /// or 0x02 / 0x03 || x when compressed. The identity traps.
+        export let encode = func(p: Point, compressed: bool) -> uint8[list] {
+            if (is_identity(p)) {
+                trap_with_message("invalid argument: the identity has no SEC1 encoding here");
+            }
+            last f = field;
+            last zi = f.inv(p.z);
+            last x = f.from_mont(f.mul(p.x, zi));
+            last y = f.from_mont(f.mul(p.y, zi));
+            let out: uint8[list] = new;
+            if (compressed) {
+                out.append((2 + (y[0] & 1)) as uint8);
+                words.append_all(out, mp.to_bytes_be(x, size));
+            } else {
+                out.append(4);
+                words.append_all(out, mp.to_bytes_be(x, size));
+                words.append_all(out, mp.to_bytes_be(y, size));
+            }
+            return out;
+        };
+
+        /// @brief The point of a SEC1 encoding (SEC 1 v2, section 2.3.4), or None when the form or length is
+        /// wrong, a coordinate is not below p, or the point is not on the curve. The identity (0x00) is
+        /// refused, so every result is a valid point of the prime-order group.
+        export let decode = func(bytes: uint8[list]) -> Optional<Point> {
+            last f = field;
+            if (bytes.length == 1 + 2 * size && bytes[0] == 4) {
+                last x = mp.from_bytes_be(words.slice(bytes, 1, 1 + size), f.n);
+                last y = mp.from_bytes_be(words.slice(bytes, 1 + size, 1 + 2 * size), f.n);
+                if (mp.less(x, f.m) == 0 || mp.less(y, f.m) == 0) {
+                    return Optional<Point>.None;
+                }
+                last xm = f.to_mont(x);
+                last ym = f.to_mont(y);
+                if (mp.equal(f.sqr(ym), rhs(xm)) == 0) {
+                    return Optional<Point>.None;
+                }
+                return Optional<Point>.Some(new(xm, ym, f.one));
+            }
+            if (bytes.length == 1 + size && (bytes[0] == 2 || bytes[0] == 3)) {
+                last x = mp.from_bytes_be(words.slice(bytes, 1, 1 + size), f.n);
+                if (mp.less(x, f.m) == 0) {
+                    return Optional<Point>.None;
+                }
+                last xm = f.to_mont(x);
+                last alpha = rhs(xm);
+                let ym = f.pow(alpha, sqrt_exponent);
+                if (mp.equal(f.sqr(ym), alpha) == 0) {
+                    return Optional<Point>.None;
+                }
+                last parity = (f.from_mont(ym)[0] & 1) as uint32;
+                if (parity != ((bytes[0] - 2) as uint32)) {
+                    ym = f.neg(ym);
+                }
+                return Optional<Point>.Some(new(xm, ym, f.one));
+            }
+            return Optional<Point>.None;
+        };
+
+        /// @brief x^3 + a x + b for a Montgomery-form x.
+        let rhs = func(x: uint32[list]) -> uint32[list] {
+            last f = field;
+            return f.add(f.add(f.mul(f.sqr(x), x), mul_a(x)), b);
+        };
+
+        /// @brief The scalar of big-endian bytes (at most `size`) when it is from 1 to n - 1, else None.
+        export let scalar_in_range = func(bytes: uint8[list]) -> Optional<uint32[list]> {
+            if (bytes.length > size) {
+                return Optional<uint32[list]>.None;
+            }
+            last s = mp.from_bytes_be(bytes, order.n);
+            if (mp.is_zero(s) == 1 || mp.less(s, order.m) == 0) {
+                return Optional<uint32[list]>.None;
+            }
+            return Optional<uint32[list]>.Some(s);
+        };
+
+        export let.override to_string = func -> string => "Weierstrass.Curve(" + id.to_string() + ")";
+    );
+);

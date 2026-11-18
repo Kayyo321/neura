@@ -1,0 +1,568 @@
+/// @brief Fixed-width multiprecision arithmetic for the public-key code of Std.Crypto. Internal: only library
+/// source may import it.
+///
+/// A number is a `uint32[list]` of limbs, least significant first, whose length is fixed by its use (the limb
+/// count of a modulus, or a public size), never by its value. Every intermediate is a uint64 by the limb row of
+/// Stdlib.md section 7.2, so no operation can overflow, and every operation runs the same steps for every value
+/// of its operands: loops run over public lengths and choices are made with masks. That makes the code
+/// branch-free in source; the runtime does not guarantee constant time. The few functions that are not
+/// branch-free say so and are used only on public values. `Modulus` gives Montgomery arithmetic modulo an odd
+/// number; the curves of Std.Crypto.Asymmetric and RSA share it.
+#Since("0.3.0")
+export let Mp = module (
+    /// @brief The mask of the low 32 bits of a limb calculation.
+    const Mask: uint64 = 4294967295;
+
+    /// @brief A new number of `n` zero limbs.
+    export let zeros = func(n: int) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let i = 0; i < n; i++) {
+            out.append(0);
+        }
+        return out;
+    };
+
+    /// @brief A new number of `n` limbs with the value `value` (below 2^32).
+    export let small = func(value: uint32, n: int) -> uint32[list] {
+        let out = zeros(n);
+        out[0] = value;
+        return out;
+    };
+
+    /// @brief A copy of the limbs.
+    export let copy = func(a: uint32[list]) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let limb in a) {
+            out.append(limb);
+        }
+        return out;
+    };
+
+    /// @brief The value as `n` limbs: extra high limbs must be zero (a public check that traps), missing ones are
+    /// filled with zeros.
+    export let resize = func(a: uint32[list], n: int) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let i = 0; i < n; i++) {
+            out.append(i < a.length ? a[i] : 0);
+        }
+        for (let i = n; i < a.length; i++) {
+            if (a[i] != 0) {
+                trap_with_message("invalid argument: number does not fit in " + n.to_string() + " limbs");
+            }
+        }
+        return out;
+    };
+
+    /// @brief The number with the hexadecimal digits of `text`, most significant first, as `n` limbs. For
+    /// constants in library source; a bad digit or a value too large traps.
+    export let from_hex = func(text: string, n: int) -> uint32[list] {
+        let out = zeros(n);
+        let position = 0;
+        for (let i = text.byte_length - 1; i >= 0; i--) {
+            last c = text.byte_at(i) as uint32;
+            last digit: uint32;
+            if (c >= 48 && c <= 57) {
+                digit = c - 48;
+            } else if (c >= 97 && c <= 102) {
+                digit = c - 87;
+            } else if (c >= 65 && c <= 70) {
+                digit = c - 55;
+            } else {
+                trap_with_message("invalid argument: bad hexadecimal digit in a constant");
+            }
+            if (digit != 0) {
+                if (position / 8 >= n) {
+                    trap_with_message("invalid argument: constant does not fit");
+                }
+                out[position / 8] = out[position / 8] | (digit << ((position % 8) * 4));
+            }
+            position++;
+        }
+        return out;
+    };
+
+    /// @brief The big-endian bytes as `n` limbs. More bytes than 4n trap unless the extra leading ones are zero.
+    export let from_bytes_be = func(bytes: uint8[list], n: int) -> uint32[list] {
+        let out = zeros(n);
+        last length = bytes.length;
+        for (let i = 0; i < length; i++) {
+            last position = length - 1 - i;
+            last b = bytes[i] as uint32;
+            if (position / 4 >= n) {
+                if (b != 0) {
+                    trap_with_message("invalid argument: number does not fit in " + n.to_string() + " limbs");
+                }
+            } else {
+                out[position / 4] = out[position / 4] | (b << ((position % 4) * 8));
+            }
+        }
+        return out;
+    };
+
+    /// @brief The little-endian bytes as `n` limbs, with the same rule for extra bytes.
+    export let from_bytes_le = func(bytes: uint8[list], n: int) -> uint32[list] {
+        let out = zeros(n);
+        for (let i = 0; i < bytes.length; i++) {
+            last b = bytes[i] as uint32;
+            if (i / 4 >= n) {
+                if (b != 0) {
+                    trap_with_message("invalid argument: number does not fit in " + n.to_string() + " limbs");
+                }
+            } else {
+                out[i / 4] = out[i / 4] | (b << ((i % 4) * 8));
+            }
+        }
+        return out;
+    };
+
+    /// @brief The low `length` bytes of the number, most significant first.
+    export let to_bytes_be = func(a: uint32[list], length: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = length - 1; i >= 0; i--) {
+            out.append(i / 4 < a.length ? ((a[i / 4] >> ((i % 4) * 8)) & 255) as uint8 : 0);
+        }
+        return out;
+    };
+
+    /// @brief The low `length` bytes of the number, least significant first.
+    export let to_bytes_le = func(a: uint32[list], length: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < length; i++) {
+            out.append(i / 4 < a.length ? ((a[i / 4] >> ((i % 4) * 8)) & 255) as uint8 : 0);
+        }
+        return out;
+    };
+
+    /// @brief out = a + b over the length of `out` (all three of one length); returns the carry, 0 or 1. `out` may
+    /// be `a` or `b`.
+    export let add_into = func(out: uint32[list], a: uint32[list], b: uint32[list]) -> uint32 {
+        let carry: uint64 = 0;
+        for (let i = 0; i < out.length; i++) {
+            last s = (a[i] as uint64) + (b[i] as uint64) + carry;
+            out[i] = (s & Mask) as uint32;
+            carry = s >> 32;
+        }
+        return carry as uint32;
+    };
+
+    /// @brief out = a - b modulo 2^(32 n) (all three of one length); returns the borrow, 1 when a < b. `out` may
+    /// be `a` or `b`.
+    export let sub_into = func(out: uint32[list], a: uint32[list], b: uint32[list]) -> uint32 {
+        let borrow: uint64 = 0;
+        for (let i = 0; i < out.length; i++) {
+            // a + 2^32 - b - borrow is between 0 and 2^33 - 1.
+            last d = (a[i] as uint64) + 4294967296 - (b[i] as uint64) - borrow;
+            out[i] = (d & Mask) as uint32;
+            borrow = 1 - (d >> 32);
+        }
+        return borrow as uint32;
+    };
+
+    /// @brief a + b modulo 2^(32 n), as a new number.
+    export let plain_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
+        let out = zeros(a.length);
+        let _ = add_into(out, a, b);
+        return out;
+    };
+
+    /// @brief a - b modulo 2^(32 n), as a new number.
+    export let plain_sub = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
+        let out = zeros(a.length);
+        let _ = sub_into(out, a, b);
+        return out;
+    };
+
+    /// @brief 1 when a < b, otherwise 0 (one length).
+    export let less = func(a: uint32[list], b: uint32[list]) -> uint32 {
+        let borrow: uint64 = 0;
+        for (let i = 0; i < a.length; i++) {
+            last d = (a[i] as uint64) + 4294967296 - (b[i] as uint64) - borrow;
+            borrow = 1 - (d >> 32);
+        }
+        return borrow as uint32;
+    };
+
+    /// @brief 1 when every limb is zero, otherwise 0.
+    export let is_zero = func(a: uint32[list]) -> uint32 {
+        let any: uint32 = 0;
+        for (let limb in a) {
+            any = any | limb;
+        }
+        // (x + 2^32 - 1) >> 32 is 1 exactly when x is not zero.
+        return ((((any as uint64) + 4294967295) >> 32) as uint32) ^ 1;
+    };
+
+    /// @brief 1 when a equals b (one length), otherwise 0.
+    export let equal = func(a: uint32[list], b: uint32[list]) -> uint32 {
+        let any: uint32 = 0;
+        for (let i = 0; i < a.length; i++) {
+            any = any | (a[i] ^ b[i]);
+        }
+        return ((((any as uint64) + 4294967295) >> 32) as uint32) ^ 1;
+    };
+
+    /// @brief 1 when the 32-bit values are equal, otherwise 0.
+    export let eq32 = func(a: uint32, b: uint32) -> uint32 => (((((a ^ b) as uint64) + 4294967295) >> 32) as uint32) ^ 1;
+
+    /// @brief A new number: `a` when `choice` is 1, `b` when it is 0 (one length).
+    export let select = func(choice: uint32, a: uint32[list], b: uint32[list]) -> uint32[list] {
+        last mask = choice * 4294967295;
+        let out: uint32[list] = new;
+        for (let i = 0; i < a.length; i++) {
+            out.append((a[i] & mask) | (b[i] & ~mask));
+        }
+        return out;
+    };
+
+    /// @brief Sets `target` to `source` when `choice` is 1 and leaves it when it is 0.
+    export let assign_if = func(choice: uint32, target: uint32[list], source: uint32[list]) {
+        last mask = choice * 4294967295;
+        for (let i = 0; i < target.length; i++) {
+            target[i] = (source[i] & mask) | (target[i] & ~mask);
+        }
+    };
+
+    /// @brief Exchanges the contents of `a` and `b` when `choice` is 1.
+    export let cswap = func(choice: uint32, a: uint32[list], b: uint32[list]) {
+        last mask = choice * 4294967295;
+        for (let i = 0; i < a.length; i++) {
+            last t = (a[i] ^ b[i]) & mask;
+            a[i] = a[i] ^ t;
+            b[i] = b[i] ^ t;
+        }
+    };
+
+    /// @brief Bit `index` of the number (0 is the least significant), 0 beyond its length.
+    export let bit = func(a: uint32[list], index: int) -> uint32 =>
+        index / 32 < a.length ? (a[index / 32] >> (index % 32)) & 1 : 0;
+
+    /// @brief The position of the highest one bit plus one; 0 for zero. Not branch-free: for public values.
+    export let bit_length = func(a: uint32[list]) -> int {
+        for (let i = a.length - 1; i >= 0; i--) {
+            if (a[i] != 0) {
+                let bits = 32;
+                let top = a[i];
+                while ((top & 2147483648) == 0) {
+                    top = top << 1;
+                    bits--;
+                }
+                return i * 32 + bits;
+            }
+        }
+        return 0;
+    };
+
+    /// @brief floor(a / 2^count) for 0 <= count < 32, same length.
+    export let shift_right_small = func(a: uint32[list], count: int) -> uint32[list] {
+        if (count == 0) {
+            return copy(a);
+        }
+        let out: uint32[list] = new;
+        for (let i = 0; i < a.length; i++) {
+            let limb = a[i] >> count;
+            if (i + 1 < a.length) {
+                limb = limb | (a[i + 1] << (32 - count));
+            }
+            out.append(limb);
+        }
+        return out;
+    };
+
+    /// @brief floor(a / 2^count) for any count >= 0, same length.
+    export let shift_right = func(a: uint32[list], count: int) -> uint32[list] {
+        last limbs = count / 32;
+        let moved = zeros(a.length);
+        for (let i = 0; i + limbs < a.length; i++) {
+            moved[i] = a[i + limbs];
+        }
+        return shift_right_small(moved, count % 32);
+    };
+
+    /// @brief The full product a b, with a.length + b.length limbs (schoolbook).
+    export let mul_full = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
+        let out = zeros(a.length + b.length);
+        for (let i = 0; i < a.length; i++) {
+            let carry: uint64 = 0;
+            last ai = a[i] as uint64;
+            for (let j = 0; j < b.length; j++) {
+                last s = (out[i + j] as uint64) + ai * (b[j] as uint64) + carry;
+                out[i + j] = (s & Mask) as uint32;
+                carry = s >> 32;
+            }
+            out[i + b.length] = carry as uint32;
+        }
+        return out;
+    };
+
+    /// @brief a mod d for a nonzero divisor below 2^32. The divisor is public; the loop is over the limbs.
+    export let rem_small = func(a: uint32[list], divisor: uint32) -> uint32 {
+        last d = divisor as uint64;
+        let rest: uint64 = 0;
+        for (let i = a.length - 1; i >= 0; i--) {
+            rest = ((rest << 32) | (a[i] as uint64)) % d;
+        }
+        return rest as uint32;
+    };
+
+    /// @brief [a / d, a mod d] for a nonzero divisor below 2^32, the quotient with a's length.
+    export let divmod_small = func(a: uint32[list], divisor: uint32) -> [uint32[list], uint32] {
+        last d = divisor as uint64;
+        let quotient = zeros(a.length);
+        let rest: uint64 = 0;
+        for (let i = a.length - 1; i >= 0; i--) {
+            last current = (rest << 32) | (a[i] as uint64);
+            quotient[i] = (current / d) as uint32;
+            rest = current % d;
+        }
+        return [quotient, rest as uint32];
+    };
+
+    /// @brief [a / m, a mod m] by restoring binary division over every bit of `a`: the quotient has a's length
+    /// and the remainder m's. Branch-free in source, for any nonzero m, including even ones (RSA's p - 1).
+    export let divmod = func(a: uint32[list], m: uint32[list]) -> [uint32[list], uint32[list]] {
+        last n = m.length;
+        let quotient = zeros(a.length);
+        let rest = zeros(n + 1);
+        let wide_m = resize(m, n + 1);
+        let trial = zeros(n + 1);
+        for (let index = a.length * 32 - 1; index >= 0; index--) {
+            // rest = 2 rest + bit; rest < 2 m fits n + 1 limbs.
+            let carry = bit(a, index);
+            for (let i = 0; i <= n; i++) {
+                last limb = rest[i];
+                rest[i] = (limb << 1) | carry;
+                carry = limb >> 31;
+            }
+            last borrow = sub_into(trial, rest, wide_m);
+            last keep = borrow ^ 1;
+            assign_if(keep, rest, trial);
+            quotient[index / 32] = quotient[index / 32] | (keep << (index % 32));
+        }
+        return [quotient, resize_low(rest, n)];
+    };
+
+    /// @brief The low `n` limbs.
+    let resize_low = func(a: uint32[list], n: int) -> uint32[list] {
+        let out: uint32[list] = new;
+        for (let i = 0; i < n; i++) {
+            out.append(a[i]);
+        }
+        return out;
+    };
+
+    /// @brief Arithmetic modulo an odd number m, in Montgomery form with R = 2^(32 n), n the limb count of m.
+    ///
+    /// Elements are numbers of n limbs below m. `mul` and `sqr` take and give Montgomery forms (x R mod m);
+    /// `add`, `sub` and `neg` work in either form. `to_mont` and `from_mont` convert. Every operation is
+    /// branch-free in source.
+    #Final
+    export let Modulus = class (
+        /// @brief The limb count n.
+        export last n: int;
+        /// @brief The modulus m.
+        export last m: uint32[list];
+        /// @brief The bit length of m.
+        export last bits: int;
+        /// @brief -m^-1 mod 2^32.
+        last m0inv: uint64;
+        /// @brief R mod m: the Montgomery form of 1.
+        export let one: uint32[list] = new;
+        /// @brief R^2 mod m.
+        let r2: uint32[list] = new;
+        /// @brief The scratch row of `mul`.
+        let t: uint64[list] = new;
+        /// @brief The scratch row of `add`.
+        let u: uint64[list] = new;
+
+        /// @brief Takes an odd modulus above 1; an even one traps.
+        export let init = func(modulus: uint32[list]) {
+            if ((modulus[0] & 1) == 0 || bit_length(modulus) < 2) {
+                trap_with_message("invalid argument: Montgomery modulus must be odd and above 1");
+            }
+            n = modulus.length;
+            m = copy(modulus);
+            bits = bit_length(modulus);
+            // Newton's iteration for m0^-1 mod 2^32: x is right to 3 bits at the start (m0 m0 = 1 mod 8) and
+            // doubles its correct bits each round.
+            last m0 = modulus[0] as uint64;
+            let x: uint64 = m0;
+            for (let i = 0; i < 5; i++) {
+                last product = (m0 * x) & Mask;
+                x = (x * ((4294967298 - product) & Mask)) & Mask;
+            }
+            m0inv = (4294967296 - x) & Mask;
+            for (let i = 0; i < n + 2; i++) {
+                t.append(0);
+                u.append(0);
+            }
+            // R mod m by doubling 1, then R^2 mod m = (2 in Montgomery form)^(32 n) in Montgomery form.
+            let value = small(1, n);
+            for (let i = 0; i < 32 * n; i++) {
+                value = add(value, value);
+            }
+            one = value;
+            last two = add(one, one);
+            r2 = pow_public(two, 32 * n);
+        };
+
+        /// @brief The Montgomery product a b R^-1 mod m, for a below R and b below m (CIOS with the product and
+        /// the reduction in one inner loop: each sum is at most (2^32 - 1)^2 + 2 (2^32 - 1) = 2^64 - 1).
+        export let mul = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
+            for (let i = 0; i <= n; i++) {
+                t[i] = 0;
+            }
+            for (let i = 0; i < n; i++) {
+                last ai = a[i] as uint64;
+                last first = t[0] + ai * (b[0] as uint64);
+                let c1 = first >> 32;
+                last low = first & Mask;
+                last q = (low * m0inv) & Mask;
+                let c2 = (low + q * (m[0] as uint64)) >> 32;
+                for (let j = 1; j < n; j++) {
+                    last s = t[j] + ai * (b[j] as uint64) + c1;
+                    c1 = s >> 32;
+                    last s2 = (s & Mask) + q * (m[j] as uint64) + c2;
+                    c2 = s2 >> 32;
+                    t[j - 1] = s2 & Mask;
+                }
+                last top = t[n] + c1 + c2;
+                t[n - 1] = top & Mask;
+                t[n] = top >> 32;
+            }
+            return reduce_once(t, (t[n] & 1) as uint32);
+        };
+
+        /// @brief The low n limbs of `value` less m when the value (with `high` as limb n) is at least m,
+        /// otherwise the low n limbs; the value must be below 2m.
+        let reduce_once = func(value: uint64[list], high: uint32) -> uint32[list] {
+            let out: uint32[list] = new;
+            let borrow: uint64 = 0;
+            for (let i = 0; i < n; i++) {
+                last d = value[i] + 4294967296 - (m[i] as uint64) - borrow;
+                out.append((d & Mask) as uint32);
+                borrow = 1 - (d >> 32);
+            }
+            last keep = high | ((borrow as uint32) ^ 1);
+            last mask = keep * 4294967295;
+            for (let i = 0; i < n; i++) {
+                out[i] = (out[i] & mask) | ((value[i] as uint32) & ~mask);
+            }
+            return out;
+        };
+
+        /// @brief a^2 R^-1 mod m.
+        export let sqr = func(a: uint32[list]) -> uint32[list] => mul(a, a);
+
+        /// @brief a + b mod m.
+        export let add = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
+            let carry: uint64 = 0;
+            for (let i = 0; i < n; i++) {
+                last s = (a[i] as uint64) + (b[i] as uint64) + carry;
+                u[i] = s & Mask;
+                carry = s >> 32;
+            }
+            return reduce_once(u, carry as uint32);
+        };
+
+        /// @brief a - b mod m.
+        export let sub = func(a: uint32[list], b: uint32[list]) -> uint32[list] {
+            let out: uint32[list] = new;
+            let borrow: uint64 = 0;
+            for (let i = 0; i < n; i++) {
+                last d = (a[i] as uint64) + 4294967296 - (b[i] as uint64) - borrow;
+                out.append((d & Mask) as uint32);
+                borrow = 1 - (d >> 32);
+            }
+            // Add m back when the difference borrowed.
+            last mask = borrow * 4294967295;
+            let carry: uint64 = 0;
+            for (let i = 0; i < n; i++) {
+                last s = (out[i] as uint64) + ((m[i] as uint64) & mask) + carry;
+                out[i] = (s & Mask) as uint32;
+                carry = s >> 32;
+            }
+            return out;
+        };
+
+        /// @brief -a mod m.
+        export let neg = func(a: uint32[list]) -> uint32[list] => sub(zeros(n), a);
+
+        /// @brief The Montgomery form a R mod m of any number a of n limbs (a may exceed m).
+        export let to_mont = func(a: uint32[list]) -> uint32[list] => mul(a, r2);
+
+        /// @brief The ordinary value of a Montgomery form.
+        export let from_mont = func(a: uint32[list]) -> uint32[list] => mul(a, small(1, n));
+
+        /// @brief a mod m for a number of n limbs that may exceed m.
+        export let reduce_limbs = func(a: uint32[list]) -> uint32[list] => mul(a, one);
+
+        /// @brief a mod m for a number of any length, as n limbs (Horner's rule over n-limb chunks).
+        export let reduce = func(a: uint32[list]) -> uint32[list] {
+            last chunks = (a.length + n - 1) / n;
+            let acc = zeros(n);
+            for (let c = chunks - 1; c >= 0; c--) {
+                let chunk = zeros(n);
+                for (let i = 0; i < n; i++) {
+                    if (c * n + i < a.length) {
+                        chunk[i] = a[c * n + i];
+                    }
+                }
+                acc = add(mul(acc, r2), mul(chunk, one));
+            }
+            return acc;
+        };
+
+        /// @brief The big-endian bytes reduced mod m, as n limbs.
+        export let reduce_bytes_be = func(bytes: uint8[list]) -> uint32[list] =>
+            reduce(from_bytes_be(bytes, (bytes.length + 3) / 4 + 1));
+
+        /// @brief The little-endian bytes reduced mod m, as n limbs.
+        export let reduce_bytes_le = func(bytes: uint8[list]) -> uint32[list] =>
+            reduce(from_bytes_le(bytes, (bytes.length + 3) / 4 + 1));
+
+        /// @brief base^exponent in Montgomery form for a Montgomery `base` and an exponent of any limb count,
+        /// with a fixed 4-bit window and a table scan, so that the steps depend only on the exponent's length.
+        export let pow = func(base: uint32[list], exponent: uint32[list]) -> uint32[list] {
+            let table: uint32[list][list] = new;
+            table.append(one);
+            table.append(base);
+            for (let i = 2; i < 16; i++) {
+                table.append(mul(table[i - 1], base));
+            }
+            let acc = one;
+            for (let window = exponent.length * 8 - 1; window >= 0; window--) {
+                acc = sqr(sqr(sqr(sqr(acc))));
+                last digit = (exponent[window / 8] >> ((window % 8) * 4)) & 15;
+                let chosen = zeros(n);
+                for (let i = 0; i < 16; i++) {
+                    assign_if(eq32(i as uint32, digit), chosen, table[i]);
+                }
+                acc = mul(acc, chosen);
+            }
+            return acc;
+        };
+
+        /// @brief base^exponent in Montgomery form by square-and-multiply over a public exponent; not
+        /// branch-free in the exponent.
+        export let pow_public = func(base: uint32[list], exponent: int) -> uint32[list] {
+            let acc = one;
+            let started = false;
+            for (let i = 30; i >= 0; i--) {
+                if (started) {
+                    acc = sqr(acc);
+                }
+                if (((exponent >> i) & 1) == 1) {
+                    acc = started ? mul(acc, base) : base;
+                    started = true;
+                }
+            }
+            return acc;
+        };
+
+        /// @brief a^-1 in Montgomery form by Fermat's little theorem, a^(m-2); m must be prime. Zero gives zero.
+        export let inv = func(a: uint32[list]) -> uint32[list] => pow(a, plain_sub(m, small(2, n)));
+
+        /// @brief Text naming the bit length, never a value.
+        export let.override to_string = func -> string => "Modulus(" + bits.to_string() + " bits)";
+    );
+);

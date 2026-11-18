@@ -1,0 +1,97 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Digests and HMAC chosen by an `Algorithm` value, for the public-key schemes whose hash is a
+/// parameter (ECDSA with RFC 6979, RSA-PSS, RSA-OAEP, MGF1, PKCS #1 v1.5). Internal.
+///
+/// The supported hashes are SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/256, SHA3-224, SHA3-256, SHA3-384 and
+/// SHA3-512; any other value traps with "invalid argument: <name> is not a supported hash here".
+#Since("0.3.0")
+export let AsymHash = module (
+    /// @brief Whether the algorithm is one of the supported hashes.
+    export let is_supported = func(algorithm: Algorithm) -> bool => match (algorithm) {
+        Algorithm.Sha224 => true,
+        Algorithm.Sha256 => true,
+        Algorithm.Sha384 => true,
+        Algorithm.Sha512 => true,
+        Algorithm.Sha512_256 => true,
+        Algorithm.Sha3_224 => true,
+        Algorithm.Sha3_256 => true,
+        Algorithm.Sha3_384 => true,
+        Algorithm.Sha3_512 => true,
+        _ => false,
+    };
+
+    /// @brief Traps unless the algorithm is a supported hash.
+    export let check = func(algorithm: Algorithm) {
+        if (!is_supported(algorithm)) {
+            trap_with_message("invalid argument: " + algorithm.to_string() + " is not a supported hash here");
+        }
+    };
+
+    /// @brief The digest length in bytes.
+    export let output_length = func(algorithm: Algorithm) -> int {
+        check(algorithm);
+        return match (algorithm) {
+            Algorithm.Sha224 => 28,
+            Algorithm.Sha3_224 => 28,
+            Algorithm.Sha256 => 32,
+            Algorithm.Sha512_256 => 32,
+            Algorithm.Sha3_256 => 32,
+            Algorithm.Sha384 => 48,
+            Algorithm.Sha3_384 => 48,
+            _ => 64,
+        };
+    };
+
+    /// @brief The digest of the bytes.
+    export let digest = func(algorithm: Algorithm, bytes: uint8[list]) -> uint8[list] {
+        check(algorithm);
+        return match (algorithm) {
+            Algorithm.Sha224 => sha2.sha224(bytes),
+            Algorithm.Sha256 => sha2.sha256(bytes),
+            Algorithm.Sha384 => sha2.sha384(bytes),
+            Algorithm.Sha512 => sha2.sha512(bytes),
+            Algorithm.Sha512_256 => sha2.sha512_256(bytes),
+            Algorithm.Sha3_224 => sha3.sha3_224(bytes),
+            Algorithm.Sha3_256 => sha3.sha3_256(bytes),
+            Algorithm.Sha3_384 => sha3.sha3_384(bytes),
+            _ => sha3.sha3_512(bytes),
+        };
+    };
+
+    /// @brief HMAC of the data under the key with the hash.
+    export let mac = func(algorithm: Algorithm, key: uint8[list], data: uint8[list]) -> uint8[list] {
+        check(algorithm);
+        return match (algorithm) {
+            Algorithm.Sha224 => hmac.mac<sha2.Sha224>(key, data),
+            Algorithm.Sha256 => hmac.mac<sha2.Sha256>(key, data),
+            Algorithm.Sha384 => hmac.mac<sha2.Sha384>(key, data),
+            Algorithm.Sha512 => hmac.mac<sha2.Sha512>(key, data),
+            Algorithm.Sha512_256 => hmac.mac<sha2.Sha512_256>(key, data),
+            Algorithm.Sha3_224 => hmac.mac<sha3.Sha3_224>(key, data),
+            Algorithm.Sha3_256 => hmac.mac<sha3.Sha3_256>(key, data),
+            Algorithm.Sha3_384 => hmac.mac<sha3.Sha3_384>(key, data),
+            _ => hmac.mac<sha3.Sha3_512>(key, data),
+        };
+    };
+
+    /// @brief MGF1 of PKCS #1 (RFC 8017, appendix B.2.1): `length` bytes from the seed.
+    export let mgf1 = func(algorithm: Algorithm, seed: uint8[list], length: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        let counter: uint32 = 0;
+        while (out.length < length) {
+            let block = words.copy(seed);
+            words.append32_be(block, counter);
+            last chunk = digest(algorithm, block);
+            for (let i = 0; i < chunk.length && out.length < length; i++) {
+                out.append(chunk[i]);
+            }
+            counter++;
+        }
+        return out;
+    };
+);

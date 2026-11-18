@@ -1,0 +1,73 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Verifier;
+let asym_hash = import:Std.Crypto.Internal.AsymHash;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
+
+/// @brief Verification of RSASSA-PKCS1-v1_5 signatures (RFC 8017, section 8.2.2), for legacy uses only: X.509
+/// certificate chains and JWS `RS256`/`RS384`/`RS512` (Stdlib.md section 20.8).
+///
+/// This module verifies and does not sign: PKCS #1 v1.5 padding is not part of the default signing surface,
+/// and new signatures should use RsaPss. The check rebuilds the expected encoding EMSA-PKCS1-v1_5(M) with the
+/// DigestInfo of the chosen hash and compares it with the recovered block byte for byte; it never parses the
+/// block, so the forgeries against lenient parsers (Bleichenbacher 2006) do not apply.
+/// @see [Std.Crypto.Asymmetric.RsaPkcs1v15](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaPkcs1v15)
+#Since("0.3.0")
+export let RsaPkcs1v15 = module (
+    /// @brief Verifies RSASSA-PKCS1-v1_5 signatures under a public key with one hash.
+    #[Final, Since("0.3.0")]
+    export let RsaPkcs1v15Verifier = class implements Verifier<rsa.RsaPublicKey, uint8[list]> (
+        last key: rsa.RsaPublicKey;
+        /// @brief The hash of the message.
+        export last hash: Algorithm;
+
+        /// @brief A verifier with SHA-256, or the given SHA-2 or SHA-3 hash (another traps).
+        export let init = func(public_key: rsa.RsaPublicKey) {
+            key = public_key;
+            hash = Algorithm.Sha256;
+            check();
+        } or func(public_key: rsa.RsaPublicKey, digest: Algorithm) {
+            key = public_key;
+            hash = digest;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(Algorithm.RsaPkcs1v15);
+            asym_hash.check(hash);
+            crypto_policy.require(hash);
+        };
+
+        /// @brief `Algorithm.RsaPkcs1v15`.
+        export let algorithm = func -> Algorithm => Algorithm.RsaPkcs1v15;
+
+        /// @brief The public key.
+        export let public_key = func -> rsa.RsaPublicKey => key;
+
+        /// @brief Whether the signature (exactly k bytes) is valid for the message.
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            verify_digest(asym_hash.digest(hash, message), signature);
+
+        /// @brief Whether the signature is valid for a digest computed elsewhere (of the hash's length).
+        #NoDiscard
+        export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
+            last core = key.core;
+            if (signature.length != core.k || digest.length != asym_hash.output_length(hash)) {
+                return false;
+            }
+            last s = rsa_core.os2ip_below(core, signature);
+            if (s.length == 0) {
+                return false;
+            }
+            last expected = rsa_core.pkcs1v15_encode(hash, digest, core.k);
+            if (expected.length == 0) {
+                return false;
+            }
+            return constant_time.ct_eq(rsa_core.i2osp(core, core.apply(s)), expected);
+        };
+
+        export let.override to_string = func -> string => "RsaPkcs1v15Verifier(" + key.bits().to_string() + " bits)";
+    );
+);
