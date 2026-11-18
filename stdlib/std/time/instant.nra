@@ -98,27 +98,20 @@ export let Instant = module (
         #Pure
         export let compare_to = func(other: Instant) -> Ordering {
             if (epoch_seconds != other.epoch_seconds) {
-                if (epoch_seconds < other.epoch_seconds) {
-                    return Ordering.Less;
-                }
-                return Ordering.Greater;
+                return if (epoch_seconds < other.epoch_seconds) -> Ordering.Less else -> Ordering.Greater;
             }
             if (nanos < other.nanos) {
                 return Ordering.Less;
             }
-            if (nanos > other.nanos) {
-                return Ordering.Greater;
-            }
-            return Ordering.Equal;
+            return if (nanos > other.nanos) -> Ordering.Greater else -> Ordering.Equal;
         };
 
         /// @brief Tests equality of epoch seconds and nanosecond adjustments.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Instant)) {
+            if (other is not moment: Instant) {
                 return false;
             }
-            last moment = other as Instant;
             return epoch_seconds == moment.epoch_seconds && nanos == moment.nanos;
         };
 
@@ -136,7 +129,7 @@ export let Instant = module (
             let [year, month, day] = calendar.civil_of(calendar.floor_div(epoch_seconds, calendar.SecondsPerDay));
             last second_of_day = calendar.floor_mod(epoch_seconds, calendar.SecondsPerDay);
             last time_of_day = second_of_day * calendar.NanosPerSecond + (nanos as int64);
-            return calendar.date_text(year, month, day) + "T" + calendar.time_text(time_of_day) + "Z";
+            return calendar.date_text(year, month, day) .. "T" .. calendar.time_text(time_of_day) .. "Z";
         };
     );
 
@@ -172,9 +165,7 @@ export let Instant = module (
         last time_of_day = calendar.read_time(scan);
         last offset = calendar.read_offset(scan);
         scan.finish();
-        if (!scan.ok()) {
-            return result.Result<Instant>.Err(scan.failure());
-        }
+        return result.Result<Instant>.Err(scan.failure()) unless scan.ok();
         last whole = calendar.floor_div(time_of_day, calendar.NanosPerSecond);
         last seconds = calendar.epoch_day_of(year, month, day) * calendar.SecondsPerDay + whole - (offset as int64);
         return result.Result<Instant>.Ok(new Instant(seconds, (time_of_day - whole * calendar.NanosPerSecond) as int));

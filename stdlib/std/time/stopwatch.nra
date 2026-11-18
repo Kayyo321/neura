@@ -49,7 +49,7 @@ export let Stopwatch = module (
         /// @brief Stops measuring and keeps the time so far. Traps with "invalid state: stopwatch is stopped"
         /// when it is not running; a failed clock read is returned and leaves it running.
         export let stop = func -> result.Result<Unit> {
-            if (!is_running) {
+            if (not is_running) {
                 trap_with_message("invalid state: stopwatch is stopped");
             }
             match (source.monotonic()) {
@@ -74,14 +74,15 @@ export let Stopwatch = module (
         /// clock.
         #NoDiscard
         export let elapsed = func -> result.Result<Duration> {
-            if (!is_running) {
-                return result.Result<Duration>.Ok(accumulated);
-            }
+            return result.Result<Duration>.Ok(accumulated) unless is_running;
             return match (source.monotonic()) {
                 result.Result.Ok(reading) => result.Result<Duration>.Ok(accumulated.plus(reading.minus(started_at))),
                 result.Result.Err(failure) => result.Result<Duration>.Err(failure),
             };
         };
+
+        /// @brief Names the stopwatch and whether it runs.
+        export let.override to_string = func -> string => "Stopwatch(" .. (is_running ? "running" : "stopped") .. ")";
     );
 
     /// @brief A stopped stopwatch over `time_source`.
