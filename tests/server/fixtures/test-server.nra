@@ -53,6 +53,14 @@ let TestServer = module:program.Entry (
             }
             return Result<app.Response>.Ok(app.text(200, "woke\n"));
         }
+        if (request.path == "/nap") {
+            last clock = new system_clock.SystemClock();
+            match (clock.sleep(of_millis(1000))) {
+                Result.Ok(_) => {},
+                Result.Err(_) => {},
+            }
+            return Result<app.Response>.Ok(app.text(200, "rested\n"));
+        }
         if (request.path == "/big") {
             last size = results.value_or<int32>(int32.parse(request.query), 0);
             last content: uint8[list] = new;

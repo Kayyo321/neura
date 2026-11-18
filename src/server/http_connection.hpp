@@ -15,6 +15,10 @@ struct ConnectionLimits {
     std::size_t response_bytes = 8 * 1024 * 1024; // Apps030 S-7
     std::chrono::milliseconds head_timeout{std::chrono::seconds{10}};
     std::chrono::milliseconds request_timeout{std::chrono::seconds{30}}; // Apps030 S-8
+    // Called once after each response the responder produced has been
+    // written, or has failed to be written. The server host counts a
+    // request as in flight until then, so a drain never cuts a response off.
+    std::function<void()> response_finished{};
 };
 
 enum class StreamStatus { Ready, End, TimedOut, Failed };

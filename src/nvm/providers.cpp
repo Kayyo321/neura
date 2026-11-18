@@ -20,6 +20,9 @@
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 #include <sys/random.h>
 #elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <bcrypt.h>
 #endif

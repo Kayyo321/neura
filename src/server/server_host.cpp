@@ -330,6 +330,9 @@ public:
     // The responder of one connection.
     http::BufferedResponse handle(const http::RequestHead& head, std::string_view body, const std::string& peer,
                                   bool secure) {
+        // Paired with response_written(), which the connection calls once
+        // this response has been written or has failed.
+        ++in_flight_;
         const auto started = Clock::now();
         const auto deadline = started + options_.limits.http.request_timeout - 50ms;
         if (draining.load()) return unavailable();
@@ -386,6 +389,7 @@ public:
     }
 
     std::size_t in_flight() const { return in_flight_.load(); }
+    void response_written() { --in_flight_; }
 
     void kill_all() {
         std::lock_guard lock(pids_mutex_);
@@ -446,7 +450,6 @@ private:
         std::unique_lock lock(admission_mutex_);
         if (running_ < options_.max_workers) {
             ++running_;
-            ++in_flight_;
             return true;
         }
         if (waiting_ >= options_.max_queue) return false;
@@ -456,7 +459,6 @@ private:
         --waiting_;
         if (!got || running_ >= options_.max_workers) return false;
         ++running_;
-        ++in_flight_;
         return true;
     }
 
@@ -464,7 +466,6 @@ private:
         {
             std::lock_guard lock(admission_mutex_);
             --running_;
-            --in_flight_;
         }
         slot_free_.notify_one();
     }
@@ -785,6 +786,8 @@ int serve(HostOptions options, const char* argv0) {
         return 1;
     }
     std::optional<http::ListenerSet> listeners;
+    Host* counted = host.get();
+    options.limits.http.response_finished = [counted] { counted->response_written(); };
     try {
         listeners.emplace(options.endpoints, options.limits);
     } catch (const std::exception& error) {
@@ -838,7 +841,8 @@ int serve(HostOptions options, const char* argv0) {
     }
 
     // Drain: stop accepting, answer 503 to new requests, and wait up to S-12
-    // for the requests in flight. Idle keep-alive connections are not waited for.
+    // until every request in flight has been answered and its response
+    // written. Idle keep-alive connections are not waited for.
     draining = true;
     listeners.reset();
     host->log(2, {}, "draining");

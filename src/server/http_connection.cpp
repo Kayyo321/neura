@@ -175,6 +175,12 @@ ConnectionEnd serve_connection(ConnectionStream& stream, const BufferedResponder
         }
 
         const auto& head = decoder.head();
+        struct Finished {
+            const std::function<void()>& notify;
+            ~Finished() {
+                if (notify) notify();
+            }
+        } finished{limits.response_finished};
         const auto response = respond(head, body);
         if (ConnectionClock::now() >= deadline) return close_with_status(stream, 504, ConnectionEnd::RequestTimeout);
         const bool no_content = response.status == 204 || response.status == 205 || response.status == 304;

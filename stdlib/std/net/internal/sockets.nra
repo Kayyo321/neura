@@ -20,20 +20,31 @@ export let Sockets = module (
     /// @brief Numeric address texts, or an unsigned host error code.
     export let AddressesOutcome = enum (Ok(string[list]), Error(uint32));
 
-    /// @brief The option numbers of `set_option` and `get_option`. Booleans are 0 or 1; times are seconds
-    /// except UserTimeout, in milliseconds; buffer sizes are bytes. An option the platform lacks fails with
-    /// Unsupported (13).
+    // The option numbers of `set_option` and `get_option`. Booleans are 0 or 1. An option the platform lacks
+    // fails with Unsupported (13).
+    /// @brief Option SO_REUSEADDR.
     export let REUSE_ADDRESS = 1;
+    /// @brief Option SO_REUSEPORT.
     export let REUSE_PORT = 2;
+    /// @brief Option TCP_NODELAY.
     export let NO_DELAY = 3;
+    /// @brief Option TCP_FASTOPEN, the queue length.
     export let FAST_OPEN = 4;
+    /// @brief Option TCP_USER_TIMEOUT, in milliseconds.
     export let USER_TIMEOUT = 5;
+    /// @brief Option SO_KEEPALIVE.
     export let KEEP_ALIVE = 6;
+    /// @brief Option TCP_KEEPIDLE (TCP_KEEPALIVE on macOS), in seconds.
     export let KEEP_IDLE = 7;
+    /// @brief Option TCP_KEEPINTVL, in seconds.
     export let KEEP_INTERVAL = 8;
+    /// @brief Option TCP_KEEPCNT.
     export let KEEP_COUNT = 9;
+    /// @brief Option SO_RCVBUF, in bytes.
     export let RECEIVE_BUFFER = 10;
+    /// @brief Option SO_SNDBUF, in bytes.
     export let SEND_BUFFER = 11;
+    /// @brief Option SO_BROADCAST.
     export let BROADCAST = 12;
 
     /// @brief A UDP socket bound to a numeric address (empty for any IPv4 address, or "localhost") and port

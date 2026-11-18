@@ -240,12 +240,12 @@ void add_tls_services(const Adder& add, StandardServices::Tables& tables, const 
             if (stream->descriptor < 0) return fail(error);
             stream->ssl = SSL_new(stream->context);
             if (!stream->ssl || SSL_set_fd(stream->ssl, stream->descriptor) != 1) return fail(host_error::other);
-            if (numeric_host(name)) {
-                X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(stream->ssl), name.c_str());
-            } else {
-                SSL_set_tlsext_host_name(stream->ssl, name.c_str());
-                SSL_set1_host(stream->ssl, name.c_str());
-            }
+            // The name check must be in place, or the call fails: verification
+            // never falls back to the chain alone.
+            const bool named = numeric_host(name)
+                ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(stream->ssl), name.c_str()) == 1
+                : SSL_set_tlsext_host_name(stream->ssl, name.c_str()) == 1 && SSL_set1_host(stream->ssl, name.c_str()) == 1;
+            if (!named) return fail(host_error::invalid_input);
             if (!alpn->empty()) {
                 SSL_set_alpn_protos(stream->ssl, reinterpret_cast<const unsigned char*>(alpn->data()),
                                     static_cast<unsigned int>(alpn->size()));

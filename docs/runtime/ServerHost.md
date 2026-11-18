@@ -2,7 +2,7 @@
 
 `neura-server-host` serves a Neura server image over HTTP/1.1 and HTTPS. It owns the listeners, TLS and the HTTP wire, and runs no application code: each request is executed by a fresh worker process that loads the image, runs the whole program once for that one request, and exits. Nothing a program holds survives between requests; data that must outlive a request belongs in a file or a database the program reaches through its host services. The contract is [the backend design note](../design/Backend030.md); this page describes what the 0.3.0 host does.
 
-The host is built on Linux and macOS with every build. HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`.
+The host is built with every build on POSIX systems; this release tests it on Linux x86-64 only, and macOS builds are unqualified. HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`.
 
 ## A server image
 
@@ -65,7 +65,7 @@ neura-server-host [options] <image.nvr>
 | `--max-head-bytes N` | S-5, request line and fields; beyond it, 431 | 16,384 |
 | `--max-body-bytes N` | S-6, request body after decoding; beyond it, 413 | 1,048,576 |
 | `--max-response-bytes N` | S-7, response body; beyond it, 500 | 8,388,608 |
-| `--request-timeout SECONDS` | S-8, from the end of the request head; beyond it the worker is killed and the answer is 504 | 30 |
+| `--request-timeout SECONDS` | S-8; beyond it the worker is killed and the answer is 504. The worker's deadline starts when the whole request has been read | 30 |
 | `--drain-timeout SECONDS` | S-12, how long a drain waits for requests in flight | 30 |
 | `--allow-fs[=prefix,...]`, `--allow-net`, `--allow-env` | Grant the workers that capability group | denied |
 | `--record-dir <directory>` | Record each request's host requests to `<request id>.trace` | |
@@ -90,7 +90,7 @@ The host rejects before any worker runs: a malformed request line or field, a fo
 
 A failed request affects no other request: each runs in its own process.
 
-Each worker always has the console, clock and entropy services and the application services. Files, network and environment are denied unless the host grants them; native code is always denied. A worker's console output goes to the host's standard error.
+Each worker runs the image with the default limits of `neura run` (100,000,000 steps, 10,000 frames, and the default heap); the host has no option to change them in this release. Each worker always has the console, clock and entropy services and the application services. Files, network and environment are denied unless the host grants them; native code is always denied. A worker's console output goes to the host's standard error.
 
 ## Configuration, logs and signals
 

@@ -55,7 +55,8 @@ Departures, each to be confirmed by the owner:
 4. **Configuration** reaches the worker through `Call`/`Return` frames; the worker never holds the host's configuration. Logs are written by the worker to the inherited standard error as JSON lines with the request identifier. No other `Call` operation exists yet.
 5. **`Cancel`** is not sent: at the deadline the host kills the worker with `SIGKILL` and answers 504; no grace period applies to a request past S-8. A worker whose channel ends without `Done` gets the grace period S-12 (5 s) to exit before it is killed.
 6. **The handler interface** the `Std.Net.Http` router implements is `Std.App.Handler` (below), not `http.Router` itself, so that `Std.App` does not depend on `Std.Net.Http`.
-7. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host. Native code is always denied.
+7. **File paths outside the file group.** A Unix-domain socket path and the CA, certificate and key files of the TLS services are opened by the network services and are not checked against `--allow-fs` prefixes; `neura.net.tls.accept` requires the file group as a whole. A program with the network group can therefore reach any Unix socket the process can.
+8. **Capabilities.** A worker always has the console, clock and entropy groups and the two application groups; files, network and environment only with `--allow-fs[=prefixes]`, `--allow-net` and `--allow-env` on the host. Native code is always denied.
 
 ### Host services for the standard library
 

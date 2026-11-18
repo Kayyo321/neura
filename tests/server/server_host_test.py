@@ -192,6 +192,8 @@ def test_basic(args, image):
              "Content-Length and Transfer-Encoding"),
             (b"POST /echo HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: gzip\r\n\r\n", 501, "unknown coding"),
             (b"BREW /pot HTTP/1.1\r\nHost: t\r\n\r\n", 501, "unknown method"),
+            (b"GET /chat HTTP/1.1\r\nHost: t\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", 501,
+             "WebSocket upgrade"),
             (b"GET / HTTP/1.1\r\nHost: t\r\nX-Folded: a\r\n b\r\n\r\n", 400, "folded header"),
             (b"GET / HTTP/1.1\r\nHost: t\r\n" + b"X-Big: " + b"a" * 20000 + b"\r\n\r\n", 431, "head over S-5"),
             (b"POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 2000000\r\n\r\n", 413, "body over S-6"),
@@ -280,6 +282,27 @@ def test_limits(args, image):
         time.sleep(0.5)
         status, _, _ = request(port, "GET", "/hello")
         check(status == 200, f"after the deadline: {status}")
+    finally:
+        host.stop()
+
+
+def test_drain_completes_responses(args, image):
+    host = Host(args, image, "--drain-timeout", "10")
+    try:
+        results = {}
+
+        def nap():
+            results["nap"] = request(host.port, "GET", "/nap")
+
+        thread = threading.Thread(target=nap)
+        thread.start()
+        time.sleep(0.4)
+        host.process.send_signal(signal.SIGTERM)
+        thread.join()
+        code = host.process.wait(15)
+        status, _, body = results.get("nap", (0, {}, b""))
+        check(status == 200 and body == b"rested\n", f"a request in flight during the drain: {status} {body!r}")
+        check(code == 0, f"drain status: {code}")
     finally:
         host.stop()
 
@@ -385,7 +408,7 @@ def main():
     if build.returncode != 0:
         print(build.stdout + build.stderr)
         return 1
-    tests = [test_basic, test_limits, test_startup_check, test_record_replay, test_without_host, test_tls]
+    tests = [test_basic, test_limits, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:
             continue
