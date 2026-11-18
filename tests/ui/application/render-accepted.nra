@@ -1,0 +1,29 @@
+// Render-compatible templates (no E1010): a hole may read a reassignable binding and a mutable list, call
+// functions that only allocate and read, build strings, call another factory, and create a handler whose
+// body has effects, because the handler runs later.
+let ui = import:Std.Ui;
+let console = import:Std.Io.Console;
+
+let theme = "light";
+let seen: string[list] = new();
+
+let label = func(name: string, count: int32) -> string => name + " (" + count.to_string() + ")";
+
+let total = func(counts: int32[]) -> int32 {
+    let sum: int32 = 0;
+    for (let count in counts) {
+        sum += count;
+    }
+    return sum;
+};
+
+let badge = html(text: string) { <em>{text}</em> };
+
+let row = new html(name: string, counts: int32[]) {
+    <li class={theme} data-seen={seen.length}>
+        {badge(label(name, total(counts)))}
+        <button type="button" on:click={ new func(event: ui.ClickEvent) { console.print_line(name); } }>
+            Log
+        </button>
+    </li>
+};

@@ -1,0 +1,12 @@
+// A factory retains the handlers bound in its view, so a capturing function value passed for an on: hole
+// escapes with the view and needs `new func`: the escape rule applies through the factory's retention summary.
+let ui = import:Std.Ui;
+
+let button = html(label: string, press: func(ui.ClickEvent) -> void) {
+    <button type="button" on:click={press}>{label}</button>
+};
+
+let counter = func() -> ui.View {
+    let clicks: int[list] = new();
+    return button("Add", new func(event: ui.ClickEvent) { clicks.append(event.detail); });
+};

@@ -763,6 +763,7 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // program is checked, so a function whose callee is a specialization, or
     // an implementation in another module, is checked with it too.
     check_pure_tags(program, {}, true);
+    check_render_factories(program, {}, true);
     // Synchronized methods take their receiver's guard only in a program that
     // spawns; the guard operations are then part of what the isolation
     // checks see.

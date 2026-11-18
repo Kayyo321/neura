@@ -543,9 +543,16 @@ export let Reconcile = module (
             } else {
                 last items = (value as storage.Payload<build.Items>).value;
                 last seen = string_maps.create<bool>();
-                let item = items.first;
+                // The builder links the newest item first; commit them in iteration order.
+                last ordered: build.Item[list] = new();
+                let link = items.first;
+                while (link != nil) {
+                    ordered.append(link);
+                    link = link.next;
+                }
                 let position: int64 = 0;
-                while (item != nil && state.refusal == nil) {
+                while (position < ordered.length as int64 && state.refusal == nil) {
+                    last item = ordered[ordered.length - 1 - position as int];
                     if (position == MaxItems as int64) {
                         refuse(state, ui.DiagnosticKind.LimitExceeded, "U-4: an @for commits at most 10000 items",
                                index, position, item.key);
@@ -559,7 +566,6 @@ export let Reconcile = module (
                     seen.set(item.key, true);
                     expand_view(item.view, key + "k" + item.key.byte_length.to_string() + ":" + item.key, pass, state,
                                 out);
-                    item = item.next;
                     position += 1;
                 }
             }

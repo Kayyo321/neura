@@ -1,0 +1,9 @@
+// A hole that reaches a host request (E1010): the label is at the hole, with the call chain.
+let console = import:Std.Io.Console;
+
+let shout = func(text: string) -> string {
+    console.print_line(text);
+    return text;
+};
+
+let greeting = html(name: string) { <p>{ shout(name) }</p> };

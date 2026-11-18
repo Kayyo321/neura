@@ -270,6 +270,7 @@ Errors about application forms and their build limits.
 | [E1007](E1007.md) | URL not allowed |
 | [E1008](E1008.md) | value cannot be iterated by a template |
 | [E1009](E1009.md) | key of the wrong type |
+| [E1010](E1010.md) | effect not allowed while rendering |
 | [E1011](E1011.md) | template or stylesheet file cannot be used |
 | [E1012](E1012.md) | not a class of the CSS module |
 | [E1013](E1013.md) | stylesheet import or asset cannot be resolved |
