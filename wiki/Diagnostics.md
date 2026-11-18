@@ -172,6 +172,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0536.md) | destructuring declared with last |
 | [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
+| [E0580](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0580.md) | type is not deeply immutable |
+| [E0581](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0581.md) | frozen storage is exposed or changed |
 
 ## E06xx: Concurrency
 

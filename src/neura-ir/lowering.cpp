@@ -10,6 +10,7 @@
 #include "ir.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
+#include "frozen.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 #include "reference_initialization.hpp"
@@ -234,6 +235,8 @@ private:
     };
 
     IrProgram program_;
+    // Every type argument written in this compilation, for E0580 (frozen.hpp).
+    std::vector<WrittenTypeArgument> written_type_arguments_;
     std::vector<Entry> entries_;
     std::vector<SymbolId> file_ids_;
     Names linked_files_;
@@ -1067,6 +1070,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         if (scope_bound(actual))
             throw Diagnostic(args[i].span, "a value of type " + describe(actual) +
                                            " cannot leave its scope: it cannot be a type argument").with_code("E0605");
+        written_type_arguments_.push_back({params[i], actual, args[i].span});
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -5004,6 +5008,10 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // function of a prebuilt module is pure only when it is marked #Pure,
     // because its tag is part of its interface.
     declare_checked_tags(program_, linked_symbols, [&](SymbolId id) { return name_span(id); });
+    // Deeply immutable application data (Components030.md): #Frozen storage
+    // and the type arguments of #Frozen classes.
+    check_frozen_storage(program_, linked_symbols, linked_bodies, [&](SymbolId id) { return name_span(id); });
+    check_frozen_arguments(program_, written_type_arguments_);
     std::set<SymbolId> artifact_files;
     for (SymbolId id = 0; id < linked_symbols; ++id) {
         const auto& item = symbol(id);

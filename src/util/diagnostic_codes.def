@@ -157,6 +157,8 @@ NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous clas
 NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
 NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
 NEURA_DIAGNOSTIC(E0537, "constructor shorthand names no instance field")
+NEURA_DIAGNOSTIC(E0580, "type is not deeply immutable")
+NEURA_DIAGNOSTIC(E0581, "frozen storage is exposed or changed")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

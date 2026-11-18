@@ -1,4 +1,5 @@
 #include "purity.hpp"
+#include "frozen.hpp"
 
 #include "host_binding.hpp"
 #include "integer.hpp"
@@ -85,7 +86,13 @@ bool immutable_type(const IrProgram& program, const IrType& type) {
             for (auto cls = item.symbol; cls < program.symbols.size() && chain.insert(cls).second;
                  cls = program.symbols[cls].base) {}
             for (const auto& field : program.symbols) {
-                if (field.kind == SymbolKind::Field && chain.contains(field.owner) && !check(field.type)) return false;
+                if (field.kind != SymbolKind::Field || !chain.contains(field.owner)) continue;
+                // #Frozen list storage is immutable when its elements are.
+                const auto& stored = frozen_field(field) && field.type.kind == TypeKind::List &&
+                                             field.type.arguments.size() == 1
+                                         ? field.type.arguments.front()
+                                         : field.type;
+                if (!check(stored)) return false;
             }
             return true;
         }

@@ -15,6 +15,7 @@ The [standard library specification](Stdlib-Design) gives the shared contracts. 
 | [`Std.Collections.BitSet`](Stdlib-Collections-BitSet) | [Contracts](Stdlib-Collections-BitSet#detailed-contracts) | [Declarations](Stdlib-Collections-BitSet#exported-declarations) |
 | [`Std.Collections.Collection`](Stdlib-Collections-Collection) | [Contracts](Stdlib-Collections-Collection#detailed-contracts) | [Declarations](Stdlib-Collections-Collection#exported-declarations) |
 | [`Std.Collections.Deque`](Stdlib-Collections-Deque) | [Contracts](Stdlib-Collections-Deque#detailed-contracts) | [Declarations](Stdlib-Collections-Deque#exported-declarations) |
+| [`Std.Collections.Frozen`](Stdlib-Collections-Frozen) | [Contracts](Stdlib-Collections-Frozen#detailed-contracts) | [Declarations](Stdlib-Collections-Frozen#exported-declarations) |
 | [`Std.Collections.HashMap`](Stdlib-Collections-HashMap) | [Contracts](Stdlib-Collections-HashMap#detailed-contracts) | [Declarations](Stdlib-Collections-HashMap#exported-declarations) |
 | [`Std.Collections.HashSet`](Stdlib-Collections-HashSet) | [Contracts](Stdlib-Collections-HashSet#detailed-contracts) | [Declarations](Stdlib-Collections-HashSet#exported-declarations) |
 | [`Std.Collections.ImmutableList`](Stdlib-Collections-ImmutableList) | [Contracts](Stdlib-Collections-ImmutableList#detailed-contracts) | [Declarations](Stdlib-Collections-ImmutableList#exported-declarations) |

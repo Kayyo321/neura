@@ -1,0 +1,35 @@
+// Deeply immutable arguments: numbers, strings, tuples, #Immutable classes,
+// enums and nested FrozenLists (Components030 cases 2, 16, 17).
+let frozen = import:Std.Collections.Frozen;
+
+#Immutable
+let Stock = class (
+    export last name: string;
+    export last count: int32;
+
+    export let init = func(name: string, count: int32) => set;
+);
+
+let Size = enum (Small, Large(int32));
+
+let empty = frozen.copy_of<int64>([]);
+let names = frozen.of<string>("a", "b");
+let pairs = frozen.of<[string, string]>(["a", "b"]);
+let stocks = frozen.of<Stock>(new Stock("bolt", 3));
+let sizes = frozen.of<Size>(Size.Small, Size.Large(2));
+let grid = frozen.of<frozen.FrozenList<int64>>(frozen.of<int64>(1, 2), frozen.empty<int64>());
+let wrap = func<T>(items: T[]) -> frozen.FrozenList<T> => frozen.copy_of<T>(items);
+let wrapped = wrap<string>(["c"]);
+
+// A template iterates a FrozenList (Html030, the @for source).
+let ui = import:Std.Ui;
+
+let rows = html(parts: frozen.FrozenList<string>) {
+    <ul>
+        @for (let part: string in parts; key: part) {
+            <li>{part}</li>
+        }
+    </ul>
+};
+
+let view = rows(frozen.of<string>("bolt", "nut"));

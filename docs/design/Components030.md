@@ -101,14 +101,14 @@ The adapter copies the fields below when the event arrives and queues an immutab
 
 | Rule | Status |
 | --- | --- |
-| `T` is deeply immutable, as defined for `ui.State` (`E0580`). | proposed |
-| `frozen.copy_of(source)` takes an array or a list and copies its elements into new private storage. `frozen.empty<T>()` and `frozen.of(items: ...T)` complete the constructors. Nothing freezes a list in place. | proposed |
-| `length`, `get(index)` (an index out of range traps, as for a list), `first_or_none()`, `last_or_none()`, `contains`, `index_of`, for-each, `slice`, `to_list()` (a fresh copy). | proposed |
-| `appended(value)`, `replaced(index, value)`, `removed(index)` and `concat(other)` return a new list. The first implementation copies; structural sharing may replace it only with alias and accounting tests. | proposed |
-| `equals` and `hash_code` compare elements by value and exist only where `T` has value equality and hashing; `==` stays identity. | proposed |
-| A `FrozenList<T>` is an `#Immutable` class, so tasks may share it and it may be a message, when `T` is transferable. | proposed |
-| The class is written in Neura. Its storage is a private `last` field of list type carrying the tag `#Frozen`, which only `Std.Collections.Frozen` may use. The compiler checks that the field is assigned once, from a list the constructor created, and that no method stores into it, passes it to a retaining parameter, or returns it (`E0581`); with that, the `#Immutable` check accepts the field. | proposed |
-| The existing `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning: read-only views. They are not deeply immutable and are not accepted where this note requires it. | proposed |
+| `T` is deeply immutable, as defined for `ui.State` (`E0580`). | implemented: `#Frozen` on the class; a type parameter passed on carries the requirement to the outermost written argument |
+| `frozen.copy_of(source)` takes an array or a list and copies its elements into new private storage. `frozen.empty<T>()` and `frozen.of(items: ...T)` complete the constructors. Nothing freezes a list in place. | implemented, with `copy_of_list` for a list: a generic function cannot be overloaded, and an array does not convert to a list |
+| `length`, `get(index)` (an index out of range traps, as for a list), `first_or_none()`, `last_or_none()`, `contains`, `index_of`, for-each, `slice`, `to_list()` (a fresh copy). | implemented |
+| `appended(value)`, `replaced(index, value)`, `removed(index)` and `concat(other)` return a new list. The first implementation copies; structural sharing may replace it only with alias and accounting tests. | implemented (copying) |
+| `equals` and `hash_code` compare elements by value and exist only where `T` has value equality and hashing; `==` stays identity. | implemented with `===` and the list hash for every `T`: Neura cannot declare a method only for some type arguments |
+| A `FrozenList<T>` is an `#Immutable` class, so tasks may share it and it may be a message, when `T` is transferable. | not implemented: NVR 1.5 admits no list in a transferable layout (`TRNS`), so sending one is `E0602`; needs a format decision |
+| The class is written in Neura. Its storage is a private `last` field of list type carrying the tag `#Frozen`, which only `Std.Collections.Frozen` may use. The compiler checks that the field is assigned once, from a list the constructor created, and that no method stores into it, passes it to a retaining parameter, or returns it (`E0581`); with that, the `#Immutable` check accepts the field. | implemented as an allow-list: after the one constructor assignment, only index reads and length; `Std.Ui` may also write the tag |
+| The existing `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning: read-only views. They are not deeply immutable and are not accepted where this note requires it. | implemented |
 | Derived JSON codecs accept `FrozenList<T>` as an ordered array when `T` has a codec, bounded by `C-3` and `C-4`. A nested `FrozenList` is allowed within those bounds. An `Optional` element is rejected (`E0584`) until a tagged absence encoding exists. | proposed |
 
 ## Contracts

@@ -169,6 +169,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](E0536.md) | destructuring declared with last |
 | [E0537](E0537.md) | constructor shorthand names no instance field |
+| [E0580](E0580.md) | type is not deeply immutable |
+| [E0581](E0581.md) | frozen storage is exposed or changed |
 
 ## E06xx: Concurrency
 

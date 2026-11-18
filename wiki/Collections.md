@@ -82,4 +82,46 @@ A negative index fails with trap reason 2 (bounds failure); an index at or past 
 
 The same loop visits any value that implements `Std.Collections.Iterable<T>`, calling `iterator()` once and then `has_next()` and `next()` ([Core language](CoreLanguage#loops)). Every standard-library collection, `Sequence`, and `Std.Core.IntRange` implement it, and a program's own classes can too. A source that is not an array, list, or `Iterable<T>` is rejected, as is an element annotation that differs from `T`.
 
+## FrozenList
+
+`Std.Collections.Frozen.FrozenList<T>` is a list that nobody can change, with storage nobody else holds. Its element type must be deeply immutable: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class whose fields are too, or a `FrozenList` of them (`E0580` at the type argument otherwise, also when a generic function passes its type parameter on). The class is `#Immutable`, so a [UI state](https://github.com/Kayyo321/neura/blob/main/docs/design/Components030.md) may hold one. It cannot yet cross to another task: the image format admits no collection in a transferable layout, so sending a `FrozenList` on a channel or to `spawn` is `E0602` in 0.3.0.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let frozen = import:Std.Collections.Frozen;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let source: string[] = ["bolt", "nut"];
+        let parts = frozen.copy_of<string>(source);
+        source[0] = "gear";
+        let more = parts.appended("washer");
+        console.print_line(parts.to_string() + " " + more.to_string());
+        for (let part: string in more) {
+            console.print_line(part);
+        }
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+[bolt, nut] [bolt, nut, washer]
+bolt
+nut
+washer
+```
+
+| Member | Meaning |
+| --- | --- |
+| `frozen.copy_of<T>(array)`, `frozen.copy_of_list<T>(list)`, `frozen.of<T>(items...)`, `frozen.empty<T>()` | Copy the elements into new private storage. Nothing freezes a list in place, so a later change to the source is not seen. |
+| `length()`, `is_empty()`, `get(index)`, `first_or_none()`, `last_or_none()`, `contains(value)`, `index_of(value)`, `for_each(action)`, for-each | Reads. `get` with an index out of range traps as a list index does. `contains` and `index_of` compare with `===`. |
+| `slice(start, end)`, `appended(value)`, `replaced(index, value)`, `removed(index)`, `concat(other)` | Return a new list and leave this one unchanged. They copy; no storage is shared between lists. |
+| `to_list()` | A fresh built-in list; changing it changes nothing in the `FrozenList`. |
+| `equals`, `hash_code`, `to_string` | Compare elements by value (`===`) at each index, fold the element hashes as a list does, and print `[a, b]`. `==` stays reference identity. |
+
+The storage is a `last` list field tagged [`#Frozen`](Tags#frozen), which only the standard library may write. The compiler checks that the constructor assigns it once, from a list the constructor created and only filled, and that the class reads it only by index and length (`E0581`); with that, the `#Immutable` check accepts the field. `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning, read-only views of a shallow copy: they are not deeply immutable and are rejected where a deeply immutable type is required.
+
 See [collections.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/collections.nra) for examples of indexing, mutation, and nested types; the test driver in `tests/backend/examples/collections-driver.nra` builds and runs it.
