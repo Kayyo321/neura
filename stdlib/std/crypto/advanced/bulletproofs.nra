@@ -12,7 +12,7 @@ let ristretto = import:Std.Crypto.Internal.Ristretto255Core;
 let sha3 = import:Std.Crypto.Hash.Sha3;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Single-value Bulletproofs range proofs with Dalek's default ristretto255 generators and Merlin framing.
+/// @brief Bulletproofs range proofs for one or more values with Dalek's default ristretto255 generators and Merlin framing.
 /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
 #Since("0.3.0")
 export let Bulletproofs = module (
@@ -24,20 +24,29 @@ export let Bulletproofs = module (
         }
     };
 
-    let random_length = func(bits: int) -> int => 64 * (2 * bits + 4);
+    const MaxValues = 16;
+
+    let valid_count = func(count: int) -> bool => count >= 1 && count <= MaxValues && (count & (count - 1)) == 0;
+
+    let check_shape = func(bits, values, blindings: int) {
+        check_bits(bits);
+        if (!valid_count(values) || values != blindings) {
+            trap_with_message("invalid argument: Bulletproofs needs 1, 2, 4, 8 or 16 values with matching blindings");
+        }
+    };
+
+    let random_length = func(bits, count: int) -> int => 64 * count * (2 * bits + 4);
     let zero = func -> uint32[list] => mp.zeros(8);
     let one = func -> uint32[list] => mp.small(1, 8);
 
-    let generator_chain = func(prefix: uint8, count: int, group: ristretto.Group) -> edwards.Point[list] {
+    let append_generator_chain = func(points: edwards.Point[list], prefix: uint8, count, block: int,
+        group: ristretto.Group) {
         let hash: sha3.Shake256 = new;
         hash.update(words.utf8("GeneratorsChain"));
-        // The party index is zero for a single-value proof.
-        hash.update(new([prefix, 0, 0, 0, 0]));
-        let points: edwards.Point[list] = new;
+        hash.update(new([prefix, block as uint8, 0, 0, 0]));
         for (let i = 0; i < count; i++) {
             points.append(group.from_uniform(hash.squeeze(64)));
         }
-        return points;
     };
 
     let Generators = class (
@@ -47,13 +56,17 @@ export let Bulletproofs = module (
         export last g: edwards.Point[list];
         export last h: edwards.Point[list];
 
-        export let init = func(bits: int) {
+        export let init = func(bits, blocks: int) {
             crypto_policy.require(Algorithm.Bulletproofs);
             group = new;
             base = group.base();
             blinding = group.from_uniform(sha3.sha3_512(group.encode(base)));
-            g = generator_chain(71, bits, group);
-            h = generator_chain(72, bits, group);
+            g = new;
+            h = new;
+            for (let block = 0; block < blocks; block++) {
+                append_generator_chain(g, 71, bits, block, group);
+                append_generator_chain(h, 72, bits, block, group);
+            }
         };
 
         export let.override to_string = func -> string => "Bulletproofs Generators";
@@ -86,10 +99,10 @@ export let Bulletproofs = module (
         return fail<edwards.Point>("invalid Bulletproofs point");
     };
 
-    let range_domain = func(transcript: merlin.Transcript, bits: int) {
+    let range_domain = func(transcript: merlin.Transcript, bits, blocks: int) {
         transcript.append_message(words.utf8("dom-sep"), words.utf8("rangeproof v1"));
         transcript.append_u64(words.utf8("n"), bits as uint64);
-        transcript.append_u64(words.utf8("m"), 1);
+        transcript.append_u64(words.utf8("m"), blocks as uint64);
     };
 
     let inner_domain = func(transcript: merlin.Transcript, bits: int) {
@@ -176,34 +189,48 @@ export let Bulletproofs = module (
         return Result<Unit>.Ok(Unit.Value);
     };
 
-    let make_proof = func(gens: Generators, transcript: merlin.Transcript, bits: int, value: uint64,
-        blind: uint32[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
+    let make_proof = func(gens: Generators, transcript: merlin.Transcript, bits: int, values: uint64[list],
+        blinds: uint32[list][list], random: uint8[list]) -> Result<[uint8[list][list], uint8[list]]> {
         last group = gens.group;
-        last v = mp.from_bytes_le(word_bytes(value), 8);
-        last encoded_v = group.encode(commitment(gens, v, blind));
-        last alpha = random_scalar(group, random, 0);
-        last rho = random_scalar(group, random, 1);
-        let a = group.multiply(alpha, gens.blinding);
-        let s = group.multiply(rho, gens.blinding);
+        last blocks = values.length;
+        last dimension = bits * blocks;
+        let encoded_values: uint8[list][list] = new;
+        let alpha = zero();
+        let rho = zero();
+        let a = group.identity();
+        let s = group.identity();
         let left_mask: uint32[list][list] = new;
         let right_mask: uint32[list][list] = new;
-        for (let i = 0; i < bits; i++) {
-            last bit = ((value >> i) & 1) as uint32;
-            a = group.add(a, group.select(bit, gens.g[i], group.negate(gens.h[i])));
-            last mask_left = random_scalar(group, random, 2 + i);
-            last mask_right = random_scalar(group, random, 2 + bits + i);
-            left_mask.append(mask_left);
-            right_mask.append(mask_right);
-            s = group.add(s, group.multiply(mask_left, gens.g[i]));
-            s = group.add(s, group.multiply(mask_right, gens.h[i]));
+        for (let block = 0; block < blocks; block++) {
+            last value = values[block];
+            last offset = block * (2 * bits + 2);
+            encoded_values.append(group.encode(commitment(gens, mp.from_bytes_le(word_bytes(value), 8), blinds[block])));
+            alpha = group.scalar_add(alpha, random_scalar(group, random, offset));
+            rho = group.scalar_add(rho, random_scalar(group, random, offset + 1));
+            for (let i = 0; i < bits; i++) {
+                last index = block * bits + i;
+                last bit = ((value >> i) & 1) as uint32;
+                a = group.add(a, group.select(bit, gens.g[index], group.negate(gens.h[index])));
+                last mask_left = random_scalar(group, random, offset + 2 + i);
+                last mask_right = random_scalar(group, random, offset + 2 + bits + i);
+                left_mask.append(mask_left);
+                right_mask.append(mask_right);
+                // The proof masks are secret. Each multiplication selects from its full table.
+                s = group.add(s, group.multiply(mask_left, gens.g[index]));
+                s = group.add(s, group.multiply(mask_right, gens.h[index]));
+            }
         }
+        a = group.add(a, group.multiply(alpha, gens.blinding));
+        s = group.add(s, group.multiply(rho, gens.blinding));
         if (group.is_identity(a) || group.is_identity(s)) {
-            return fail<[uint8[list], uint8[list]]>("degenerate Bulletproofs bit commitment");
+            return fail<[uint8[list][list], uint8[list]]>("degenerate Bulletproofs bit commitment");
         }
         last encoded_a = group.encode(a);
         last encoded_s = group.encode(s);
-        range_domain(transcript, bits);
-        absorb(transcript, "V", encoded_v);
+        range_domain(transcript, bits, blocks);
+        for (let encoded_v in encoded_values) {
+            absorb(transcript, "V", encoded_v);
+        }
         absorb(transcript, "A", encoded_a);
         absorb(transcript, "S", encoded_s);
         last y = challenge(group, transcript, "y")?;
@@ -213,30 +240,44 @@ export let Bulletproofs = module (
         let left_constant: uint32[list][list] = new;
         let right_constant: uint32[list][list] = new;
         let power_y = one();
-        let power_2 = one();
+        let block_z = z_sq;
+        let value_blinding = zero();
         let t1 = zero();
         let t2 = zero();
-        for (let i = 0; i < bits; i++) {
-            last bit = mp.small(((value >> i) & 1) as uint32, 8);
-            last l0 = group.scalar_subtract(bit, z);
-            last r0 = group.scalar_add(group.scalar_multiply(power_y, group.scalar_subtract(group.scalar_add(bit, z), one())),
-                group.scalar_multiply(z_sq, power_2));
-            last r1 = group.scalar_multiply(power_y, right_mask[i]);
-            left_constant.append(l0);
-            right_constant.append(r0);
-            right_mask[i] = r1;
-            t1 = group.scalar_add(t1, group.scalar_add(group.scalar_multiply(l0, r1), group.scalar_multiply(left_mask[i], r0)));
-            t2 = group.scalar_add(t2, group.scalar_multiply(left_mask[i], r1));
-            power_y = group.scalar_multiply(power_y, y);
-            power_2 = group.scalar_add(power_2, power_2);
+        for (let block = 0; block < blocks; block++) {
+            let power_2 = one();
+            for (let i = 0; i < bits; i++) {
+                last index = block * bits + i;
+                last bit = mp.small(((values[block] >> i) & 1) as uint32, 8);
+                last l0 = group.scalar_subtract(bit, z);
+                last r0 = group.scalar_add(group.scalar_multiply(power_y,
+                    group.scalar_subtract(group.scalar_add(bit, z), one())), group.scalar_multiply(block_z, power_2));
+                last r1 = group.scalar_multiply(power_y, right_mask[index]);
+                left_constant.append(l0);
+                right_constant.append(r0);
+                right_mask[index] = r1;
+                t1 = group.scalar_add(t1, group.scalar_add(group.scalar_multiply(l0, r1),
+                    group.scalar_multiply(left_mask[index], r0)));
+                t2 = group.scalar_add(t2, group.scalar_multiply(left_mask[index], r1));
+                power_y = group.scalar_multiply(power_y, y);
+                power_2 = group.scalar_add(power_2, power_2);
+            }
+            value_blinding = group.scalar_add(value_blinding, group.scalar_multiply(block_z, blinds[block]));
+            block_z = group.scalar_multiply(block_z, z);
         }
 
-        last t1_blind = random_scalar(group, random, 2 + 2 * bits);
-        last t2_blind = random_scalar(group, random, 3 + 2 * bits);
+        // Dalek consumes each block's T1/T2 blindings after all A/S proof randomness.
+        let t1_blind = zero();
+        let t2_blind = zero();
+        last polynomial_random = blocks * (2 * bits + 2);
+        for (let block = 0; block < blocks; block++) {
+            t1_blind = group.scalar_add(t1_blind, random_scalar(group, random, polynomial_random + 2 * block));
+            t2_blind = group.scalar_add(t2_blind, random_scalar(group, random, polynomial_random + 2 * block + 1));
+        }
         last t1_commitment = commitment(gens, t1, t1_blind);
         last t2_commitment = commitment(gens, t2, t2_blind);
         if (group.is_identity(t1_commitment) || group.is_identity(t2_commitment)) {
-            return fail<[uint8[list], uint8[list]]>("degenerate Bulletproofs polynomial commitment");
+            return fail<[uint8[list][list], uint8[list]]>("degenerate Bulletproofs polynomial commitment");
         }
         last encoded_t1 = group.encode(t1_commitment);
         last encoded_t2 = group.encode(t2_commitment);
@@ -244,13 +285,13 @@ export let Bulletproofs = module (
         absorb(transcript, "T_2", encoded_t2);
         last x = challenge(group, transcript, "x")?;
         last x_sq = group.scalar_multiply(x, x);
-        for (let i = 0; i < bits; i++) {
+        for (let i = 0; i < dimension; i++) {
             left_constant[i] = group.scalar_add(left_constant[i], group.scalar_multiply(x, left_mask[i]));
             right_constant[i] = group.scalar_add(right_constant[i], group.scalar_multiply(x, right_mask[i]));
         }
 
-        last tx = inner_product(group, left_constant, 0, right_constant, 0, bits);
-        last tx_blind = group.scalar_add(group.scalar_multiply(z_sq, blind),
+        last tx = inner_product(group, left_constant, 0, right_constant, 0, dimension);
+        last tx_blind = group.scalar_add(value_blinding,
             group.scalar_add(group.scalar_multiply(x, t1_blind), group.scalar_multiply(x_sq, t2_blind)));
         last e_blind = group.scalar_add(alpha, group.scalar_multiply(x, rho));
         last encoded_tx = group.scalar_bytes(tx);
@@ -270,7 +311,7 @@ export let Bulletproofs = module (
         words.append_all(proof, encoded_tx_blind);
         words.append_all(proof, encoded_e_blind);
         let _ = prove_inner_product(gens, transcript, left_constant, right_constant, group.scalar_invert(y), w, proof)?;
-        return Result<[uint8[list], uint8[list]]>.Ok([encoded_v, proof]);
+        return Result<[uint8[list][list], uint8[list]]>.Ok([encoded_values, proof]);
     };
 
     let word_bytes = func(value: uint64) -> uint8[list] {
@@ -291,20 +332,28 @@ export let Bulletproofs = module (
 
     let part = func(bytes: uint8[list], index: int) -> uint8[list] => words.slice(bytes, 32 * index, 32 * (index + 1));
 
-    let delta = func(group: ristretto.Group, bits: int, y: uint32[list], z: uint32[list], z_sq: uint32[list])
+    let delta = func(group: ristretto.Group, bits, blocks: int, y: uint32[list], z: uint32[list], z_sq: uint32[list])
         -> uint32[list] {
         let sum_y = zero();
         let sum_2 = zero();
+        let sum_z = zero();
         let power_y = one();
         let power_2 = one();
-        for (let i = 0; i < bits; i++) {
+        let power_z = group.scalar_multiply(z, z_sq);
+        for (let i = 0; i < bits * blocks; i++) {
             sum_y = group.scalar_add(sum_y, power_y);
-            sum_2 = group.scalar_add(sum_2, power_2);
             power_y = group.scalar_multiply(power_y, y);
+        }
+        for (let i = 0; i < bits; i++) {
+            sum_2 = group.scalar_add(sum_2, power_2);
             power_2 = group.scalar_add(power_2, power_2);
         }
+        for (let block = 0; block < blocks; block++) {
+            sum_z = group.scalar_add(sum_z, power_z);
+            power_z = group.scalar_multiply(power_z, z);
+        }
         return group.scalar_subtract(group.scalar_multiply(group.scalar_subtract(z, z_sq), sum_y),
-            group.scalar_multiply(group.scalar_multiply(z, z_sq), sum_2));
+            group.scalar_multiply(sum_z, sum_2));
     };
 
     let verification_weights = func(group: ristretto.Group, bits: int, challenges: uint32[list][list],
@@ -323,11 +372,16 @@ export let Bulletproofs = module (
         return weights;
     };
 
-    let verify_proof = func(gens: Generators, transcript: merlin.Transcript, bits: int, encoded_v: uint8[list],
+    let verify_proof = func(gens: Generators, transcript: merlin.Transcript, bits: int, encoded_values: uint8[list][list],
         proof: uint8[list]) -> Result<bool> {
         last group = gens.group;
-        last rounds = log2_bits(bits);
-        last v = read_point(group, encoded_v, true)?;
+        last blocks = encoded_values.length;
+        last dimension = bits * blocks;
+        last rounds = log2_bits(dimension);
+        let values: edwards.Point[list] = new;
+        for (let encoded_v in encoded_values) {
+            values.append(read_point(group, encoded_v, true)?);
+        }
         last encoded_a = part(proof, 0);
         last encoded_s = part(proof, 1);
         last encoded_t1 = part(proof, 2);
@@ -343,8 +397,10 @@ export let Bulletproofs = module (
         last tx_blind = read_scalar(group, encoded_tx_blind)?;
         last e_blind = read_scalar(group, encoded_e_blind)?;
 
-        range_domain(transcript, bits);
-        absorb(transcript, "V", encoded_v);
+        range_domain(transcript, bits, blocks);
+        for (let encoded_v in encoded_values) {
+            absorb(transcript, "V", encoded_v);
+        }
         absorb(transcript, "A", encoded_a);
         absorb(transcript, "S", encoded_s);
         last y = challenge(group, transcript, "y")?;
@@ -359,16 +415,20 @@ export let Bulletproofs = module (
         last w = challenge(group, transcript, "w")?;
 
         // Check the polynomial commitment equation independently of the inner product equation.
-        last adjustment = delta(group, bits, y, z, z_sq);
+        last adjustment = delta(group, bits, blocks, y, z, z_sq);
         let polynomial = group.multiply_two(x, t1, group.scalar_multiply(x, x), t2);
-        polynomial = group.add(polynomial, group.multiply(z_sq, v));
+        let block_z = z_sq;
+        for (let v in values) {
+            polynomial = group.add(polynomial, group.multiply(block_z, v));
+            block_z = group.scalar_multiply(block_z, z);
+        }
         polynomial = group.add(polynomial, group.multiply(group.scalar_subtract(adjustment, tx), gens.base));
         polynomial = group.subtract(polynomial, group.multiply(tx_blind, gens.blinding));
         if (!group.is_identity(polynomial)) {
             return Result<bool>.Ok(false);
         }
 
-        inner_domain(transcript, bits);
+        inner_domain(transcript, dimension);
         let inner = group.add(a, group.multiply(x, s));
         let challenges: uint32[list][list] = new;
         let inverses: uint32[list][list] = new;
@@ -393,43 +453,37 @@ export let Bulletproofs = module (
         inner = group.add(inner, group.multiply(group.scalar_multiply(w, group.scalar_subtract(tx, ab)), gens.base));
         inner = group.subtract(inner, group.multiply(e_blind, gens.blinding));
 
-        last weights = verification_weights(group, bits, challenges, inverses);
+        last weights = verification_weights(group, dimension, challenges, inverses);
         last y_inv = group.scalar_invert(y);
         let power_inv_y = one();
-        let power_2 = one();
-        for (let i = 0; i < bits; i++) {
-            last g_weight = group.scalar_subtract(zero(), group.scalar_add(z, group.scalar_multiply(a_scalar, weights[i])));
-            last h_weight = group.scalar_add(z, group.scalar_multiply(power_inv_y,
-                group.scalar_subtract(group.scalar_multiply(z_sq, power_2),
-                    group.scalar_multiply(b_scalar, weights[bits - 1 - i]))));
-            inner = group.add(inner, group.multiply_two(g_weight, gens.g[i], h_weight, gens.h[i]));
-            power_inv_y = group.scalar_multiply(power_inv_y, y_inv);
-            power_2 = group.scalar_add(power_2, power_2);
+        block_z = z_sq;
+        for (let block = 0; block < blocks; block++) {
+            let power_2 = one();
+            for (let i = 0; i < bits; i++) {
+                last index = block * bits + i;
+                last g_weight = group.scalar_subtract(zero(),
+                    group.scalar_add(z, group.scalar_multiply(a_scalar, weights[index])));
+                last h_weight = group.scalar_add(z, group.scalar_multiply(power_inv_y,
+                    group.scalar_subtract(group.scalar_multiply(block_z, power_2),
+                        group.scalar_multiply(b_scalar, weights[dimension - 1 - index]))));
+                inner = group.add(inner, group.multiply_two(g_weight, gens.g[index], h_weight, gens.h[index]));
+                power_inv_y = group.scalar_multiply(power_inv_y, y_inv);
+                power_2 = group.scalar_add(power_2, power_2);
+            }
+            block_z = group.scalar_multiply(block_z, z);
         }
         return Result<bool>.Ok(group.is_identity(inner));
     };
 
     /// @brief Proves one value in [0, 2^bits) and returns [commitment, proof] in Dalek's encoding.
-    ///
-    /// Widths are 8, 16, 32 and 64. The caller supplies the canonical 32-byte blinding scalar.
-    /// Hiding the committed value requires independent uniform blinding. Supply exactly 64 * (2 * bits + 4)
-    /// independent unpredictable bytes for production proofs. Degenerate proof points return a Result error.
-    /// The caller's Merlin transcript is forked. Scalar multiplication of secret values is branch-free in
-    /// source. The runtime does not guarantee constant time.
+    /// Supply one canonical 32-byte blinding scalar and 64 * (2 * bits + 4) independent unpredictable bytes.
+    /// See prove_aggregate_with for the supported widths and random material requirements.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
     #[NoDiscard, Since("0.3.0")]
     export let prove_with = func(transcript: merlin.Transcript, bits: int, value: uint64,
         blinding: uint8[list], random: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
-        check_bits(bits);
-        if (random.length != random_length(bits)) {
-            trap_with_message("invalid argument: incorrect Bulletproofs randomness length");
-        }
-        if (bits < 64 && (value >> bits) != 0) {
-            return fail<[uint8[list], uint8[list]]>("the value is outside the Bulletproofs range");
-        }
-        let gens: Generators = new(bits);
-        last scalar = read_scalar(gens.group, blinding)?;
-        return make_proof(gens, transcript.fork(), bits, value, scalar, random);
+        last result = prove_aggregate_with(transcript, bits, new([value]), new([blinding]), random)?;
+        return Result<[uint8[list], uint8[list]]>.Ok([result[0][0], result[1]]);
     };
 
     /// @brief Proves one value using fresh operating system randomness for the proof.
@@ -437,26 +491,83 @@ export let Bulletproofs = module (
     #[NoDiscard, Since("0.3.0")]
     export let prove = func(transcript: merlin.Transcript, bits: int, value: uint64, blinding: uint8[list])
         -> Result<[uint8[list], uint8[list]]> {
-        check_bits(bits);
-        let random = entropy.os_bytes(random_length(bits))?;
-        last result = prove_with(transcript, bits, value, blinding, random);
+        last result = prove_aggregate(transcript, bits, new([value]), new([blinding]))?;
+        return Result<[uint8[list], uint8[list]]>.Ok([result[0][0], result[1]]);
+    };
+
+    /// @brief Verifies one Dalek range proof deterministically by checking both group equations.
+    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(transcript: merlin.Transcript, bits: int, commitment: uint8[list],
+        proof: uint8[list]) -> bool => verify_aggregate(transcript, bits, new([commitment]), proof);
+
+    /// @brief Produces one Dalek range proof for an ordered list of values in [0, 2^bits).
+    /// Returns the list of commitments in input order and then the proof bytes.
+    ///
+    /// Widths are 8, 16, 32, and 64. The list contains 1, 2, 4, 8, or 16 values and one canonical
+    /// 32-byte blinding scalar per value. Uniform independent blinding scalars hide the committed values.
+    /// Supply 64 * value_count * (2 * bits + 4) independent unpredictable bytes for production proofs.
+    /// A bad width, value or blinding count, or random byte count traps. Noncanonical blindings,
+    /// out-of-range values, and degenerate proof points return errors. The caller's Merlin transcript
+    /// is forked. Scalar multiplication of secret values is branch-free in source. The runtime
+    /// does not guarantee constant time.
+    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
+    #[NoDiscard, Since("0.3.0")]
+    export let prove_aggregate_with = func(transcript: merlin.Transcript, bits: int, values: uint64[list],
+        blindings: uint8[list][list], random: uint8[list]) -> Result<[uint8[list][list], uint8[list]]> {
+        check_shape(bits, values.length, blindings.length);
+        if (random.length != random_length(bits, values.length)) {
+            trap_with_message("invalid argument: incorrect Bulletproofs randomness length");
+        }
+        if (bits < 64) {
+            for (let value in values) {
+                if ((value >> bits) != 0) {
+                    return fail<[uint8[list][list], uint8[list]]>("the value is outside the Bulletproofs range");
+                }
+            }
+        }
+        let gens: Generators = new(bits, values.length);
+        let scalars: uint32[list][list] = new;
+        for (let blind in blindings) {
+            scalars.append(read_scalar(gens.group, blind)?);
+        }
+        return make_proof(gens, transcript.fork(), bits, values, scalars, random);
+    };
+
+    /// @brief Produces an aggregate range proof with fresh operating system randomness.
+    /// The values and caller-supplied blindings follow the same contract as prove_aggregate_with.
+    /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
+    #[NoDiscard, Since("0.3.0")]
+    export let prove_aggregate = func(transcript: merlin.Transcript, bits: int, values: uint64[list],
+        blindings: uint8[list][list]) -> Result<[uint8[list][list], uint8[list]]> {
+        check_shape(bits, values.length, blindings.length);
+        let random = entropy.os_bytes(random_length(bits, values.length))?;
+        last result = prove_aggregate_with(transcript, bits, values, blindings, random);
         words.wipe(random);
         return result;
     };
 
-    /// @brief Verifies one Dalek range proof deterministically by checking both group equations.
+    /// @brief Verifies a Dalek aggregate range proof deterministically against the ordered commitment list.
     ///
-    /// Widths are 8, 16, 32 and 64. Wrong encodings, mismatched transcripts, and failed equations return false.
-    /// The caller's Merlin transcript is forked.
+    /// Widths are 8, 16, 32, and 64. A list contains 1, 2, 4, 8, or 16 commitments in proving order.
+    /// An unsupported width traps. Wrong encodings, mismatched transcripts, invalid counts, and failed
+    /// group equations return false. The caller's Merlin transcript is forked.
     /// @see [Std.Crypto.Advanced.Bulletproofs](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Bulletproofs)
     #[NoDiscard, Since("0.3.0")]
-    export let verify = func(transcript: merlin.Transcript, bits: int, commitment: uint8[list], proof: uint8[list]) -> bool {
+    export let verify_aggregate = func(transcript: merlin.Transcript, bits: int, commitments: uint8[list][list],
+        proof: uint8[list]) -> bool {
         check_bits(bits);
-        if (commitment.length != 32 || proof.length != 32 * (9 + 2 * log2_bits(bits))) {
+        last count = commitments.length;
+        if (!valid_count(count) || proof.length != 32 * (9 + 2 * log2_bits(bits * count))) {
             return false;
         }
-        let gens: Generators = new(bits);
-        match (verify_proof(gens, transcript.fork(), bits, commitment, proof)) {
+        for (let encoded in commitments) {
+            if (encoded.length != 32) {
+                return false;
+            }
+        }
+        let gens: Generators = new(bits, count);
+        match (verify_proof(gens, transcript.fork(), bits, commitments, proof)) {
             Result.Ok(valid) => {
                 return valid;
             },

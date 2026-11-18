@@ -167,10 +167,101 @@ fn range_vectors() {
     }
 }
 
+fn aggregate_vectors() {
+    let pc = PedersenGens::default();
+    let bp = BulletproofGens::new(64, 4);
+    let label = b"neura aggregate range test";
+    for (bits, values) in [(8, vec![0, 255]), (16, vec![9, 0, 32768, 65535])] {
+        let blinds: Vec<_> = (0..values.len())
+            .map(|index| {
+                if index == 0 && bits == 8 {
+                    Scalar::ZERO
+                } else {
+                    Scalar::from(101 + bits as u64 + 13 * index as u64)
+                }
+            })
+            .collect();
+        let mut random = Recorder::new(&[bits as u8, values.len() as u8]);
+        let (proof, commitments) = RangeProof::prove_multiple_with_rng(
+            &bp,
+            &pc,
+            &mut Transcript::new(label),
+            &values,
+            &blinds,
+            bits,
+            &mut random,
+        )
+        .unwrap();
+        assert_eq!(random.consumed.len(), 64 * values.len() * (2 * bits + 4));
+        let mut verifier_random = Recorder::new(b"aggregate verification entropy");
+        let verify = |proof: &RangeProof,
+                      items: &[CompressedRistretto],
+                      label,
+                      rng: &mut Recorder| {
+            proof.verify_multiple_with_rng(&bp, &pc, &mut Transcript::new(label), items, bits, rng)
+        };
+        verify(&proof, &commitments, label, &mut verifier_random).unwrap();
+        let mut reordered = commitments.clone();
+        reordered.swap(0, 1);
+        assert!(verify(&proof, &reordered, label, &mut verifier_random).is_err());
+        assert!(verify(
+            &proof,
+            &commitments,
+            b"wrong aggregate transcript",
+            &mut verifier_random
+        )
+        .is_err());
+        let mut mismatched = commitments.clone();
+        mismatched[1] = pc
+            .commit(Scalar::from(values[1]), blinds[1] + Scalar::ONE)
+            .compress();
+        assert!(verify(&proof, &mismatched, label, &mut verifier_random).is_err());
+
+        let bytes = proof.to_bytes();
+        let mut altered = bytes.clone();
+        let a_offset = altered.len() - 64;
+        let a: [u8; 32] = altered[a_offset..a_offset + 32].try_into().unwrap();
+        let modified = Scalar::from_canonical_bytes(a).unwrap() + Scalar::ONE;
+        altered[a_offset..a_offset + 32].copy_from_slice(modified.as_bytes());
+        assert!(verify(
+            &RangeProof::from_bytes(&altered).unwrap(),
+            &commitments,
+            label,
+            &mut verifier_random
+        )
+        .is_err());
+
+        println!(
+            "{bits}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            hex(label),
+            values
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+            blinds
+                .iter()
+                .map(|item| hex(item.as_bytes()))
+                .collect::<Vec<_>>()
+                .join(","),
+            hex(&random.consumed),
+            commitments
+                .iter()
+                .map(|item| hex(item.as_bytes()))
+                .collect::<Vec<_>>()
+                .join(","),
+            hex(&bytes),
+            hex(mismatched[1].as_bytes()),
+            hex(&altered),
+        );
+    }
+}
+
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("merlin") => merlin_vectors(),
         Some("range") => range_vectors(),
-        _ => panic!("usage: neura-bulletproofs-reference merlin|range"),
+        Some("aggregate") => aggregate_vectors(),
+        _ => panic!("usage: neura-bulletproofs-reference merlin|range|aggregate"),
     }
 }
