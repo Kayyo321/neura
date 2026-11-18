@@ -1464,8 +1464,32 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
     // After a leading '|' of a class hook or accessor clause, offer the
     // clause words (docs/design/Hooks030.md); `||` is an operator.
     if (before != std::string::npos && doc.source[before] == '|' && (before == 0 || doc.source[before - 1] != '|')) {
-        add("get", 14, "class hook or accessor clause", "`| get: instance;` runs when a reference is read.");
-        add("set", 14, "class hook or accessor clause", "`| set: value;` runs when a reference is stored or passed.");
+        // In an interface the clause is a property requirement's bodyless
+        // `| get;` or `| set;` (docs/design/Records030.md, edge case 143):
+        // the innermost open '(' belongs to `interface` or `interface<T>`.
+        bool requirement = false;
+        int depth = 0;
+        for (std::size_t i = doc.tokens.size(); i > 0;) {
+            const auto &t = doc.tokens[--i];
+            if (t.kind == TokenKind::End || t.span.offset >= before) continue;
+            if (t.text == ")") ++depth;
+            else if (t.text == "(" && depth-- == 0) {
+                for (std::size_t j = i; j > 0;) {
+                    const auto &word = doc.tokens[--j];
+                    if (word.text == "interface") requirement = true;
+                    if (requirement || word.text == "=" || word.text == ";" || word.text == "(" || word.text == ")")
+                        break;
+                }
+                break;
+            }
+        }
+        if (requirement) {
+            add("get;", 14, "property requirement", "`| get;` requires a readable property.");
+            add("set;", 14, "property requirement", "`| set;` requires an assignable property.");
+        } else {
+            add("get", 14, "class hook or accessor clause", "`| get: instance;` runs when a reference is read.");
+            add("set", 14, "class hook or accessor clause", "`| set: value;` runs when a reference is stored or passed.");
+        }
         return Json{{"isIncomplete", false}, {"items", items}};
     }
     // After `| get.` or `| set.`, the dispatch word of an accessor clause:

@@ -1096,6 +1096,8 @@ private:
                 expect("(");
                 hook_clauses(result, result.kind == Declaration::Kind::Class ? nullptr
                                      : result.kind == Declaration::Kind::Interface ? "an interface" : "a module");
+                // Set when a member's error reached the end of the file.
+                bool member_failed_at_end = false;
                 while (!at_end() && !at(")")) {
                     const auto member_start = cursor_;
                     if (startup_member(result)) continue;
@@ -1105,6 +1107,7 @@ private:
                     } catch (const Diagnostic& error) {
                         recover(error, member_start);
                         skip_accessor_clauses();
+                        member_failed_at_end = at_end();
                         continue;
                     }
                     if (member.cast_target) {
@@ -1115,7 +1118,13 @@ private:
                         result.members.push_back(std::move(member));
                     }
                 }
-                expect(")");
+                // Edge case 143 (docs/design/Records030.md): a member whose
+                // error ran to the end of the file has reported it; the body
+                // keeps its other members, as a record does (edge case 141).
+                if (member_failed_at_end && at_end())
+                    unfinished_at_end_ = true;
+                else
+                    expect(")");
                 expand_constructor_shorthands(result);
             } else if (next_is_word(0, "derive") && cursor_ + 1 < tokens_.size() &&
                        tokens_[cursor_ + 1].kind == TokenKind::Identifier) {

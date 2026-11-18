@@ -290,6 +290,27 @@ class LanguageServerTests(unittest.TestCase):
         self.assertEqual(result.stderr.count('error['), 1, result.stderr)
         self.assertIn('E0203', result.stderr)
 
+    def test_unfinished_property_clause_keeps_the_interface(self):
+        # Edge case 143: one E0202; the interface keeps its other members,
+        # and completion after the '|' offers the bodyless clauses.
+        path = self.root / 'partial-interface.nra'
+        self.client.open(path, 'let before = 1;\nlet Named = interface (\n    let other = func() -> int;\n'
+                               '    let name: string;\n        |')
+        response = self.client.request('textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        self.assertEqual([symbol['name'] for symbol in response], ['before', 'Named'])
+        self.assertIn('other', [child['name'] for child in response[1].get('children', [])])
+        items = self.client.request('textDocument/completion', params(path, 4, 9))['items']
+        self.assertEqual([item['label'] for item in items], ['get;', 'set;'])
+        reports = [n['params']['diagnostics'] for n in self.client.notifications
+                   if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+        self.assertEqual([item['code'] for item in reports[-1]], ['E0202'])
+        # In a class the same '|' still offers the clause words of a hook or
+        # accessor.
+        other = self.root / 'partial-class.nra'
+        self.client.open(other, 'let Box = class (\n    export let label: string = "";\n        |')
+        items = self.client.request('textDocument/completion', params(other, 2, 9))['items']
+        self.assertEqual([item['label'] for item in items], ['get', 'set'])
+
     def test_property_rename_reaches_requirement_fields_and_overrides(self):
         # docs/design/Records030.md, Tooling: a property is one name across
         # its interface requirement, the field that satisfies it, the
