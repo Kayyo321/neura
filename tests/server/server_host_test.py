@@ -66,15 +66,22 @@ class Host:
             self.err.flush()
         return self.err_path.read_text()
 
-    def children(self):
-        # Workers are children of whichever host thread spawned them.
+    def children(self, zygote=False):
+        # Workers are children of whichever host thread spawned them; a
+        # worker forked by the zygote is a child of the host too. The zygote
+        # is left out unless asked for.
         pids = []
         for task in Path(f"/proc/{self.process.pid}/task").glob("*"):
             try:
                 pids += [int(pid) for pid in (task / "children").read_text().split()]
             except OSError:
                 pass
-        return sorted(set(pids))
+        # Each thread's list is read at a different moment, so a worker
+        # reaped after one list was read can appear next to its replacement
+        # from a later one. Only the processes that still exist after every
+        # list has been read (zombies included) are counted: all of them
+        # existed at one moment, the end of the reading.
+        return sorted(pid for pid in set(pids) if exists(pid) and (comm(pid) == "neura-zygote") == zygote)
 
     def stop(self, sig=signal.SIGTERM, timeout=15):
         if self.process.poll() is None:
@@ -86,6 +93,25 @@ class Host:
                 self.process.wait()
         self.err.close()
         return self.process.returncode
+
+
+def exists(pid):
+    return Path(f"/proc/{pid}").exists()
+
+
+def comm(pid):
+    try:
+        return Path(f"/proc/{pid}/comm").read_text().strip()
+    except OSError:
+        return ""
+
+
+def metric(port, name):
+    status, _, body = request(port, "GET", "/metrics")
+    for line in body.decode().splitlines():
+        if line.startswith(name + " "):
+            return int(line.split()[1])
+    return None
 
 
 def request(port, method, path, body=None, headers=None, timeout=30):
@@ -257,7 +283,10 @@ def test_basic(args, image):
 
 
 def test_limits(args, image):
-    host = Host(args, image, "--max-workers", "1", "--max-queue", "0", "--ready-workers", "0",
+    # One slot and one place in the queue: a worker holds its slot until it
+    # has been reaped, so a request that follows a response at once waits
+    # for it instead of being refused.
+    host = Host(args, image, "--max-workers", "1", "--max-queue", "1", "--ready-workers", "0",
                 "--request-timeout", "2", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
     try:
         port = host.port
@@ -275,13 +304,21 @@ def test_limits(args, image):
         def slow():
             results["slow"] = request(port, "GET", "/sleep")[0]
 
+        def queued():
+            results["queued"] = request(port, "GET", "/hello")[0]
+
         started = time.time()
         thread = threading.Thread(target=slow)
         thread.start()
         time.sleep(0.5)
+        waiting = threading.Thread(target=queued)
+        waiting.start()
+        time.sleep(0.3)
         status, headers, _ = request(port, "GET", "/hello")
         check(status == 503 and headers.get("retry-after") == "1", f"saturated: {status} {headers}")
         thread.join()
+        waiting.join()
+        check(results.get("queued") in (200, 503), f"queued behind the slow request: {results}")
         elapsed = time.time() - started
         check(results.get("slow") == 504 and elapsed < 6, f"deadline: {results} after {elapsed:.1f} s")
         time.sleep(0.5)
@@ -489,6 +526,110 @@ def test_dead_ready_worker(args, image):
     check("a ready worker had ended" in host.stderr(), "the discarded worker is logged")
 
 
+def test_refused_assignment(args, image):
+    # A worker whose channel refuses the Assign has run nothing: the request
+    # goes to a new worker, once, and runs exactly once. The test hook
+    # NEURA_SERVER_TEST_REFUSE_ASSIGN=N makes the first N workers refuse.
+    for start in ("zygote", "exec"):
+        for ready in ("0", "1"):
+            env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="1")
+            host = Host(args, image, "--worker-start", start, "--ready-workers", ready, "--no-startup-check",
+                        "--admin-listen", "127.0.0.1:0", env=env)
+            label = f"{start}, {ready} ready"
+            try:
+                if ready == "1":
+                    # The ready worker took the refusal; it must be in the
+                    # pool before the request, or the request starts its own.
+                    deadline = time.time() + 10
+                    while metric(host.ports["admin"], "neura_workers_ready") != 1 and time.time() < deadline:
+                        time.sleep(0.01)
+                status, _, _ = request(host.port, "GET", "/metric")
+                check(status == 200, f"refused assignment ({label}): {status}")
+                admin = host.ports["admin"]
+                check(metric(admin, "test_requests_total") == 2, f"the request ran once ({label})")
+                check(metric(admin, "neura_worker_retries_total") == 1, f"one retry ({label})")
+                # A worker that took its Assign is never replaced.
+                status, _, _ = request(host.port, "GET", "/trap")
+                check(status == 500, f"trap after a retry ({label}): {status}")
+                check(metric(admin, "neura_worker_retries_total") == 1, f"a trap is not retried ({label})")
+            finally:
+                host.stop()
+            check("a worker refused its assignment; using a new one" in host.stderr(), f"retry logged ({label})")
+    # The new worker refuses too: no third worker, the client gets 500.
+    env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="2")
+    host = Host(args, image, "--ready-workers", "0", "--no-startup-check", "--admin-listen", "127.0.0.1:0", env=env)
+    try:
+        status, _, body = request(host.port, "GET", "/metric")
+        check(status == 500 and body == b'{"error":"internal"}', f"two refusals: {status} {body!r}")
+        check(metric(host.ports["admin"], "test_requests_total") is None, "nothing ran after two refusals")
+        check(metric(host.ports["admin"], "neura_worker_retries_total") == 1, "two refusals are one retry")
+        status, _, _ = request(host.port, "GET", "/hello")
+        check(status == 200, f"after two refusals: {status}")
+    finally:
+        host.stop()
+    check("the new worker refused its assignment too" in host.stderr(), "second refusal logged")
+
+
+def test_zygote_restart(args, image):
+    # A zygote that ends is replaced; requests are still served.
+    host = Host(args, image, "--ready-workers", "0")
+    try:
+        zygotes = host.children(zygote=True)
+        check(len(zygotes) == 1, f"one zygote: {zygotes}")
+        for pid in zygotes:
+            os.kill(pid, signal.SIGKILL)
+        time.sleep(0.2)
+        status, _, body = request(host.port, "GET", "/hello")
+        check(status == 200 and body == b"hello from http\n", f"after the zygote died: {status} {body!r}")
+        replaced = host.children(zygote=True)
+        check(len(replaced) == 1 and replaced != zygotes, f"a new zygote: {zygotes} then {replaced}")
+    finally:
+        host.stop()
+    check("the worker zygote ended; starting a new one" in host.stderr(), "the zygote restart is logged")
+
+
+def test_process_bound(args, image):
+    # A worker holds its S-1 slot until it has been reaped, so the workers,
+    # exited or not, never outnumber S-1 plus S-2 (B-S4).
+    for start in ("zygote", "exec"):
+        host = Host(args, image, "--worker-start", start, "--max-workers", "2", "--ready-workers", "1",
+                    "--max-queue", "256")
+        peak = [0]
+        stop = threading.Event()
+
+        def sample():
+            while not stop.is_set():
+                peak[0] = max(peak[0], len(host.children()))
+                time.sleep(0.002)
+
+        def load(statuses):
+            connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
+            for _ in range(25):
+                connection.request("GET", "/info")
+                response = connection.getresponse()
+                response.read()
+                statuses.append(response.status)
+            connection.close()
+
+        try:
+            sampler = threading.Thread(target=sample)
+            sampler.start()
+            statuses = []
+            threads = [threading.Thread(target=load, args=(statuses,)) for _ in range(12)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            stop.set()
+            sampler.join()
+            check(statuses.count(200) == 300, f"bounded load ({start}): {sorted(set(statuses))} {len(statuses)}")
+            check(0 < peak[0] <= 3, f"workers at the peak ({start}): {peak[0]}, the bound is 3")
+            check(len(host.children(zygote=True)) == (1 if start == "zygote" else 0), f"zygote count ({start})")
+        finally:
+            stop.set()
+            host.stop()
+
+
 def test_step_limit(args, image):
     # --max-steps bounds each request's execution; past it the execution
     # traps, the client gets 500, and the next request runs in a new worker.
@@ -634,7 +775,8 @@ def main():
         print(build.stdout + build.stderr)
         return 1
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
-             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_refused_assignment, test_zygote_restart,
+             test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
     for test in tests:
         if args.only and args.only != test.__name__:
             continue
