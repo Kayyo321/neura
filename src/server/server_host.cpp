@@ -855,8 +855,11 @@ private:
                      http::ResponseWriter& writer, Clock::time_point deadline) {
         Outcome outcome;
         auto& channel = *worker.channel;
+        // A call answered at or past the deadline (a statement the deadline
+        // interrupted) ends the request as timed out, in either phase.
+        bool deadline_ended = false;
         const auto failed = [&] {
-            outcome.timed_out = channel.status() == Channel::Status::TimedOut;
+            outcome.timed_out = deadline_ended || channel.status() == Channel::Status::TimedOut;
             return outcome;
         };
         // The request's SQL leases; leaving this function, by any path,
@@ -880,6 +883,10 @@ private:
                 if (!frame) return channel.status() == Channel::Status::Ok;
                 if (frame->kind == FrameKind::Call) {
                     if (channel.send(FrameKind::Return, reply(frame->body), deadline) != Channel::Status::Ok) {
+                        return false;
+                    }
+                    if (Clock::now() >= deadline) {
+                        deadline_ended = true;
                         return false;
                     }
                     continue;
