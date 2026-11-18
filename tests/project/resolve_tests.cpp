@@ -295,8 +295,18 @@ void links_and_special_files() {
     write(fixture.dependency / "ambiguous\\name", "name\n");
     rejected([&] { fixture.resolve(ordinary); }, "E1032", "unambiguous UTF-8");
     fs::remove(fixture.dependency / "ambiguous\\name");
-    write(fixture.dependency / "invalid-\xff", "name\n");
-    rejected([&] { fixture.resolve(ordinary); }, "E1032", "unambiguous UTF-8");
+    // A file system that requires UTF-8 names (APFS, on macOS) refuses this
+    // name, so no dependency there can hold it, and there is nothing to check.
+    {
+        std::ofstream out(fixture.dependency / "invalid-\xff", std::ios::binary);
+        out << "name\n";
+        out.close();
+        if (out.good()) {
+            rejected([&] { fixture.resolve(ordinary); }, "E1032", "unambiguous UTF-8");
+        } else {
+            std::cout << "the file system refuses a name that is not UTF-8; that case is not checked here\n";
+        }
+    }
 }
 #endif
 
