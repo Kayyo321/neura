@@ -1,0 +1,261 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let error = import:Std.Core.Error;
+let entropy = import:Std.Crypto.Random.Entropy;
+let hashing = import:Std.Core.Hash;
+let hybrid = import:Std.Crypto.Internal.HybridKem768;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The TLS 1.3 X25519MLKEM768 group of draft-ietf-tls-ecdhe-mlkem-05, section 4.
+///
+/// The public key and ciphertext are concatenations with the ML-KEM-768 component first.
+/// The shared secret is the 32-byte ML-KEM secret followed by the 32-byte X25519 secret.
+/// A low-order X25519 share is rejected, as TLS requires. An equal-length ML-KEM ciphertext that fails
+/// its re-encryption check contributes the ML-KEM implicit rejection secret. The TLS protocol itself
+/// supplies transcript binding and peer authentication.
+/// The X25519 ladder and the ML-KEM rejection-key selection are branch-free in source. The runtime
+/// does not guarantee constant time.
+/// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+#Since("0.3.0")
+export let X25519MlKem768 = module (
+    /// @brief The public key, in bytes.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #Since("0.3.0")
+    export const PublicKeyLength = hybrid.PublicKeyLength;
+
+    /// @brief The private-key seed, in bytes.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #Since("0.3.0")
+    export const PrivateKeyLength = 96;
+
+    /// @brief The ciphertext, in bytes.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #Since("0.3.0")
+    export const CiphertextLength = hybrid.CiphertextLength;
+
+    /// @brief The shared secret, in bytes.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #Since("0.3.0")
+    export const SharedSecretLength = 64;
+
+    /// @brief A 1216-byte X25519MLKEM768 public key containing the ML-KEM-768 encapsulation key followed by the X25519 share.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #[Final, Since("0.3.0")]
+    export let X25519MlKem768PublicKey = class (
+        last encoded: uint8[list];
+
+        /// @brief Validates and copies the public key. Invalid bytes trap. Use `parse_public_key` for
+        /// untrusted input.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let init = func(bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.X25519MlKem768);
+            match (hybrid.validate_public_key(bytes, false)) {
+                Result.Err(e) => {
+                    trap_with_message("invalid argument: " + e.to_string());
+                },
+                Result.Ok(_) => {},
+            }
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the encoded key.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        /// @brief Whether the other key has the same type and bytes.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is X25519MlKem768PublicKey)) {
+                return false;
+            }
+            return constant_time.ct_eq(encoded, (other as X25519MlKem768PublicKey).to_bytes());
+        };
+
+        /// @brief A hash of the encoded key bytes.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = 768;
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        /// @brief The type and size, without the key contents.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "X25519MlKem768PublicKey(1216 bytes)";
+    );
+
+    /// @brief A private key stored as a 96-byte Neura seed. TLS uses no serialized private-key format.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #[Final, Since("0.3.0")]
+    export let X25519MlKem768PrivateKey = class implements PrivateKey<X25519MlKem768> (
+        last material: SecretBytes;
+        last public_encoded: uint8[list];
+
+        /// @brief Derives the key from the 96-byte Neura seed `d || z || x`. A wrong length traps.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let init = func(seed: uint8[list]) {
+            crypto_policy.require(Algorithm.X25519MlKem768);
+            let expanded = hybrid.expand(seed, false);
+            material = new(seed);
+            public_encoded = hybrid.derive_public_key(expanded);
+            words.wipe(expanded);
+        };
+
+        /// @brief A copy of the private-key seed. Traps after wiping.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let expose = func -> uint8[list] => words.copy(material.expose());
+
+        /// @brief Overwrites the stored seed and invalidates it.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let wipe = func => material.wipe();
+
+        /// @brief Whether the private-key seed has been invalidated.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let is_wiped = func -> bool => material.is_wiped();
+
+        /// @brief Requests the same storage lock as SecretBytes.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let lock = func => material.lock();
+
+        /// @brief A copy of the encoded public key.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
+
+        /// @brief The matching X25519MLKEM768 public key.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let public_key = func -> X25519MlKem768PublicKey => new(public_encoded);
+
+        /// @brief A fixed placeholder for the private key.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "X25519MlKem768PrivateKey(<redacted>)";
+    );
+
+    /// @brief X25519MLKEM768 key generation, encapsulation and decapsulation.
+    /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+    #[Final, Since("0.3.0")]
+    export let X25519MlKem768 = class implements KeyEncapsulation<X25519MlKem768PublicKey, X25519MlKem768PrivateKey,
+            SecretBytes, uint8[list]> (
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        /// @brief Uses OS entropy or a caller's generator.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let init = func {
+            crypto_policy.require(Algorithm.X25519MlKem768);
+        } or func(random: drbg.ChaCha20Drbg) {
+            crypto_policy.require(Algorithm.X25519MlKem768);
+            generator = random;
+            has_generator = true;
+        };
+
+        /// @brief The policy identifier.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let algorithm = func -> Algorithm => Algorithm.X25519MlKem768;
+
+        let random_bytes = func(count: int) -> Result<uint8[list]> {
+            if (has_generator) {
+                return Result<uint8[list]>.Ok(generator.fill(count));
+            }
+            return entropy.os_bytes(count);
+        };
+
+        /// @brief Deterministic key generation from the 96-byte Neura seed `d || z || x`. A wrong length traps.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let key_pair_from_seed = func(seed: uint8[list]) -> X25519MlKem768PrivateKey => new(seed);
+
+        /// @brief Generates a private key, or reports an entropy failure.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let generate_key_pair = func -> Result<X25519MlKem768PrivateKey> {
+            let seed = random_bytes(PrivateKeyLength)?;
+            last key = key_pair_from_seed(seed);
+            words.wipe(seed);
+            return Result<X25519MlKem768PrivateKey>.Ok(key);
+        };
+
+        /// @brief Checks a received public key's length and ML-KEM modulus. Also rejects low-order X25519 shares.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let parse_public_key = func(bytes: uint8[list]) -> Result<X25519MlKem768PublicKey> {
+            hybrid.validate_public_key(bytes, false)?;
+            return Result<X25519MlKem768PublicKey>.Ok(new X25519MlKem768PublicKey(bytes));
+        };
+
+        /// @brief Deterministic encapsulation. The seed is the 32-byte ML-KEM input m followed by the
+        /// 32-byte ephemeral X25519 scalar. Another length traps.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let encapsulate_with = func(public_key: X25519MlKem768PublicKey, seed: uint8[list])
+                -> Encapsulation<SecretBytes, uint8[list]> => hybrid.encapsulate(public_key.to_bytes(), seed, false);
+
+        /// @brief Encapsulates with fresh randomness, or reports an entropy failure.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #[NoDiscard, Since("0.3.0")]
+        export let try_encapsulate = func(public_key: X25519MlKem768PublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            let seed = random_bytes(hybrid.EncapsulationSeedLength)?;
+            last result = encapsulate_with(public_key, seed);
+            words.wipe(seed);
+            return Result<Encapsulation<SecretBytes, uint8[list]>>.Ok(result);
+        };
+
+        /// @brief Encapsulates with fresh randomness. An entropy failure traps. Use `try_encapsulate`
+        /// to handle that failure.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let encapsulate = func(public_key: X25519MlKem768PublicKey) -> Encapsulation<SecretBytes, uint8[list]> {
+            match (try_encapsulate(public_key)) {
+                Result.Ok(value) => {
+                    return value;
+                },
+                Result.Err(e) => {
+                    trap_with_message("unavailable: X25519MLKEM768 encapsulation needs entropy: " + e.to_string());
+                },
+            }
+        };
+
+        /// @brief Recovers the shared secret, or returns an error for a wrong-length ciphertext. A low-order
+        /// X25519 share also fails.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let decapsulate = func(private_key: X25519MlKem768PrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes> {
+            if (ciphertext.length != CiphertextLength) {
+                return Result<SecretBytes>.Err(error.custom("crypto.invalid_ciphertext", "X25519MLKEM768 ciphertext must be 1120 bytes"));
+            }
+            let seed = private_key.expose();
+            let expanded = hybrid.expand(seed, false);
+            words.wipe(seed);
+            last shared = hybrid.decapsulate(expanded, ciphertext, private_key.public_key_bytes(), false);
+            words.wipe(expanded);
+            return shared;
+        };
+
+        /// @brief The scheme name.
+        /// @see [Std.Crypto.Pqc.X25519MlKem768](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-X25519MlKem768)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "X25519MLKEM768";
+    );
+);

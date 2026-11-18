@@ -73,6 +73,20 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | FF1 (2.5) | KAT | all 9 NIST FF1 samples (AES-128/192/256, radix 10 and 36, with and without a tweak); radix 2 and 65536 round trips | implemented |
 | Raw ECB and CBC modes (2.5) | not exposed | | by design |
 
+### Asymmetric and post-quantum
+
+| Item (spec section) | Tier | Vectors and notes | Status |
+| --- | --- | --- | --- |
+| X25519, X448, Ed25519 and Ed448 (2.6) | KAT | RFC 7748 and RFC 8032, independent cryptography and PyNaCl, and Wycheproof negative cases. | implemented |
+| ECDSA and ECDH (2.6) | KAT | RFC 6979, OpenSSL deterministic signatures, and Wycheproof malformed, wrong-curve and boundary cases. | implemented |
+| RSA and HPKE (2.6) | KAT | Independently checked RSA-PSS, RSA-OAEP, PKCS #1 v1.5 and keygen, and official RFC 9180 HPKE vectors. | implemented |
+| ML-KEM, ML-DSA and SLH-DSA (2.7) | KAT | Selected NIST ACVP vectors for all parameter sets. ML-KEM adds public input modulus checks and implicit-rejection tests. Long SLH-DSA signing sets run a representative selection. | implemented |
+| TLS X25519MLKEM768 and X-Wing (2.7) | KAT | OpenSSL 3.5.7 with independent component tests, plus X-Wing draft -11 Appendix C. TLS rejects all-zero DH contributions. | implemented |
+| Composite ML-DSA-65 and Ed25519 (2.7) | KAT | Official -19 signatures with and without context, seed-derived public key, and independent deterministic component signatures. | implemented |
+| FN-DSA (2.7) | stub | NIST lists FIPS 206 as in development. A published standard or initial public draft and FIPS 206 reference vectors are unavailable. | stub |
+
+The TLS and X-Wing APIs are separate. TLS concatenates the two secrets after checking the X25519 contribution. X-Wing applies the draft's domain-separated combiner to the raw contribution, including all-zero X25519. The composite signature passes the suite label as the ML-DSA context and requires both signatures. The approved-algorithm allowlist of `Fips140_3` denies all three hybrid constructions and `Hpke`. HPKE has a single policy identifier and also supports nonapproved suites. Allowing it would require a suite-specific policy that covers the whole RFC 9180 construction.
+
 ### PKI
 
 Verification runs in Neura and shares the asymmetric and post-quantum primitives. RSA-PSS supports an independent MGF1 hash and enforces the minimum salt length in a constrained key. PKCS #1 v1.5 verification accepts both absent and NULL signature parameters for interoperable SHA-2 and SHA-3 encodings. SHA-1 signatures and policy-denied schemes return UnsupportedAlgorithm. CSOR HashML-DSA keys and signatures must use the matching OID. This is outside the RFC 9881 profile.
