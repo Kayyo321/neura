@@ -949,9 +949,9 @@ export let Desktop = module (
         /// @brief Answers bridge calls with `dispatcher` and consumes events until the host ends the channel: after
         /// the last window closes, after `quit`, or when the host itself ends. Each call runs as its own task. A
         /// Closed event forgets its window; then every event goes to the dispatcher's `on_event` handler on this
-        /// task. When the channel ends, calls still running are cancelled; if any is still running then, the
-        /// process ends at once with the application's status. A dispatcher for another registry is
-        /// InvalidInput.
+        /// task. When the channel ends, every call that has not reported finishing (a cancelled call included)
+        /// is abandoned and the process ends at once with the application's status; when none is left, `run`
+        /// returns. A dispatcher for another registry is InvalidInput.
         export let run = func(dispatcher: Dispatcher) -> Result<Unit> {
             if (!dispatcher.registry.equals(registry)) {
                 return Result<Unit>.Err(failure(4, "the dispatcher serves another registry"));
@@ -991,8 +991,9 @@ export let Desktop = module (
                             reap();
                             for (let i = 0; i < running.length; i = i + 1) {
                                 if (running[i].id == id) {
+                                    // The call stays listed until its task reports finishing: an operation
+                                    // that never asks may still be running when the channel ends.
                                     running[i].cancel.try_send(true);
-                                    running.remove_at(i);
                                     break;
                                 }
                             }
@@ -1000,11 +1001,12 @@ export let Desktop = module (
                         _ => {},
                     }
                 }
+                // Calls still listed have not reported finishing. An operation that never parks and never asks
+                // would hold the process forever once nobody waits for it, so the process ends now, without a
+                // scheduling point between the cancel and the exit: every listed call is abandoned.
                 serving.cancel();
                 reap();
                 if (running.length > 0) {
-                    // An operation that never parks and never asks would hold the process forever once nobody
-                    // is waiting for it: end now, as the host would after its grace period.
                     program.Process.exit(services.exit_status());
                 }
             }
@@ -1044,13 +1046,20 @@ export let Desktop = module (
             return bytes.ok();
         };
 
-        /// @brief The arguments of the reader task. Used once by `run_application`.
+        /// @brief Where the reader task passes calls, cancels and events. Used once by `run_application`.
         #Hidden
         export let reader_inbound = func -> channels.Sender<Inbound> => inbound_sender;
+
+        /// @brief Where the reader task receives host request registrations. Used once by `run_application`.
         #Hidden
         export let reader_waiters = func -> channels.Receiver<Waiter> => waiter_receiver;
+
+        /// @brief What the reader task closes at the end of input. Used once by `run_application`.
         #Hidden
         export let reader_waiter_closer = func -> channels.Closer<Waiter> => waiter_closer;
+
+        /// @brief The count of open windows the reader task lowers at each Closed. Used once by
+        /// `run_application`.
         #Hidden
         export let window_counter = func -> atomics.AtomicInt64 => services.window_counter();
 

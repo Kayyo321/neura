@@ -377,6 +377,27 @@ test('thirty-two calls of D-3 from one window in flight at once, each echoed exa
     assert.equal(closed.code, 0);
 });
 
+test('a cancelled operation that never asks does not keep the child alive after the end of input', { skip: !child }, async () => {
+    const echoed = Promise.withResolvers();
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            echoed.resolve();
+        }
+    });
+    await channel.ready;
+    await queue.send(Kind.Call, callBody(1, 1, 'fixture.spin', '1000000000000000'));
+    await queue.send(Kind.Cancel, u32(1));
+    await queue.send(Kind.Call, callBody(2, 1, 'fixture.echo', 'x'));
+    await echoed.promise;
+    const started = Date.now();
+    const closed = await channel.close();
+    assert.equal(closed.error, null);
+    assert.equal(closed.code, 0);
+    assert.ok(Date.now() - started < 4000, 'the child waited for the cancelled call');
+});
+
 test('the end of input with calls running ends the child at once with the application status (case 34)', { skip: !child }, async () => {
     const echoed = Promise.withResolvers();
     const { channel, queue } = startChild(async ({ kind, body }, q) => {

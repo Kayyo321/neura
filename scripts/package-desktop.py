@@ -48,12 +48,14 @@ EXCLUDED_ENGINE_FILES = {"resources/default_app.asar", "LICENSE", "LICENSES.chro
 LINUX_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
 WINDOWS_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 ELECTRON_VERSION = "45.3.3"
-# The libraries the pinned Electron loads on Debian, as Electron's own packages declare them, and xdg-utils for
-# opening external links.
+# The Debian packages of the libraries the pinned Electron and its bundled libraries name as NEEDED, found with
+# objdump -p and dpkg -S on Debian 13, plus xdg-utils, which opens external links. The second name of a pair is
+# the package's name before Debian 13's 64-bit time transition; only Debian 13 has been checked.
 DEB_DEPENDS = ("libasound2t64 | libasound2, libatk-bridge2.0-0t64 | libatk-bridge2.0-0, libatk1.0-0t64 | libatk1.0-0, "
-               "libatspi2.0-0t64 | libatspi2.0-0, libcups2t64 | libcups2, libdrm2, libgbm1, libgtk-3-0t64 | libgtk-3-0, "
-               "libnspr4, libnss3, libx11-6, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, "
-               "libxrandr2, libxshmfence1, libxss1, xdg-utils")
+               "libatspi2.0-0t64 | libatspi2.0-0, libc6, libcairo2, libcups2t64 | libcups2, libdbus-1-3, libdrm2, "
+               "libexpat1, libgbm1, libgcc-s1, libglib2.0-0t64 | libglib2.0-0, libgtk-3-0t64 | libgtk-3-0, libnspr4, "
+               "libnss3, libpango-1.0-0, libudev1, libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, "
+               "libxfixes3, libxkbcommon0, libxrandr2, xdg-utils")
 PROVIDERS = """The native child of this application is a Neura native executable. Its runtime and its
 host-service providers are part of Neura and are covered by LICENSE.neura. On Linux it links
 only the system C and math libraries, which are not part of this package. The window host is

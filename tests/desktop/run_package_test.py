@@ -235,8 +235,9 @@ def listening_inodes():
     for table in ("tcp", "tcp6", "udp", "udp6"):
         for line in Path(f"/proc/net/{table}").read_text().splitlines()[1:]:
             fields = line.split()
-            # TCP state 0A is LISTEN; any bound UDP socket can receive.
-            if table.startswith("udp") or fields[3] == "0A":
+            # TCP state 0A is LISTEN. A UDP socket can receive from anyone unless it is connected to one peer
+            # (state 01, a remote address set), as the network service's DNS queries to the local resolver are.
+            if fields[3] == "0A" if table.startswith("tcp") else fields[3] != "01":
                 inodes.add(fields[9])
     return inodes
 
@@ -270,8 +271,12 @@ def inner(executable):
             raise RuntimeError(f"the native child is not in the process tree: {sorted(names)}")
         listening = listening_inodes()
         for pid in tree:
-            if socket_inodes(pid) & listening:
-                raise RuntimeError(f"process {pid} of the package listens on a socket")
+            if found := socket_inodes(pid) & listening:
+                exe = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")[:200].decode(errors="replace")
+                rows = [line for table in ("tcp", "tcp6", "udp", "udp6")
+                        for line in Path(f"/proc/net/{table}").read_text().splitlines()[1:]
+                        if line.split()[9] in found]
+                raise RuntimeError(f"process {pid} of the package listens on a socket: {exe}; {rows}")
         process.send_signal(signal.SIGTERM)
         output, _ = process.communicate(timeout=15)
         if process.returncode != 0:

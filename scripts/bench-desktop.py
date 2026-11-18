@@ -153,13 +153,16 @@ def main():
                  "child_mib": round(memory["child_kib"] / 1024, 1),
                  "processes": memory["processes"], "budget": f"{BUDGET_TREE_MIB} MiB tree, {BUDGET_CHILD_MIB} MiB child"},
     }
-    # Judged on the wall time from starting xvfb-run, which includes starting the X server, and on PSS; the
-    # host's own figure starts only when Node in Electron's main process starts, and summed RSS counts shared
-    # pages once per process.
+    # B-D1 is judged on the wall time from starting xvfb-run, which includes starting the X server; the host's
+    # own figure starts only when Node in Electron's main process starts.
     report["B-D1"]["met"] = (report["B-D1"]["wall_median_ms"] <= BUDGET_LAUNCH_MEDIAN and
                              report["B-D1"]["wall_p95_ms"] <= BUDGET_LAUNCH_P95)
-    report["B-D2"]["met"] = (report["B-D2"]["tree_pss_mib"] <= BUDGET_TREE_MIB and
-                             report["B-D2"]["child_mib"] <= BUDGET_CHILD_MIB)
+    # Apps030 defines B-D2 as resident size summed over the tree; PSS is reported beside it, and which measure
+    # the budget means awaits the owner.
+    report["B-D2"]["met_as_defined"] = (report["B-D2"]["tree_rss_sum_mib"] <= BUDGET_TREE_MIB and
+                                        report["B-D2"]["child_mib"] <= BUDGET_CHILD_MIB)
+    report["B-D2"]["met_on_pss"] = (report["B-D2"]["tree_pss_mib"] <= BUDGET_TREE_MIB and
+                                    report["B-D2"]["child_mib"] <= BUDGET_CHILD_MIB)
     text = json.dumps(report, indent=2)
     print(text)
     if args.json:
