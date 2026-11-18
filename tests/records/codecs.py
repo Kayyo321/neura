@@ -2,6 +2,7 @@
 """Derived JSON codecs across parsing, linking, expansion and executable images."""
 import pathlib
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -35,40 +36,76 @@ class Codecs(unittest.TestCase):
         path.write_text(BASE + "let derive = 1; let after = derive + 1;\n"
                         "let A = derive json.Codec<User>; let B = derive json.Codec<User> {};\n")
         self.command("check", path)
+        # (source, code, the text the primary span begins at, message).
         cases = [
-            ("let J = derive json.Codec<User, Team>;", "E0417"),
-            ("let J = derive json.Codec;", "E0202"),
-            ("let J = derive json.JsonValue<User>;", "E0579"),
-            ("let App = module (export let Codec = interface<T> ();); let J = derive App.Codec<User>;", "E0579"),
-            ("let use = func() { let J = derive json.Codec<User>; };", "E0579"),
-            ("let f = func(x: int) => x; let value = f(derive json.Codec<User>);", "E0202"),
-            ('let J = derive json.Codec<User> { field User.name: "a" };', "E0202"),
-            ('let J = derive json.Codec<User> { field User.name: "a" + "b"; };', "E0202"),
-            ('let J = derive json.Codec<User> { wrong User.name: "a"; };', "E0202"),
-            ('let J = derive json.Codec<User> { field User.name: name; };', "E0202"),
-            ('let J = derive json.Codec<User> { field User.nick: "n"; };', "E0318"),
-            ('let J = derive json.Codec<User> { field Team.nick: "n"; };', "E0318"),
-            ('let J = derive json.Codec<User> { field User.name: ""; };', "E0319"),
-            ('let J = derive json.Codec<User> { field User.name: "id"; };', "E0319"),
-            ('let J = derive json.Codec<User> { field User.name: "a"; field User.name: "b"; };', "E0319"),
-            ("let Node = record (next: Node); let J = derive json.Codec<Node>;", "E0590"),
-            ("let J = derive json.Codec<[int, int]>;", "E0590"),
-            ("let J = derive json.Codec<Optional<User>>;", "E0590"),
-            ("let J = derive json.Codec<int>;", "E0590"),
-            ("let Plain = class (); let J = derive json.Codec<Plain>;", "E0590"),
-            ("let Bad = record (o: Optional<Optional<int>>); let J = derive json.Codec<Bad>;", "E0590"),
-            ("let Bad = record (t: [int, Optional<int>]); let J = derive json.Codec<Bad>;", "E0590"),
-            ("let Bad = enum (Case(Optional<int>)); let J = derive json.Codec<Bad>;", "E0590"),
+            ("let J = derive json.Codec<User, Team>;", "E0417", "json.Codec<",
+             "Json.Codec expects one type argument"),
+            ("let J = derive json.Codec;", "E0202", ";", "expected '<' and the type to derive"),
+            ("let J = derive json.JsonValue<User>;", "E0579", "json.JsonValue",
+             "'json.JsonValue' is not a generator; this release derives 'Std.Encoding.Json.Codec<T>'"),
+            ("let App = module (export let Codec = interface<T> ();); let J = derive App.Codec<User>;", "E0579",
+             "App.Codec<", "'App.Codec' is not a generator"),
+            ("let use = func() { let J = derive json.Codec<User>; };", "E0579", "derive",
+             "a derivation is a member of a file or module"),
+            ("let f = func(x: int) => x; let value = f(derive json.Codec<User>);", "E0202", "derive",
+             "a derivation is a declaration, not an expression"),
+            ('let J = derive json.Codec<User> { field User.name: "a" };', "E0202", "}",
+             "expected ';' after the mapping"),
+            ('let J = derive json.Codec<User> { field User.name: "a" + "b"; };', "E0202", "+",
+             "expected ';' after the mapping"),
+            ('let J = derive json.Codec<User> { wrong User.name: "a"; };', "E0202", "wrong",
+             "expected 'field' or 'variant' in a derivation mapping"),
+            ('let J = derive json.Codec<User> { field User.name: name; };', "E0202", "name;",
+             "expected a wire name as one string literal"),
+            ('let J = derive json.Codec<User> { field User.nick: "n"; };', "E0318", "User.nick",
+             "'User.nick' names no member reachable from the codec root"),
+            ('let J = derive json.Codec<User> { field Team.nick: "n"; };', "E0318", "Team.nick",
+             "'Team.nick' names no member reachable from the codec root"),
+            ('let J = derive json.Codec<User> { variant User.name: "a"; };', "E0318", "User.name",
+             "'User.name' names no member reachable from the codec root"),
+            ('let J = derive json.Codec<User> { field User.name: ""; };', "E0319", '""',
+             "a wire name must not be empty"),
+            ('let J = derive json.Codec<User> { field User.name: "id"; };', "E0319", '"id"',
+             "duplicate wire name 'id'"),
+            ('let J = derive json.Codec<User> { field User.name: "a"; field User.name: "b"; };', "E0319", '"b"',
+             "this member already has a wire mapping"),
+            ("let Node = record (next: Node); let J = derive json.Codec<Node>;", "E0590", "Node>",
+             "'Json.Codec' cannot encode Node.next: Node reaches itself"),
+            ("let A = record (b: B); let B = record (a: A); let J = derive json.Codec<A>;", "E0590", "A>",
+             "'Json.Codec' cannot encode A.b.a: A reaches itself"),
+            ("let J = derive json.Codec<[int, int]>;", "E0590", "[int",
+             "a JSON codec root must be a record or an enum"),
+            ("let J = derive json.Codec<Optional<User>>;", "E0590", "Optional<User>",
+             "'Json.Codec' cannot encode Optional<User>: Optional is supported only as the type of a record field"),
+            ("let J = derive json.Codec<int>;", "E0590", "int>", "a JSON codec root must be a record or an enum; got int32"),
+            ("let Plain = class (); let J = derive json.Codec<Plain>;", "E0590", "Plain>",
+             "a JSON codec root must be a record or an enum; got Plain"),
+            ("let Bad = record (o: Optional<Optional<int>>); let J = derive json.Codec<Bad>;", "E0590", "Bad>",
+             "'Json.Codec' cannot encode Bad.o: Optional is supported only as the type of a record field"),
+            ("let Bad = record (t: [int, Optional<int>]); let J = derive json.Codec<Bad>;", "E0590", "Bad>",
+             "'Json.Codec' cannot encode Bad.t.1: Optional is supported only as the type of a record field"),
+            ("let Bad = enum (Case(Optional<int>)); let J = derive json.Codec<Bad>;", "E0590", "Bad>",
+             "'Json.Codec' cannot encode Bad.Case.0: Optional is supported only as the type of a record field"),
+            ("let W = record (x: int[]); let J = derive json.Codec<W>;", "E0590", "W>",
+             "'Json.Codec' cannot encode W.x: int32[] is outside the supported JSON shapes"),
         ]
-        for source, code in cases:
+        for source, code, anchor, message in cases:
             with self.subTest(source=source):
                 path.write_text(BASE + source)
                 stderr = self.command("check", path, failure=True).stderr
-                self.assertIn(f"error[{code}]", stderr)
-                self.assertRegex(stderr, r"form\.nra:5:[1-9]\d*")
+                self.assertIn(f"error[{code}]: {message}", stderr)
+                self.assertIn(f"form.nra:5:{source.rindex(anchor) + 1}\n", stderr)
+
+    @staticmethod
+    def sections(image):
+        # The NVR directory (docs/runtime/NVR.md, File header): a u32 section
+        # count at byte 12, then one 24-byte record per section from byte 24.
+        data = image.read_bytes()
+        count = struct.unpack_from("<I", data, 12)[0]
+        return {data[24 + 24 * i: 28 + 24 * i].decode() for i in range(count)}
 
     def test_wire_and_artifacts(self):
-        for name in ("record", "wire"):
+        for name in ("record", "wire", "bounds"):
             with self.subTest(name=name):
                 source = FIXTURES / (name + ".nra")
                 expected = (FIXTURES / (name + ".expected")).read_text().splitlines()
@@ -77,16 +114,20 @@ class Codecs(unittest.TestCase):
                     self.command("build", *strip, source, "-o", "source.nvr")
                     self.command("build", *strip, "program.nir", "-o", "import.nvr")
                     self.assertEqual((self.root / "source.nvr").read_bytes(), (self.root / "import.nvr").read_bytes())
+                    # Case 135: the stripped image keeps no NAME or SMAP, and
+                    # the codec's output and errors are unchanged.
+                    names = {"NAME", "SMAP"} & self.sections(self.root / "import.nvr")
+                    self.assertEqual(names, set() if strip else {"NAME", "SMAP"})
                     result = self.command("run", "--tier=0", "import.nvr").stdout.splitlines()
                     if name == "wire":
                         self.assertEqual(result[-2], result[-1])
                         self.assertTrue(result[-1].startswith("parse "))
                         result = result[:-2]
-                        # Error text begins with the path. The remaining human explanation can change.
-                        for i, line in enumerate(expected):
-                            if line.startswith("json.codec."):
-                                self.assertRegex(result[i], re.escape(line) + r"(?:$|[:\s])")
-                                result[i] = line
+                    # Error text begins with the path. The remaining human explanation can change.
+                    for i, line in enumerate(expected):
+                        if line.startswith("json.codec.") and i < len(result):
+                            self.assertRegex(result[i], re.escape(line) + r"(?:$|[:\s])")
+                            result[i] = line
                     self.assertEqual(expected, result)
 
     def test_expansion_matches_compiled_work(self):
