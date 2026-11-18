@@ -1,9 +1,9 @@
 """Run a Neura web application in headless browsers: tests/apps/web/app/app.nra, mounted with Std.Web.mount on
-the browser runtime, driven by app-test.mjs, and the portfolio of tests/apps/web/portfolio/portfolio.nra (router, deep
-link, contact form with validation over Std.Ui.Controls), driven by portfolio-test.mjs. Checks the native refusal first: without a browser page the image
-reports that the ui services are not granted. Then bundles the walkthrough's example
-(examples/apps/web-counter/app.nra, which docs/apps/WebApp.md shows verbatim) with scripts/build-web-bundle.py
-and checks that the bundle mounts it, with its stylesheet, in headless Chromium.
+the browser runtime, driven by app-test.mjs, and the portfolio of tests/apps/web/portfolio/portfolio.nra (router,
+deep link, contact form with validation over Std.Ui.Controls), driven by portfolio-test.mjs. Each image's native run
+must first report that the ui services are not granted. Then bundles the walkthrough's example
+(examples/apps/web-counter/app.nra, which docs/apps/WebApp.md shows verbatim) and the test application with
+scripts/build-web-bundle.py, and loads both bundles in each browser with bundle-probe.mjs added to the page.
 
 Exits 77 (skipped) when the browser runtime was not built or no browser is given, as the other web checks do."""
 
@@ -23,8 +23,6 @@ sys.path.insert(0, str(ROOT / 'tests/wasm'))
 from importlib import import_module  # noqa: E402
 
 host_check = import_module('check-host')
-sys.path.insert(0, str(HERE))
-bundle_check = import_module('bundle-check')
 
 SKIP = 77
 
@@ -82,14 +80,18 @@ def main():
     return 0
 
 
-def load(browser, site, path, wasm_type):
-    """The bundled page's DOM once its boot module settled. bundle-check.dump tries a load three times, since a
-    loaded machine can exhaust the virtual-time budget while nvm.wasm compiles; this tries that three times more."""
-    for _ in range(3):
-        dom = bundle_check.dump(browser, site, path, wasm_type)
-        if 'data-neura-state=' in dom:
-            break
-    return dom
+def probe(bundle, work, browser):
+    """Loads a copy of `bundle` with bundle-probe.mjs added to its page and returns the probe's report."""
+    copy = work / f'probe-{bundle.name}'
+    shutil.copytree(bundle, copy)
+    shutil.copy(HERE / 'bundle-probe.mjs', copy / 'bundle-probe.mjs')
+    index = (copy / 'index.html').read_text()
+    (copy / 'index.html').write_text(index.replace('</head>', '<script type="module" src="./bundle-probe.mjs"></script>\n</head>'))
+    report = host_check.run_browser(browser, copy)
+    shutil.rmtree(copy)
+    if 'error' in report:
+        raise SystemExit(f'bundle {bundle.name}: {report["error"]}')
+    return report
 
 
 def walkthrough(args, work, browsers):
@@ -105,17 +107,6 @@ def walkthrough(args, work, browsers):
     sheets = [entry['path'] for entry in manifest['files'] if entry['path'].startswith('styles/')]
     if len(sheets) != 1 or not (bundle / sheets[0]).exists():
         raise SystemExit(f'expected one bundled stylesheet, found {sheets}')
-    chromium = next((browser for browser in browsers if 'firefox' not in Path(browser).name), None)
-    if chromium is None:
-        print('bundle: no Chromium to load it')
-        return
-    dom = load(chromium, site, 'portfolio/', 'application/wasm')
-    bundle_check.expect(dom, f'<link rel="stylesheet" href="./{re.escape(sheets[0])}">', 'stylesheet link')
-    bundle_check.expect(dom, r'data-neura-state="running"', 'bundle state')
-    bundle_check.expect(dom, r'<h1>My first Neura app</h1>', 'heading')
-    bundle_check.expect(dom, r'<span class="count" id="count">0</span>', 'counter')
-    print(f'bundle: the walkthrough example mounted from /portfolio/ with {sheets[0]} linked')
-    # The test application's bundle carries its two assets, fetched when used rather than before the first commit.
     parts = site / 'parts'
     subprocess.run([sys.executable, ROOT / 'scripts/build-web-bundle.py', '--source', HERE / 'app/app.nra', '--neura',
                     args.neura, '--wasm', args.wasm, '--id', 'org.example.parts', '--out', parts], check=True,
@@ -125,12 +116,16 @@ def walkthrough(args, work, browsers):
     if len(assets) != 2 or any(entry['initial'] or entry['media_type'] != 'image/svg+xml'
                                or not (parts / entry['path']).exists() for entry in assets):
         raise SystemExit(f'expected two bundled SVG assets, not initial: {assets}')
-    dom = load(chromium, site, 'parts/', 'application/wasm')
-    bundle_check.expect(dom, r'data-neura-state="running"', 'parts bundle state')
-    badge = re.search(r'<img id="badge" src="(assets/[0-9a-f]{64}\.svg)"', dom)
-    if not badge or badge.group(1) not in {entry['path'] for entry in assets}:
-        raise SystemExit(f'the bundled page does not show a bundled image: {dom[-1500:]}')
-    print(f'bundle: the test application mounted from /parts/ with {len(assets)} assets')
+    for browser in browsers:
+        version = subprocess.check_output([browser, '--version'], text=True, timeout=10).strip()
+        report = probe(bundle, work, browser)
+        if report != {'state': 'running', 'sheets': 1, 'color': 'rgb(42, 93, 176)', 'clicked': '1'}:
+            raise SystemExit(f'bundle: unexpected walkthrough report {report}')
+        report = probe(parts, work, browser)
+        if report.get('state') != 'running' or report.get('image') not in {entry['path'] for entry in assets}:
+            raise SystemExit(f'bundle: unexpected test application report {report}')
+        print(f'bundle: {version}: the walkthrough mounted with {sheets[0]} applied and counted a click; the test '
+              f'application showed its bundled image {report["image"]}')
 
 
 if __name__ == '__main__':

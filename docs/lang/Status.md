@@ -108,7 +108,7 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 | `concurrency/monitor.nra` | Compiles and runs; a monitor shared by tasks, an `#Immutable` value class, and `#Pure` and `#ThreadSafe` functions ([Tags](Tags.md#implemented-tags)). `backend-cli` builds and runs it. |
 | `types/frozen-list.nra` | Compiles and runs; a `FrozenList` copied from an array, a derived list, and for-each ([Collections](Collections.md#frozenlist)). |
 | `apps/components.nra` | Compiles and runs; a `ui.State`, a component with a click handler, and a root on the model host ([State and components](../apps/Components.md)). |
-| `apps/web-counter/app.nra` | Compiles; runs in a browser page, where `app-web-browser` bundles it and checks that it mounts with its stylesheet. Run natively it reports that the `ui` services are not granted ([Your first Neura web app](../apps/WebApp.md)). |
+| `apps/web-counter/app.nra` | Compiles; runs in a browser page, where `app-web-browser` bundles it and checks in headless Chromium and Firefox that it mounts with its stylesheet applied and counts a click. Run natively it reports that the `ui` services are not granted ([Your first Neura web app](../apps/WebApp.md)). |
 | `apps/portfolio.nra` | Compiles and runs; a router with a deep link and a contact form with validation and focus on the model host ([State and components](../apps/Components.md#routing)). |
 | `concurrency/ui-command.nra` | Compiles and runs; a UI command whose work runs as a task under `Std.Ui.Commands.run` ([State and components](../apps/Components.md#commands)). |
 
