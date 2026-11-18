@@ -209,6 +209,22 @@ class LanguageServerTests(unittest.TestCase):
             program = subprocess.run([BINARY, 'run', image], check=True, text=True, capture_output=True)
             self.assertEqual(program.stdout, '{"name":"Ada"}\n{"nickname":"Ada"}\n')
 
+    def test_variant_rename_pins_its_wire_name(self):
+        # docs/design/Records030.md, Tooling: a renamed variant reachable from
+        # an unpinned derivation keeps its wire name through a new mapping.
+        path = self.root / 'modes.nra'
+        source = ('let json = import:Std.Encoding.Json;\n'
+                  'let Mode = enum (Fast, Slow);\n'
+                  'let ModeJson = derive json.Codec<Mode>;\n'
+                  'let pick = func() -> Mode => Mode.Fast;\n')
+        self.client.open(path, source)
+        response = self.client.request('textDocument/rename', {**params(path, 1, 17), 'newName': 'Quick'})
+        edits = response['documentChanges'][0]['edits']
+        pinned = [edit['newText'] for edit in edits if edit.get('annotationId') == 'neura.preserveSchema']
+        self.assertEqual(len(pinned), 1)
+        self.assertIn('variant Mode.Quick: "Fast";', pinned[0])
+        self.assertEqual(sorted(edit['newText'] for edit in edits if 'annotationId' not in edit), ['Quick', 'Quick'])
+
     def test_incomplete_json_derivation_keeps_previous_symbols(self):
         path = self.root / 'model.nra'
         self.client.open(path, 'let visible = 1;\nlet Incomplete = derive')
