@@ -77,6 +77,8 @@ After compiling, the build reads the image's host imports. A service whose capab
 | `server` | `app.<sha256>.nvr`, `server.json` (the `listen`, `tls_listen` and `admin_listen` addresses, the configuration prefix and each SQL pool's provider, migrations and `migrate` mode), and each pool's migrations as `migrations/<pool>/NNNN_name.sql`, which keep their names because the host orders them by number. |
 | `desktop` | The web bundle of its `ui` target, built first into `dist/<ui target>` and copied unchanged into `web/`; the native child, `bin/app-<sha256>`, built with `--native --deny-all --allow-clock` and the largest step limit ([Desktop applications](Apps-Desktop#writing-the-native-child)); `registry.json` of the manifest's `bridge.operations`; and `desktop.json`, the package description the desktop host reads. |
 
+`tests/project/browser-check.py` (`project-web-browser`, registered when the build has the browser runtime) opens the `fullstack` template's page, built by `neura build --target web` and served from a deep path with `application/wasm` and with `application/octet-stream` for `nvm.wasm`, and from `neura dev`, in headless Chromium and Firefox.
+
 The web target needs the browser runtime: `nvm.wasm` and `nvm.mjs` beside the page modules, found in `--web-runtime`, then `NEURA_WEB_RUNTIME`, then `share/neura/web` of the installation. An SDK built with the browser runtime installs both there; otherwise the build reports `E1031` and names the directory it searched.
 
 ## bundle.json

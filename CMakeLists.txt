@@ -1516,6 +1516,12 @@ if(BUILD_TESTING AND NEURA_SDK)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/backend-check.py" --neura "$<TARGET_FILE:neura>"
             --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
         set_tests_properties(app-web-backend PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+        # The reference project's page from `neura build --target web` and from `neura dev`, at a deep path and
+        # with a wrong media type for nvm.wasm (tests/project/browser-check.py).
+        add_test(NAME project-web-browser COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/browser-check.py" --neura "$<TARGET_FILE:neura>"
+            --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
+        set_tests_properties(project-web-browser PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
     endif()
 
     # Diagnostics: the core's unit tests, and one UI test per area under

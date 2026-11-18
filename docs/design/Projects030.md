@@ -339,6 +339,8 @@ The integration milestone (A6). Each step is one commit with its targeted tests.
 | 6 | `neura dev` for the three kinds | Cases 14, 15, 45; process-tree checks |
 | 7 | `neura package` for server and desktop | With [Desktop](Desktop030.md#order-of-work) steps 7 and 8 |
 | 8 | The reference application and its journeys in CI: browsers, both databases, desktop under Xvfb | The journeys above |
+
+Status of steps 8 and 9 (2026-11-18): the reference page built by `neura build --target web` and by `neura dev` mounts in headless Chromium and Firefox from a deep path and with a wrong `.wasm` media type (`project-web-browser`); the server answers its routes from a bundle and from a server package; the desktop bundle and its `.tar.gz` package start under Xvfb. The journeys, both databases, the budgets of step 9 and a hosted-runner reproducibility check are not done. The new tools are in the tool registry, the install components and `packaging/qualify.sh`.
 | 9 | Every budget measured and recorded; the tools in the tool registry, install components and `packaging/qualify.sh` | Case 18; the budget scripts |
 
 ## Gate and acceptance
