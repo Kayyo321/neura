@@ -1,0 +1,138 @@
+let endpoint = import:Std.Net.Endpoint;
+let filters = import:Std.Net.Filter;
+let framed = import:Std.Net.FramedTransport;
+let int32s = import:Std.Core.Int32;
+let listeners = import:Std.Net.Listener;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// The Std.Net contract tree: services and filters, and in-memory
+// implementations of the endpoint and transport contracts.
+let ContractsTests = module (
+    // Appends its tag to the request on the way in and to the response on the way out.
+    let Tagging = class implements filters.SimpleFilter<string, string> (
+        last tag: string;
+
+        export let init = func(text: string) {
+            tag = text;
+        };
+
+        export let apply = func(request: string, next: services.Service<string, string>) -> result.Result<string> {
+            return match (next.call(request + tag)) {
+                result.Result.Ok(reply) => result.Result<string>.Ok(reply + tag),
+                result.Result.Err(e) => result.Result<string>.Err(e),
+            };
+        };
+
+        export let.override to_string = func -> string => "Tagging";
+    );
+
+    // Changes types: parses the text request to a number for the next service and prints its answer.
+    let Parsing = class implements filters.Filter<string, string, int, int> (
+        export let apply = func(request: string, next: services.Service<int, int>) -> result.Result<string> {
+            last parsed = int32s.parse(request);
+            return match (parsed) {
+                result.Result.Ok(n) => match (next.call(n)) {
+                    result.Result.Ok(answer) => result.Result<string>.Ok("=" + answer.to_string()),
+                    result.Result.Err(e) => result.Result<string>.Err(e),
+                },
+                result.Result.Err(e) => result.Result<string>.Err(e),
+            };
+        };
+
+        export let.override to_string = func -> string => "Parsing";
+    );
+
+    let echo = func(request: string) -> result.Result<string> => result.Result<string>.Ok("<" + request + ">");
+
+    let double = func(n: int) -> result.Result<int> => result.Result<int>.Ok(n * 2);
+
+    export let test_function_service = func {
+        last service = services.of<string, string>(echo);
+        test.assert_equal_string("<a>", test.assert_ok<string>(service.call("a")));
+    };
+
+    export let test_chain_runs_in_order = func {
+        last chain = filters.chain<string, string>();
+        chain.add(new Tagging("1"));
+        chain.add(new Tagging("2"));
+        test.assert_equal<int>(2, chain.size());
+        last service = chain.then(services.of<string, string>(echo));
+        // The first filter sees the request first and the response last.
+        test.assert_equal_string("<x12>21", test.assert_ok<string>(service.call("x")));
+    };
+
+    export let test_bind_and_compose_change_types = func {
+        last bound = filters.bind<string, string, int, int>(new Parsing(), services.of<int, int>(double));
+        test.assert_equal_string("=42", test.assert_ok<string>(bound.call("21")));
+        test.assert_err<string>(bound.call("x"));
+        last composed = filters.compose<string, string, string, string, int, int>(new Tagging("0"), new Parsing());
+        last service = filters.bind<string, string, int, int>(composed, services.of<int, int>(double));
+        test.assert_equal_string("=1400", test.assert_ok<string>(service.call("7")));
+    };
+
+    // A framed transport over an in-memory queue of frames.
+    let Loopback = class implements framed.FramedTransport<string> (
+        last frames: string[list] = new;
+        let next_index: int = 0;
+        let closed: bool = false;
+
+        export let receive = func -> result.Result<optional.Optional<string>> {
+            if (next_index >= frames.length) {
+                return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.None);
+            }
+            last frame = frames[next_index];
+            next_index++;
+            return result.Result<optional.Optional<string>>.Ok(optional.Optional<string>.Some(frame));
+        };
+
+        export let send = func(data: string) -> result.Result<unit.Unit> {
+            frames.append(data);
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+
+        export let close = func -> result.Result<unit.Unit> {
+            closed = true;
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+
+        export let.override to_string = func -> string => "Loopback";
+    );
+
+    export let test_framed_transport = func {
+        last transport: framed.FramedTransport<string> = new Loopback();
+        test.assert_ok<unit.Unit>(transport.send("one"));
+        test.assert_ok<unit.Unit>(transport.send(""));
+        test.assert_equal_string("one", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(transport.receive())));
+        test.assert_equal_string("", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(transport.receive())));
+        test.assert_none<string>(test.assert_ok<optional.Optional<string>>(transport.receive()));
+        test.assert_ok<unit.Unit>(transport.close());
+    };
+
+    // A listener that hands out numbered connections.
+    let Counting = class implements listeners.Listener<string, int> (
+        let accepted: int = 0;
+
+        export let address = func -> string => "memory:1";
+
+        export let accept = func -> result.Result<int> {
+            accepted++;
+            return result.Result<int>.Ok(accepted);
+        };
+
+        export let close = func -> result.Result<unit.Unit> => result.Result<unit.Unit>.Ok(unit.Unit.Value);
+
+        export let.override to_string = func -> string => "Counting";
+    );
+
+    export let test_listener_is_an_endpoint = func {
+        last listener: listeners.Listener<string, int> = new Counting();
+        last as_endpoint: endpoint.Endpoint<string> = listener;
+        test.assert_equal_string("memory:1", as_endpoint.address());
+        test.assert_equal<int>(1, test.assert_ok<int>(listener.accept()));
+        test.assert_equal<int>(2, test.assert_ok<int>(listener.accept()));
+    };
+);

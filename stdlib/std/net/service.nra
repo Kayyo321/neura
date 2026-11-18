@@ -1,0 +1,38 @@
+let.promote _ = import:Std.Core.Result;
+
+/// @brief A Finagle-style request-to-response function shared by RPC and HTTP (docs/design/Net030.md).
+///
+/// A service answers each request with a result. Filters (`Std.Net.Filter`) wrap a service to add retries,
+/// authentication, tracing, rate limits, and the other policies of `Std.Net.Resilience` and `Std.Net.Mesh`.
+/// @see [Std.Net.Service](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Service)
+#Since("0.3.0")
+export let Service = module (
+    /// @brief Answers a request of type `Req` with a response of type `Resp` or an error.
+    export let Service = interface<Req, Resp> (
+        /// @brief Handles one request.
+        let call = func(request: Req) -> Result<Resp>;
+    );
+
+    /// @brief A service that calls a function value.
+    #Final
+    export let FunctionService = class<Req, Resp> implements Service<Req, Resp> (
+        /// @brief The function each call runs.
+        last handler: func(Req) -> Result<Resp>;
+
+        /// @brief Wraps `body`.
+        export let init = func(body: func(Req) -> Result<Resp>) {
+            handler = body;
+        };
+
+        /// @brief Runs the function with the request.
+        export let call = func(request: Req) -> Result<Resp> => handler(request);
+
+        /// @brief The fixed text "FunctionService".
+        export let.override to_string = func -> string => "FunctionService";
+    );
+
+    /// @brief A service whose calls run `body`.
+    #NoDiscard
+    export let of = func<Req, Resp>(body: func(Req) -> Result<Resp>) -> Service<Req, Resp> =>
+        new FunctionService<Req, Resp>(body);
+);

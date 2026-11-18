@@ -1,0 +1,13 @@
+let.promote _ = import:Std.Net.Transport;
+
+/// @brief A transport that exchanges discrete frames instead of a byte stream (docs/design/Net030.md).
+///
+/// Each `receive` yields one whole frame and each `send` writes one; framing (length prefixes, WebSocket
+/// headers, gRPC message prefixes) is the implementation's business. `Std.Net.Realtime.Ws` and
+/// `Std.Net.Rpc` provide codecs that implementations use.
+/// @see [Std.Net.FramedTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-FramedTransport)
+#Since("0.3.0")
+export let FramedTransport = module (
+    /// @brief A transport whose input and output units are both `Frame`.
+    export let FramedTransport = interface<Frame>:Transport<Frame, Frame> ();
+);
