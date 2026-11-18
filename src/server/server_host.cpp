@@ -1305,7 +1305,7 @@ extern "C" void on_signal(int signal) {
 void install_signals() {
     struct sigaction action{};
     action.sa_handler = on_signal;
-    ::sigemptyset(&action.sa_mask);
+    sigemptyset(&action.sa_mask);
     for (const int signal : {SIGHUP, SIGINT, SIGTERM}) ::sigaction(signal, &action, nullptr);
     struct sigaction ignore{};
     ignore.sa_handler = SIG_IGN;
