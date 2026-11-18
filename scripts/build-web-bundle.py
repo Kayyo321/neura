@@ -32,7 +32,7 @@ MEDIA_TYPES = {'.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/jav
                '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon',
                '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
                '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
-               '.wav': 'audio/wav', '.vtt': 'text/vtt', '.txt': 'text/plain'}
+               '.wav': 'audio/wav', '.vtt': 'text/vtt', '.txt': 'text/plain', '.pdf': 'application/pdf'}
 # Bundled stylesheets and assets keep the paths the build gave them: a digest name below one of these directories.
 STYLE_PATH = re.compile(r'^(styles|assets)/[0-9a-f]{64}(\.[A-Za-z0-9]+)?$')
 FILE_LIMIT = 64 * 1024 * 1024  # W-1
@@ -101,7 +101,7 @@ def build(args):
         links = styles['stylesheets']
         for entry in styles['files']:
             path = entry['path']
-            if not STYLE_PATH.match(path) or Path(path).suffix not in MEDIA_TYPES:
+            if not STYLE_PATH.match(path):
                 sys.exit(f'build-web-bundle: {listing}: unexpected file {path!r}')
             data = (args.image.parent / path).read_bytes()
             if digest(data) != entry['sha256'] or len(data) != entry['bytes']:
@@ -142,7 +142,7 @@ def build(args):
         'contracts': [],
         'csp': CSP,
         'files': [{'bytes': len(data), 'initial': path not in deferred,
-                   'media_type': MEDIA_TYPES[Path(path).suffix], 'path': path, 'sha256': digest(data)}
+                   'media_type': MEDIA_TYPES.get(Path(path).suffix, 'application/octet-stream'), 'path': path, 'sha256': digest(data)}
                   for path, data in sorted(files.items())],
         'id': args.id,
         'image': {'digest': digest(image), 'path': image_path},

@@ -94,7 +94,7 @@ A host copies an event's fields into an immutable record (`ui.ClickEvent`, `ui.I
 | Rule | Status |
 | --- | --- |
 | Events are delivered in arrival order, one per turn. A coalesced event (pointer moves, scrolls) replaces the queued event of the same listener and keeps its place. | implemented in the root and the browser host |
-| At the queue limit (1,024 by default, `set_queue_limit` up to 65,536) the root is overloaded: an arriving event that cannot be coalesced is not queued and is counted. Before the next event the root accepts, it delivers `ui.RootEvent.InputOverflow(dropped)` to the `on_overflow` handler and asks the host to resynchronize, so that the host posts one input event for each controlled element whose value changed. | implemented in the root and the model host; the browser queues and drops events itself, sets `data-neura-overloaded`, and the web host passes its count on with `root.post_overflow` |
+| At the queue limit (1,024 by default, `set_queue_limit` up to 65,536) the root is overloaded: an arriving event that cannot be coalesced is not queued and is counted. Before the next event the root accepts, it delivers `ui.RootEvent.InputOverflow(dropped)` to the `on_overflow` handler and asks the host to resynchronize, so that the host posts one input event for each controlled element whose value changed. | implemented in the root and the model host; the browser queues and drops events itself, sets `data-neura-overloaded`, and the web host passes its count on with `root.post_overflow` (not exercised in a browser) |
 
 ## The host interface
 
@@ -122,8 +122,9 @@ scope (tasks) {
 
 | Rule | Status |
 | --- | --- |
-| `mount` is `Err` when no element matches, the element is inside or contains another root, `U-9` roots are open, or the component is mounted. A native `neura run` grants no `ui` service, so `mount` is `Err` there, with a message that names the capability. | implemented |
-| A reset closes the browser's root and opens a new one on the same element, then commits every component again. | implemented |
+| `mount` is `Err` when no element matches, the element is inside or contains another root, `U-9` roots are open, or the component is mounted. A native `neura run` grants no `ui` service, so `mount` is `Err` there, with a message that names the capability. | implemented; the native refusal is checked, the browser's errors 1, 3 and 100 are mapped but not exercised in a browser |
+| A reset closes the browser's root and opens a new one on the same element, then commits every component again. | implemented, not exercised in a browser |
+| Every event kind of the [event encoding](../runtime/Providers.md#event-encoding) is decoded into its record, and an overflow record reaches `on_overflow` through `root.post_overflow`. | implemented; clicks and input are exercised in headless browsers, the other kinds and the overflow record are not |
 | `root.run()` returns when `root.close()` is called, from a handler or elsewhere: the browser empties the element and detaches every listener. | implemented; checked in headless Chromium and Firefox |
 
 [Your first Neura web app](WebApp.md) builds and serves a complete application. Desktop mounting, commands, gesture actions, controls, forms, routing and contracts are not implemented in this release; [the design note](../design/Components030.md) lists them.

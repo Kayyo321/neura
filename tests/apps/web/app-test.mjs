@@ -64,6 +64,14 @@ async function journey(ui, lines, steps) {
     check(getComputedStyle(document.getElementById('count')).fontWeight === '700', 'the count is bold');
     const title = document.getElementById('title');
     title.dataset.mark = 'kept';
+    // Bundled assets: the template's image and the stylesheet's url() name files the build wrote.
+    const badge = document.getElementById('badge');
+    check(/^assets\/[0-9a-f]{64}\.svg$/.test(badge.getAttribute('src')), `the image is bundled: ${badge.getAttribute('src')}`);
+    await until(() => badge.complete && badge.naturalWidth === 16, 'the bundled image to load', lines);
+    const stripe = getComputedStyle(title).backgroundImage;
+    check(/assets\/[0-9a-f]{64}\.svg/.test(stripe), `the stylesheet's url() is bundled: ${stripe}`);
+    const sheetAsset = stripe.match(/assets\/[0-9a-f]{64}\.svg/)[0];
+    check((await fetch(sheetAsset)).ok, `the stylesheet's asset is served: ${sheetAsset}`);
     step('mount', { commits: ui.commits.length, operations: ui.commits[0].length, color });
 
     // A click on the child: only the counter renders, and the commit changes only the count's text.

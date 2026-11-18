@@ -99,6 +99,22 @@ def walkthrough(args, work, browsers):
     bundle_check.expect(dom, r'<h1>My first Neura app</h1>', 'heading')
     bundle_check.expect(dom, r'<span class="count" id="count">0</span>', 'counter')
     print(f'bundle: the walkthrough example mounted from /portfolio/ with {sheets[0]} linked')
+    # The test application's bundle carries its two assets, fetched when used rather than before the first commit.
+    parts = site / 'parts'
+    subprocess.run([sys.executable, ROOT / 'scripts/build-web-bundle.py', '--source', HERE / 'app/app.nra', '--neura',
+                    args.neura, '--wasm', args.wasm, '--id', 'org.example.parts', '--out', parts], check=True,
+                   timeout=120)
+    manifest = json.loads((parts / 'bundle.json').read_text())
+    assets = [entry for entry in manifest['files'] if entry['path'].startswith('assets/')]
+    if len(assets) != 2 or any(entry['initial'] or entry['media_type'] != 'image/svg+xml'
+                               or not (parts / entry['path']).exists() for entry in assets):
+        raise SystemExit(f'expected two bundled SVG assets, not initial: {assets}')
+    dom = bundle_check.dump(chromium, site, 'parts/', 'application/wasm')
+    bundle_check.expect(dom, r'data-neura-state="running"', 'parts bundle state')
+    badge = re.search(r'<img id="badge" src="(assets/[0-9a-f]{64}\.svg)"', dom)
+    if not badge or badge.group(1) not in {entry['path'] for entry in assets}:
+        raise SystemExit(f'the bundled page does not show a bundled image: {dom[-1500:]}')
+    print(f'bundle: the test application mounted from /parts/ with {len(assets)} assets')
 
 
 if __name__ == '__main__':

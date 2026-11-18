@@ -1,7 +1,7 @@
 // The browser journey of tests/apps/web/app-check.py: a page of three child components under one parent, mounted
 // with Std.Web.mount. A counter with a stylesheet, a keyed list that adds, removes and reverses its items, a form
 // input bound both ways, and a button that closes the root. Each render prints a line, so the check can tell
-// which components rendered for each event.
+// which components rendered for each event. The heading's image and the stylesheet's url() are bundled assets.
 let console = import:Std.Io.Console;
 let error = import:Std.Core.Error;
 let frozen = import:Std.Collections.Frozen;
@@ -14,6 +14,7 @@ const AppStyles = css {
     .app { font-family: sans-serif; }
     .count { color: rgb(200, 30, 30); font-weight: 700; }
     .parts li { margin: 2px 0; }
+    .app h1 { background: url("./stripe.svg") repeat-x bottom; }
 };
 
 let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
@@ -47,7 +48,7 @@ let form_view = html(draft: string, on_input: func(ui.InputEvent) -> void, on_cl
 
 let app_view = html(counter: ui.View, parts: ui.View, form: ui.View, on_close: func(ui.ClickEvent) -> void) {
     <main class="app">
-        <h1 id="title">Parts</h1>
+        <h1 id="title"><img id="badge" src="./badge.svg" alt="" width="16" height="16"> Parts</h1>
         {counter}
         {parts}
         {form}
