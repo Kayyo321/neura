@@ -862,10 +862,14 @@ private:
         Outcome outcome;
         auto& channel = *worker.channel;
         // A call answered at or past the deadline (a statement the deadline
-        // interrupted) ends the request as timed out, in either phase.
+        // interrupted) ends the request as timed out, in either phase. So
+        // does a channel that fails once the deadline has passed: the worker,
+        // whose own wait for the call's Return ends at the same deadline, may
+        // have answered and exited before the interrupted statement returned.
         bool deadline_ended = false;
         const auto failed = [&] {
-            outcome.timed_out = deadline_ended || channel.status() == Channel::Status::TimedOut;
+            outcome.timed_out = deadline_ended || channel.status() == Channel::Status::TimedOut ||
+                                Clock::now() >= deadline;
             return outcome;
         };
         // The request's SQL leases; leaving this function, by any path,
