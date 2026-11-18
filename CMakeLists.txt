@@ -1195,6 +1195,14 @@ if(BUILD_TESTING AND NEURA_SDK)
     neura_target_defaults(neura_worker_wire_tests)
     add_test(NAME server-worker-wire COMMAND neura_worker_wire_tests)
 
+    if(TARGET neura_server_worker)
+        add_executable(neura_worker_channel_tests tests/server/worker_channel_tests.cpp)
+        target_link_libraries(neura_worker_channel_tests PRIVATE neura_server_worker Threads::Threads)
+        neura_target_defaults(neura_worker_channel_tests)
+        add_test(NAME server-worker-channel COMMAND neura_worker_channel_tests)
+        set_tests_properties(server-worker-channel PROPERTIES TIMEOUT 60)
+    endif()
+
     add_executable(neura_http_wire_tests
         src/server/http_wire.cpp
         tests/server/http_wire_tests.cpp)
