@@ -54,7 +54,7 @@ export let RoundRobin = module (
         export let pending = func(index: int) -> int => waiting[index];
 
         /// @brief Text such as "RoundRobin(3 endpoints)".
-        export let.override to_string = func -> string => "RoundRobin(" + endpoints.length.to_string() + " endpoints)";
+        export let.override to_string = func -> string => "RoundRobin(" .. endpoints.length.to_string() .. " endpoints)";
     );
 
     /// @brief A round-robin balancer over a copy of `endpoints`.

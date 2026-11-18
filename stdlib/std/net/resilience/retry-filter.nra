@@ -53,7 +53,7 @@ export let RetryFilter = module (
             budget.deposit();
             let outcome = next.call(request);
             for (let attempt = 1; attempt < max_attempts && should_retry(outcome); attempt++) {
-                if (!budget.try_withdraw()) {
+                if (not budget.try_withdraw()) {
                     refused++;
                     return outcome;
                 }
@@ -71,7 +71,7 @@ export let RetryFilter = module (
         export let budget_refusals = func -> int64 => refused;
 
         /// @brief Text such as "RetryFilter(3 attempts)".
-        export let.override to_string = func -> string => "RetryFilter(" + max_attempts.to_string() + " attempts)";
+        export let.override to_string = func -> string => "RetryFilter(" .. max_attempts.to_string() .. " attempts)";
     );
 
     /// @brief A filter that retries every `Err`.

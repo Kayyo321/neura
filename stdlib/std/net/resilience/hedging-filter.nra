@@ -96,7 +96,7 @@ export let HedgingFilter = module (
 
         /// @brief Runs the request as described for the module.
         export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
-            if (!(next is spawnables.SpawnableService<Req, Resp>)) {
+            if (next is not spawnables.SpawnableService<Req, Resp>) {
                 return Result<Resp>.Err(errors.custom(UnsupportedCode,
                     "HedgingFilter needs a SpawnableService as its next service"));
             }
@@ -124,7 +124,7 @@ export let HedgingFilter = module (
 
         /// @brief Text such as "HedgingFilter(p95, 3 hedges)".
         export let.override to_string = func -> string =>
-            "HedgingFilter(p" + percentile.to_string() + ", " + hedged.to_string() + " hedges)";
+            "HedgingFilter(p" .. percentile.to_string() .. ", " .. hedged.to_string() .. " hedges)";
 
         /// @brief The primary and, after `delay`, the backup as tasks; the first Ok wins.
         let race = func(request: Req, primary: func(Req) -> Result<Resp>, backup: func(Req) -> Result<Resp>,
@@ -141,7 +141,7 @@ export let HedgingFilter = module (
                         fired = waited == timers.TimerOutcome.Fired;
                     },
                 }
-                if (!fired || !budget.try_withdraw()) {
+                if (not fired || not budget.try_withdraw()) {
                     return settle(start, first.join());
                 }
                 hedged++;

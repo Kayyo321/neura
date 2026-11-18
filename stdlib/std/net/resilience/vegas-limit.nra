@@ -52,10 +52,10 @@ export let VegasLimit = module (
             if (initial < minimum || initial > maximum) {
                 trap_with_message("invalid argument: initial_limit");
             }
-            if (!(weight > 0.0 && weight <= 1.0)) {
+            if (not (weight > 0.0 && weight <= 1.0)) {
                 trap_with_message("invalid argument: smoothing");
             }
-            if (!((alpha == 0 && beta == 0) || (alpha > 0 && alpha <= beta))) {
+            if (not ((alpha == 0 && beta == 0) || (alpha > 0 && alpha <= beta))) {
                 trap_with_message("invalid argument: alpha");
             }
             min_limit = minimum;
@@ -118,7 +118,7 @@ export let VegasLimit = module (
         };
 
         /// @brief Text such as "VegasLimit(limit 20)".
-        export let.override to_string = func -> string => "VegasLimit(limit " + limit().to_string() + ")";
+        export let.override to_string = func -> string => "VegasLimit(limit " .. limit().to_string() .. ")";
 
         /// @brief max(1, floor(log10(x))).
         let log = func(x: int) -> int {

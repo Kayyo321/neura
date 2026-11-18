@@ -41,10 +41,9 @@ export let RateLimiter = module (
 
         /// @brief Equal when every part is equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RateDecision)) {
+            if (other is not decision: RateDecision) {
                 return false;
             }
-            last decision = other as RateDecision;
             return allowed == decision.allowed && remaining == decision.remaining
                 && retry_after.equals(decision.retry_after) && reset_after.equals(decision.reset_after);
         };
@@ -59,7 +58,7 @@ export let RateLimiter = module (
 
         /// @brief Text such as "RateDecision(allowed, remaining 2, retry after PT0S, reset after PT0.1S)".
         export let.override to_string = func -> string =>
-            "RateDecision(" + (allowed ? "allowed" : "denied") + ", remaining " + remaining.to_string()
-            + ", retry after " + retry_after.to_string() + ", reset after " + reset_after.to_string() + ")";
+            "RateDecision(" .. (allowed ? "allowed" : "denied") .. ", remaining " .. remaining.to_string()
+            .. ", retry after " .. retry_after.to_string() .. ", reset after " .. reset_after.to_string() .. ")";
     );
 );

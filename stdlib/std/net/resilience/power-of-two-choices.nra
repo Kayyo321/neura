@@ -71,7 +71,7 @@ export let PowerOfTwoChoices = module (
 
         /// @brief Text such as "PowerOfTwoChoices(3 endpoints)".
         export let.override to_string = func -> string =>
-            "PowerOfTwoChoices(" + endpoints.length.to_string() + " endpoints)";
+            "PowerOfTwoChoices(" .. endpoints.length.to_string() .. " endpoints)";
     );
 
     /// @brief A P2C balancer over a copy of `endpoints`.

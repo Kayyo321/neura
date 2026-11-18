@@ -42,9 +42,9 @@ export let RateLimitFilter = module (
             } else {
                 latest[0] = decision;
             }
-            if (!decision.allowed) {
+            if (not decision.allowed) {
                 return Result<Resp>.Err(errors.custom(LimitedCode,
-                    "rate limit exceeded; retry after " + decision.retry_after.to_string()));
+                    "rate limit exceeded; retry after " .. decision.retry_after.to_string()));
             }
             return next.call(request);
         };

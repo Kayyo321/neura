@@ -74,8 +74,8 @@ export let Backoff = module (
 
         /// @brief Text such as "Backoff(PT0.1S to PT10S, Full jitter)".
         export let.override to_string = func -> string =>
-            "Backoff(" + durations.of_nanos(base).to_string() + " to " + durations.of_nanos(cap).to_string() + ", "
-            + jitter.to_string() + " jitter)";
+            "Backoff(" .. durations.of_nanos(base).to_string() .. " to " .. durations.of_nanos(cap).to_string() .. ", "
+            .. jitter.to_string() .. " jitter)";
 
         /// @brief floor(span * u) for one draw u in [0, 1).
         let scaled = func(span: int64) -> int64 => ((span as float64) * random.next_float64()) as int64;

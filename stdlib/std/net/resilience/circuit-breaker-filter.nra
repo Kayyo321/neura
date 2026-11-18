@@ -35,9 +35,7 @@ export let CircuitBreakerFilter = module (
         /// `resilience.circuit_open` error without calling it.
         export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
             last admitted = breaker.try_acquire()?;
-            if (!admitted) {
-                return Result<Resp>.Err(errors.custom(OpenCode, "circuit breaker is open"));
-            }
+            return Result<Resp>.Err(errors.custom(OpenCode, "circuit breaker is open")) unless admitted;
             last outcome = next.call(request);
             if (is_failure(outcome)) {
                 breaker.record_failure()?;
@@ -48,7 +46,7 @@ export let CircuitBreakerFilter = module (
         };
 
         /// @brief Text such as "CircuitBreakerFilter(CircuitBreaker(Open))".
-        export let.override to_string = func -> string => "CircuitBreakerFilter(" + breaker.to_string() + ")";
+        export let.override to_string = func -> string => "CircuitBreakerFilter(" .. breaker.to_string() .. ")";
     );
 
     /// @brief A filter over `breaker` that counts every `Err` as a failure.
