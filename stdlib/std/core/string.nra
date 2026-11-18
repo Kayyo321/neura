@@ -218,7 +218,7 @@ export let String = module:strings (
     export let utf16_length = func(s: string) -> int {
         let length = 0;
         last bytes = s.byte_length;
-        for (let i = 0; i < bytes; i += 1) {
+        for (let i in 0 .. bytes) {
             last byte = s.byte_at(i);
             if ((byte & 192) != 128) {
                 length += byte >= 240 ? 2 : 1;
@@ -260,12 +260,12 @@ export let String = module:strings (
     export let get_chars =
         func(s: string, start: int, end: int, destination: uint16[], destination_start: int) {
             last units = checked_utf16_window(s, start, end, destination.length, destination_start);
-            for (let i = 0; i < units.length; i += 1) {
+            for (let i in 0 .. units.length) {
                 destination[destination_start + i] = units[i];
             }
         } or func(s: string, start: int, end: int, destination: uint16[list], destination_start: int) {
             last units = checked_utf16_window(s, start, end, destination.length, destination_start);
-            for (let i = 0; i < units.length; i += 1) {
+            for (let i in 0 .. units.length) {
                 destination[destination_start + i] = units[i];
             }
         };

@@ -260,7 +260,7 @@ export let Calendar = module (
         /// @brief Exactly `count` decimal digits.
         export let fixed_digits = func(count: int) -> int64 {
             let value: int64 = 0;
-            for (let i = 0; i < count; i = i + 1) {
+            for (let i in 0 .. count) {
                 if (not peek_digit()) {
                     unexpected("digit");
                     return 0;

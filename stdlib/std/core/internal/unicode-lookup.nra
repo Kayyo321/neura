@@ -43,7 +43,7 @@ export let UnicodeLookup = module (
     #[Pure, ThreadSafe]
     export let word = func(table: string, offset: int, width: int) -> uint64 {
         let value: uint64 = 0;
-        for (let i = 0; i < width; i += 1) {
+        for (let i in 0 .. width) {
             value = (value << 6) | ((table.byte_at(offset + i) - 48) as uint64);
         }
         return value;
@@ -82,7 +82,7 @@ export let UnicodeLookup = module (
     #Pure
     let loose = func(text: string) -> string {
         let bytes: uint8[list] = new;
-        for (let i = 0; i < text.byte_length; i += 1) {
+        for (let i in 0 .. text.byte_length) {
             last byte = text.byte_at(i);
             if (byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 95 || byte == 45) {
                 continue;
@@ -97,7 +97,7 @@ export let UnicodeLookup = module (
     #Pure
     let before = func(left: string, right: string) -> bool {
         last count = left.byte_length < right.byte_length ? left.byte_length : right.byte_length;
-        for (let i = 0; i < count; i += 1) {
+        for (let i in 0 .. count) {
             if (left.byte_at(i) != right.byte_at(i)) {
                 return left.byte_at(i) < right.byte_at(i);
             }

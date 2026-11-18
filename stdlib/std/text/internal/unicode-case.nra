@@ -15,7 +15,7 @@ export let UnicodeCase = module (
         last source = strings.scalars(s);
         last result = string_builder.create();
         let before_cased = false;
-        for (let index = 0; index < source.length; index += 1) {
+        for (let index in 0 .. source.length) {
             last scalar = source[index];
             append_lowercase(result, source, index, locale, before_cased);
             if (not case_ignorable(scalar)) {
@@ -31,7 +31,7 @@ export let UnicodeCase = module (
         last locale = casing_locale(language_tag);
         last source = strings.scalars(s);
         last result = string_builder.create();
-        for (let index = 0; index < source.length; index += 1) {
+        for (let index in 0 .. source.length) {
             append_uppercase(result, source, index, locale);
         }
         return result.to_string();
@@ -155,7 +155,7 @@ export let UnicodeCase = module (
 
     /// @brief Looks for a following cased scalar, skipping case-ignorable scalars.
     let following_cased = func(source: uint32[list], index: int) -> bool {
-        for (let next = index + 1; next < source.length; next += 1) {
+        for (let next in index + 1 .. source.length) {
             last scalar = source[next];
             return cased(scalar) unless case_ignorable(scalar);
         }
@@ -164,7 +164,7 @@ export let UnicodeCase = module (
 
     /// @brief Return the first combining mark of class Above before the next base.
     let following_above = func(source: uint32[list], index: int) -> uint32 {
-        for (let next = index + 1; next < source.length; next += 1) {
+        for (let next in index + 1 .. source.length) {
             last scalar = source[next];
             return 0 unless contains_property(data.Combining, scalar);
             if (contains_property(data.Above, scalar)) {

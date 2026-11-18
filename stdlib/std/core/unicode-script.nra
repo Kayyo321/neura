@@ -124,7 +124,7 @@ export let UnicodeScript = module (
     #[Pure, ThreadSafe]
     export let all = func() -> UnicodeScript[list] {
         last result: UnicodeScript[list] = new;
-        for (let index = 0; index < 175; index += 1) {
+        for (let index in 0 .. 175) {
             result.append(variant(index));
         }
         return result;
