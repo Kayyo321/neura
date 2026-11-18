@@ -33,9 +33,10 @@ void tool_help(const Tool& tool, std::ostream& out) {
         out << (i == 0 ? "usage: " : "       ") << tool.name << ' ' << (i == 0 ? "[" : "") << tool.words[i]
             << (i == 0 ? "]" : "") << " ...\n";
     }
-    out << "The first argument selects one of these commands; without one, the tool runs "
-        << tool.words.front() << ".\n"
-           "`neura help` lists the options of every command, which mean the same here.\n";
+    if (!tool.words.empty())
+        out << "The first argument selects one of these commands; without one, the tool runs " << tool.words.front()
+            << ".\n";
+    out << "`neura help` lists the options of every command, which mean the same here.\n";
 }
 
 } // namespace
@@ -140,7 +141,7 @@ Start start(const Tool& tool, int argc, char** argv) {
     if (first < argc) {
         for (const auto& word : tool.words) named = named || word == argv[first];
     }
-    if (!named) result.arguments.emplace_back(tool.words.front());
+    if (!named && !tool.words.empty()) result.arguments.emplace_back(tool.words.front());
     for (int i = first; i < argc; ++i) result.arguments.emplace_back(argv[i]);
     return result;
 }

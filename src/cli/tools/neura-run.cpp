@@ -3,6 +3,7 @@
 
 #include "cli/commands.hpp"
 #include "cli/driver.hpp"
+#include "cli/serve.hpp"
 #include "cli/tool.hpp"
 #ifndef _WIN32
 #include "service/service.hpp"
@@ -45,5 +46,11 @@ int main(int argc, char** argv) {
         return core_protocol_main(start.arguments, runtime);
     }
 #endif
+    // `neura serve` (docs/runtime/ServerHost.md) builds through `neura` and
+    // replaces this process with neura-server-host.
+    if (start.arguments.size() > 1 && start.arguments[1] == "serve") {
+        auto argv = neura::tool::argv_of(start.arguments);
+        return neura::cli::run_serve(static_cast<int>(start.arguments.size()), argv.data());
+    }
     return core_options_main(std::move(start.arguments), command);
 }

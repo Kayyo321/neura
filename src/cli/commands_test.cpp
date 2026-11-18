@@ -1,4 +1,7 @@
 #include "commands.hpp"
+#ifdef NEURA_HAS_SQL
+#include "sql/sql_engine.hpp"
+#endif
 
 #include "gpu_run.hpp"
 #include "source_loader.hpp"
@@ -215,7 +218,13 @@ int run_tests(const Options& options) {
                 reporter->event("output", neura::tooling::test_output_json(catalog[i].id, stream, text));
             });
     };
+#ifdef NEURA_HAS_SQL
+    neura::sql::LocalSql sql(options.sql_pools);
+    Host host(options.capabilities, nullptr, neura::nvm::default_response_bytes, sql.exchange());
+#else
+    if (!options.sql_pools.empty()) throw std::runtime_error("this build has no SQL providers");
     Host host(options.capabilities);
+#endif
     provide_native_library(image, host.services);
     const auto bindings = neura::nvm::bind(image, host.registry);
     std::size_t failed = 0;
@@ -225,6 +234,7 @@ int run_tests(const Options& options) {
                               const std::string& forced_failure = {}) {
         // Each test is its own run: files and sockets it left open close now.
         host.services.end_run();
+        host.secrets.release_all();
         std::string message = forced_failure;
         if (message.empty() && result.completed && result.status != 0)
             message = "the test exited with status " + std::to_string(result.status);
@@ -373,6 +383,7 @@ int run_tests(const Options& options) {
                                               options.virtual_time, {}};
             for (std::uint64_t k = 1; passed(result) && k < options.schedules; ++k) {
                 host.services.end_run();
+                host.secrets.release_all();
                 neura::nvm::ExploringChooser chooser(options.schedule_seed + k);
                 result = run_test(i, &chooser, limits.task_quantum, options.virtual_time);
                 // No decision offered a choice: the test has one schedule.

@@ -1,0 +1,29 @@
+/// @brief The secret-memory host services (docs/runtime/NVM.md, "Secret memory"): secret bytes held by the host
+/// in page memory it locks with mlock, excludes from core dumps and forked children, and zeroes when the buffer is
+/// released or the execution ends. Only Std.Crypto uses them. The guarantee covers the host buffer only: bytes
+/// written into it, and bytes read back, are ordinary copies in the NVM heap. Every service is in the entropy
+/// capability group; without it each call fails with error 14 (CapabilityDenied). A run that records a trace
+/// cannot create a buffer (error 13, Unsupported), because the trace would hold the secret.
+export let LockedMemory = module (
+    /// @brief A new handle or an unsigned host error code.
+    export let HandleOutcome = enum (Ok(int64), Error(uint32));
+    /// @brief Returned bytes or an unsigned host error code.
+    export let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
+    /// @brief A comparison result or an unsigned host error code.
+    export let BoolOutcome = enum (Ok(bool), Error(uint32));
+    /// @brief Host success without a value or an unsigned host error code.
+    export let DoneOutcome = enum (Ok, Error(uint32));
+
+    /// @brief A zeroed locked buffer of `size` bytes (1 to 65,536). TooLarge (16) past 1 MiB locked in the
+    /// execution or past the process's lock limit; Unsupported (13) without mlock or while recording.
+    export let create = func(size: int) -> HandleOutcome host("neura.memory.lock.create", 1);
+    /// @brief Copies `bytes` into the buffer at `offset`; InvalidInput (4) outside the buffer.
+    export let write = func(handle: int64, offset: int, bytes: uint8[list]) -> DoneOutcome
+        host("neura.memory.lock.write", 1);
+    /// @brief A copy of `count` bytes at `offset`, as an ordinary heap value.
+    export let read = func(handle: int64, offset: int, count: int) -> BytesOutcome host("neura.memory.lock.read", 1);
+    /// @brief Whether `bytes` equal the whole buffer, compared in time that depends on the buffer's length only.
+    export let equal = func(handle: int64, bytes: uint8[list]) -> BoolOutcome host("neura.memory.lock.equal", 1);
+    /// @brief Zeroes, unlocks and unmaps the buffer; the handle is never valid again.
+    export let release = func(handle: int64) -> DoneOutcome host("neura.memory.lock.release", 1);
+);

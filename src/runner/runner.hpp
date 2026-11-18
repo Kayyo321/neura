@@ -1,8 +1,11 @@
 #pragma once
 
+#include "nvm/app_services.hpp"
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
+#include "nvm/sql_services.hpp"
+#include "nvm/secret_services.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -17,9 +20,17 @@ struct Host {
     nvm::DescriptorSource input{0};
     nvm::ConsoleWriteLine console{output};
     nvm::StandardServices services;
+    // Bound in every image; only a server-host worker passes an exchange.
+    nvm::ApplicationServices application;
+    // Bound in every image; answered only with an SQL exchange and the sql group.
+    nvm::SqlServices sql;
+    // neura.memory.lock.*, in the entropy group.
+    nvm::SecretServices secrets;
     nvm::HostRegistry registry;
 
-    explicit Host(const nvm::Capabilities& capabilities);
+    explicit Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange = nullptr,
+                  std::uint64_t response_bytes = nvm::default_response_bytes,
+                  nvm::SqlExchange* sql_exchange = nullptr);
 };
 
 struct RunOptions {

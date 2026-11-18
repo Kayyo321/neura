@@ -132,6 +132,7 @@ A refusal changes nothing. A different version, or another build of the same ver
 <root>/versions/<generation>/              one generation: bin/, share/, lib/
     bin/neura                              the dispatcher
     bin/neurac, bin/neura-run, ...         the tools it starts
+    bin/neura-server-host                  the server host, on Linux and macOS ([Server host](runtime/ServerHost.md))
     lib/neura/libneura-core-<version>.so   the code the tools share (.dylib on macOS)
     lib/neura/libneura-sdk-<version>.so    the compiler's part of it
     lib/neura/launchers/<target>/...       where the platform has launchers

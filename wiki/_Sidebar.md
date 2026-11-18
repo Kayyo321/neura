@@ -41,6 +41,8 @@
 - [NeuraIR optimization](IrOptimization)
 - [NeuraIR format](NirFormat)
 - [NVR format](NVR)
+- [Server host](Server-Host)
+- [SQL](Sql)
 - [Neura Virtual Machine](NVM)
 - [Runtime service](Service)
 - [Kernels](Kernels)

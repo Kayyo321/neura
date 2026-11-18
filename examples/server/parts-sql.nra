@@ -1,0 +1,362 @@
+// A small CRUD backend over Std.Data.Sql: neura-server-host runs it once for each request and owns the
+// database connections (docs/runtime/Sql.md). The same code runs against SQLite and PostgreSQL; only the
+// migrations differ, because the two databases generate identifiers differently.
+//
+//   neura build examples/server/parts-sql.nra -o parts-sql.nvr
+//   neura-server-host --listen 127.0.0.1:8080 --sql-pool main=sqlite:parts.db \
+//       --config sql.main.migrations=examples/server/parts-migrations/sqlite \
+//       --config sql.main.migrate=on_start parts-sql.nvr
+//   curl -X POST -d '{"code":"bolt","quantity":5}' http://127.0.0.1:8080/parts
+//   curl http://127.0.0.1:8080/parts/1
+//
+// Routes: GET /parts, GET /parts/{id}, POST /parts, PUT /parts/{id}, DELETE /parts/{id}. A duplicate code is
+// 409, a malformed body 400, an unknown id 404.
+let app = import:Std.App;
+let errors = import:Std.Core.Error;
+let integers = import:Std.Core.Int64;
+let json = import:Std.Encoding.Json;
+let program = import:Std.Program;
+let sql = import:Std.Data.Sql;
+let strings = import:Std.Text.Strings;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let PartsSql = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode => app.run(serve);
+
+    /// @brief The composition root: the pool, the repository, and the handler.
+    let serve = func(context: app.Context) -> Result<Unit> {
+        match (context.sql_pool("main")) {
+            Result.Err(problem) => {
+                return Result<Unit>.Err(problem);
+            },
+            Result.Ok(pool) => {
+                last repository = new PartRepository(pool);
+                return context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+                    route(repository, request)));
+            },
+        }
+    };
+
+    /// @brief One stored part.
+    #Final
+    let Part = class (
+        /// @brief The database's identifier.
+        export last id: int64;
+        /// @brief The unique code.
+        export last code: string;
+        /// @brief How many are in stock.
+        export last quantity: int64;
+        /// @brief A note, or None.
+        export last note: Optional<string>;
+
+        /// @brief Builds a part.
+        export let init = func(id_value: int64, code_value: string, quantity_value: int64,
+                               note_value: Optional<string>) {
+            id = id_value;
+            code = code_value;
+            quantity = quantity_value;
+            note = note_value;
+        };
+
+        /// @brief The part as a JSON object.
+        export let to_json = func -> json.JsonValue {
+            last members: [string, json.JsonValue][list] = new;
+            members.append(["id", json.number_of_int64(id)]);
+            members.append(["code", json.JsonValue.Text(code)]);
+            members.append(["quantity", json.number_of_int64(quantity)]);
+            members.append(["note", match (note) {
+                Optional.Some(text) => json.JsonValue.Text(text),
+                Optional.None => json.JsonValue.Null,
+            }]);
+            return json.JsonValue.Object(members);
+        };
+
+        /// @brief The code and identifier.
+        export let.override to_string = func -> string => "Part(" + id.to_string() + ", " + code + ")";
+    );
+
+    /// @brief The SQL of the parts; the only place that knows the table.
+    #Final
+    let PartRepository = class (
+        /// @brief The host's pool.
+        last pool: sql.Pool;
+
+        /// @brief Uses `parts_pool`.
+        export let init = func(parts_pool: sql.Pool) {
+            pool = parts_pool;
+        };
+
+        /// @brief At most 100 parts in identifier order.
+        export let list = func -> Result<Part[list]> {
+            match (pool.query_page("SELECT id, code, quantity, note FROM parts ORDER BY id", 100)) {
+                Result.Err(problem) => {
+                    return Result<Part[list]>.Err(problem);
+                },
+                Result.Ok(rows) => {
+                    last parts: Part[list] = new;
+                    for (let i = 0; i < rows.size(); i += 1) {
+                        match (part_of(rows.get(i))) {
+                            Result.Ok(part) => {
+                                parts.append(part);
+                            },
+                            Result.Err(problem) => {
+                                return Result<Part[list]>.Err(problem);
+                            },
+                        }
+                    }
+                    return Result<Part[list]>.Ok(parts);
+                },
+            }
+        };
+
+        /// @brief The part `id`, or an error of kind NotFound.
+        export let find = func(id: int64) -> Result<Part> {
+            return match (pool.query_one("SELECT id, code, quantity, note FROM parts WHERE id = $1", id)) {
+                Result.Err(problem) => Result<Part>.Err(problem),
+                Result.Ok(row) => part_of(row),
+            };
+        };
+
+        /// @brief Stores a new part and returns it with its identifier.
+        export let create = func(code: string, quantity: int64, note: Optional<string>) -> Result<Part> {
+            last row = pool.query_one(
+                "INSERT INTO parts (code, quantity, note) VALUES ($1, $2, $3) RETURNING id, code, quantity, note",
+                code, quantity, note_value(note));
+            return match (row) {
+                Result.Err(problem) => Result<Part>.Err(problem),
+                Result.Ok(found) => part_of(found),
+            };
+        };
+
+        /// @brief Changes a part's quantity and note in one transaction; NotFound when it does not exist.
+        export let update = func(id: int64, quantity: int64, note: Optional<string>) -> Result<Part> {
+            return sql.in_transaction<Part>(pool, new func(transaction: sql.Transaction) -> Result<Part> {
+                last changed = transaction.execute("UPDATE parts SET quantity = $2, note = $3 WHERE id = $1",
+                                                   id, quantity, note_value(note));
+                match (changed) {
+                    Result.Err(problem) => {
+                        return Result<Part>.Err(problem);
+                    },
+                    Result.Ok(count) => {
+                        if (count == 0) {
+                            return Result<Part>.Err(errors.custom("parts.not_found", "no part " + id.to_string()));
+                        }
+                    },
+                }
+                return match (transaction.query_one("SELECT id, code, quantity, note FROM parts WHERE id = $1", id)) {
+                    Result.Err(problem) => Result<Part>.Err(problem),
+                    Result.Ok(row) => part_of(row),
+                };
+            });
+        };
+
+        /// @brief Deletes a part: whether it existed.
+        export let delete = func(id: int64) -> Result<bool> {
+            return match (pool.execute("DELETE FROM parts WHERE id = $1", id)) {
+                Result.Err(problem) => Result<bool>.Err(problem),
+                Result.Ok(count) => Result<bool>.Ok(count > 0),
+            };
+        };
+
+        /// @brief A fixed description; never the pool's URL.
+        export let.override to_string = func -> string => "PartRepository(" + pool.name + ")";
+    );
+
+    /// @brief The SQL value of an optional note.
+    let note_value = func(note: Optional<string>) -> sql.Value => match (note) {
+        Optional.Some(text) => sql.text_value(text),
+        Optional.None => sql.null_value(),
+    };
+
+    /// @brief A part from a row.
+    let part_of = func(row: sql.Row) -> Result<Part> {
+        last id = row.int64("id");
+        last code = row.text("code");
+        last quantity = row.int64("quantity");
+        last note = row.optional_text("note");
+        return match (id) {
+            Result.Err(problem) => Result<Part>.Err(problem),
+            Result.Ok(id_value) => match (code) {
+                Result.Err(problem) => Result<Part>.Err(problem),
+                Result.Ok(code_value) => match (quantity) {
+                    Result.Err(problem) => Result<Part>.Err(problem),
+                    Result.Ok(quantity_value) => match (note) {
+                        Result.Err(problem) => Result<Part>.Err(problem),
+                        Result.Ok(note_value) => Result<Part>.Ok(new Part(id_value, code_value, quantity_value,
+                                                                          note_value)),
+                    },
+                },
+            },
+        };
+    };
+
+    /// @brief Dispatches on the method and the path.
+    let route = func(repository: PartRepository, request: app.Request) -> Result<app.Response> {
+        if (request.path == "/parts") {
+            if (request.method == "GET" || request.method == "HEAD") {
+                return list_parts(repository);
+            }
+            if (request.method == "POST") {
+                return create_part(repository, request);
+            }
+            return Result<app.Response>.Ok(app.json(405, "{\"error\":\"method\"}").with_header("Allow", "GET, POST"));
+        }
+        if (strings.starts_with(request.path, "/parts/")) {
+            last id = parse_id(request.path.slice(7, request.path.byte_length));
+            match (id) {
+                Optional.None => {
+                    return Result<app.Response>.Ok(app.json(404, "{\"error\":\"not found\"}"));
+                },
+                Optional.Some(number) => {
+                    if (request.method == "GET" || request.method == "HEAD") {
+                        return answer_part(repository.find(number), 200);
+                    }
+                    if (request.method == "PUT") {
+                        return update_part(repository, number, request);
+                    }
+                    if (request.method == "DELETE") {
+                        return match (repository.delete(number)) {
+                            Result.Err(problem) => Result<app.Response>.Err(problem),
+                            Result.Ok(existed) => Result<app.Response>.Ok(
+                                existed ? app.empty(204) : app.json(404, "{\"error\":\"not found\"}")),
+                        };
+                    }
+                    return Result<app.Response>.Ok(app.json(405, "{\"error\":\"method\"}")
+                        .with_header("Allow", "GET, PUT, DELETE"));
+                },
+            }
+        }
+        return Result<app.Response>.Ok(app.json(404, "{\"error\":\"not found\"}"));
+    };
+
+    /// @brief A positive decimal identifier.
+    let parse_id = func(text: string) -> Optional<int64> {
+        if (text.byte_length == 0 || text.byte_length > 18) {
+            return Optional<int64>.None;
+        }
+        let value: int64 = 0;
+        for (let i = 0; i < text.byte_length; i += 1) {
+            last digit = text.byte_at(i);
+            if (digit < 48 || digit > 57) {
+                return Optional<int64>.None;
+            }
+            value = value * 10 + (digit - 48) as int64;
+        }
+        return value > 0 ? Optional<int64>.Some(value) : Optional<int64>.None;
+    };
+
+    /// @brief GET /parts.
+    let list_parts = func(repository: PartRepository) -> Result<app.Response> {
+        match (repository.list()) {
+            Result.Err(problem) => {
+                return Result<app.Response>.Err(problem);
+            },
+            Result.Ok(parts) => {
+                last items: json.JsonValue[list] = new;
+                for (let part in parts) {
+                    items.append(part.to_json());
+                }
+                return Result<app.Response>.Ok(app.json(200, json.write(json.JsonValue.Array(items))));
+            },
+        }
+    };
+
+    /// @brief The fields of a request body: code, quantity, and an optional note.
+    let body_of = func(request: app.Request) -> Optional<[string, int64, Optional<string>]> {
+        last text = match (request.body_text()) {
+            Result.Ok(found) => found,
+            Result.Err(_) => "",
+        };
+        return match (json.parse(text)) {
+            Result.Err(_) => Optional<[string, int64, Optional<string>]>.None,
+            Result.Ok(document) => match (document) {
+                json.JsonValue.Object(members) => fields_of(members),
+                _ => Optional<[string, int64, Optional<string>]>.None,
+            },
+        };
+    };
+
+    /// @brief The fields of a JSON object: a "code" text, a non-negative integer "quantity", and an optional
+    /// "note" text.
+    let fields_of = func(members: [string, json.JsonValue][list]) -> Optional<[string, int64, Optional<string>]> {
+        last code = text_member(members, "code");
+        last note = text_member(members, "note");
+        let quantity: int64 = -1;
+        match (json.member(members, "quantity")) {
+            Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Number(digits) => {
+                        if (digits == "0") {
+                            quantity = 0;
+                        } else {
+                            quantity = optional.value_or<int64>(parse_id(digits), -1);
+                        }
+                    },
+                    _ => {},
+                }
+            },
+            Optional.None => {},
+        }
+        if (quantity < 0) {
+            return Optional<[string, int64, Optional<string>]>.None;
+        }
+        return Optional<[string, int64, Optional<string>]>.Some([optional.value_or<string>(code, ""), quantity, note]);
+    };
+
+    /// @brief The text of a member, or None when it is absent or not text.
+    let text_member = func(members: [string, json.JsonValue][list], name: string) -> Optional<string> {
+        match (json.member(members, name)) {
+            Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Text(text) => {
+                        return Optional<string>.Some(text);
+                    },
+                    _ => {},
+                }
+            },
+            Optional.None => {},
+        }
+        return Optional<string>.None;
+    };
+
+    /// @brief POST /parts.
+    let create_part = func(repository: PartRepository, request: app.Request) -> Result<app.Response> {
+        return match (body_of(request)) {
+            Optional.None => Result<app.Response>.Ok(app.json(400, "{\"error\":\"expected code and quantity\"}")),
+            Optional.Some(fields) => fields[0] == ""
+                ? Result<app.Response>.Ok(app.json(400, "{\"error\":\"expected code and quantity\"}"))
+                : answer_part(repository.create(fields[0], fields[1], fields[2]), 201),
+        };
+    };
+
+    /// @brief PUT /parts/{id}.
+    let update_part = func(repository: PartRepository, id: int64, request: app.Request) -> Result<app.Response> {
+        return match (body_of(request)) {
+            Optional.None => Result<app.Response>.Ok(app.json(400, "{\"error\":\"expected quantity\"}")),
+            Optional.Some(fields) => answer_part(repository.update(id, fields[1], fields[2]), 200),
+        };
+    };
+
+    /// @brief A part as JSON with `status`; NotFound as 404, a constraint violation as 409; other errors
+    /// fail the handler (500).
+    let answer_part = func(outcome: Result<Part>, status: int) -> Result<app.Response> {
+        return match (outcome) {
+            Result.Ok(part) => Result<app.Response>.Ok(app.json(status, json.write(part.to_json()))),
+            Result.Err(problem) => match (sql.kind_of(problem)) {
+                Optional.Some(kind) => kind == sql.ErrorKind.NotFound
+                    ? Result<app.Response>.Ok(app.json(404, "{\"error\":\"not found\"}"))
+                    : (kind == sql.ErrorKind.ConstraintViolation
+                        ? Result<app.Response>.Ok(app.json(409, "{\"error\":\"conflict\"}"))
+                        : Result<app.Response>.Err(problem)),
+                Optional.None => match (problem) {
+                    errors.Error.Custom(detail) => detail.code() == "parts.not_found"
+                        ? Result<app.Response>.Ok(app.json(404, "{\"error\":\"not found\"}"))
+                        : Result<app.Response>.Err(problem),
+                    _ => Result<app.Response>.Err(problem),
+                },
+            },
+        };
+    };
+);

@@ -3,7 +3,7 @@
 # them with it: a lone dispatcher reports each missing tool instead of
 # running the command.
 set(NEURA_TOOL_NAMES
-    neura-run neura-inspect neura-doctor neura-update neura-uninstall
+    neura-run neura-inspect neura-doctor neura-update neura-uninstall neura-server-host
     neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm
     neura-explain neura-tags neura-debug neura-lsp neura-fmt)
 

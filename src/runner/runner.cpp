@@ -154,10 +154,17 @@ TaskDumps::~TaskDumps() {
     signalled_request.store(nullptr, std::memory_order_relaxed);
 }
 
-Host::Host(const nvm::Capabilities& capabilities)
-    : services(output, error, input, capabilities) {
+Host::Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange, std::uint64_t response_bytes,
+           nvm::SqlExchange* sql_exchange)
+    : services(output, error, input, capabilities),
+      application(exchange, capabilities.http_server, capabilities.app, response_bytes),
+      sql(sql_exchange, capabilities.sql),
+      secrets(capabilities.entropy) {
     registry.add(console);
     services.register_all(registry);
+    application.register_all(registry);
+    sql.register_all(registry);
+    secrets.register_all(registry);
 }
 
 std::vector<std::uint8_t> read_file(const fs::path& path) {
@@ -413,10 +420,13 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         }
         result = result_of(replayed.trace);
     } else if (options.record) {
+        // A trace would hold every secret byte: no secret buffer is created.
+        host.secrets.set_recording(true);
         const auto bindings = nvm::bind(image, host.registry);
         begin();
         const auto trace = nvm::record(image, bindings, arguments, limits, clock);
         host.services.end_run();
+        host.secrets.release_all();
         const auto text = nvm::write_trace(trace);
         write_file(*options.record, std::vector<std::uint8_t>(text.begin(), text.end()));
         result = result_of(trace);
@@ -425,6 +435,7 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
         begin();
         result = nvm::run(image, bindings, arguments, limits, clock);
         host.services.end_run();
+        host.secrets.release_all();
     }
     if (options.stats) {
         std::cerr << "stats: steps " << result.steps << ", peak heap cells " << result.peak_heap_cells

@@ -76,7 +76,7 @@ case $components in
 esac
 
 # The tools of each component, as src/cli/tool_registry.cpp lists them.
-core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall"
+core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall neura-server-host"
 sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
 service_tools="neurad"
 

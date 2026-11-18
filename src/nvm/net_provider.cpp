@@ -512,9 +512,9 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         };
         if (auto done = advance(false)) return *done;
         PendingOperation operation;
-        operation.descriptor = connecting->socket->fd;
-        operation.writable = true;
-        operation.current_descriptor = [connecting] { return connecting->socket ? connecting->socket->fd : -1; };
+        operation.wait_source = PosixWait{{}, [connecting] {
+            return PosixWait::Interest{connecting->socket ? connecting->socket->fd : -1, PosixWait::Events::Write};
+        }};
         operation.attempt = advance;
         if (timeout > 0) {
             operation.deadline = deadline_after(request.now, timeout);
@@ -567,8 +567,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         };
         if (auto done = accept_once(false)) return *done;
         PendingOperation operation;
-        operation.descriptor = held->fd;
-        operation.readable = true;
+        operation.wait_source = PosixWait{{held->fd, PosixWait::Events::Read}};
         operation.attempt = accept_once;
         return operation;
     };
@@ -604,8 +603,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         };
         if (auto done = read_once(false)) return *done;
         PendingOperation operation;
-        operation.descriptor = held->fd;
-        operation.readable = true;
+        operation.wait_source = PosixWait{{held->fd, PosixWait::Events::Read}};
         operation.attempt = read_once;
         if (timeout > 0) {
             operation.deadline = deadline_after(request.now, timeout);
@@ -650,8 +648,7 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         };
         if (auto done = write_once(false)) return *done;
         PendingOperation operation;
-        operation.descriptor = held->fd;
-        operation.writable = true;
+        operation.wait_source = PosixWait{{held->fd, PosixWait::Events::Write}};
         operation.attempt = write_once;
         return operation;
     };

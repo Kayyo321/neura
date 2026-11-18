@@ -23,7 +23,7 @@ namespace {
 
 
 constexpr std::array<std::string_view, 3> compiler_words{"build", "check", "emit-ir"};
-constexpr std::array<std::string_view, 2> run_words{"run", "runtime"};
+constexpr std::array<std::string_view, 3> run_words{"run", "runtime", "serve"};
 constexpr std::array<std::string_view, 1> test_words{"test"};
 constexpr std::array<std::string_view, 2> inspect_words{"inspect", "inspect-image"};
 constexpr std::array<std::string_view, 1> doc_words{"docs"};
@@ -39,14 +39,17 @@ constexpr std::array<std::string_view, 1> fmt_words{"fmt"};
 constexpr std::array<std::string_view, 1> doctor_words{"doctor"};
 constexpr std::array<std::string_view, 1> update_words{"update"};
 constexpr std::array<std::string_view, 1> uninstall_words{"uninstall"};
+// The server host serves no `neura` command: `neura serve` (neura-run) starts it.
+constexpr std::array<std::string_view, 0> server_host_words{};
 
 // The executables next to `neura`, core first (Products030.md, "Binary map").
-constexpr std::array<Tool, 17> tool_table{{
+constexpr std::array<Tool, 18> tool_table{{
     {"neura-run", Component::Core, run_words},
     {"neura-inspect", Component::Core, inspect_words},
     {"neura-doctor", Component::Core, doctor_words},
     {"neura-update", Component::Core, update_words},
     {"neura-uninstall", Component::Core, uninstall_words},
+    {"neura-server-host", Component::Core, server_host_words},
     {"neurac", Component::Sdk, compiler_words},
     {"neura-test", Component::Sdk, test_words},
     {"neura-doc", Component::Sdk, doc_words},
@@ -63,13 +66,14 @@ constexpr std::array<Tool, 17> tool_table{{
 
 // Every `neura` command that a tool serves. version, help and capabilities
 // are built into `neura` itself.
-constexpr std::array<Command, 22> command_table{{
+constexpr std::array<Command, 23> command_table{{
     {"check", "neurac", "check", Component::Sdk},
     {"docs", "neura-doc", "docs", Component::Sdk},
     {"emit-ir", "neurac", "emit-ir", Component::Sdk},
     {"build", "neurac", "build", Component::Sdk},
     {"inspect", "neura-inspect", "inspect", Component::Core},
     {"run", "neura-run", "run", Component::Core},
+    {"serve", "neura-run", "serve", Component::Core},
     {"test", "neura-test", "test", Component::Sdk},
     {"disassemble", "neura-disasm", "disassemble", Component::Sdk},
     {"assemble", "neura-asm", "assemble", Component::Sdk},
@@ -231,6 +235,7 @@ const char* usage_text() {
            "                  [--tier-stats] [capabilities]\n"
            "                  [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
+           "       neura serve [-I source-root] <file.nra>... | <file.nvr> [neura-server-host options]\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
            "       neura assemble <file.nvra> -o <file.nvr>\n"
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
@@ -263,6 +268,9 @@ const char* usage_text() {
            "  --allow-net, --allow-env, --allow-clock, --allow-entropy, --allow-native\n"
            "                           grant that group again after a --deny option (native code is unsafe)\n"
            "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
+           "  --sql-pool <name>=<url>  (run, test) an SQL pool for Std.Data.Sql: sqlite:<path>, sqlite::memory:,\n"
+           "                           or postgresql://...; <name>.migrations=<dir> applies a migration directory,\n"
+           "                           <name>.password_env=<variable> reads the password\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
            "  --tier=0|1|2             the highest execution tier: 0 evaluates every graph by reference, 1 also\n"

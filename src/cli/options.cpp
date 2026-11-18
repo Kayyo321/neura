@@ -124,6 +124,9 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
     } else if (arg == "--deny-all") {
         options.capabilities = {};
         options.allow_native_requested = false;
+    } else if (arg == "--sql-pool") {
+        options.sql_pools.emplace_back(next());
+        options.capabilities.sql = true;
     } else {
         return false;
     }
@@ -602,6 +605,9 @@ Options read_options(int argc, char** argv) {
     }
     if (!options.detach && (options.detach_stdout || options.detach_stderr || options.detach_stdin)) {
         throw RuntimeError("--stdout, --stderr and --stdin apply only with --detach", 1);
+    }
+    if (!options.sql_pools.empty() && options.runtime && *options.runtime != RuntimeMode::Off) {
+        throw RuntimeError("--sql-pool applies only to a direct run; run without --runtime", 1);
     }
 #ifdef _WIN32
     if (options.runtime && *options.runtime != RuntimeMode::Off) {

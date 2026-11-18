@@ -74,6 +74,8 @@ GENERATED: dict[str, str] = {
     "docs/runtime/Service.md": "Service",
     "docs/runtime/Kernels.md": "Kernels",
     "docs/runtime/NVR.md": "NVR",
+    "docs/runtime/ServerHost.md": "Server-Host",
+    "docs/runtime/Sql.md": "Sql",
     "docs/style/CodingStyle.md": "CodingStyle",
 }
 
@@ -99,6 +101,12 @@ REPOSITORY_ONLY = (
     "docs/design/Records030.md",
     "docs/design/Lifetime030.md",
     "docs/design/Crypto030.md",
+    "docs/design/Apps030.md",
+    "docs/design/Html030.md",
+    "docs/design/Components030.md",
+    "docs/design/Backend030.md",
+    "docs/design/Desktop030.md",
+    "docs/design/Projects030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )

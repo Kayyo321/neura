@@ -121,6 +121,8 @@ The language has no hexadecimal integer literals, no inference of type arguments
 | `Std.Fs` | `Path`, `File`, `Fs` | [11.2](#112-stdfs) |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` | [11.3](#113-stdprogram) |
 | `Std.Net` | TCP streams and listeners | [11.4](#114-stdnet) |
+| `Std.App` | `run`, `Context`, `Request`, `Response`, `Handler`, `handler_of`, `Context.sql_pool`: the entry of a server image | [Server host](../runtime/ServerHost.md) |
+| `Std.Data` | `Sql`: pools, connections, transactions, cursors and rows of SQLite and PostgreSQL | [SQL](../runtime/Sql.md) |
 | `Std.Time` | `Duration`, `Instant`, `Clock`, calendar types | [12.1](#121-stdtime) |
 | `Std.Random` | `Random`, `Uuid` | [12.2](#122-stdrandom) |
 | `Std.Encoding` | `Utf8`, `Hex`, `Base64`, `Json`, `Csv` | [13.1](#131-stdencoding) |
