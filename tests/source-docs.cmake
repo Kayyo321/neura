@@ -333,3 +333,48 @@ expect_json("Likely" files 0 symbols 3 tags 0 name)
 expect_json("The second color." files 0 symbols 4 documentation text)
 expect_json("Removed" files 0 symbols 4 tags 0 name)
 expect_json("unused" files 0 symbols 4 tags 0 arguments 1 value)
+
+# Records, interface properties and derivations (docs/design/Records030.md,
+# Tooling): a record with its components and generated constructor, a
+# property requirement with its clauses, and a derived module with its
+# generator, its pinned wire names and its four generated functions.
+set(records "${TEST_DIR}/records.nra")
+file(WRITE "${records}" [=[
+let json = import:Std.Encoding.Json;
+/// Something with a name.
+let Named = interface (
+    /// The display name.
+    let name: string;
+        | get;
+);
+/// A user.
+let User = record implements Named (
+    /// The identifier.
+    id: int64,
+    name: string,
+);
+/// The user's JSON form.
+export let UserJson = derive json.Codec<User> {
+    field User.name: "display_name";
+};
+]=])
+run_docs(index "${records}")
+string(JSON count LENGTH "${index}" files 0 symbols)
+if(NOT count EQUAL 10)
+    message(FATAL_ERROR "Expected 10 documented declarations in the records file, got ${count}\n${index}")
+endif()
+expect_json("let name: string { get }" files 0 symbols 1 signature)
+expect_json("User" files 0 symbols 2 name)
+expect_json("record" files 0 symbols 2 kind)
+expect_json("User = record implements Named (id: int64, name: string)" files 0 symbols 2 signature)
+expect_json("init" files 0 symbols 3 name)
+expect_json("init = func(id: int64, name: string) => set" files 0 symbols 3 signature)
+expect_json("User" files 0 symbols 3 scope 0)
+expect_json("" files 0 symbols 3 documentation text)
+expect_json("last id: int64" files 0 symbols 4 signature)
+expect_json("UserJson = derive json.Codec<User> { field User.name: \"display_name\"; }" files 0 symbols 5 signature)
+expect_json("to_json = func(value: User) -> Result<JsonValue>" files 0 symbols 6 signature)
+expect_json("encode = func(value: User) -> Result<string>" files 0 symbols 7 signature)
+expect_json("from_json = func(value: JsonValue) -> Result<User>" files 0 symbols 8 signature)
+expect_json("decode = func(text: string) -> Result<User>" files 0 symbols 9 signature)
+expect_json("UserJson" files 0 symbols 9 scope 0)

@@ -183,6 +183,7 @@ std::string_view kind_name(const Declaration& declaration, bool variant) {
     if (variant) return "variant";
     if (declaration.cast_target) return "cast";
     if (declaration.singleton) return "singleton";
+    if (declaration.record) return "record";
     switch (declaration.kind) {
     case DeclKind::Binding: return declaration.constant ? "constant" : "binding";
     case DeclKind::Function: return "function";
@@ -280,6 +281,17 @@ private:
             }
             result += accessor_text(declaration);
             return result;
+        } else if (declaration.derive) {
+            return declaration.name + " = derive " + derivation_text(*declaration.derive);
+        } else if (declaration.record) {
+            // A record shows its components, as written (docs/design/Records030.md, Tooling).
+            result = declaration.name + " = record";
+            if (!declaration.interfaces.empty()) {
+                result += " implements ";
+                for (std::size_t i = 0; i < declaration.interfaces.size(); ++i)
+                    result += (i == 0 ? "" : ", ") + type_text(declaration.interfaces[i]);
+            }
+            return result + " (" + components(declaration) + ")";
         } else {
             result = declaration.name + " = ";
             result += declaration.kind == DeclKind::Function ? "func" : kind;
@@ -328,6 +340,62 @@ private:
         return result;
     }
 
+    std::string components(const Declaration& record) const {
+        std::string result;
+        for (const auto& member : record.members) {
+            if (member.kind != DeclKind::Binding || member.static_member) continue;
+            if (!result.empty()) result += ", ";
+            result += member.name + ": " + (member.type ? type_text(*member.type) : std::string());
+        }
+        return result;
+    }
+
+    std::string derivation_text(const DeriveSyntax& derive) const {
+        std::string result = derive.generator.name + "<";
+        for (std::size_t i = 0; i < derive.arguments.size(); ++i)
+            result += (i == 0 ? "" : ", ") + type_text(derive.arguments[i]);
+        result += ">";
+        if (derive.mappings.empty()) return result;
+        result += " {";
+        for (const auto& mapping : derive.mappings) {
+            result += mapping.variant ? " variant " : " field ";
+            for (std::size_t i = 0; i < mapping.parts.size(); ++i) result += (i == 0 ? "" : ".") + mapping.parts[i];
+            // The wire literal as written, so escapes survive.
+            result += ": " + std::string(source_.substr(mapping.wire_span.offset, mapping.wire_span.length)) + ";";
+        }
+        return result + " }";
+    }
+
+    // The members lowering generates for a documented record or derivation:
+    // a record's constructor, and a derived codec's four functions, whose
+    // signatures are those of Std.Encoding.Json.Codec<T> for the derived type.
+    void generated_members(const Declaration& declaration) {
+        // They have no comment of their own: an empty text at the declaration's comment.
+        const DocComment none{declaration.documentation->span, {}};
+        const auto& selection = declaration.name_span ? *declaration.name_span : declaration.span;
+        if (declaration.record) {
+            std::string parameters;
+            for (const auto& member : declaration.members) {
+                if (member.kind != DeclKind::Function || member.name != "init") continue;
+                for (std::size_t i = 0; i < member.parameters.size(); ++i)
+                    parameters += (i == 0 ? "" : ", ") + member.parameters[i].name + ": " +
+                                  type_text(member.parameters[i].type);
+            }
+            symbol("init", "function", "init = func(" + parameters + ") => set", declaration.span, selection, none);
+        }
+        if (declaration.derive && declaration.derive->arguments.size() == 1) {
+            const auto root = type_text(declaration.derive->arguments.front());
+            symbol("to_json", "function", "to_json = func(value: " + root + ") -> Result<JsonValue>",
+                   declaration.span, selection, none);
+            symbol("encode", "function", "encode = func(value: " + root + ") -> Result<string>",
+                   declaration.span, selection, none);
+            symbol("from_json", "function", "from_json = func(value: JsonValue) -> Result<" + root + ">",
+                   declaration.span, selection, none);
+            symbol("decode", "function", "decode = func(text: string) -> Result<" + root + ">",
+                   declaration.span, selection, none);
+        }
+    }
+
     void symbol(std::string_view name, std::string_view kind, std::string_view signature,
                 const Span& declaration, const Span& selection, const DocComment& comment,
                 const std::vector<TagSyntax>& tags = {}) {
@@ -364,7 +432,10 @@ private:
                    *declaration.name_span, *declaration.documentation, declaration.tags);
         }
         if (!declaration.name.empty()) scope_.push_back(declaration.name);
+        if (declaration.documentation && declaration.name_span) generated_members(declaration);
         for (const auto& member : declaration.members) {
+            // A record's constructor is generated; it is listed above.
+            if (declaration.record && member.kind == DeclKind::Function) continue;
             this->declaration(member, declaration.kind == DeclKind::Enum);
         }
         if (declaration.initializer) expression(*declaration.initializer);
