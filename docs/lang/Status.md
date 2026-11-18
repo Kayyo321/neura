@@ -27,7 +27,7 @@ Arrays use [activation and static regions](Collections.md#array-lifetime). An ow
 
 ## Application platform development
 
-[HTML factories](../apps/Html.md) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. Host reconciliation, application packaging, and full render effect checks are separate milestones. [State and components](../apps/Components.md) are library code in `Std.Ui`: `ui.State<T>` of deeply immutable values, subscriptions, components with slots, and roots whose turns render and commit over a `ui.Host`, tested on the in-memory `Std.Ui.ModelHost`; the browser and desktop hosts, commands, controls, routing and contracts are not implemented.
+[HTML factories](../apps/Html.md) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. Host reconciliation, application packaging, and full render effect checks are separate milestones. [State and components](../apps/Components.md) are library code in `Std.Ui`: `ui.State<T>` of deeply immutable values, subscriptions, components with slots, and roots whose turns render and commit over a `ui.Host`, tested on the in-memory `Std.Ui.ModelHost`. Commands (`Std.Ui.Commands`), the router (`Std.Ui.Routing`), validated forms (`Std.Ui.Forms`) and controls over real elements (`Std.Ui.Controls`) are implemented and tested on the model host, and a refused commit rolls back the turn's mounts; the browser and desktop hosts, derived codecs for `FrozenList` and contracts are not implemented.
 
 ## Outside this release
 
@@ -106,6 +106,8 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 | `concurrency/monitor.nra` | Compiles and runs; a monitor shared by tasks, an `#Immutable` value class, and `#Pure` and `#ThreadSafe` functions ([Tags](Tags.md#implemented-tags)). `backend-cli` builds and runs it. |
 | `types/frozen-list.nra` | Compiles and runs; a `FrozenList` copied from an array, a derived list, and for-each ([Collections](Collections.md#frozenlist)). |
 | `apps/components.nra` | Compiles and runs; a `ui.State`, a component with a click handler, and a root on the model host ([State and components](../apps/Components.md)). |
+| `apps/portfolio.nra` | Compiles and runs; a router with a deep link and a contact form with validation and focus on the model host ([State and components](../apps/Components.md#routing)). |
+| `concurrency/ui-command.nra` | Compiles and runs; a UI command whose work runs as a task under `Std.Ui.Commands.run` ([State and components](../apps/Components.md#commands)). |
 
 
 ## Editor tooling candidate

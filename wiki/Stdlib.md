@@ -220,7 +220,11 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
 | [`Std.Ui`](Stdlib-Ui) | [Contracts](Stdlib-Ui#detailed-contracts) | [Declarations](Stdlib-Ui#exported-declarations) |
+| [`Std.Ui.Commands`](Stdlib-Ui-Commands) | [Contracts](Stdlib-Ui-Commands#detailed-contracts) | [Declarations](Stdlib-Ui-Commands#exported-declarations) |
+| [`Std.Ui.Controls`](Stdlib-Ui-Controls) | [Contracts](Stdlib-Ui-Controls#detailed-contracts) | [Declarations](Stdlib-Ui-Controls#exported-declarations) |
+| [`Std.Ui.Forms`](Stdlib-Ui-Forms) | [Contracts](Stdlib-Ui-Forms#detailed-contracts) | [Declarations](Stdlib-Ui-Forms#exported-declarations) |
 | [`Std.Ui.ModelHost`](Stdlib-Ui-ModelHost) | [Contracts](Stdlib-Ui-ModelHost#detailed-contracts) | [Declarations](Stdlib-Ui-ModelHost#exported-declarations) |
+| [`Std.Ui.Routing`](Stdlib-Ui-Routing) | [Contracts](Stdlib-Ui-Routing#detailed-contracts) | [Declarations](Stdlib-Ui-Routing#exported-declarations) |
 
 ### `Std.Web`
 
