@@ -21,6 +21,7 @@ This page owns the host services and protocols of the application hosts that [th
 | `neura_wasm_clock` | run, task clock reading in nanoseconds (`int64`) | The number of timers and deadlines that expired, or -1 |
 | `neura_wasm_has_proof`, `neura_wasm_prove_idle` | run | Whether a proof is queued; the milliseconds one idle proof took, -1 when none ran, -2 on failure |
 | `neura_wasm_last_proof` | run | The function and block of the last idle proof as `function * 2^32 + block`, for measurements |
+| `neura_wasm_tier_stats` | run | The lifting statistics of the run's cache as `neura run --tier-stats` prints them, NUL-terminated, valid until the next call; for measurements. Its step line reads zero: the browser does not collect step counters |
 | `neura_wasm_close` | run | none |
 | `neura_wasm_error` | none | The last failure as NUL-terminated UTF-8 |
 
@@ -53,6 +54,7 @@ All have a `uint32` error. The adapter key is the `host` member of `new NvmExecu
 | Service | Version | Arguments | Result | Overlaps | Key |
 | --- | --- | --- | --- | --- | --- |
 | `neura.console.write_line` | 1 | text | none | no | `console` |
+| `neura.console.write` | 1 | `int32` stream (1 stdout, 2 stderr), `uint8[list]` bytes | `int32` count | no | `consoleWrite` |
 | `neura.clock.wall` | 1 | none | `[int64 seconds, int32 nanos]` | no | `clockWall` |
 | `neura.clock.monotonic` | 1 | none | `int64` nanoseconds | no | `clockMonotonic` |
 | `neura.clock.sleep` | 1, 2 | `int64` nanoseconds | none | yes; version 2 can be cancelled | `sleep` |
@@ -70,11 +72,11 @@ All have a `uint32` error. The adapter key is the `host` member of `new NvmExecu
 The runtime answers two kinds of service itself, without reporting a request to the adapter:
 
 - `neura.process.exit` version 1 ends the run with its status, as on every host.
-- A service of the table that the embedder does not grant, and a standard service of a group a browser never grants (`neura.console.write`, `neura.console.read`, `neura.env.get`, `neura.fs.*`, `neura.net.*`, `neura.ffi.*`, `neura.http.*`, `neura.bridge.call`, `neura.sql.*`, `neura.app.*`, `neura.desktop.*`), binds and answers error 14. An image that reaches one runs and fails locally, as [Apps030](https://github.com/Kayyo321/neura/blob/main/docs/design/Apps030.md#capability-groups) requires. A service of the second kind binds with the image's own parameter and result types; its error type must be `uint32`, because error 14 is the only value that crosses. An overlapping request among them is answered at the next scheduling point, like any other.
+- A service of the table that the embedder does not grant, and a standard service of a group a browser never grants (`neura.console.read`, `neura.env.get`, `neura.fs.*`, `neura.net.*`, `neura.ffi.*`, `neura.http.*`, `neura.bridge.call`, `neura.sql.*`, `neura.app.*`, `neura.desktop.*`), binds and answers error 14. An image that reaches one runs and fails locally, as [Apps030](https://github.com/Kayyo321/neura/blob/main/docs/design/Apps030.md#capability-groups) requires. A service of the second kind binds with the image's own parameter and result types; its error type must be `uint32`, because error 14 is the only value that crosses. An overlapping request among them is answered at the next scheduling point, like any other.
 
 Any other import fails the open with the import's name and version. `src/wasm/entry.cpp` holds the table; `hosts/web/nvm.js` holds the argument and result conversions.
 
-`browserHost({ output, ui, history })` in `nvm.js` supplies the defaults of a page: the console writes each line to `console.log`, the wall clock is `performance.timeOrigin + performance.now()`, the monotonic clock and the task clock are `performance.now()`, both in nanoseconds, a sleep is a timer, and entropy is `crypto.getRandomValues`. A negative sleep or an entropy count outside 0 to 1 MiB answers error 4.
+`browserHost({ output, ui, history })` in `nvm.js` supplies the defaults of a page: the console writes each line to `console.log`, and `neura.console.write` keeps the bytes of each stream until their LF and writes whole lines to `console.log` (stdout) or `console.error` (stderr), the wall clock is `performance.timeOrigin + performance.now()`, the monotonic clock and the task clock are `performance.now()`, both in nanoseconds, a sleep is a timer, and entropy is `crypto.getRandomValues`. A sleep ends once the monotonic clock has reached its deadline, even when a timer fires early. A negative sleep, an entropy count outside 0 to 1 MiB, or a console stream other than 1 or 2 answers error 4. Console input, `neura.console.read`, is never granted.
 
 ## Scheduling
 

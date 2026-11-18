@@ -119,9 +119,9 @@ class CountingExecution extends NvmExecution {
 
 async function runImage(module, image, host, label) {
     const lines = [];
-    const execution = new CountingExecution(module, image, {
-        host: { ...browserHost(host), console: line => void lines.push(line) },
-    });
+    // stdout is compared with the native runner; stderr is not.
+    const output = { log: line => void lines.push(`${line}\n`), error: () => {} };
+    const execution = new CountingExecution(module, image, { host: browserHost({ ...host, output }) });
     const started = performance.now();
     try {
         const event = await execution.run();
@@ -134,7 +134,7 @@ async function runImage(module, image, host, label) {
 
 async function waits(module, oracles) {
     const results = [];
-    for (const name of ['timers', 'serialSleep']) {
+    for (const name of ['timers', 'serialSleep', 'print']) {
         const outcome = await runImage(module, await read(`${name}.nvr`), {}, name);
         equal([outcome.kind, outcome.status, outcome.stdout], [oracles[name].kind, oracles[name].status,
               oracles[name].stdout], name);

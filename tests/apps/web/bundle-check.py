@@ -36,6 +36,16 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def dump(browser, root, path, wasm_type):
+    """The DOM once the boot module has settled. A loaded machine can exhaust the virtual-time budget while
+    nvm.wasm compiles, which leaves no state on the page; that load is tried again, at most three times."""
+    for _ in range(3):
+        dom = dump_once(browser, root, path, wasm_type)
+        if 'data-neura-state=' in dom:
+            return dom
+    return dom
+
+
+def dump_once(browser, root, path, wasm_type):
     with ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=root, wasm_type=wasm_type)) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -46,6 +56,8 @@ def dump(browser, root, path, wasm_type):
                      '--virtual-time-budget=15000', '--dump-dom',
                      f'http://127.0.0.1:{server.server_port}/{path}index.html'],
                     capture_output=True, text=True, timeout=120)
+            if not result.stdout.strip():
+                print(f'(no DOM from {browser}: status {result.returncode}; {result.stderr.strip()[-300:]})')
             return result.stdout
         finally:
             server.shutdown()

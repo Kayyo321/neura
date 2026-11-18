@@ -43,6 +43,7 @@ The members of `host` grant [the browser services](../../docs/runtime/Providers.
 | Member | Called as | Answer |
 | --- | --- | --- |
 | `console` | `console(line, context)`; the line includes its LF | `false` for a failed write, or `true` or `undefined` |
+| `consoleWrite` | `consoleWrite(stream, bytes, context)`; stream 1 is stdout and 2 stderr | The number of bytes written |
 | `clockWall` | `clockWall(context)` | `{ seconds, nanos }` with `seconds` a signed 64-bit `BigInt` and `nanos` an integer in `[0, 1000000000)` |
 | `clockMonotonic` | `clockMonotonic(context)` | A signed 64-bit `BigInt` in nanoseconds |
 | `sleep` | `sleep(nanos, context)` | `undefined` when the time has passed |

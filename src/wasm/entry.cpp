@@ -155,6 +155,7 @@ std::vector<BrowserService> browser_services() {
     const auto sleep = signature("neura.clock.sleep", {int64()}, void_type());
     return {
         {signature("neura.console.write_line", {text()}, void_type())},
+        {signature("neura.console.write", {int32(), byte_list()}, int32())},
         {signature("neura.clock.wall", {}, tuple({int64(), int32()}))},
         {signature("neura.clock.monotonic", {}, int64())},
         {sleep, true, false},
@@ -178,7 +179,7 @@ std::vector<BrowserService> browser_services() {
 // answers error 14. Its error type must still be uint32.
 bool denied_everywhere(std::string_view name) {
     static const std::set<std::string_view> names{
-        "neura.console.write", "neura.console.read", "neura.env.get", "neura.http.fetch", "neura.bridge.call"};
+        "neura.console.read", "neura.env.get", "neura.http.fetch", "neura.bridge.call"};
     static constexpr std::array<std::string_view, 7> groups{
         "neura.fs.", "neura.net.", "neura.ffi.", "neura.sql.", "neura.app.", "neura.desktop.", "neura.http.server."};
     if (names.contains(name)) return true;
