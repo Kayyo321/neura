@@ -97,6 +97,12 @@ std::optional<fs::path> resolve_inside(const fs::path& root, const fs::path& pat
     std::error_code error;
     for (const auto& part : path) {
         if (part == ".." && current == root) outside(at, "this path leaves the project directory");
+        // Only a directory has entries: "file/." and "file/" do not resolve.
+        // realpath(3) says so on Linux, but macOS resolves "file/." to the
+        // file, so the rule is checked here for every platform.
+        if (current != root && !fs::is_directory(current, error)) {
+            invalid("cannot resolve project path '" + path_text(path) + "'");
+        }
         const auto next = current / part;
         current = fs::canonical(next, error);
         if (error) {
