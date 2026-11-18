@@ -103,6 +103,8 @@ Verification runs in Neura and shares the asymmetric and post-quantum primitives
 | Compact JWE direct and AES Key Wrap (2.10) | KAT | RFC 3394, RFC 7516 A.3, RFC 7518 CBC-HMAC, RFC 7520 5.6, and independent Python cryptography checks. Tests include failed authentication and AES-CBC padding failure. | implemented |
 | PASETO v4.local and v4.public (2.10) | KAT | All 17 pinned official v4 records. Exact local encryption and public signatures, plus rejection of altered tags, footer and assertion mismatches, wrong purpose, and invalid encodings. | implemented |
 | Macaroons v1/v2 wire format (2.10) | KAT | 16 libmacaroons vectors and independent PyMacaroons vectors for first-party and nested third-party caveats. | implemented |
+| Compact RSA-OAEP-256 JWE (2.10) | KAT | The RSA key from RFC 7516 A.1, independently generated SHA-256 OAEP and GCM expected bytes, rejection of SHA-1 and a uniform authentication error after bad unwrap. | implemented |
+| Biscuit v3.0 signature chain and bounded Datalog authorization (2.10) | KAT + logic | Eclipse Biscuit official samples, independent Ed25519 verification and rejected authority widening from a holder-signed block. | implemented for the supported subset |
 
 JOSE verification keys bind the caller's choice of algorithm and key family. The header only confirms that choice. Critical header extensions and unencoded JWS payloads are outside this profile. For JWT, integer time claims avoid numeric rounding, and future-issued tokens follow the same leeway as not-before claims. The RSA1_5 and SHA-1 OAEP modes of JWE are refused. PASETO authenticates bytes and leaves claim validation to its caller. Macaroons authenticate the caveat chain and require a caller to decide which first-party predicates hold.
 

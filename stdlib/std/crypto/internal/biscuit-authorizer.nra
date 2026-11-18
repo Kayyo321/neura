@@ -1,0 +1,267 @@
+let datalog = import:Std.Crypto.Internal.BiscuitDatalog;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let json = import:Std.Encoding.Json;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Text parser for Biscuit's bounded positive Datalog authorizer. Internal.
+export let BiscuitAuthorizer = module (
+    let invalid = func<T>(offset: int, message: string) -> Result<T> =>
+        datalog.fail<T>("biscuit.authorizer", "Datalog byte " + offset.to_string() + ": " + message);
+
+    let space = func(byte: uint8) -> bool => byte == 9 || byte == 10 || byte == 13 || byte == 32;
+    let alpha = func(byte: uint8) -> bool => (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+    let digit = func(byte: uint8) -> bool => byte >= 48 && byte <= 57;
+    let name_part = func(byte: uint8) -> bool => alpha(byte) || digit(byte) || byte == 58 || byte == 95;
+
+    let Parser = class (
+        last source: string;
+        let offset = 0;
+
+        export let init = func(text: string) {
+            source = text;
+        };
+
+        export let done = func -> bool {
+            skip_space();
+            return offset == source.byte_length;
+        };
+
+        let skip_space = func {
+            while (offset < source.byte_length && space(source.byte_at(offset))) {
+                offset++;
+            }
+        };
+
+        let looking_at = func(text: string) -> bool {
+            return text.byte_length <= source.byte_length - offset
+                && source.slice(offset, offset + text.byte_length) == text;
+        };
+
+        export let accept = func(text: string) -> bool {
+            skip_space();
+            if (!looking_at(text)) {
+                return false;
+            }
+            offset += text.byte_length;
+            return true;
+        };
+
+        export let keyword = func(text: string) -> bool {
+            skip_space();
+            if (!looking_at(text)) {
+                return false;
+            }
+            last end = offset + text.byte_length;
+            if (end < source.byte_length && name_part(source.byte_at(end))) {
+                return false;
+            }
+            offset = end;
+            return true;
+        };
+
+        export let expect = func(text: string) -> Result<Unit> {
+            if (!accept(text)) {
+                return invalid<Unit>(offset, "expected " + text + " in the supported Datalog subset");
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        export let expect_keyword = func(text: string) -> Result<Unit> {
+            if (!keyword(text)) {
+                return invalid<Unit>(offset, "expected keyword " + text);
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        export let name = func(variable: bool) -> Result<string> {
+            if (!variable) {
+                skip_space();
+                if (offset == source.byte_length || !alpha(source.byte_at(offset))) {
+                    return invalid<string>(offset, "expected an ASCII predicate name");
+                }
+            }
+            last start = offset;
+            while (offset < source.byte_length && name_part(source.byte_at(offset))) {
+                offset++;
+            }
+            if (offset == start) {
+                return invalid<string>(offset, "empty variable name");
+            }
+            return Result<string>.Ok(source.slice(start, offset));
+        };
+
+        let string_term = func -> Result<datalog.Term> {
+            last start = offset;
+            offset++;
+            while (offset < source.byte_length) {
+                last byte = source.byte_at(offset);
+                offset++;
+                if (byte == 92) {
+                    if (offset == source.byte_length) {
+                        return invalid<datalog.Term>(start, "unfinished string escape");
+                    }
+                    offset++;
+                } else if (byte == 34) {
+                    match (json.parse(source.slice(start, offset))) {
+                        Result.Ok(value) => {
+                            match (value) {
+                                json.JsonValue.Text(text) => {
+                                    return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Text, text));
+                                },
+                                _ => {},
+                            }
+                        },
+                        Result.Err(_) => {},
+                    }
+                    return invalid<datalog.Term>(start, "invalid JSON-style Datalog string");
+                }
+            }
+            return invalid<datalog.Term>(start, "unclosed Datalog string");
+        };
+
+        export let term = func -> Result<datalog.Term> {
+            skip_space();
+            if (offset == source.byte_length) {
+                return invalid<datalog.Term>(offset, "missing Datalog term");
+            }
+            last first = source.byte_at(offset);
+            if (first == 34) {
+                return string_term();
+            }
+            if (first == 36) {
+                offset++;
+                last variable = name(true)?;
+                return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Variable, variable));
+            }
+            last start = offset;
+            while (offset < source.byte_length) {
+                last byte = source.byte_at(offset);
+                if (space(byte) || byte == 41 || byte == 44 || byte == 59) {
+                    break;
+                }
+                offset++;
+            }
+            last text = source.slice(start, offset);
+            if (text == "true" || text == "false") {
+                return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Boolean, text));
+            }
+            if (text.byte_length > 4 && text.slice(0, 4) == "hex:") {
+                last bytes = hex.decode(text.slice(4, text.byte_length))?;
+                return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Bytes, hex.encode(bytes)));
+            }
+            if (first == 45 || digit(first)) {
+                match (int64s.parse(text)) {
+                    Result.Ok(value) => {
+                        return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Integer, value.to_string()));
+                    },
+                    Result.Err(_) => {},
+                }
+                match (instant.parse(text)) {
+                    Result.Ok(value) => {
+                        if (value.epoch_seconds >= 0 && value.nanos == 0) {
+                            return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Date, value.epoch_seconds.to_string()));
+                        }
+                    },
+                    Result.Err(_) => {},
+                }
+            }
+            return invalid<datalog.Term>(start, "unsupported Datalog term");
+        };
+
+        export let predicate = func -> Result<datalog.Predicate> {
+            last identifier = name(false)?;
+            if (identifier == "revocation_id") {
+                return invalid<datalog.Predicate>(offset, "implicit revocation_id facts are unsupported");
+            }
+            expect("(")?;
+            let terms: datalog.Term[list] = new;
+            terms.append(term()?);
+            while (accept(",")) {
+                if (terms.length == datalog.MaxTerms) {
+                    return invalid<datalog.Predicate>(offset, "Biscuit predicate arity exceeds the limit");
+                }
+                terms.append(term()?);
+            }
+            expect(")")?;
+            return Result<datalog.Predicate>.Ok(new datalog.Predicate(identifier, terms));
+        };
+
+        export let query = func -> Result<datalog.Query> {
+            let body: datalog.Predicate[list] = new;
+            if (!keyword("true")) {
+                body.append(predicate()?);
+                while (accept(",")) {
+                    if (body.length == datalog.MaxBody) {
+                        return invalid<datalog.Query>(offset, "too many predicates in a Datalog query");
+                    }
+                    body.append(predicate()?);
+                }
+            }
+            return Result<datalog.Query>.Ok(new datalog.Query(body));
+        };
+
+        export let alternatives = func -> Result<datalog.Query[list]> {
+            let queries: datalog.Query[list] = new;
+            queries.append(query()?);
+            while (keyword("or")) {
+                if (queries.length == datalog.MaxItems) {
+                    return invalid<datalog.Query[list]>(offset, "too many alternatives in a Datalog query");
+                }
+                queries.append(query()?);
+            }
+            return Result<datalog.Query[list]>.Ok(queries);
+        };
+
+        export let statement = func(authorizer: datalog.Authorizer) -> Result<Unit> {
+            if (keyword("check")) {
+                expect_keyword("if")?;
+                authorizer.logic.checks.append(alternatives()?);
+            } else {
+                last allow = keyword("allow");
+                if (allow || keyword("deny")) {
+                    expect_keyword("if")?;
+                    last queries = alternatives()?;
+                    authorizer.policies.append(new datalog.Policy(allow, queries));
+                } else {
+                    last head = predicate()?;
+                    if (accept("<-")) {
+                        last body = query()?;
+                        last rule = new datalog.Rule(head, body);
+                        if (!datalog.safe_rule(rule)) {
+                            return invalid<Unit>(offset, "unbound variable in the Datalog rule head");
+                        }
+                        authorizer.logic.rules.append(rule);
+                    } else {
+                        if (!datalog.ground(head)) {
+                            return invalid<Unit>(offset, "a Datalog fact contains a variable");
+                        }
+                        authorizer.logic.facts.append(head);
+                    }
+                }
+            }
+            return expect(";");
+        };
+
+        export let.override to_string = func -> string => "Biscuit Authorizer Parser";
+    );
+
+    export let parse = func(code: string) -> Result<datalog.Authorizer> {
+        if (code.byte_length > 65536) {
+            return datalog.fail<datalog.Authorizer>("biscuit.limit", "Biscuit authorizer text exceeds the byte limit");
+        }
+        let parser: Parser = new(code);
+        let authorizer: datalog.Authorizer = new;
+        let count = 0;
+        while (!parser.done()) {
+            if (count == datalog.MaxItems) {
+                return datalog.fail<datalog.Authorizer>("biscuit.limit", "too many authorizer statements");
+            }
+            parser.statement(authorizer)?;
+            count++;
+        }
+        return Result<datalog.Authorizer>.Ok(authorizer);
+    };
+);

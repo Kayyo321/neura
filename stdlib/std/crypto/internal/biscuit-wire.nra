@@ -1,0 +1,463 @@
+let datalog = import:Std.Crypto.Internal.BiscuitDatalog;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let words = import:Std.Crypto.Internal.Words;
+let uint64s = import:Std.Core.UInt64;
+let utf8 = import:Std.Encoding.Utf8;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The strict protobuf and Ed25519 wire reader for Biscuit v3.0. Internal.
+export let BiscuitWire = module (
+    export const MaxBytes = 65536;
+    const MaxBlocks = 16;
+    const MaxSymbols = 512;
+
+    let invalid = func<T>(message: string) -> Result<T> => datalog.fail<T>("biscuit.format", message);
+    let unsupported = func<T>(message: string) -> Result<T> => datalog.fail<T>("biscuit.unsupported", message);
+    let limited = func<T>(message: string) -> Result<T> => datalog.fail<T>("biscuit.limit", message);
+
+    let Field = class (
+        export last tag: int;
+        export last scalar: uint64;
+        export last bytes: uint8[list];
+
+        export let init = func(field_tag: int, value: uint64, data: uint8[list]) {
+            tag = field_tag;
+            scalar = value;
+            bytes = data;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Wire Field";
+    );
+
+    let Reader = class (
+        last raw: uint8[list];
+        let offset = 0;
+
+        export let init = func(bytes: uint8[list]) {
+            raw = bytes;
+        };
+
+        export let done = func -> bool => offset == raw.length;
+
+        export let varint = func -> Result<uint64> {
+            let value: uint64 = 0;
+            for (let i = 0; i < 10; i++) {
+                if (done()) {
+                    return invalid<uint64>("truncated protobuf varint");
+                }
+                last byte = raw[offset];
+                offset++;
+                if (i == 9 && byte > 1) {
+                    return invalid<uint64>("protobuf varint exceeds 64 bits");
+                }
+                value = value | ((byte as uint64 & 127) << (i * 7));
+                if (byte < 128) {
+                    if (i > 0 && byte == 0) {
+                        return invalid<uint64>("nonminimal protobuf varint");
+                    }
+                    return Result<uint64>.Ok(value);
+                }
+            }
+            return invalid<uint64>("unterminated protobuf varint");
+        };
+
+        export let blob = func -> Result<uint8[list]> {
+            last length = varint()?;
+            if (length > (raw.length - offset) as uint64) {
+                return invalid<uint8[list]>("truncated protobuf field");
+            }
+            last end = offset + length as int;
+            last bytes = words.slice(raw, offset, end);
+            offset = end;
+            return Result<uint8[list]>.Ok(bytes);
+        };
+
+        export let.override to_string = func -> string => "Biscuit Wire Reader";
+    );
+
+    let Message = class (
+        export last fields: Field[list] = new;
+
+        export let has = func(tag: int) -> bool {
+            for (let field in fields) {
+                if (field.tag == tag) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        export let require = func(tag: int) -> Result<Field> {
+            for (let field in fields) {
+                if (field.tag == tag) {
+                    return Result<Field>.Ok(field);
+                }
+            }
+            return invalid<Field>("missing required protobuf field");
+        };
+
+        export let.override to_string = func -> string => "Biscuit Wire Message";
+    );
+
+    let contains_tag = func(tags: int[], tag: int) -> bool {
+        for (let allowed in tags) {
+            if (allowed == tag) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // A tag is field_number * 8 + wire_type. Only the exact allowed tags are accepted.
+    let read_message = func(bytes: uint8[list], once: int[], repeat: int[]) -> Result<Message> {
+        let reader: Reader = new(bytes);
+        let message: Message = new;
+        while (!reader.done()) {
+            if (message.fields.length == datalog.MaxItems) {
+                return limited<Message>("too many protobuf fields");
+            }
+            last encoded = reader.varint()?;
+            if (encoded > 63) {
+                return unsupported<Message>("unsupported Biscuit protobuf field");
+            }
+            last tag = encoded as int;
+            if (!contains_tag(repeat, tag)) {
+                if (!contains_tag(once, tag)) {
+                    return unsupported<Message>("unsupported Biscuit protobuf field");
+                }
+                if (message.has(tag)) {
+                    return invalid<Message>("duplicate singular protobuf field");
+                }
+            }
+            if (tag % 8 == 0) {
+                last value = reader.varint()?;
+                message.fields.append(new Field(tag, value, new));
+            } else {
+                last value = reader.blob()?;
+                message.fields.append(new Field(tag, 0, value));
+            }
+        }
+        return Result<Message>.Ok(message);
+    };
+
+    let SignatureBlock = class (
+        export last data: uint8[list];
+        export last next_key: ed25519.Ed25519PublicKey;
+        export last key_bytes: uint8[list];
+        export last signature: uint8[list];
+        export last version: int;
+
+        export let init = func(block_data: uint8[list], key: ed25519.Ed25519PublicKey, encoded_key: uint8[list],
+                signed: uint8[list], format: int) {
+            data = block_data;
+            next_key = key;
+            key_bytes = encoded_key;
+            signature = signed;
+            version = format;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Signature Block";
+    );
+
+    let parse_signature_block = func(encoded: uint8[list]) -> Result<SignatureBlock> {
+        // SignedBlock: block, nextKey, signature and signature payload version. External signatures are unsupported.
+        last message = read_message(encoded, [10, 18, 26, 40], [])?;
+        last data = message.require(10)?;
+        last key_field = message.require(18)?;
+        last signature = message.require(26)?;
+        if (signature.bytes.length != 64) {
+            return invalid<SignatureBlock>("invalid Ed25519 signature length");
+        }
+        let version = 0;
+        if (message.has(40)) {
+            last field = message.require(40)?;
+            if (field.scalar > 1) {
+                return unsupported<SignatureBlock>("unsupported Biscuit signature payload version");
+            }
+            version = field.scalar as int;
+        }
+        // PublicKey: the required algorithm (Ed25519 = 0) and the raw key.
+        last key_message = read_message(key_field.bytes, [8, 18], [])?;
+        last algorithm = key_message.require(8)?;
+        if (algorithm.scalar != 0) {
+            return unsupported<SignatureBlock>("only Ed25519 Biscuit keys are supported");
+        }
+        last raw_key = key_message.require(18)?;
+        last key = ed25519.parse_public_key(raw_key.bytes)?;
+        return Result<SignatureBlock>.Ok(new SignatureBlock(data.bytes, key, raw_key.bytes, signature.bytes, version));
+    };
+
+    // The version 0 transcript in the official samples is data || algorithm_le32 || next_key.
+    let legacy_payload = func(block: SignatureBlock) -> uint8[list] {
+        let data = words.copy(block.data);
+        words.append32_le(data, 0);
+        words.append_all(data, block.key_bytes);
+        return data;
+    };
+
+    let append_tag = func(output: uint8[list], tag: string) {
+        output.append(0);
+        words.append_all(output, words.utf8(tag));
+        output.append(0);
+    };
+
+    let tagged_payload = func(block: SignatureBlock, previous: uint8[list]) -> uint8[list] {
+        let data: uint8[list] = new;
+        append_tag(data, "BLOCK");
+        append_tag(data, "VERSION");
+        words.append32_le(data, 1);
+        append_tag(data, "PAYLOAD");
+        words.append_all(data, block.data);
+        append_tag(data, "ALGORITHM");
+        words.append32_le(data, 0);
+        append_tag(data, "NEXTKEY");
+        words.append_all(data, block.key_bytes);
+        if (previous.length > 0) {
+            append_tag(data, "PREVSIG");
+            words.append_all(data, previous);
+        }
+        return data;
+    };
+
+    let verify_signature = func(block: SignatureBlock, key: ed25519.Ed25519PublicKey, previous: uint8[list]) -> bool {
+        last payload = block.version == 0 ? legacy_payload(block) : tagged_payload(block, previous);
+        return new ed25519.Ed25519Verifier(key).verify(payload, block.signature);
+    };
+
+    let verify_proof = func(encoded: uint8[list], block: SignatureBlock) -> bool {
+        match (read_message(encoded, [10, 18], [])) {
+            Result.Err(_) => { return false; },
+            Result.Ok(message) => {
+                if (message.fields.length != 1) {
+                    return false;
+                }
+                last proof = message.fields[0];
+                if (proof.tag == 10) {
+                    if (proof.bytes.length != 32) {
+                        return false;
+                    }
+                    let private_key: ed25519.Ed25519PrivateKey = new(proof.bytes);
+                    last equal = block.next_key.equals(private_key.public_key());
+                    private_key.wipe();
+                    words.wipe(proof.bytes);
+                    return equal;
+                }
+                last data = legacy_payload(block);
+                words.append_all(data, block.signature);
+                return new ed25519.Ed25519Verifier(block.next_key).verify(data, proof.bytes);
+            },
+        }
+        return false;
+    };
+
+    let default_symbols = func -> string[list] =>
+        new(["read", "write", "resource", "operation", "right", "time", "role", "owner", "tenant", "namespace",
+            "user", "team", "service", "admin", "email", "group", "member", "ip_address", "client", "client_ip",
+            "domain", "path", "version", "cluster", "node", "hostname", "nonce", "query"]);
+
+    let symbol = func(id: uint64, custom: string[list], defaults: string[list]) -> Result<string> {
+        if (id < defaults.length as uint64) {
+            return Result<string>.Ok(defaults[id as int]);
+        }
+        if (id >= 1024 && id - 1024 < custom.length as uint64) {
+            return Result<string>.Ok(custom[(id - 1024) as int]);
+        }
+        return invalid<string>("undefined Biscuit symbol");
+    };
+
+    let add_symbol = func(symbols: string[list], base: string[list], text: string) -> Result<bool> {
+        if (symbols.length == MaxSymbols || text.byte_length > 4096) {
+            return limited<bool>("Biscuit symbol limit exceeded");
+        }
+        for (let existing in base) {
+            if (existing == text) {
+                return invalid<bool>("duplicate Biscuit symbol");
+            }
+        }
+        for (let existing in symbols) {
+            if (existing == text) {
+                return invalid<bool>("duplicate Biscuit symbol");
+            }
+        }
+        symbols.append(text);
+        return Result<bool>.Ok(true);
+    };
+
+    let term = func(bytes: uint8[list], custom: string[list], defaults: string[list]) -> Result<datalog.Term> {
+        // Term: variable, signed int64, string, date, opaque bytes or boolean.
+        last message = read_message(bytes, [8, 16, 24, 32, 42, 48], [])?;
+        if (message.fields.length != 1) {
+            return invalid<datalog.Term>("expected exactly one protobuf term alternative");
+        }
+        last field = message.fields[0];
+        if (field.tag == 8 || field.tag == 24) {
+            if (field.tag == 8 && field.scalar > 4294967295) {
+                return invalid<datalog.Term>("invalid variable symbol");
+            }
+            last text = symbol(field.scalar, custom, defaults)?;
+            last kind = field.tag == 8 ? datalog.Kind.Variable : datalog.Kind.Text;
+            return Result<datalog.Term>.Ok(new datalog.Term(kind, text));
+        }
+        if (field.tag == 16) {
+            return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Integer, uint64s.to_signed(field.scalar).to_string()));
+        }
+        if (field.tag == 32) {
+            return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Date, field.scalar.to_string()));
+        }
+        if (field.tag == 42) {
+            return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Bytes, hex.encode(field.bytes)));
+        }
+        if (field.scalar > 1) {
+            return invalid<datalog.Term>("invalid boolean term");
+        }
+        return Result<datalog.Term>.Ok(new datalog.Term(datalog.Kind.Boolean, field.scalar == 0 ? "false" : "true"));
+    };
+
+    let predicate = func(bytes: uint8[list], custom: string[list], defaults: string[list]) -> Result<datalog.Predicate> {
+        // Predicate: symbol ID and its positional terms.
+        last message = read_message(bytes, [8], [18])?;
+        last id = message.require(8)?;
+        last name = symbol(id.scalar, custom, defaults)?;
+        if (name == "revocation_id") {
+            return unsupported<datalog.Predicate>("implicit revocation_id facts are unsupported");
+        }
+        let terms: datalog.Term[list] = new;
+        for (let field in message.fields) {
+            if (field.tag == 18) {
+                if (terms.length == datalog.MaxTerms) {
+                    return limited<datalog.Predicate>("Biscuit predicate arity exceeds the limit");
+                }
+                terms.append(term(field.bytes, custom, defaults)?);
+            }
+        }
+        return Result<datalog.Predicate>.Ok(new datalog.Predicate(name, terms));
+    };
+
+    let rule = func(bytes: uint8[list], custom: string[list], defaults: string[list]) -> Result<datalog.Rule> {
+        // Rule: head and a positive conjunction. Expressions and scope overrides are unsupported.
+        last message = read_message(bytes, [10], [18])?;
+        last head_field = message.require(10)?;
+        last head = predicate(head_field.bytes, custom, defaults)?;
+        let body: datalog.Predicate[list] = new;
+        for (let field in message.fields) {
+            if (field.tag == 18) {
+                if (body.length == datalog.MaxBody) {
+                    return limited<datalog.Rule>("too many predicates in a Biscuit rule");
+                }
+                body.append(predicate(field.bytes, custom, defaults)?);
+            }
+        }
+        if (body.length == 0) {
+            return unsupported<datalog.Rule>("empty token rule bodies are unsupported");
+        }
+        return Result<datalog.Rule>.Ok(new datalog.Rule(head, new datalog.Query(body)));
+    };
+
+    let check = func(bytes: uint8[list], custom: string[list], defaults: string[list]) -> Result<datalog.Query[list]> {
+        // Check kind defaults to existential (One); All and Reject are newer Datalog features.
+        last message = read_message(bytes, [16], [10])?;
+        if (message.has(16)) {
+            last kind = message.require(16)?;
+            if (kind.scalar != 0) {
+                return unsupported<datalog.Query[list]>("only existential Biscuit checks are supported");
+            }
+        }
+        let queries: datalog.Query[list] = new;
+        for (let field in message.fields) {
+            if (field.tag == 10) {
+                last parsed = rule(field.bytes, custom, defaults)?;
+                queries.append(parsed.query);
+            }
+        }
+        if (queries.length == 0) {
+            return invalid<datalog.Query[list]>("Biscuit check has no query");
+        }
+        return Result<datalog.Query[list]>.Ok(queries);
+    };
+
+    let block_data = func(bytes: uint8[list], custom: string[list], defaults: string[list]) -> Result<datalog.Block> {
+        // Block: symbols, context, Datalog version, facts, rules and checks. Explicit scopes and key tables fail.
+        last message = read_message(bytes, [18, 24], [10, 34, 42, 50])?;
+        last version = message.require(24)?;
+        if (version.scalar != 3) {
+            return unsupported<datalog.Block>("only Biscuit Datalog v3.0 blocks are supported");
+        }
+        for (let field in message.fields) {
+            if (field.tag == 10) {
+                let _ = add_symbol(custom, defaults, utf8.decode(field.bytes)?)?;
+            } else if (field.tag == 18) {
+                let _ = utf8.decode(field.bytes)?;
+            }
+        }
+        let block: datalog.Block = new;
+        for (let field in message.fields) {
+            if (field.tag == 34) {
+                last fact = read_message(field.bytes, [10], [])?;
+                last predicate_field = fact.require(10)?;
+                last parsed = predicate(predicate_field.bytes, custom, defaults)?;
+                if (!datalog.ground(parsed)) {
+                    return invalid<datalog.Block>("a Biscuit fact contains a variable");
+                }
+                block.facts.append(parsed);
+            } else if (field.tag == 42) {
+                last parsed = rule(field.bytes, custom, defaults)?;
+                if (!datalog.safe_rule(parsed)) {
+                    return invalid<datalog.Block>("unbound variable in a Biscuit rule");
+                }
+                block.rules.append(parsed);
+            } else if (field.tag == 50) {
+                block.checks.append(check(field.bytes, custom, defaults)?);
+            }
+        }
+        return Result<datalog.Block>.Ok(block);
+    };
+
+    /// @brief Reads an authenticated v3.0 token, resolving symbols only through the current block.
+    export let verify = func(encoded: uint8[list], root: ed25519.Ed25519PublicKey) -> Result<datalog.Block[list]> {
+        if (encoded.length > MaxBytes) {
+            return limited<datalog.Block[list]>("Biscuit token exceeds the byte limit");
+        }
+        // A root key ID is only a hint. The caller supplies the trusted root directly.
+        last token = read_message(encoded, [8, 18, 34], [26])?;
+        if (token.has(8)) {
+            last key_id = token.require(8)?;
+            if (key_id.scalar > 4294967295) {
+                return invalid<datalog.Block[list]>("root key ID exceeds uint32");
+            }
+        }
+        last authority = token.require(18)?;
+        last proof = token.require(34)?;
+        let wire_blocks: uint8[list][list] = new([authority.bytes]);
+        for (let field in token.fields) {
+            if (field.tag == 26) {
+                if (wire_blocks.length == MaxBlocks) {
+                    return limited<datalog.Block[list]>("too many Biscuit blocks");
+                }
+                wire_blocks.append(field.bytes);
+            }
+        }
+        let current = root;
+        let previous: uint8[list] = new;
+        last defaults = default_symbols();
+        let custom: string[list] = new;
+        let blocks: datalog.Block[list] = new;
+        for (let i = 0; i < wire_blocks.length; i++) {
+            last block = parse_signature_block(wire_blocks[i])?;
+            if (!verify_signature(block, current, previous)) {
+                return datalog.fail<datalog.Block[list]>("biscuit.signature", "Biscuit block signature does not verify");
+            }
+            if (i == wire_blocks.length - 1) {
+                last valid = verify_proof(proof.bytes, block);
+                words.wipe(proof.bytes);
+                if (!valid) {
+                    return datalog.fail<datalog.Block[list]>("biscuit.proof", "Biscuit proof does not match the last block");
+                }
+            }
+            current = block.next_key;
+            previous = block.signature;
+            blocks.append(block_data(block.data, custom, defaults)?);
+        }
+        return Result<datalog.Block[list]>.Ok(blocks);
+    };
+);

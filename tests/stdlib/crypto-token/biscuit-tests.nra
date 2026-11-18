@@ -1,0 +1,108 @@
+// test-options: --gpu=off --max-steps 4000000000
+let biscuit = import:Std.Crypto.Token.Biscuit;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:BiscuitVectors;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+let BiscuitTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let key = func -> ed25519.Ed25519PublicKey => test.assert_ok(ed25519.parse_public_key(decode(vectors.root[0])));
+
+    let code_of = func(error: Error) -> string {
+        match (error) {
+            Error.Custom(detail) => { return detail.code(); },
+            _ => { return "not custom"; },
+        }
+        return "";
+    };
+
+    export let test_official_authorizer_outcomes = func {
+        last root = key();
+        last rows = vectors.samples;
+        for (let i = 0; i < rows.length; i += 4) {
+            last token = decode(rows[i + 1]);
+            last code = test.assert_ok(utf8.decode(decode(rows[i + 2])));
+            match (biscuit.authorize(token, root, code)) {
+                Result.Ok(_) => {
+                    test.assert_with(rows[i + 3] == "allow", rows[i]);
+                },
+                Result.Err(error) => {
+                    last detail = code_of(error);
+                    test.assert_with(rows[i + 3] == "deny" && (detail == "biscuit.check" || detail == "biscuit.denied"),
+                        rows[i] + ": " + error.to_string());
+                },
+            }
+        }
+    };
+
+    export let test_official_rejections = func {
+        last root = key();
+        last rows = vectors.rejections;
+        for (let i = 0; i < rows.length; i += 3) {
+            match (biscuit.verify(decode(rows[i + 1]), root)) {
+                Result.Ok(_) => { test.fail("accepted " + rows[i]); },
+                Result.Err(error) => {
+                    if (rows[i + 2] == "unsupported") {
+                        test.assert_with(code_of(error) == "biscuit.unsupported", rows[i] + ": " + error.to_string());
+                    } else if (rows[i + 2] == "datalog") {
+                        test.assert_with(code_of(error) == "biscuit.format", rows[i] + ": " + error.to_string());
+                    }
+                },
+            }
+        }
+    };
+
+    export let test_tagged_proof_and_attenuation_scope = func {
+        last root = key();
+        last token = decode(vectors.tagged[0]);
+        let _ = test.assert_ok(biscuit.verify(token, root));
+        test.assert_equal_string("biscuit.proof", code_of(test.assert_err(biscuit.verify(decode(vectors.tagged[1]), root))));
+        let _ = test.assert_ok(biscuit.authorize(token, root, "allow if right(\"file1\", \"read\");"));
+        test.assert_equal_string("biscuit.denied", code_of(test.assert_err(
+            biscuit.authorize(token, root, "allow if right(\"file3\", \"read\");"))));
+        test.assert_equal_string("biscuit.denied", code_of(test.assert_err(biscuit.authorize(token, root,
+            "can_read($x) <- right($x, \"read\"); allow if can_read(\"file3\");"))));
+    };
+
+    export let test_rule_closure_and_ordered_policies = func {
+        last root = key();
+        last token = decode(vectors.tagged[0]);
+        last rules = "can_read($item) <- right($item, \"read\");"
+            + "alias($item) <- can_read($item), request($item);"
+            + "request(\"file1\"); check if alias(\"file1\");";
+        let _ = test.assert_ok(biscuit.authorize(token, root, rules + "allow if alias(\"file1\"); deny if true;"));
+        test.assert_equal_string("biscuit.denied", code_of(test.assert_err(
+            biscuit.authorize(token, root, rules + "deny if alias(\"file1\"); allow if true;"))));
+    };
+
+    export let test_bounded_authorizer_execution = func {
+        last root = key();
+        last token = decode(vectors.tagged[0]);
+        let code = "combination($a, $b, $c) <- item($a), item($b), item($c); allow if true;";
+        for (let i = 0; i < 24; i++) {
+            code += "item(" + i.to_string() + ");";
+        }
+        test.assert_equal_string("biscuit.limit", code_of(test.assert_err(biscuit.authorize(token, root, code))));
+    };
+
+    export let test_authorizer_fail_closed = func {
+        last root = key();
+        last token = decode(vectors.tagged[0]);
+        for (let code in ["allow if true trusting previous;", "allow if !false;", "allow if unknown(1), 1 + 1 == 2;",
+            "deny if revocation_id($id, $sig); allow if true;", "r($unbound) <- right($x, \"read\"); allow if true;",
+            "allow if true", "check all r(1); allow if true;"]) {
+            test.assert_equal_string("biscuit.authorizer", code_of(test.assert_err(biscuit.authorize(token, root, code))));
+        }
+        let duplicate = decode(vectors.tagged[0]);
+        duplicate.append(8);
+        duplicate.append(1);
+        duplicate.append(8);
+        duplicate.append(2);
+        test.assert_equal_string("biscuit.format", code_of(test.assert_err(biscuit.verify(duplicate, root))));
+    };
+);

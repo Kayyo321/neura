@@ -1,0 +1,46 @@
+let authorizer = import:Std.Crypto.Internal.BiscuitAuthorizer;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let datalog = import:Std.Crypto.Internal.BiscuitDatalog;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let wire = import:Std.Crypto.Internal.BiscuitWire;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+
+/// @brief Verifies Ed25519 Biscuit tokens with v3.0 Datalog and evaluates positive authorization policies.
+/// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+#Since("0.3.0")
+export let Biscuit = module (
+    /// @brief Checks the signed chain and its open or sealed proof using an explicitly trusted root key.
+    ///
+    /// Accepts wire-format bytes with Datalog v3.0, signature payload versions 0 and 1, and Ed25519 keys.
+    /// Bounds token size and parser work, and rejects unknown fields and unsupported Datalog constructs.
+    /// The caller uses authorize for access decisions.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(token: uint8[list], root: ed25519.Ed25519PublicKey) -> Result<Unit> {
+        if (!crypto_policy.allows(Algorithm.Ed25519)) {
+            return datalog.fail<Unit>("biscuit.unsupported", "the crypto policy denies Ed25519");
+        }
+        let _ = wire.verify(token, root)?;
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Verifies the token and grants access only when every check and the first matching policy allow it.
+    ///
+    /// Authorizer text accepts facts, safe positive rules, existential checks, and ordered allow/deny policies.
+    /// It supports ASCII identifiers, JSON-style strings, variables, int64, dates, booleans and hex bytes as
+    /// predicate terms. A literal true authorizer query always matches. Explicit scope annotations, implicit
+    /// revocation_id facts, comments, general expressions, and third-party blocks are unsupported.
+    /// Default scopes isolate each attenuation block from the authorizer and from other attenuation blocks.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let authorize = func(token: uint8[list], root: ed25519.Ed25519PublicKey, code: string) -> Result<Unit> {
+        if (!crypto_policy.allows(Algorithm.Ed25519)) {
+            return datalog.fail<Unit>("biscuit.unsupported", "the crypto policy denies Ed25519");
+        }
+        last trusted = authorizer.parse(code)?;
+        last blocks = wire.verify(token, root)?;
+        return datalog.authorize(blocks, trusted);
+    };
+);

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Reproduce binary Macaroon fixtures with pinned libmacaroons and pymacaroons.
 
-Requires PyNaCl 1.5.0 and six for the pinned pymacaroons checkout.
-Usage: python3 scripts/crypto-vectors/gen-macaroon.py [reference-repositories-directory]
+Requires PyNaCl 1.5.0 and six 1.16.0 for the pinned pymacaroons checkout.
+On the release host, use the already-installed six vendored with distro pip:
+
+    PYTHONPATH=/usr/lib/python3/dist-packages/pip/_vendor/urllib3/packages \
+        python3 scripts/crypto-vectors/gen-macaroon.py [reference-repositories-directory]
+
+If six is importable in the Python environment, omit PYTHONPATH.
 """
 
 import argparse

@@ -1,0 +1,329 @@
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The bounded positive Datalog engine used by Biscuit v3.0. Internal.
+export let BiscuitDatalog = module (
+    export const MaxItems: int = 128;
+    export const MaxBody: int = 32;
+    export const MaxTerms: int = 16;
+    const MaxFacts: int = 512;
+    const MaxRounds: int = 32;
+    const MaxWork: int = 100000;
+
+    export let fail = func<T>(code: string, message: string) -> Result<T> =>
+        Result<T>.Err(errors.custom(code, message));
+
+    export let Kind = enum (Variable, Text, Integer, Date, Boolean, Bytes);
+
+    // Each ground term holds its exact canonical string form within its type.
+    export let Term = class (
+        export last kind: Kind;
+        export last text: string;
+
+        export let init = func(category: Kind, value: string) {
+            kind = category;
+            text = value;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Term)) {
+                return false;
+            }
+            last term = other as Term;
+            return kind == term.kind && text == term.text;
+        };
+
+        export let.override hash_code = func -> uint32 => text.hash_code();
+        export let.override to_string = func -> string => "Biscuit Term";
+    );
+
+    export let Predicate = class (
+        export last name: string;
+        export last terms: Term[list];
+
+        export let init = func(identifier: string, arguments: Term[list]) {
+            name = identifier;
+            terms = arguments;
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Predicate)) {
+                return false;
+            }
+            last predicate = other as Predicate;
+            if (name != predicate.name || terms.length != predicate.terms.length) {
+                return false;
+            }
+            for (let i = 0; i < terms.length; i++) {
+                if (!terms[i].equals(predicate.terms[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 => name.hash_code();
+        export let.override to_string = func -> string => "Biscuit Predicate";
+    );
+
+    export let Query = class (
+        export last body: Predicate[list];
+
+        export let init = func(predicates: Predicate[list]) {
+            body = predicates;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Query";
+    );
+
+    export let Rule = class (
+        export last head: Predicate;
+        export last query: Query;
+
+        export let init = func(conclusion: Predicate, condition: Query) {
+            head = conclusion;
+            query = condition;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Rule";
+    );
+
+    export let Block = class (
+        export last facts: Predicate[list] = new;
+        export last rules: Rule[list] = new;
+        export last checks: Query[list][list] = new;
+
+        export let.override to_string = func -> string => "Biscuit Block";
+    );
+
+    export let Policy = class (
+        export last allow: bool;
+        export last queries: Query[list];
+
+        export let init = func(grant_access: bool, alternatives: Query[list]) {
+            allow = grant_access;
+            queries = alternatives;
+        };
+
+        export let.override to_string = func -> string => "Biscuit Policy";
+    );
+
+    export let Authorizer = class (
+        export last logic: Block = new;
+        export last policies: Policy[list] = new;
+
+        export let.override to_string = func -> string => "Biscuit Authorizer";
+    );
+
+    export let Budget = class (
+        let work: int = 0;
+
+        export let step = func -> Result<Unit> {
+            if (work == MaxWork) {
+                return fail<Unit>("biscuit.limit", "too many Datalog matching steps");
+            }
+            work++;
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        export let.override to_string = func -> string => "Biscuit Budget";
+    );
+
+    export let ground = func(predicate: Predicate) -> bool {
+        for (let term in predicate.terms) {
+            if (term.kind == Kind.Variable) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let contains_variable = func(query: Query, name: string) -> bool {
+        for (let predicate in query.body) {
+            for (let term in predicate.terms) {
+                if (term.kind == Kind.Variable && term.text == name) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    export let safe_rule = func(rule: Rule) -> bool {
+        for (let term in rule.head.terms) {
+            if (term.kind == Kind.Variable && !contains_variable(rule.query, term.text)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let bound = func(bindings: [string, Term][list], name: string, budget: Budget) -> Result<Optional<Term>> {
+        for (let pair in bindings) {
+            budget.step()?;
+            if (pair[0] == name) {
+                return Result<Optional<Term>>.Ok(Optional<Term>.Some(pair[1]));
+            }
+        }
+        return Result<Optional<Term>>.Ok(Optional<Term>.None);
+    };
+
+    let bind_terms = func(pattern: Predicate, fact: Predicate, bindings: [string, Term][list], budget: Budget)
+            -> Result<bool> {
+        for (let i = 0; i < pattern.terms.length; i++) {
+            budget.step()?;
+            last term = pattern.terms[i];
+            last actual = fact.terms[i];
+            if (term.kind == Kind.Variable) {
+                match (bound(bindings, term.text, budget)?) {
+                    Optional.Some(value) => {
+                        if (!value.equals(actual)) {
+                            return Result<bool>.Ok(false);
+                        }
+                    },
+                    Optional.None => {
+                        bindings.append([term.text, actual]);
+                    },
+                }
+            } else if (!term.equals(actual)) {
+                return Result<bool>.Ok(false);
+            }
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    // A successful continuation can stop the search early for checks and policies.
+    let visit = func(query: Query, index: int, facts: Predicate[list], bindings: [string, Term][list],
+            on_match: func([string, Term][list]) -> Result<bool>, budget: Budget) -> Result<bool> {
+        if (index == query.body.length) {
+            return on_match(bindings);
+        }
+        last pattern = query.body[index];
+        for (let fact in facts) {
+            budget.step()?;
+            if (pattern.name == fact.name && pattern.terms.length == fact.terms.length) {
+                last previous = bindings.length;
+                if ((bind_terms(pattern, fact, bindings, budget)?)
+                        && (visit(query, index + 1, facts, bindings, on_match, budget)?)) {
+                    return Result<bool>.Ok(true);
+                }
+                while (bindings.length > previous) {
+                    bindings.remove_at(bindings.length - 1);
+                }
+            }
+        }
+        return Result<bool>.Ok(false);
+    };
+
+    let substitute = func(head: Predicate, bindings: [string, Term][list], budget: Budget) -> Result<Predicate> {
+        let terms: Term[list] = new;
+        for (let term in head.terms) {
+            if (term.kind == Kind.Variable) {
+                match (bound(bindings, term.text, budget)?) {
+                    Optional.Some(value) => { terms.append(value); },
+                    Optional.None => {
+                        return fail<Predicate>("biscuit.format", "unbound variable in rule head");
+                    },
+                }
+            } else {
+                terms.append(term);
+            }
+        }
+        return Result<Predicate>.Ok(new Predicate(head.name, terms));
+    };
+
+    let add = func(facts: Predicate[list], fact: Predicate, budget: Budget) -> Result<Unit> {
+        for (let current in facts) {
+            budget.step()?;
+            if (current.equals(fact)) {
+                return Result<Unit>.Ok(Unit.Value);
+            }
+        }
+        if (facts.length == MaxFacts) {
+            return fail<Unit>("biscuit.limit", "too many Datalog facts");
+        }
+        facts.append(fact);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let close = func(base: Predicate[list], added: Predicate[list], rules: Rule[list], budget: Budget)
+            -> Result<Predicate[list]> {
+        let facts: Predicate[list] = new;
+        for (let fact in base) {
+            facts.append(fact);
+        }
+        for (let fact in added) {
+            add(facts, fact, budget)?;
+        }
+        for (let round = 0; round < MaxRounds; round++) {
+            let generated: Predicate[list] = new;
+            for (let rule in rules) {
+                let _ = visit(rule.query, 0, facts, new, func(bindings: [string, Term][list]) -> Result<bool> {
+                    last fact = substitute(rule.head, bindings, budget)?;
+                    add(generated, fact, budget)?;
+                    return Result<bool>.Ok(false);
+                }, budget)?;
+            }
+            last previous = facts.length;
+            for (let fact in generated) {
+                add(facts, fact, budget)?;
+            }
+            if (facts.length == previous) {
+                return Result<Predicate[list]>.Ok(facts);
+            }
+        }
+        return fail<Predicate[list]>("biscuit.limit", "Datalog did not reach a fixed point");
+    };
+
+    let matches = func(queries: Query[list], facts: Predicate[list], budget: Budget) -> Result<bool> {
+        for (let query in queries) {
+            if (visit(query, 0, facts, new, func(bindings: [string, Term][list]) -> Result<bool> {
+                    return Result<bool>.Ok(true);
+                }, budget)?) {
+                return Result<bool>.Ok(true);
+            }
+        }
+        return Result<bool>.Ok(false);
+    };
+
+    let check_all = func(block: Block, facts: Predicate[list], budget: Budget) -> Result<Unit> {
+        for (let queries in block.checks) {
+            if (!(matches(queries, facts, budget)?)) {
+                return fail<Unit>("biscuit.check", "a Datalog check did not match");
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Under default v3.0 scopes, attenuation blocks see the base plus their own consequences.
+    export let authorize = func(blocks: Block[list], authorizer: Authorizer) -> Result<Unit> {
+        let budget: Budget = new;
+        last authority = blocks[0];
+        let base_rules: Rule[list] = new;
+        for (let rule in authority.rules) {
+            base_rules.append(rule);
+        }
+        for (let rule in authorizer.logic.rules) {
+            base_rules.append(rule);
+        }
+        last base = close(authority.facts, authorizer.logic.facts, base_rules, budget)?;
+        check_all(authority, base, budget)?;
+        check_all(authorizer.logic, base, budget)?;
+        for (let i = 1; i < blocks.length; i++) {
+            last block = blocks[i];
+            last local = close(base, block.facts, block.rules, budget)?;
+            check_all(block, local, budget)?;
+        }
+        for (let policy in authorizer.policies) {
+            if (matches(policy.queries, base, budget)?) {
+                if (policy.allow) {
+                    return Result<Unit>.Ok(Unit.Value);
+                }
+                return fail<Unit>("biscuit.denied", "the first matching Datalog policy denies access");
+            }
+        }
+        return fail<Unit>("biscuit.denied", "no Datalog policy matched");
+    };
+);

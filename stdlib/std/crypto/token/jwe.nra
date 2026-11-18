@@ -12,14 +12,17 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
 let entropy = import:Std.Crypto.Random.Entropy;
 let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
 let hmac = import:Std.Crypto.Mac.Hmac;
 let jose = import:Std.Crypto.Internal.JoseJson;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_oaep = import:Std.Crypto.Asymmetric.RsaOaep;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief Compact JSON Web Encryption (RFC 7516 and RFC 7518).
 ///
-/// A caller supplies a DirectKey or a WrappingKey with a fixed content encryption algorithm. The protected
+/// A caller supplies a key bound to direct encryption, AES Key Wrap, or RSA-OAEP-256. The protected
 /// header must agree with that key's algorithms. The original compact protected-header segment is authenticated
 /// as received. This module accepts no critical extensions or compression and ignores noncritical metadata
 /// when selecting keys. The CBC-HMAC modes verify the full wire tag before attempting decryption.
@@ -207,6 +210,123 @@ export let Jwe = module (
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
         #Since("0.3.0")
         export let.override to_string = func -> string => "Jwe.WrappingKey(<redacted>)";
+    );
+
+    const RsaOaep256 = "RSA-OAEP-256";
+
+    let require_rsa = func(bits: int, enc: ContentEncryption) {
+        crypto_policy.require(Algorithm.RsaOaep);
+        crypto_policy.require(Algorithm.Sha256);
+        if (bits < 2048) {
+            trap_with_message("invalid argument: RSA-OAEP-256 needs a modulus of at least 2048 bits");
+        }
+        require_encryption(enc);
+    };
+
+    /// @brief An RSA public key bound to RSA-OAEP-256 and one content encryption algorithm.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+    #[Final, Since("0.3.0")]
+    export let RsaWrappingKey = class (
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+
+        /// @brief The RSA public key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export last public_key: rsa.RsaPublicKey;
+
+        /// @brief Binds the public key. A modulus shorter than 2048 bits traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPublicKey) {
+            require_rsa(rsa_key.bits(), enc);
+            encryption = enc;
+            public_key = rsa_key;
+        };
+
+        /// @brief Whether the key and the content encryption algorithm are equal.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is RsaWrappingKey)) {
+                return false;
+            }
+            last right = other as RsaWrappingKey;
+            return encryption == right.encryption && public_key.equals(right.public_key);
+        };
+
+        /// @brief A hash of the public key and the content algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 => hashing.combine(public_key.hash_code(), (encryption as int) as uint32);
+
+        /// @brief The key management and content encryption names.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.RsaWrappingKey(" + content_name(encryption) + ")";
+    );
+
+    /// @brief An RSA private key bound to RSA-OAEP-256 and one content encryption algorithm.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+    #[Final, Since("0.3.0")]
+    export let RsaUnwrappingKey = class (
+        /// @brief The expected content encryption algorithm.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export last encryption: ContentEncryption;
+        last key: rsa.RsaPrivateKey;
+
+        /// @brief Retains the private key. A modulus shorter than 2048 bits traps.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export let init = func(enc: ContentEncryption, rsa_key: rsa.RsaPrivateKey) {
+            require_rsa(rsa_key.bits(), enc);
+            crypto_policy.require(Algorithm.Sha512);
+            encryption = enc;
+            key = rsa_key;
+        };
+
+        /// @brief Authenticates and decrypts an RSA-OAEP-256 compact JWE. Traps after the underlying key is
+        /// wiped. On failure to recover the expected CEK, it still checks content authentication using a
+        /// pseudorandom substitute derived under the private key, and returns the same authentication error.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #[NoDiscard, Since("0.3.0")]
+        export let open = func(compact: string) -> Result<uint8[list]> {
+            if (key.is_wiped()) {
+                trap_with_message("invalid state: JWE RSA key is wiped");
+            }
+            last fields = parse(compact, RsaOaep256, encryption, (key.bits() + 7) / 8)?;
+            last oaep = new rsa_oaep.RsaOaep();
+            last size = cek_length(encryption);
+            let seed_input = words.utf8("Neura JWE RSA-OAEP-256 substitute key");
+            words.append_all(seed_input, fields.wrapped);
+            let seed = hmac.mac<sha2.Sha512>(key.expose(), seed_input);
+            let cek = words.slice(seed, 0, size);
+            words.wipe(seed);
+            let accepted = false;
+            match (oaep.decrypt(key, fields.wrapped, new)) {
+                Result.Ok(bytes) => {
+                    if (bytes.length == size) {
+                        words.wipe(cek);
+                        cek = bytes;
+                        accepted = true;
+                    } else {
+                        words.wipe(bytes);
+                    }
+                },
+                Result.Err(_) => {},
+            }
+            last result = open_content(encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
+            words.wipe(cek);
+            return accepted ? result : auth_error<uint8[list]>();
+        };
+
+        /// @brief A fixed placeholder for the key.
+        /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Jwe.RsaUnwrappingKey(<redacted>)";
     );
 
     let auth_error = func<T> -> Result<T> => Result<T>.Err(error.custom("crypto.authentication_failed",
@@ -410,7 +530,7 @@ export let Jwe = module (
     };
 
     /// @brief Deterministic compact encryption with a caller-supplied IV, and a CEK when using a wrapping key.
-    /// Never repeat the IV under the same content encryption key. With a caller-supplied protected JSON header,
+    /// The RSA-OAEP-256 overload also takes a 32-byte seed. Never reuse an IV under the same CEK. With a caller-supplied protected JSON header,
     /// its exact UTF-8 bytes are authenticated, and a malformed or mismatching header returns an error.
     /// An incorrect IV or CEK length traps.
     /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Jwe)
@@ -438,6 +558,35 @@ export let Jwe = module (
         last wrapped = wrap(new aes_block.AesBlock(kek), cek);
         words.wipe(kek);
         return Result<string>.Ok(encode(bytes, key.encryption, cek, wrapped, iv, plaintext));
+    } or func(key: RsaWrappingKey, plaintext: uint8[list], cek: uint8[list], iv: uint8[list],
+            oaep_seed: uint8[list]) -> Result<string> =>
+        seal_with(key, plaintext, cek, iv, oaep_seed, header(RsaOaep256, key.encryption))
+    or func(key: RsaWrappingKey, plaintext: uint8[list], cek: uint8[list], iv: uint8[list],
+            oaep_seed: uint8[list], protected: string) -> Result<string> {
+        check_iv(key.encryption, iv);
+        if (cek.length != cek_length(key.encryption)) {
+            trap_with_message("invalid argument: wrong length for JWE content encryption key");
+        }
+        if (oaep_seed.length != 32) {
+            trap_with_message("invalid argument: JWE RSA-OAEP-256 seed must be 32 bytes");
+        }
+        last bytes = words.utf8(protected);
+        validate_header(bytes, RsaOaep256, key.encryption)?;
+        last wrapped = new rsa_oaep.RsaOaep().encrypt_with_seed(key.public_key, cek, new, oaep_seed);
+        return Result<string>.Ok(encode(bytes, key.encryption, cek, wrapped, iv, plaintext));
+    };
+
+    let seal_rsa_random = func(key: RsaWrappingKey, plaintext: uint8[list], random: uint8[list]) -> Result<string> {
+        last split = cek_length(key.encryption);
+        last iv_end = split + iv_length(key.encryption);
+        let cek = words.slice(random, 0, split);
+        last iv = words.slice(random, split, iv_end);
+        let oaep_seed = words.slice(random, iv_end, random.length);
+        words.wipe(random);
+        last result = seal_with(key, plaintext, cek, iv, oaep_seed);
+        words.wipe(cek);
+        words.wipe(oaep_seed);
+        return result;
     };
 
     let seal_with_random = func(key: WrappingKey, plaintext: uint8[list], random: uint8[list]) -> Result<string> {
@@ -462,7 +611,11 @@ export let Jwe = module (
     or func(key: WrappingKey, plaintext: uint8[list]) -> Result<string> =>
         seal_with_random(key, plaintext, entropy.os_bytes(cek_length(key.encryption) + iv_length(key.encryption))?)
     or func(key: WrappingKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
-        seal_with_random(key, plaintext, random.fill(cek_length(key.encryption) + iv_length(key.encryption)));
+        seal_with_random(key, plaintext, random.fill(cek_length(key.encryption) + iv_length(key.encryption)))
+    or func(key: RsaWrappingKey, plaintext: uint8[list]) -> Result<string> =>
+        seal_rsa_random(key, plaintext, entropy.os_bytes(cek_length(key.encryption) + iv_length(key.encryption) + 32)?)
+    or func(key: RsaWrappingKey, plaintext: uint8[list], random: drbg.ChaCha20Drbg) -> Result<string> =>
+        seal_rsa_random(key, plaintext, random.fill(cek_length(key.encryption) + iv_length(key.encryption) + 32));
 
     /// @brief Authenticates and decrypts a compact JWE using the caller's expected algorithms.
     /// Malformed input and an algorithm mismatch return crypto.invalid_jwe. Integrity and decryption failures
@@ -484,5 +637,5 @@ export let Jwe = module (
         last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
         words.wipe(cek);
         return result;
-    };
+    } or func(key: RsaUnwrappingKey, compact: string) -> Result<uint8[list]> => key.open(compact);
 );
