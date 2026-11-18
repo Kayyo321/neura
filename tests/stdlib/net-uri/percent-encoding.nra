@@ -1,0 +1,90 @@
+let errors = import:Std.Core.Error;
+let percent = import:Std.Net.Core.PercentEncoding;
+let test = import:Std.Test;
+
+// Percent-encoding per component (RFC 3986 section 2) and form encoding.
+let PercentEncodingTests = module (
+    // The sample holds every gen-delim and sub-delim, space, '%', '~', and two non-ASCII scalars.
+    const Sample: string = "a b&c=d/e?f#g+h%i~j:k@l!$'()*,;ü€";
+
+    let encode = func(set: percent.EncodeSet) -> string => percent.encode(Sample, set);
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        errors.Error.Encoding { offset, message } => offset,
+        _ => -100,
+    };
+
+    // Generated with python3 -I and urllib.parse.quote(s, safe=...), whose safe set plus its fixed
+    // ALPHA/DIGIT/"_.-~" equals each component's set: Unreserved safe='', Path safe="!$&'()*+,;=:@/",
+    // PathSegment safe="!$&'()*+,;=:@", Query and Fragment safe="!$&'()*+,;=:@/?", QueryComponent
+    // safe="!$'()*,;:@/?", UserInfo safe="!$&'()*+,;=:".
+    export let test_component_sets = func {
+        test.assert_equal_string("a%20b%26c%3Dd%2Fe%3Ff%23g%2Bh%25i~j%3Ak%40l%21%24%27%28%29%2A%2C%3B%C3%BC%E2%82%AC", encode(percent.EncodeSet.Unreserved));
+        test.assert_equal_string("a%20b&c=d/e%3Ff%23g+h%25i~j:k@l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.Path));
+        test.assert_equal_string("a%20b&c=d%2Fe%3Ff%23g+h%25i~j:k@l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.PathSegment));
+        test.assert_equal_string("a%20b&c=d/e?f%23g+h%25i~j:k@l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.Query));
+        test.assert_equal_string("a%20b&c=d/e?f%23g+h%25i~j:k@l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.Fragment));
+        test.assert_equal_string("a%20b%26c%3Dd/e?f%23g%2Bh%25i~j:k@l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.QueryComponent));
+        test.assert_equal_string("a%20b&c=d%2Fe%3Ff%23g+h%25i~j:k%40l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.UserInfo));
+        // RegName is UserInfo without ':' (no Python call needed: the one difference is the ':' byte).
+        test.assert_equal_string("a%20b&c=d%2Fe%3Ff%23g+h%25i~j%3Ak%40l!$'()*,;%C3%BC%E2%82%AC", encode(percent.EncodeSet.RegName));
+    };
+
+    // Generated with python3 -I: urllib.parse.quote_plus(s.replace('~', ''), safe='*'); WHATWG form encoding
+    // also escapes '~', which Python keeps, so the sample drops it here and the '~' case is checked alone.
+    export let test_form_encoding = func {
+        test.assert_equal_string("a+b%26c%3Dd%2Fe%3Ff%23g%2Bh%25ij%3Ak%40l%21%24%27%28%29*%2C%3B%C3%BC%E2%82%AC",
+            percent.encode("a b&c=d/e?f#g+h%ij:k@l!$'()*,;ü€", percent.EncodeSet.Form));
+        test.assert_equal_string("%7E", percent.encode("~", percent.EncodeSet.Form));
+        test.assert_equal_string("a b+c", test.assert_ok<string>(percent.decode_form("a+b%2Bc")));
+    };
+
+    export let test_decode = func {
+        // python3 -I: urllib.parse.unquote('caf%C3%A9%20%e2%82%ac') == 'café €' (hex digits in either case).
+        test.assert_equal_string("café €", test.assert_ok<string>(percent.decode("caf%C3%A9%20%e2%82%ac")));
+        test.assert_equal_string("a+b", test.assert_ok<string>(percent.decode("a+b")));
+        test.assert_equal_string(Sample, test.assert_ok<string>(percent.decode(encode(percent.EncodeSet.Unreserved))));
+        last bytes = test.assert_ok<uint8[list]>(percent.decode_bytes("%FF%00a"));
+        test.assert_equal<int>(3, bytes.length);
+        test.assert_equal<uint8>(255, bytes[0]);
+        test.assert_equal<uint8>(0, bytes[1]);
+    };
+
+    export let test_strict_decode_errors = func {
+        last lone = test.assert_err<string>(percent.decode("ab%"));
+        test.assert(kind_of(lone) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_equal<int>(2, offset_of(lone));
+        test.assert_equal<int>(1, offset_of(test.assert_err<string>(percent.decode("a%4"))));
+        test.assert_equal<int>(0, offset_of(test.assert_err<string>(percent.decode("%G0"))));
+        // %C3 alone is a truncated UTF-8 sequence; the offset is that of its '%' in the input.
+        last bad_utf8 = test.assert_err<string>(percent.decode("ok%C3"));
+        test.assert_equal<int>(2, offset_of(bad_utf8));
+        test.assert(match (bad_utf8) {
+            errors.Error.Encoding { offset, message } => true,
+            _ => false,
+        });
+        // An overlong encoding of '/' (C0 AF) and an encoded surrogate (ED A0 80) are not UTF-8.
+        test.assert_err<string>(percent.decode("%C0%AF"));
+        test.assert_err<string>(percent.decode("%ED%A0%80"));
+    };
+
+    // RFC 3986 section 6.2.2.2: unreserved triplets decode, others get uppercase hex digits.
+    export let test_normalize = func {
+        test.assert_equal_string("a~b%2F%C3%BC", percent.normalize("%61%7eb%2f%c3%bc"));
+        test.assert_equal_string("100%", percent.normalize("100%"));
+    };
+
+    export let test_first_invalid = func {
+        test.assert_equal<int>(-1, percent.first_invalid("a/b%20c", percent.EncodeSet.Path));
+        test.assert_equal<int>(1, percent.first_invalid("a b", percent.EncodeSet.Path));
+        test.assert_equal<int>(1, percent.first_invalid("a/b", percent.EncodeSet.PathSegment));
+        test.assert_equal<int>(1, percent.first_invalid("a%2", percent.EncodeSet.Path));
+        test.assert_equal<int>(0, percent.first_invalid("ü", percent.EncodeSet.Path));
+    };
+);

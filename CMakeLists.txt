@@ -110,6 +110,9 @@ neura_target_defaults(neura_nvr)
 set(neura_nvm_sources
     src/nvm/driver.cpp
     src/nvm/environment.cpp
+    src/nvm/app_provider.cpp
+    src/nvm/sql_services.cpp
+    src/nvm/secret_services.cpp
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -118,9 +121,12 @@ set(neura_nvm_sources
     src/nvm/layered.cpp
     src/nvm/machine.cpp
     src/nvm/net_provider.cpp
+    src/nvm/pending_requests.cpp
     src/nvm/placement.cpp
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
+    src/nvm/socket_provider.cpp
+    src/nvm/tls_provider.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
@@ -172,6 +178,10 @@ if(NOT WIN32)
     endif()
 endif()
 neura_target_defaults(neura_nvm)
+if(WIN32)
+    # neura.entropy.fill uses the system generator, BCryptGenRandom.
+    target_link_libraries(neura_nvm PRIVATE bcrypt)
+endif()
 
 set(neura_runner_sources src/runner/runner.cpp src/launcher/container.cpp)
 add_library(neura_runner STATIC ${neura_runner_sources})
@@ -411,6 +421,140 @@ file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pa
     CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
 endif()
 
+add_library(neura_server_worker_wire STATIC EXCLUDE_FROM_ALL src/server/worker_wire.cpp)
+target_include_directories(neura_server_worker_wire PUBLIC src)
+neura_target_defaults(neura_server_worker_wire)
+
+if(UNIX AND NOT EMSCRIPTEN)
+    add_library(neura_server_http STATIC EXCLUDE_FROM_ALL
+        src/server/http_wire.cpp
+        src/server/http_connection.cpp
+        src/server/http_tcp.cpp)
+    target_include_directories(neura_server_http PUBLIC src)
+    neura_target_defaults(neura_server_http)
+
+    add_library(neura_server_listeners STATIC EXCLUDE_FROM_ALL src/server/http_listener.cpp)
+    target_include_directories(neura_server_listeners PUBLIC src)
+    target_link_libraries(neura_server_listeners PRIVATE neura_server_http)
+    neura_target_defaults(neura_server_listeners)
+endif()
+
+option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 server TLS transport" OFF)
+if(NEURA_ENABLE_SERVER_TLS)
+    if(NOT UNIX OR EMSCRIPTEN)
+        message(FATAL_ERROR "The Neura server TLS transport requires POSIX sockets")
+    endif()
+
+    function(neura_configure_server_tls)
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
+        if(NOT OPENSSL_VERSION MATCHES "^3\\.5\\." OR NOT OPENSSL_SSL_LIBRARY MATCHES "\\.a$"
+           OR NOT OPENSSL_CRYPTO_LIBRARY MATCHES "\\.a$")
+            message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 3.5 static archives")
+        endif()
+
+        add_library(neura_server_tls STATIC src/server/http_tls.cpp)
+        target_include_directories(neura_server_tls PUBLIC src)
+        target_link_libraries(neura_server_tls PRIVATE neura_server_http OpenSSL::SSL)
+        neura_target_defaults(neura_server_tls)
+        target_compile_definitions(neura_server_listeners PRIVATE NEURA_SERVER_TLS_ENABLED)
+        # TLS client and server streams of the standard providers
+        # (src/nvm/tls_provider.cpp); without this build option they answer
+        # Unsupported.
+        target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
+        target_link_libraries(neura_nvm PRIVATE OpenSSL::SSL)
+        target_link_libraries(neura_server_listeners PRIVATE neura_server_tls)
+
+        if(BUILD_TESTING)
+            find_package(Threads REQUIRED)
+            add_executable(neura_http_tls_tests tests/server/http_tls_tests.cpp)
+            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls OpenSSL::SSL Threads::Threads)
+            neura_target_defaults(neura_http_tls_tests)
+            add_test(NAME server-http-tls COMMAND neura_http_tls_tests)
+            set_tests_properties(server-http-tls PROPERTIES TIMEOUT 15)
+        endif()
+    endfunction()
+
+    neura_configure_server_tls()
+endif()
+
+# The SQL providers of Std.Data.Sql (docs/runtime/Sql.md): pools, sessions and
+# migrations, used by neura-server-host and by `neura run`/`neura test`
+# --sql-pool. SQLite is compiled in from the amalgamation that
+# packaging/server-components.lock.toml pins: from NEURA_SQLITE_AMALGAMATION
+# when it names the archive, otherwise downloaded at configure time; either
+# way its SHA-256 must match the lock. PostgreSQL needs a static libpq 18.7
+# and the static OpenSSL 3.5 of the TLS build.
+option(NEURA_ENABLE_SQL "Build the SQL providers of Std.Data.Sql (SQLite)" ON)
+set(NEURA_SQLITE_AMALGAMATION "" CACHE FILEPATH
+    "sqlite-amalgamation-3540100.zip; when empty it is downloaded from the URL of the component lock")
+option(NEURA_ENABLE_POSTGRES "Build the PostgreSQL provider of Std.Data.Sql over a static libpq 18.7" OFF)
+set(NEURA_LIBPQ_SOURCE "" CACHE PATH "The postgresql-18.7 source tree, for the libpq headers")
+set(NEURA_LIBPQ_BUILD "" CACHE PATH "The postgresql-18.7 build tree holding libpq.a, libpgcommon_shlib.a and libpgport_shlib.a")
+if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
+    set(neura_sqlite_sha256 "0a9c8e34352dad46006aa82836d5383bff9dc6bc9ce5a60553c05aa30e6ad1f9")
+    set(neura_sqlite_dir "${CMAKE_CURRENT_BINARY_DIR}/_deps/sqlite")
+    set(neura_sqlite_source "${neura_sqlite_dir}/sqlite-amalgamation-3540100/sqlite3.c")
+    if(NOT EXISTS "${neura_sqlite_source}")
+        set(neura_sqlite_zip "${NEURA_SQLITE_AMALGAMATION}")
+        if(neura_sqlite_zip STREQUAL "")
+            set(neura_sqlite_zip "${neura_sqlite_dir}/sqlite-amalgamation-3540100.zip")
+            message(STATUS "Downloading the SQLite 3.54.1 amalgamation")
+            file(DOWNLOAD "https://sqlite.org/2026/sqlite-amalgamation-3540100.zip" "${neura_sqlite_zip}"
+                EXPECTED_HASH SHA256=${neura_sqlite_sha256} STATUS neura_sqlite_status TLS_VERIFY ON)
+            list(GET neura_sqlite_status 0 neura_sqlite_code)
+            if(NOT neura_sqlite_code EQUAL 0)
+                message(FATAL_ERROR "Cannot download the SQLite amalgamation (${neura_sqlite_status}). Pass "
+                    "-DNEURA_SQLITE_AMALGAMATION=<sqlite-amalgamation-3540100.zip> or -DNEURA_ENABLE_SQL=OFF.")
+            endif()
+        endif()
+        file(SHA256 "${neura_sqlite_zip}" neura_sqlite_actual)
+        if(NOT neura_sqlite_actual STREQUAL neura_sqlite_sha256)
+            message(FATAL_ERROR "${neura_sqlite_zip} has SHA-256 ${neura_sqlite_actual}; the lock pins ${neura_sqlite_sha256}")
+        endif()
+        file(ARCHIVE_EXTRACT INPUT "${neura_sqlite_zip}" DESTINATION "${neura_sqlite_dir}")
+    endif()
+    # Upstream C, compiled without the project's warnings.
+    add_library(neura_sqlite3 STATIC "${neura_sqlite_source}")
+    target_include_directories(neura_sqlite3 SYSTEM PUBLIC "${neura_sqlite_dir}/sqlite-amalgamation-3540100")
+    target_compile_definitions(neura_sqlite3 PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION SQLITE_DQS=0
+        SQLITE_DEFAULT_MEMSTATUS=0 SQLITE_LIKE_DOESNT_MATCH_BLOBS)
+    set_target_properties(neura_sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+    if(NOT MSVC)
+        target_compile_options(neura_sqlite3 PRIVATE -w)
+    endif()
+    find_package(Threads REQUIRED)
+    target_link_libraries(neura_sqlite3 PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+
+    add_library(neura_sql STATIC src/sql/sql_engine.cpp src/sql/sqlite_connection.cpp src/sql/postgres_connection.cpp
+        src/sql/migrations.cpp)
+    target_include_directories(neura_sql PUBLIC src)
+    target_link_libraries(neura_sql PUBLIC neura_nvm neura_lifecycle PRIVATE neura_sqlite3)
+    target_compile_definitions(neura_sql PUBLIC NEURA_HAS_SQL)
+    neura_target_defaults(neura_sql)
+    if(NEURA_ENABLE_POSTGRES)
+        if(WIN32)
+            message(FATAL_ERROR "The PostgreSQL provider needs POSIX sockets")
+        endif()
+        if(NOT NEURA_ENABLE_SERVER_TLS)
+            message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_ENABLE_SERVER_TLS for the static OpenSSL 3.5")
+        endif()
+        if(NOT EXISTS "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq/libpq-fe.h"
+           OR NOT EXISTS "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a")
+            message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_LIBPQ_SOURCE (postgresql-18.7) and "
+                "NEURA_LIBPQ_BUILD (its build tree with libpq.a)")
+        endif()
+        target_include_directories(neura_sql SYSTEM PRIVATE "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq"
+            "${NEURA_LIBPQ_SOURCE}/src/include")
+        target_compile_definitions(neura_sql PRIVATE NEURA_SQL_POSTGRES)
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        find_package(OpenSSL 3.5 REQUIRED)
+        target_link_libraries(neura_sql PRIVATE "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a"
+            "${NEURA_LIBPQ_BUILD}/src/common/libpgcommon_shlib.a" "${NEURA_LIBPQ_BUILD}/src/port/libpgport_shlib.a"
+            OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+    endif()
+endif()
+
 # --- The Neura tools (docs/design/Products030.md) ------------------------------
 # `neura` is a dispatcher: each command runs a sibling tool from the same
 # directory. The code the tools share is in two shared libraries in
@@ -449,6 +593,7 @@ add_library(neura_cli_core STATIC
     src/cli/gpu_run.cpp
     src/cli/lifecycle.cpp
     src/cli/options.cpp
+    src/cli/serve.cpp
     src/launcher/descriptor.cpp
     src/tooling/inspect.cpp
 )
@@ -470,6 +615,10 @@ if(NOT WIN32)
 endif()
 target_include_directories(neura_cli_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(neura_cli_core PUBLIC neura_cli_tool neura_runner neura_lifecycle)
+if(TARGET neura_sql)
+    # neura run and neura test take --sql-pool (docs/runtime/Sql.md).
+    target_link_libraries(neura_cli_core PUBLIC neura_sql)
+endif()
 if(NEURA_HAS_GPU)
     # The GPU options change the layout of the option types, so every user of
     # them is built with the same setting.
@@ -576,7 +725,21 @@ set(neura_core_archives neura_cli_core neura_cli_tool neura_cli_registry neura_r
 if(NEURA_HAS_GPU)
     list(APPEND neura_core_archives neura_gpu)
 endif()
+if(TARGET neura_sql)
+    list(APPEND neura_core_archives neura_sql)
+endif()
 neura_add_shared(neura_core_library neura-core core none ${neura_core_archives})
+if(NEURA_ENABLE_SERVER_TLS AND NOT APPLE)
+    # The static OpenSSL of the TLS streams stays private to the library, so
+    # the server host's own copy (src/server/http_tls.cpp) cannot interpose.
+    target_link_options(neura_core_library PRIVATE "-Wl,--exclude-libs,libssl.a:libcrypto.a")
+    if(NEURA_ENABLE_POSTGRES)
+        # libpq and its support archives stay private too, so a program that
+        # loads a system libpq through C import binds to its own copy.
+        target_link_options(neura_core_library PRIVATE
+            "-Wl,--exclude-libs,libpq.a:libpgcommon_shlib.a:libpgport_shlib.a")
+    endif()
+endif()
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # The C++ runtime lives in libneura-core, whole, and the SDK library and
     # the tools take it from there; each needs only the C library, libm and
@@ -749,7 +912,71 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
+# The server host (docs/design/Backend030.md): listeners, TLS when
+# NEURA_ENABLE_SERVER_TLS is on, and one request-worker process per request.
+# The same executable is the worker, in its --worker mode. It is a tool of
+# the core component: its worker objects call the runner, the NVM and the SQL
+# providers in libneura-core, which it loads like the other core tools.
+if(UNIX AND NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+    add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp
+        src/server/sql_channel.cpp src/server/sql_host.cpp)
+    target_include_directories(neura_server_worker PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(neura_server_worker PUBLIC neura_server_worker_wire)
+    if(TARGET neura_sql)
+        target_compile_definitions(neura_server_worker PUBLIC NEURA_HAS_SQL)
+    endif()
+    neura_target_defaults(neura_server_worker)
+    neura_add_tool(neura-server-host core src/server/server_host.cpp neura_server_worker neura_server_listeners
+        neura_server_http neura_core_library Threads::Threads)
+    add_dependencies(neura neura-server-host)
+endif()
+
 if(BUILD_TESTING AND NEURA_SDK)
+    add_executable(neura_wait_source_tests
+        src/nvm/pending_requests.cpp
+        tests/backend/wait_source_tests.cpp)
+    target_include_directories(neura_wait_source_tests PRIVATE src)
+    if(NOT EMSCRIPTEN)
+        find_package(Threads REQUIRED)
+        target_link_libraries(neura_wait_source_tests PRIVATE Threads::Threads)
+    endif()
+    neura_target_defaults(neura_wait_source_tests)
+    add_test(NAME nvm-wait-source COMMAND neura_wait_source_tests)
+    set_tests_properties(nvm-wait-source PROPERTIES TIMEOUT 10)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # The same waits through the epoll(7) backend (src/nvm/pending_requests.cpp).
+        add_test(NAME nvm-wait-source-epoll COMMAND neura_wait_source_tests)
+        set_tests_properties(nvm-wait-source-epoll PROPERTIES TIMEOUT 10 ENVIRONMENT "NEURA_IO_BACKEND=epoll")
+        add_test(NAME nvm-wait-source-io-uring COMMAND neura_wait_source_tests)
+        set_tests_properties(nvm-wait-source-io-uring PROPERTIES TIMEOUT 10 ENVIRONMENT "NEURA_IO_BACKEND=io_uring")
+    endif()
+
+    add_executable(neura_worker_wire_tests tests/server/worker_wire_tests.cpp)
+    target_link_libraries(neura_worker_wire_tests PRIVATE neura_server_worker_wire)
+    neura_target_defaults(neura_worker_wire_tests)
+    add_test(NAME server-worker-wire COMMAND neura_worker_wire_tests)
+
+    add_executable(neura_http_wire_tests
+        src/server/http_wire.cpp
+        tests/server/http_wire_tests.cpp)
+    target_include_directories(neura_http_wire_tests PRIVATE src)
+    neura_target_defaults(neura_http_wire_tests)
+    add_test(NAME server-http-wire COMMAND neura_http_wire_tests)
+
+    if(UNIX AND NOT EMSCRIPTEN)
+        find_package(Threads REQUIRED)
+        add_executable(neura_http_connection_tests tests/server/http_connection_tests.cpp)
+        target_link_libraries(neura_http_connection_tests PRIVATE neura_server_http Threads::Threads)
+        neura_target_defaults(neura_http_connection_tests)
+        add_test(NAME server-http-connection COMMAND neura_http_connection_tests)
+        set_tests_properties(server-http-connection PROPERTIES TIMEOUT 15)
+
+        add_executable(neura_http_listener_foreground tests/server/http_listener_foreground.cpp)
+        target_link_libraries(neura_http_listener_foreground PRIVATE neura_server_listeners Threads::Threads)
+        neura_target_defaults(neura_http_listener_foreground)
+    endif()
+
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)
         neura_target_defaults(neura_native_container_tests)
@@ -826,6 +1053,66 @@ if(BUILD_TESTING AND NEURA_SDK)
     )
     # Editor protocol contracts execute real compiler and runtime paths.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    if(TARGET neura_http_listener_foreground)
+        set(NEURA_SERVER_LISTENER_TEST_OPTIONS)
+        if(NEURA_ENABLE_SERVER_TLS)
+            find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
+            list(APPEND NEURA_SERVER_LISTENER_TEST_OPTIONS --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        endif()
+        add_test(NAME server-http-listeners COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/http_listener_foreground.py"
+            "$<TARGET_FILE:neura_http_listener_foreground>" ${NEURA_SERVER_LISTENER_TEST_OPTIONS})
+        set_tests_properties(server-http-listeners PROPERTIES TIMEOUT 20)
+    endif()
+    if(TARGET neura-server-host)
+        # A Neura server image under the server host: HTTP, HTTPS when the
+        # build has TLS, malformed and oversized input, limits, traps,
+        # record and replay, the drain, and 1,000 requests of load.
+        set(NEURA_SERVER_HOST_TEST_OPTIONS)
+        if(NEURA_ENABLE_SERVER_TLS)
+            find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
+            list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --tls --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        endif()
+        find_program(NEURA_SERVER_TEST_CURL NAMES curl)
+        if(NEURA_SERVER_TEST_CURL)
+            list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
+        endif()
+        add_test(NAME server-host COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/server_host_test.py"
+            --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+            --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-host-test"
+            ${NEURA_SERVER_HOST_TEST_OPTIONS})
+        set_tests_properties(server-host PROPERTIES TIMEOUT 300)
+        if(TARGET neura_sql)
+            # Std.Data.Sql under the server host (docs/runtime/Sql.md): the
+            # CRUD example with curl, leases, deadlines, migrations and
+            # replay on SQLite; the same against PostgreSQL 16, 17 and 18 in
+            # Docker, skipped without Docker or the PostgreSQL provider.
+            set(NEURA_SQL_TEST_OPTIONS)
+            if(NEURA_SERVER_TEST_CURL)
+                list(APPEND NEURA_SQL_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
+            endif()
+            if(NEURA_ENABLE_POSTGRES)
+                list(APPEND NEURA_SQL_TEST_OPTIONS --postgres-build --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+            endif()
+            add_test(NAME server-sql COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/sql_host_test.py"
+                --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+                --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-sql-test"
+                ${NEURA_SQL_TEST_OPTIONS})
+            set_tests_properties(server-sql PROPERTIES TIMEOUT 300)
+            # Registered only with the PostgreSQL provider: a build without it
+            # would report the entry as skipped, which the CI report refuses.
+            if(NEURA_ENABLE_POSTGRES)
+                add_test(NAME server-sql-postgres COMMAND "${Python3_EXECUTABLE}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/sql_host_test.py" --postgres
+                    --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+                    --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-sql-postgres-test"
+                    ${NEURA_SQL_TEST_OPTIONS})
+                set_tests_properties(server-sql-postgres PROPERTIES TIMEOUT 900 SKIP_RETURN_CODE 77)
+            endif()
+        endif()
+    endif()
     foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_hooks lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
             add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"
@@ -1040,6 +1327,9 @@ if(BUILD_TESTING AND NEURA_SDK)
     target_link_libraries(neura_backend_tests PRIVATE neura_compiler neura_nvm neura_decompiler)
     target_include_directories(neura_backend_tests PRIVATE tests)
     neura_target_defaults(neura_backend_tests)
+    if(NEURA_ENABLE_SERVER_TLS)
+        target_compile_definitions(neura_backend_tests PRIVATE NEURA_NVM_TLS)
+    endif()
 
     if(NEURA_HAS_GPU)
         target_sources(neura_backend_tests PRIVATE tests/backend/gpu_tests.cpp)
@@ -1229,6 +1519,10 @@ if(BUILD_TESTING AND NEURA_SDK)
             continue()
         endif()
         get_filename_component(area "${area_dir}" NAME)
+        # Std.Data.Sql's tests need the SQL providers (--sql-pool).
+        if(area STREQUAL "sql" AND NOT TARGET neura_sql)
+            continue()
+        endif()
         add_test(NAME stdlib-${area} COMMAND ${CMAKE_COMMAND}
             "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"

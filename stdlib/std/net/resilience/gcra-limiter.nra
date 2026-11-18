@@ -1,0 +1,124 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let memory_stores = import:Std.Net.Resilience.InMemoryRateStore;
+let instant = import:Std.Time.Instant;
+let optional = import:Std.Core.Optional;
+let limiters = import:Std.Net.Resilience.RateLimiter;
+let stores = import:Std.Net.Resilience.RateStore;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief A keyed limiter by the Generic Cell Rate Algorithm (GCRA, the virtual-scheduling form of ITU-T I.371),
+/// over a `RateStore` so that the state can live in memory or in a shared external store.
+///
+/// With `rate` requests per `period`, the emission interval is `T = period / rate` nanoseconds (integer division) and
+/// `burst` is the number of requests allowed back to back, so the tolerance is `tau = T * (burst - 1)`. Per key the
+/// store holds the theoretical arrival time `TAT` in nanoseconds since the Unix epoch, read from the injected clock's
+/// wall time (`now`), so processes sharing a store share a time base. A request for `n` permits at time `t`:
+///
+/// - `start = max(TAT, t)` (an absent key has `TAT = t`), `new_tat = start + n * T`, `allow_at = new_tat - tau - T`;
+/// - granted when `t >= allow_at`: the store's compare-and-set writes `new_tat`, `remaining = (tau + T - (new_tat -
+///   t)) / T`, `reset_after = new_tat - t`;
+/// - denied otherwise, nothing is written: `retry_after = allow_at - t`, `remaining = 0`, `reset_after = start - t`.
+///
+/// A compare-and-set that loses a race rereads and retries, up to `attempts` times; after that the request fails with
+/// the `Custom` error `resilience.rate_store_contention`. A store error is returned as is.
+/// @see [Std.Net.Resilience.GcraLimiter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-GcraLimiter)
+#Since("0.3.0")
+export let GcraLimiter = module (
+    /// @brief The error code after too many lost compare-and-set races.
+    export const ContentionCode = "resilience.rate_store_contention";
+
+    /// @brief A GCRA limiter over a rate store.
+    #[Final, NotThreadSafe]
+    export let GcraLimiter = class implements limiters.RateLimiter (
+        /// @brief The emission interval in nanoseconds.
+        last interval: int64;
+        /// @brief The burst size.
+        last burst: int;
+        /// @brief The per-key arrival times.
+        last store: stores.RateStore;
+        /// @brief The wall clock.
+        last clock: Clock;
+        /// @brief Compare-and-set attempts per request.
+        last attempts: int;
+
+        /// @brief A limiter of `rate` requests per `period` with bursts of `burst`, over `state`. Traps with
+        /// "invalid argument: <name>" unless `rate`, `burst`, and `max_attempts` are positive and `period / rate` is
+        /// at least one nanosecond.
+        export let init = func(rate: int, period: durations.Duration, burst_size: int, state: stores.RateStore,
+            source: Clock, max_attempts: int) {
+            if (rate < 1) {
+                trap_with_message("invalid argument: rate");
+            }
+            if (burst_size < 1) {
+                trap_with_message("invalid argument: burst");
+            }
+            if (max_attempts < 1) {
+                trap_with_message("invalid argument: max_attempts");
+            }
+            if (period.to_nanos() / (rate as int64) < 1) {
+                trap_with_message("invalid argument: period");
+            }
+            interval = period.to_nanos() / (rate as int64);
+            burst = burst_size;
+            store = state;
+            clock = source;
+            attempts = max_attempts;
+        };
+
+        /// @brief The emission interval `T`.
+        export let emission_interval = func -> durations.Duration => durations.of_nanos(interval);
+
+        /// @brief The tolerance `tau = T * (burst - 1)`.
+        export let burst_tolerance = func -> durations.Duration =>
+            durations.of_nanos(interval * ((burst - 1) as int64));
+
+        /// @brief Takes `permits` for `key`. `permits` must be from 1 through the burst, else the call traps with
+        /// "invalid argument: permits".
+        export let try_acquire = func(key: string, permits: int) -> Result<limiters.RateDecision> {
+            if (permits < 1 || permits > burst) {
+                trap_with_message("invalid argument: permits");
+            }
+            last wall = clock.now()?;
+            last t = wall.duration_since(instant.Epoch).to_nanos();
+            last limit = interval * (burst as int64);
+            for (let attempt = 0; attempt < attempts; attempt++) {
+                last stored = store.get(key)?;
+                last start = match (stored) {
+                    optional.Optional.Some(tat) => tat > t ? tat : t,
+                    optional.Optional.None => t,
+                };
+                last new_tat = start + (permits as int64) * interval;
+                last allow_at = new_tat - limit;
+                if (t < allow_at) {
+                    return Result<limiters.RateDecision>.Ok(new limiters.RateDecision(false, 0,
+                        durations.of_nanos(allow_at - t), durations.of_nanos(start - t)));
+                }
+                last written = store.compare_and_set(key, stored, new_tat, durations.of_nanos(new_tat - t))?;
+                if (written) {
+                    last left = ((limit - (new_tat - t)) / interval) as int;
+                    return Result<limiters.RateDecision>.Ok(new limiters.RateDecision(true, left, durations.of_nanos(0),
+                        durations.of_nanos(new_tat - t)));
+                }
+            }
+            return Result<limiters.RateDecision>.Err(errors.custom(ContentionCode,
+                "rate store compare-and-set lost " + attempts.to_string() + " times"));
+        };
+
+        /// @brief Text such as "GcraLimiter(interval PT0.1S, burst 3)".
+        export let.override to_string = func -> string =>
+            "GcraLimiter(interval " + durations.of_nanos(interval).to_string() + ", burst " + burst.to_string() + ")";
+    );
+
+    /// @brief A limiter of `rate` per `period` with bursts of `burst`, keeping its state in a new in-memory store.
+    #NoDiscard
+    export let in_memory = func(rate: int, period: durations.Duration, burst: int, clock: Clock) -> GcraLimiter =>
+        new GcraLimiter(rate, period, burst, memory_stores.create(), clock, 1);
+
+    /// @brief A limiter of `rate` per `period` with bursts of `burst` over a shared store, retrying a lost
+    /// compare-and-set up to 8 times.
+    #NoDiscard
+    export let distributed = func(rate: int, period: durations.Duration, burst: int, store: stores.RateStore,
+        clock: Clock) -> GcraLimiter => new GcraLimiter(rate, period, burst, store, clock, 8);
+);

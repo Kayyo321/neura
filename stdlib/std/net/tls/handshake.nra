@@ -1,0 +1,35 @@
+let.promote _ = import:Std.Net.Socket.DatagramSocket;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.StreamSocket;
+let.promote _ = import:Std.Net.Tls.TlsConfig;
+let.promote _ = import:Std.Net.Transport;
+
+/// @brief The pure-Neura TLS 1.3 (RFC 8446) and DTLS 1.3 (RFC 9147) handshake and record engines: planned, not
+/// part of Neura 0.3.0.
+///
+/// In 0.3.0 the TLS provider is the host's OpenSSL (`TlsConnector`, `TlsAcceptor`, `TlsStream`, in builds configured
+/// with `NEURA_ENABLE_SERVER_TLS`). A memory-safe engine in Neura needs the TLS 1.3 key schedule over HKDF, AEAD
+/// record protection, X.25519/P-256 key exchange and certificate verification in the standard library, and
+/// none of these is qualified for 0.3.0; both entry points trap. Kernel TLS offload of a host stream is
+/// `TlsStream.enable_kernel_offload`.
+/// @see [Std.Net.Tls.Handshake](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Handshake)
+#Since("0.3.0")
+export let Handshake = module (
+    /// @brief Runs a TLS 1.3 handshake in Neura over a connected stream and returns the protected transport.
+    /// @stub no pure-Neura TLS 1.3 engine in 0.3.0; the host's OpenSSL is the provider
+    #NoDiscard
+    export let tls13 = func(config: TlsConfig, stream: StreamSocket<SocketAddr>)
+        -> Result<Transport<uint8[list], uint8[list]>> {
+        trap_with_message("unsupported: Std.Net.Tls.Handshake.tls13 is not implemented in Neura 0.3.0 (no pure-Neura TLS 1.3 engine in 0.3.0; the host's OpenSSL is the provider)");
+    };
+
+    /// @brief Runs a DTLS 1.3 handshake in Neura with `peer` over a datagram socket and returns the protected
+    /// transport.
+    /// @stub no pure-Neura DTLS 1.3 engine in 0.3.0 and no host DTLS service
+    #NoDiscard
+    export let dtls13 = func(config: TlsConfig, socket: DatagramSocket<SocketAddr>, peer: SocketAddr)
+        -> Result<Transport<uint8[list], uint8[list]>> {
+        trap_with_message("unsupported: Std.Net.Tls.Handshake.dtls13 is not implemented in Neura 0.3.0 (no pure-Neura DTLS 1.3 engine in 0.3.0 and no host DTLS service)");
+    };
+);

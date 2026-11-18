@@ -1,0 +1,318 @@
+let.promote _ = import:Std.Core.Error;
+let punycode = import:Std.Net.Core.Punycode;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief Internationalized domain names: conversion between Unicode labels and their ASCII `xn--` form
+/// (RFC 5890 and RFC 5891, processing in the manner of UTS 46 section 4 without its mapping table).
+///
+/// Labels are separated by `.` or one of the IDNA dot variants U+3002, U+FF0E, U+FF61; the output always uses
+/// `.`. ASCII letters are lowercased. A label with a non-ASCII scalar is checked and Punycode-encoded with the
+/// `xn--` prefix. A label already in `xn--` form must decode and re-encode to itself and must hold a non-ASCII
+/// scalar. Hyphen rules (UTS 46 CheckHyphens): no label starts or ends with `-`, and only an `xn--` label has
+/// `--` in its third and fourth positions. Lengths are measured on the ASCII form: 1 to 63 bytes per label and
+/// at most 253 bytes for the name without a final root `.`, which is kept.
+///
+/// Limitation: the UTS 46 mapping step (the IdnaMappingTable, case folding beyond ASCII, NFC) needs Unicode
+/// data tables that this library does not carry, so `to_ascii` requires input that is already mapped:
+/// lowercase and in NFC. It rejects the scalars it can identify as needing that mapping or as disallowed
+/// (controls, uppercase Latin-1, Greek and Cyrillic letters, the halfwidth and fullwidth forms block,
+/// noncharacters, U+FFFD), but it cannot detect every unmapped or disallowed scalar. `map_uts46` is a stub.
+/// @see [Std.Net.Core.Idna](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Idna)
+#Since("0.3.0")
+export let Idna = module (
+    /// @brief The longest label in bytes of its ASCII form (RFC 1035 section 2.3.4).
+    export const MaxLabelLength: int = 63;
+    /// @brief The longest name in bytes of its ASCII form, without a final root dot.
+    export const MaxNameLength: int = 253;
+
+    /// @brief The ASCII (A-label) form of a domain name whose labels are already UTS 46-mapped.
+    ///
+    /// Errors (Parse, offset is the byte offset in the input of the failing label): Empty for an empty name
+    /// or an empty label other than a final root label; InvalidCharacter for a scalar that needs UTS 46
+    /// mapping or is disallowed, or a hyphen rule violation; Syntax for an `xn--` label that is not valid
+    /// Punycode of a non-ASCII label; OutOfRange for a label over 63 bytes or a name over 253 bytes.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let to_ascii = func(domain: string) -> Result<string> => convert_to_ascii(domain, std3: false);
+
+    /// @brief to_ascii with the STD3 ASCII rules (UTS 46 UseSTD3ASCIIRules): an ASCII scalar in a label must
+    /// also be a letter, a digit, or `-`, as in a host name (RFC 1123 section 2.1). Errors as in to_ascii.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let to_ascii_strict = func(domain: string) -> Result<string> => convert_to_ascii(domain, std3: true);
+
+    /// @brief The Unicode (U-label) form of a domain name: ASCII letters lowercased, each `xn--` label
+    /// Punycode-decoded, dot variants replaced by `.`, a final root dot kept.
+    ///
+    /// Errors (Parse, offset of the failing label): Empty as in to_ascii; Syntax for an `xn--` label that does
+    /// not decode.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let to_unicode = func(domain: string) -> Result<string> {
+        last labels = split_labels(domain)?;
+        let text = "";
+        for (let i = 0; i < labels.length; i++) {
+            last label = labels[i];
+            if (i > 0) {
+                text += ".";
+            }
+            last lowered = strings.to_ascii_lower(label.text);
+            if (strings.starts_with(lowered, "xn--")) {
+                last decoded = punycode.decode_text(lowered.slice(4, lowered.byte_length));
+                match (decoded) {
+                    Result.Ok(value) => {
+                        text += value;
+                    },
+                    Result.Err(e) => {
+                        return failed(ParseErrorKind.Syntax, label.offset, "invalid punycode in xn-- label");
+                    },
+                }
+            } else {
+                text += lowered;
+            }
+        }
+        if (ends_with_root(domain)) {
+            text += ".";
+        }
+        return Result<string>.Ok(text);
+    };
+
+    /// @brief The UTS 46 mapping step (IdnaMappingTable lookup, case folding, NFC) of a domain name.
+    /// @stub needs the Unicode IdnaMappingTable and NFC data tables, which the library does not carry
+    #[NoDiscard, Pure, ThreadSafe]
+    export let map_uts46 = func(domain: string) -> string {
+        trap_with_message("unsupported: Std.Net.Core.Idna.map_uts46 is not implemented in Neura 0.3.0 (needs the Unicode IdnaMappingTable and NFC data tables, which the library does not carry)");
+    };
+
+    /// @brief Tests whether a scalar is `.` or one of the IDNA dot variants U+3002, U+FF0E, U+FF61.
+    #[Pure, ThreadSafe]
+    export let is_dot = func(scalar: uint32) -> bool => scalar == 46 or 12290 or 65294 or 65377;
+
+    // Internal helpers.
+
+    /// @brief One label of the input and the byte offset where it starts.
+    #Final
+    let Label = class (
+        export last text: string;
+        export last offset: int;
+
+        export let init = func(label_text: string, label_offset: int) {
+            text = label_text;
+            offset = label_offset;
+        };
+
+        export let.override to_string = func -> string => text;
+    );
+
+    /// @brief Splits on dots; a final empty label (the root) is dropped and reported by its absence.
+    let split_labels = func(domain: string) -> Result<Label[list]> {
+        last labels: Label[list] = new;
+        last length = domain.byte_length;
+        if (length == 0) {
+            return Result<Label[list]>.Err(Error.Parse {
+                kind: ParseErrorKind.Empty, offset: 0, message: "empty domain name"
+            });
+        }
+        let start = 0;
+        let i = 0;
+        while (i < length) {
+            last width = scalar_width(domain.byte_at(i));
+            last scalar = strings.scalar_at(domain, i);
+            if (is_dot(scalar)) {
+                if (i == start) {
+                    return Result<Label[list]>.Err(Error.Parse {
+                        kind: ParseErrorKind.Empty, offset: i, message: "empty label"
+                    });
+                }
+                labels.append(new Label(domain.slice(start, i), start));
+                start = i + width;
+            }
+            i += width;
+        }
+        if (start < length) {
+            labels.append(new Label(domain.slice(start, length), start));
+        }
+        return Result<Label[list]>.Ok(labels);
+    };
+
+    /// @brief Tests whether the name ends with a dot variant (a root label).
+    let ends_with_root = func(domain: string) -> bool {
+        last length = domain.byte_length;
+        let i = length - 1;
+        while (i > 0 && (domain.byte_at(i) & 192) == 128) {
+            i--;
+        }
+        return is_dot(strings.scalar_at(domain, i));
+    };
+
+    /// @brief to_ascii with or without the STD3 ASCII rules.
+    let convert_to_ascii = func(domain: string, std3: bool) -> Result<string> {
+        last labels = split_labels(domain)?;
+        let text = "";
+        for (let i = 0; i < labels.length; i++) {
+            if (i > 0) {
+                text += ".";
+            }
+            text += label_to_ascii(labels[i], std3)?;
+        }
+        if (text.byte_length > MaxNameLength) {
+            return failed(ParseErrorKind.OutOfRange, 0, "domain name longer than 253 bytes");
+        }
+        if (ends_with_root(domain)) {
+            text += ".";
+        }
+        return Result<string>.Ok(text);
+    };
+
+    /// @brief One label's ASCII form after the checks.
+    let label_to_ascii = func(label: Label, std3: bool) -> Result<string> {
+        last lowered = strings.to_ascii_lower(label.text);
+        last scalars = strings.scalars(lowered);
+        let ascii = true;
+        for (let s in scalars) {
+            if (s >= 128) {
+                ascii = false;
+            }
+            if (needs_mapping(s)) {
+                return failed(ParseErrorKind.InvalidCharacter, label.offset,
+                    "U+" + hex4(s) + " needs UTS 46 mapping or is disallowed");
+            }
+            if (std3 && s < 128 && !is_ldh(s)) {
+                return failed(ParseErrorKind.InvalidCharacter, label.offset,
+                    "STD3 rules allow only letters, digits, and '-'");
+            }
+        }
+        last is_ace = ascii && strings.starts_with(lowered, "xn--");
+        check_hyphens(scalars, is_ace, label.offset)?;
+        last result: string;
+        if (ascii) {
+            if (is_ace) {
+                check_ace(lowered, label.offset)?;
+            }
+            result = lowered;
+        } else {
+            match (punycode.encode(scalars)) {
+                Result.Ok(value) => {
+                    result = "xn--" + value;
+                },
+                Result.Err(e) => {
+                    return failed(ParseErrorKind.OutOfRange, label.offset, "label too long to encode");
+                },
+            }
+        }
+        if (result.byte_length > MaxLabelLength) {
+            return failed(ParseErrorKind.OutOfRange, label.offset, "label longer than 63 bytes");
+        }
+        return Result<string>.Ok(result);
+    };
+
+    /// @brief UTS 46 CheckHyphens on a label's scalars.
+    let check_hyphens = func(scalars: uint32[list], is_ace: bool, offset: int) -> Result<int> {
+        last count = scalars.length;
+        if (scalars[0] == 45 || scalars[count - 1] == 45) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.InvalidCharacter, offset: offset, message: "label starts or ends with '-'"
+            });
+        }
+        if (!is_ace && count >= 4 && scalars[2] == 45 && scalars[3] == 45) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.InvalidCharacter, offset: offset, message: "'--' in the third and fourth positions"
+            });
+        }
+        return Result<int>.Ok(0);
+    };
+
+    /// @brief An `xn--` label must decode to a non-ASCII label that encodes back to the same text.
+    let check_ace = func(lowered: string, offset: int) -> Result<int> {
+        last body = lowered.slice(4, lowered.byte_length);
+        last decoded: uint32[list];
+        match (punycode.decode(body)) {
+            Result.Ok(value) => {
+                decoded = value;
+            },
+            Result.Err(e) => {
+                return Result<int>.Err(Error.Parse {
+                    kind: ParseErrorKind.Syntax, offset: offset, message: "invalid punycode in xn-- label"
+                });
+            },
+        }
+        let non_ascii = false;
+        for (let s in decoded) {
+            if (s >= 128) {
+                non_ascii = true;
+            }
+            if (needs_mapping(s) || (s >= 65 && s <= 90)) {
+                return Result<int>.Err(Error.Parse {
+                    kind: ParseErrorKind.Syntax, offset: offset, message: "xn-- label decodes to an unmapped label"
+                });
+            }
+        }
+        last again = punycode.encode(decoded);
+        last same = match (again) {
+            Result.Ok(value) => value == body,
+            Result.Err(e) => false,
+        };
+        if (!non_ascii || !same) {
+            return Result<int>.Err(Error.Parse {
+                kind: ParseErrorKind.Syntax, offset: offset,
+                message: "xn-- label is not a canonical encoding of a non-ASCII label"
+            });
+        }
+        return Result<int>.Ok(0);
+    };
+
+    /// @brief Scalars that UTS 46 maps or disallows and that this library can recognize without its tables.
+    let needs_mapping = func(s: uint32) -> bool {
+        if (s < 32 || (s >= 127 && s <= 159)) {
+            return true;
+        }
+        // Latin-1 uppercase letters U+00C0-U+00DE except U+00D7.
+        if (s >= 192 && s <= 222 && s != 215) {
+            return true;
+        }
+        // Greek capitals U+0391-U+03A9 and Cyrillic capitals U+0400-U+042F.
+        if ((s >= 913 && s <= 937) || (s >= 1024 && s <= 1071)) {
+            return true;
+        }
+        // Halfwidth and fullwidth forms U+FF00-U+FFEF, noncharacters U+FDD0-U+FDEF, U+FFFD, and U+xxFFFE/F.
+        if ((s >= 65280 && s <= 65519) || (s >= 64976 && s <= 65007) || s == 65533) {
+            return true;
+        }
+        return (s & 65534) == 65534;
+    };
+
+    /// @brief A letter, digit, or hyphen.
+    let is_ldh = func(s: uint32) -> bool => (s >= 97 && s <= 122) || (s >= 48 && s <= 57) || s == 45;
+
+    /// @brief The UTF-8 sequence length from its lead byte.
+    let scalar_width = func(lead: uint8) -> int {
+        if (lead < 128) {
+            return 1;
+        }
+        if (lead < 224) {
+            return 2;
+        }
+        if (lead < 240) {
+            return 3;
+        }
+        return 4;
+    };
+
+    /// @brief At least four uppercase hex digits.
+    let hex4 = func(s: uint32) -> string {
+        last digits = "0123456789ABCDEF";
+        let text = "";
+        let value = s;
+        while (value > 0) {
+            last d = (value % 16) as int;
+            text = digits.slice(d, d + 1) + text;
+            value = value / 16;
+        }
+        while (text.byte_length < 4) {
+            text = "0" + text;
+        }
+        return text;
+    };
+
+    /// @brief A parse failure.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<string> =>
+        Result<string>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+);

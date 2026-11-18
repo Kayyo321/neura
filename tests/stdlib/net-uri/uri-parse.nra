@@ -1,0 +1,270 @@
+let errors = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let query = import:Std.Net.Core.Query;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let uris = import:Std.Net.Core.Uri;
+
+// Uri parsing (RFC 3986 appendix A), accessors, recomposition, and the builder.
+let UriParseTests = module (
+    let parse = func(text: string) -> uris.Uri => test.assert_ok<uris.Uri>(uris.parse(text));
+
+    let some = func(o: optional.Optional<string>) -> string => test.assert_some<string>(o);
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    let rejects = func(text: string) -> errors.Error => test.assert_err<uris.Uri>(uris.parse(text));
+
+    // RFC 3986 section 3 example.
+    export let test_rfc_section3_components = func {
+        last u = parse("foo://example.com:8042/over/there?name=ferret#nose");
+        test.assert_equal_string("foo", some(u.scheme));
+        test.assert_equal_string("example.com", some(u.host));
+        test.assert_equal<int>(8042, test.assert_some<int>(u.port));
+        test.assert_equal_string("/over/there", u.path);
+        test.assert_equal_string("name=ferret", some(u.query));
+        test.assert_equal_string("nose", some(u.fragment));
+        test.assert_equal_string("example.com:8042", some(u.authority()));
+        last urn = parse("urn:example:animal:ferret:nose");
+        test.assert_equal_string("urn", some(urn.scheme));
+        test.assert(!urn.has_authority());
+        test.assert_equal_string("example:animal:ferret:nose", urn.path);
+    };
+
+    // RFC 3986 section 1.1.2 examples: each parses and recomposes to the same text.
+    export let test_rfc_section112_round_trip = func {
+        last examples: string[] = [
+            "ftp://ftp.is.co.za/rfc/rfc1808.txt", "http://www.ietf.org/rfc/rfc2396.txt",
+            "ldap://[2001:db8::7]/c=GB?objectClass?one", "mailto:John.Doe@example.com",
+            "news:comp.infosystems.www.servers.unix", "tel:+1-816-555-1212", "telnet://192.0.2.16:80/",
+            "urn:oasis:names:specification:docbook:dtd:xml:4.1.2"
+        ];
+        for (let text in examples) {
+            test.assert_equal_string(text, parse(text).to_string());
+        }
+        last ldap = parse("ldap://[2001:db8::7]/c=GB?objectClass?one");
+        test.assert(test.assert_some<uris.HostKind>(ldap.host_kind()) == uris.HostKind.Ipv6);
+        test.assert_equal_string("2001:db8::7", some(ldap.host_name()));
+        test.assert_equal_string("objectClass?one", some(ldap.query));
+        last telnet = parse("telnet://192.0.2.16:80/");
+        test.assert(test.assert_some<uris.HostKind>(telnet.host_kind()) == uris.HostKind.Ipv4);
+        test.assert_equal_string("John.Doe@example.com", parse("mailto:John.Doe@example.com").path);
+    };
+
+    export let test_undefined_versus_empty = func {
+        last bare = parse("http://a");
+        test.assert_none<string>(bare.query);
+        test.assert_none<string>(bare.fragment);
+        test.assert_equal_string("", bare.path);
+        last empty = parse("http://a?#");
+        test.assert_equal_string("", some(empty.query));
+        test.assert_equal_string("", some(empty.fragment));
+        test.assert_equal_string("http://a?#", empty.to_string());
+        test.assert(!bare.equals(empty));
+        last file = parse("file:///etc/hosts");
+        test.assert_equal_string("", some(file.host));
+        test.assert_equal_string("file:///etc/hosts", file.to_string());
+        last relative = parse("//g");
+        test.assert(relative.is_relative() && relative.has_authority());
+        test.assert_equal_string("", parse("").to_string());
+        test.assert_equal_string("?y", parse("?y").to_string());
+    };
+
+    export let test_userinfo_and_ports = func {
+        last u = parse("https://user:p%40ss@example.com:0/");
+        test.assert_equal_string("user:p%40ss", some(u.userinfo));
+        test.assert_equal_string("user:p@ss", test.assert_ok<string>(u.decoded_userinfo()));
+        test.assert_equal<int>(0, test.assert_some<int>(u.port));
+        test.assert_equal<int>(65535, test.assert_some<int>(parse("http://a:65535").port));
+        // An empty port is dropped (RFC 3986 section 6.2.3 allows it).
+        last empty_port = parse("http://a:/");
+        test.assert_none<int>(empty_port.port);
+        test.assert_equal_string("http://a/", empty_port.to_string());
+        test.assert(kind_of(rejects("http://a:65536/")) == errors.ParseErrorKind.OutOfRange);
+        test.assert(kind_of(rejects("http://a:99999999999999999999/")) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal<int>(9, offset_of(rejects("http://a:b")));
+        // Leading zeros are not kept: the port is a number.
+        last zeros = parse("http://a:0080/");
+        test.assert_equal<int>(80, test.assert_some<int>(zeros.port));
+        test.assert_equal_string("http://a:80/", zeros.to_string());
+    };
+
+    // Valid and invalid IPv6 literals: python3 -I -c "import ipaddress; ipaddress.IPv6Address(s)" (for each s)
+    // accepts exactly the first list and raises for every address in the second.
+    export let test_ipv6_literals = func {
+        last valid: string[] = [
+            "::", "::1", "1::", "1:2:3:4:5:6:7:8", "1:2:3:4:5:6:7::", "::2:3:4:5:6:7:8", "1:2:3:4:5:6::8",
+            "::ffff:192.0.2.1", "1:2:3:4:5:6:1.2.3.4", "1:2:3:4:5::1.2.3.4", "2001:db8::7", "FE80::ABCD"
+        ];
+        for (let address in valid) {
+            last u = parse("http://[" + address + "]:8080/x");
+            test.assert_equal_string(address, some(u.host_name()));
+            test.assert_equal<int>(8080, test.assert_some<int>(u.port));
+        }
+        last invalid: string[] = [
+            "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7", "1::2::3", ":1::", "1:::2", "12345::", "::1.2.3",
+            "::256.1.1.1", "::01.2.3.4", "1.2.3.4::", "1:2:3:4:5:6:7::1.2.3.4", "::g", "1:2:3:4:5:6::1.2.3.4",
+            ":", "::ffff:1.2.3.4:5", "1:2:3:4:5:6:7:1.2.3.4"
+        ];
+        for (let address in invalid) {
+            test.assert(kind_of(rejects("http://[" + address + "]/")) == errors.ParseErrorKind.Syntax);
+        }
+    };
+
+    export let test_zone_and_future_literals = func {
+        // RFC 6874 section 2 example form: a zone identifier after "%25".
+        last zoned = parse("http://[fe80::a%25en1]/");
+        test.assert_equal_string("[fe80::a%25en1]", some(zoned.host));
+        test.assert_equal_string("fe80::a%en1", test.assert_ok<string>(zoned.decoded_host()));
+        rejects("http://[fe80::a%en1]/");
+        rejects("http://[fe80::a%25]/");
+        last future = parse("http://[v7.a:b!]/");
+        test.assert(test.assert_some<uris.HostKind>(future.host_kind()) == uris.HostKind.IpFuture);
+        rejects("http://[v7]/");
+        rejects("http://[v.a]/");
+        rejects("http://[vg.a]/");
+        test.assert(kind_of(rejects("http://[::1")) == errors.ParseErrorKind.Syntax);
+        rejects("http://[::1]x/");
+        rejects("http://[]/");
+    };
+
+    export let test_rejections = func {
+        // ':' in the first segment of a relative path, bad scheme characters, empty scheme.
+        test.assert(kind_of(rejects("1a:b")) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of(rejects(":x")) == errors.ParseErrorKind.Syntax);
+        test.assert_equal<int>(1, offset_of(rejects("a_b:c")));
+        // Bad percent-encoding anywhere.
+        test.assert_equal<int>(8, offset_of(rejects("http://a%/")));
+        test.assert_equal<int>(10, offset_of(rejects("http://a/b%4")));
+        test.assert_equal<int>(11, offset_of(rejects("http://a/?q%")));
+        rejects("%");
+        // Characters outside the grammar.
+        test.assert_equal<int>(10, offset_of(rejects("http://a/b c")));
+        rejects("http://a/#f#g");
+        rejects("http://a/ü");
+        rejects("http://a b/");
+        rejects("http://a/<x>");
+        rejects("http://us er@a/");
+    };
+
+    export let test_non_ascii_registered_name = func {
+        last u = parse("http://bücher.example/");
+        test.assert_equal_string("bücher.example", some(u.host));
+        test.assert(test.assert_some<uris.HostKind>(u.host_kind()) == uris.HostKind.RegName);
+        // dec-octet forms only: other dotted numbers are registered names (RFC 3986 section 3.2.2).
+        test.assert(test.assert_some<uris.HostKind>(parse("http://1.2.3.256/").host_kind()) == uris.HostKind.RegName);
+        test.assert(test.assert_some<uris.HostKind>(parse("http://01.2.3.4/").host_kind()) == uris.HostKind.RegName);
+    };
+
+    export let test_decoded_accessors = func {
+        last u = parse("http://h/a%20b/c%2Fd/?x=%E2%82%AC+1#f%23");
+        test.assert_equal_string("/a b/c/d/", test.assert_ok<string>(u.decoded_path()));
+        last segments = test.assert_ok<string[list]>(u.path_segments());
+        test.assert_equal<int>(3, segments.length);
+        test.assert_equal_string("c/d", segments[1]);
+        test.assert_equal_string("", segments[2]);
+        test.assert_equal_string("x=€+1", test.assert_ok<string>(u.decoded_query()));
+        test.assert_equal_string("f#", test.assert_ok<string>(u.decoded_fragment()));
+        last params = test.assert_ok<query.QueryString>(u.query_parameters(query.QueryMode.Form));
+        test.assert_equal_string("€ 1", test.assert_some<string>(params.get("x")));
+        test.assert_err<string>(parse("http://h/%FF").decoded_path());
+    };
+
+    export let test_equals_is_raw = func {
+        last a = parse("http://example.com/a");
+        test.assert(a.equals(parse("http://example.com/a")));
+        test.assert_equal<uint32>(a.hash_code(), parse("http://example.com/a").hash_code());
+        test.assert(!a.equals(parse("HTTP://example.com/a")));
+        test.assert(a.equivalent(parse("HTTP://EXAMPLE.com:80/./a")));
+    };
+
+    export let test_builder = func {
+        last b = new uris.UriBuilder();
+        b.set_scheme("https");
+        b.set_userinfo("ann:p@ss");
+        b.set_host("example.com");
+        b.set_port(8443);
+        b.add_path_segment("a b");
+        b.add_path_segment("c/d");
+        b.add_query_parameter("q", "x&y=z");
+        b.add_query_parameter("lang", "en");
+        b.set_fragment("top part");
+        last u = test.assert_ok<uris.Uri>(b.build());
+        test.assert_equal_string("https://ann:p%40ss@example.com:8443/a%20b/c%2Fd?q=x%26y%3Dz&lang=en#top%20part", u.to_string());
+        test.assert_equal_string("c/d", test.assert_ok<string[list]>(u.path_segments())[1]);
+        // IPv6 hosts get brackets, non-ASCII hosts go through Idna.to_ascii (bücher.example gives
+        // xn--bcher-kva.example with python3 -I: 'bücher.example'.encode('idna')).
+        last v6 = new uris.UriBuilder();
+        v6.set_scheme("http");
+        v6.set_host("fe80::1%eth0");
+        v6.set_path("/x y");
+        test.assert_equal_string("http://[fe80::1%25eth0]/x%20y", test.assert_ok<uris.Uri>(v6.build()).to_string());
+        last idn = new uris.UriBuilder();
+        idn.set_scheme("http");
+        idn.set_host("bücher.example");
+        test.assert_equal_string("http://xn--bcher-kva.example", test.assert_ok<uris.Uri>(idn.build()).to_string());
+        // Bytes a registered name does not allow are encoded, before and after the IDNA step.
+        last idn_at = new uris.UriBuilder();
+        idn_at.set_scheme("http");
+        idn_at.set_host("bü@x");
+        last built = test.assert_ok<uris.Uri>(idn_at.build());
+        test.assert_none<string>(built.userinfo);
+        test.assert(!strings.contains(built.to_string(), "@"));
+        // A query string AST.
+        last params = new query.QueryString();
+        params.add("a b", "c+d");
+        last q = new uris.UriBuilder();
+        q.set_raw_path("p");
+        q.set_query_parameters(params, query.QueryMode.Form);
+        test.assert_equal_string("p?a+b=c%2Bd", test.assert_ok<uris.Uri>(q.build()).to_string());
+        // Starting from an existing URI.
+        last copy = new uris.UriBuilder();
+        copy.set_all(u);
+        copy.clear_port();
+        copy.clear_userinfo();
+        test.assert_equal_string("https://example.com/a%20b/c%2Fd?q=x%26y%3Dz&lang=en#top%20part", test.assert_ok<uris.Uri>(copy.build()).to_string());
+    };
+
+    export let test_builder_rejections = func {
+        // A path starting with "//" without a host would read as an authority.
+        last slashes = new uris.UriBuilder();
+        slashes.set_raw_path("//x");
+        test.assert_err<uris.Uri>(slashes.build());
+        // A first segment with ':' and no scheme would read as a scheme.
+        last colon = new uris.UriBuilder();
+        colon.set_raw_path("a:b");
+        test.assert_err<uris.Uri>(colon.build());
+        // A relative path after a host, a port without a host, an out-of-range port, a bad scheme, raw text
+        // that is not valid.
+        last relative = new uris.UriBuilder();
+        relative.set_host("h");
+        relative.set_raw_path("x");
+        test.assert_err<uris.Uri>(relative.build());
+        last port_only = new uris.UriBuilder();
+        port_only.set_port(80);
+        test.assert_err<uris.Uri>(port_only.build());
+        last big_port = new uris.UriBuilder();
+        big_port.set_host("h");
+        big_port.set_port(70000);
+        test.assert_err<uris.Uri>(big_port.build());
+        last bad_scheme = new uris.UriBuilder();
+        bad_scheme.set_scheme("1x");
+        test.assert_err<uris.Uri>(bad_scheme.build());
+        last bad_raw = new uris.UriBuilder();
+        bad_raw.set_raw_query("a b");
+        test.assert_err<uris.Uri>(bad_raw.build());
+        // A host that cannot be converted to ASCII.
+        last bad_host = new uris.UriBuilder();
+        bad_host.set_host("BÜCHER.example");
+        test.assert_err<uris.Uri>(bad_host.build());
+        test.assert_equal_string("//BÜCHER.example", bad_host.to_string());
+    };
+);

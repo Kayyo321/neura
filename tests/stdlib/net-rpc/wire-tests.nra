@@ -1,0 +1,273 @@
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let framing = import:Std.Net.Rpc.Framing;
+let hex = import:Std.Encoding.Hex;
+let meta = import:Std.Net.Rpc.Metadata;
+let optional = import:Std.Core.Optional;
+let statuses = import:Std.Net.Rpc.Status;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let timeouts = import:Std.Net.Rpc.Timeout;
+let unit = import:Std.Core.Unit;
+let web = import:Std.Net.Rpc.GrpcWeb;
+
+// Framing, gRPC-Web, status, metadata and grpc-timeout. Vectors from `python3 -I vec2.py` (std-net-rpc scratch,
+// recorded in notes-rpc.md): frame(flags, p) = bytes([flags]) + struct.pack('>I', len(p)) + p;
+// base64.b64encode; pe(s) = ''.join(chr(b) if 0x20<=b<=0x7e and b!=0x25 else '%%%02X'%b for b in s.encode()).
+let WireTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let code_of = func(e: errors.Error) -> int => statuses.number(statuses.of_error(e).code);
+
+    // python3: frame(0, b'\x08\x96\x01') 0000000003089601; frame(0, b'') 0000000000
+    export let test_length_prefixed_encoding = func {
+        test.assert_equal_string("0000000003089601", hex.encode(framing.encode_message(bytes_of("089601"), false)));
+        test.assert_equal_string("0000000000", hex.encode(framing.encode_message(new, false)));
+        test.assert_equal_string("0100000001ff", hex.encode(framing.encode_message(bytes_of("ff"), true)));
+    };
+
+    export let test_decoder_handles_any_chunking = func {
+        last stream = bytes_of("0000000003089601" + "0000000000" + "0000000002abcd");
+        // Feed one byte at a time.
+        last decoder = new framing.MessageDecoder(framing.DefaultMaxMessageSize, false);
+        last got: framing.Frame[list] = new;
+        for (let b in stream) {
+            last one: uint8[list] = new;
+            one.append(b);
+            decoder.push(one);
+            match (test.assert_ok<optional.Optional<framing.Frame>>(decoder.next())) {
+                optional.Optional.Some(frame) => {
+                    got.append(frame);
+                },
+                optional.Optional.None => {
+                },
+            }
+        }
+        test.assert_equal<int>(3, got.length);
+        test.assert_equal_string("089601", hex.encode(got[0].payload));
+        test.assert_equal<int>(0, got[1].payload.length);
+        test.assert(got[2].equals(new framing.Frame(0, bytes_of("abcd"))));
+        test.assert_ok<unit.Unit>(decoder.finish());
+    };
+
+    export let test_decoder_rejections = func {
+        // Oversize: rejected from the header alone, RESOURCE_EXHAUSTED (8).
+        last small = new framing.MessageDecoder(4, false);
+        small.push(bytes_of("0000000005"));
+        test.assert_equal<int>(8, code_of(test.assert_err<optional.Optional<framing.Frame>>(small.next())));
+        // Stays failed.
+        test.assert_err<optional.Optional<framing.Frame>>(small.next());
+        // A length that does not fit int is still just too large.
+        last huge = new framing.MessageDecoder(4, false);
+        huge.push(bytes_of("00ffffffff"));
+        test.assert_equal<int>(8, code_of(test.assert_err<optional.Optional<framing.Frame>>(huge.next())));
+        // Flags 2 and 0x80 on native gRPC: INTERNAL (13).
+        last bad = new framing.MessageDecoder(100, false);
+        bad.push(bytes_of("0200000000"));
+        test.assert_equal<int>(13, code_of(test.assert_err<optional.Optional<framing.Frame>>(bad.next())));
+        test.assert_err<framing.Frame[list]>(framing.decode_all(bytes_of("8000000000"), 100, false));
+        test.assert_ok<framing.Frame[list]>(framing.decode_all(bytes_of("8000000000"), 100, true));
+        // Truncated body at end of stream.
+        test.assert_equal<int>(13, code_of(test.assert_err<framing.Frame[list]>(
+            framing.decode_all(bytes_of("00000000050102"), 100, false))));
+        // Compressed flag on an identity call.
+        last compressed = new framing.Frame(1, bytes_of("01"));
+        test.assert_equal<int>(13, code_of(test.assert_err<uint8[list]>(
+            framing.message_of(compressed, framing.Compression.Identity))));
+    };
+
+    // python3: v(3)+b'abc' 03616263; v(300) ac02
+    export let test_varint_delimited = func {
+        test.assert_equal_string("03616263", hex.encode(framing.encode_delimited(strings.to_bytes("abc"))));
+        last decoder = new framing.DelimitedDecoder(1000);
+        decoder.push(bytes_of("0361"));
+        test.assert_none<uint8[list]>(test.assert_ok<optional.Optional<uint8[list]>>(decoder.next()));
+        decoder.push(bytes_of("6263" + "00"));
+        test.assert_equal_string("616263", hex.encode(test.assert_some<uint8[list]>(
+            test.assert_ok<optional.Optional<uint8[list]>>(decoder.next()))));
+        test.assert_equal<int>(0, test.assert_some<uint8[list]>(
+            test.assert_ok<optional.Optional<uint8[list]>>(decoder.next())).length);
+        last limited = new framing.DelimitedDecoder(299);
+        limited.push(bytes_of("ac02"));
+        test.assert_equal<int>(8, code_of(test.assert_err<optional.Optional<uint8[list]>>(limited.next())));
+        last long = new framing.DelimitedDecoder(10);
+        long.push(bytes_of("ffffffffffffffffffff01"));
+        test.assert_err<optional.Optional<uint8[list]>>(long.next());
+    };
+
+    export let test_compression_names = func {
+        test.assert_equal_string("gzip", framing.compression_name(test.assert_some<framing.Compression>(
+            framing.compression_of("gzip"))));
+        test.assert_none<framing.Compression>(framing.compression_of("snappy"));
+        test.assert_equal_string("01", hex.encode(test.assert_ok<uint8[list]>(
+            framing.compress(framing.Compression.Identity, bytes_of("01")))));
+    };
+
+    // python3: frame(0x80, b'grpc-status: 0\r\ngrpc-message: ok\r\n')
+    export let test_web_trailer_frame = func {
+        last trailers = meta.empty();
+        trailers.add_raw("grpc-status", "0");
+        trailers.add_raw("grpc-message", "ok");
+        test.assert_equal_string("8000000022677270632d7374617475733a20300d0a677270632d6d6573736167653a206f6b0d0a",
+            hex.encode(web.encode_trailers(trailers)));
+        last parsed = test.assert_ok<meta.Metadata>(web.parse_trailer_block(strings.to_bytes(
+            "Grpc-Status:0\r\ngrpc-message:  ok  \r\n")));
+        test.assert(parsed.equals(trailers));
+        test.assert_err<meta.Metadata>(web.parse_trailer_block(strings.to_bytes("no colon\r\n")));
+    };
+
+    // python3: frame(0, b'hi') + frame(0x80, b'grpc-status: 0\r\n'), base64 of it and of each part
+    export let test_web_body_and_text = func {
+        last body = bytes_of("000000000268698000000010677270632d7374617475733a20300d0a");
+        last decoded = test.assert_ok<web.WebBody>(web.decode_body(body, 100));
+        test.assert_equal<int>(1, decoded.messages.length);
+        test.assert(decoded.has_trailers);
+        test.assert_equal_string("0", test.assert_some<string>(decoded.trailers.get("grpc-status")));
+        // A frame after the trailers fails; so does a compressed trailer.
+        test.assert_err<web.WebBody>(web.decode_body(bytes_of("8000000000" + "0000000000"), 100));
+        test.assert_err<web.WebBody>(web.decode_body(bytes_of("8100000000"), 100));
+        test.assert_equal_string("AAAAAAJoaYAAAAAQZ3JwYy1zdGF0dXM6IDANCg==", web.encode_text(body));
+        // Two flushes, padding mid-stream, delivered in odd chunks.
+        last decoder = new web.TextDecoder();
+        last out: uint8[list] = new;
+        for (let chunk in ["AAAAAA", "JoaQ==gAA", "AABBncnBjLXN0YXR1czogMA0K"]) {
+            for (let b in test.assert_ok<uint8[list]>(decoder.push(chunk))) {
+                out.append(b);
+            }
+        }
+        test.assert(decoder.is_complete());
+        test.assert_equal_string(hex.encode(body), hex.encode(out));
+        test.assert_err<uint8[list]>(web.decode_text("AAAAAAJ"));
+        test.assert_err<uint8[list]>(web.decode_text("AA*A"));
+        // A multi-byte character across a group boundary is rejected, not sliced.
+        test.assert_err<uint8[list]>(web.decode_text("aaaéaaa"));
+    };
+
+    export let test_status_codes_and_names = func {
+        test.assert_equal<int>(17, statuses.all().length);
+        for (let i = 0; i < 17; i++) {
+            last code = test.assert_some<statuses.Code>(statuses.of_number(i));
+            test.assert_equal<int>(i, statuses.number(code));
+            test.assert_equal<int>(i, statuses.number(test.assert_some<statuses.Code>(
+                statuses.of_name(statuses.name(code)))));
+        }
+        // grpc/grpc doc/statuscodes.md
+        test.assert_equal_string("DEADLINE_EXCEEDED", statuses.name(statuses.Code.DeadlineExceeded));
+        test.assert_equal_string("UNAUTHENTICATED", statuses.name(statuses.Code.Unauthenticated));
+        test.assert_none<statuses.Code>(statuses.of_number(17));
+    };
+
+    // doc/http-grpc-status-mapping.md and google/rpc/code.proto "HTTP Mapping"
+    export let test_http_mappings = func {
+        test.assert_equal<int>(13, statuses.number(statuses.from_http(400)));
+        test.assert_equal<int>(16, statuses.number(statuses.from_http(401)));
+        test.assert_equal<int>(7, statuses.number(statuses.from_http(403)));
+        test.assert_equal<int>(12, statuses.number(statuses.from_http(404)));
+        for (let s in [429, 502, 503, 504]) {
+            test.assert_equal<int>(14, statuses.number(statuses.from_http(s)));
+        }
+        test.assert_equal<int>(2, statuses.number(statuses.from_http(200)));
+        test.assert_equal<int>(2, statuses.number(statuses.from_http(500)));
+        test.assert_equal<int>(504, statuses.to_http(statuses.Code.DeadlineExceeded));
+        test.assert_equal<int>(499, statuses.to_http(statuses.Code.Cancelled));
+        test.assert_equal<int>(429, statuses.to_http(statuses.Code.ResourceExhausted));
+        test.assert_equal<int>(501, statuses.to_http(statuses.Code.Unimplemented));
+        test.assert_equal<int>(409, statuses.to_http(statuses.Code.Aborted));
+    };
+
+    // python3: pe('a%bé\n') a%25b%C3%A9%0A
+    export let test_message_percent_encoding = func {
+        test.assert_equal_string("a%25b%C3%A9%0A", statuses.encode_message("a%bé\n"));
+        test.assert_equal_string("a%bé\n", statuses.decode_message("a%25b%C3%A9%0A"));
+        // Broken escapes stay; invalid UTF-8 returns the raw text; decoding never fails.
+        test.assert_equal_string("100%", statuses.decode_message("100%"));
+        test.assert_equal_string("%zz ok", statuses.decode_message("%zz ok"));
+        test.assert_equal_string("bad %FF", statuses.decode_message("bad %FF"));
+    };
+
+    export let test_trailers_round_trip = func {
+        last details = statuses.encode_rpc_status(statuses.of(statuses.Code.NotFound, "gone"));
+        // google.rpc.Status: python3: v(1<<3|0)+v(5)+v(2<<3|2)+v(4)+b'gone' = 0805 1204 676f6e65
+        test.assert_equal_string("08051204676f6e65", hex.encode(details));
+        last original = new statuses.RpcStatus(statuses.Code.NotFound, "gone: café", details);
+        last trailers = statuses.to_trailers(original);
+        test.assert_equal_string("5", test.assert_some<string>(trailers.get("grpc-status")));
+        test.assert_equal_string("gone: caf%C3%A9", test.assert_some<string>(trailers.get("grpc-message")));
+        // python3: base64.b64encode(bytes.fromhex('08051204676f6e65')).rstrip(b'=') CAUSBGdvbmU
+        test.assert_equal_string("CAUSBGdvbmU", test.assert_some<string>(trailers.get("grpc-status-details-bin")));
+        test.assert(statuses.from_trailers(trailers, 200).equals(original));
+        // Contradicting details are dropped.
+        last contradict = statuses.to_trailers(new statuses.RpcStatus(statuses.Code.Internal, "x", details));
+        test.assert_equal<int>(0, statuses.from_trailers(contradict, 200).details.length);
+        // Missing grpc-status: synthesized from HTTP.
+        test.assert_equal<int>(14, statuses.number(statuses.from_trailers(meta.empty(), 503).code));
+        // Unparsable code: UNKNOWN.
+        last junk = meta.empty();
+        junk.add_raw("grpc-status", "07");
+        test.assert_equal<int>(2, statuses.number(statuses.from_trailers(junk, 200).code));
+        // OK carries no details.
+        test.assert_equal<int>(1, statuses.to_trailers(statuses.ok()).size());
+    };
+
+    export let test_status_errors = func {
+        last e = statuses.error(statuses.Code.PermissionDenied, "no");
+        test.assert_equal<int>(7, statuses.number(statuses.of_error(e).code));
+        test.assert_equal<int>(2, statuses.number(statuses.of_error(errors.custom("x", "y")).code));
+        test.assert_equal_string("PERMISSION_DENIED: no", statuses.of_error(e).to_string());
+    };
+
+    // python3: base64.b64encode(b'\x00\x01\xfe\xff') AAH+/w== (unpadded AAH+/w)
+    export let test_metadata = func {
+        last m = meta.empty();
+        test.assert_ok<unit.Unit>(m.add("X-Trace", "abc"));
+        test.assert_ok<unit.Unit>(m.add_binary("trace-bin", bytes_of("0001feff")));
+        test.assert_equal_string("AAH+/w", test.assert_some<string>(m.get("trace-bin")));
+        test.assert_equal_string("abc", test.assert_some<string>(m.get("x-trace")));
+        test.assert_err<unit.Unit>(m.add("bad name", "v"));
+        test.assert_err<unit.Unit>(m.add("x-bin", "v"));
+        test.assert_err<unit.Unit>(m.add("ok", "tab\there"));
+        test.assert_err<unit.Unit>(m.add_binary("nobin", new));
+        // Padded and unpadded, and comma-joined values.
+        last received: [string, string][list] = new;
+        received.append(["Trace-Bin", "AAH+/w==,AAH+/w"]);
+        received.append([":path", "/x/y"]);
+        received.append(["bad", "line\nbreak"]);
+        last parsed = meta.from_entries(received);
+        test.assert_equal<int>(1, parsed.size());
+        last parts = test.assert_ok<uint8[list][list]>(parsed.get_binary("trace-bin"));
+        test.assert_equal<int>(2, parts.length);
+        test.assert_equal_string("0001feff", hex.encode(parts[1]));
+        test.assert_equal<int>(1, m.remove("x-trace"));
+        test.assert_equal<int>(1, m.size());
+        // header_list_size: "trace-bin" 9 + "AAH+/w" 6 + 32
+        test.assert_equal<int>(47, m.header_list_size());
+    };
+
+    export let test_grpc_timeout = func {
+        test.assert_equal_int64(1000000000, test.assert_ok<duration.Duration>(timeouts.parse("1S")).to_nanos());
+        test.assert_equal_int64(3600000000000, test.assert_ok<duration.Duration>(timeouts.parse("1H")).to_nanos());
+        test.assert_equal_int64(120000000000, test.assert_ok<duration.Duration>(timeouts.parse("2M")).to_nanos());
+        test.assert_equal_int64(5000000, test.assert_ok<duration.Duration>(timeouts.parse("5m")).to_nanos());
+        test.assert_equal_int64(7000, test.assert_ok<duration.Duration>(timeouts.parse("7u")).to_nanos());
+        test.assert_equal_int64(99999999, test.assert_ok<duration.Duration>(timeouts.parse("99999999n")).to_nanos());
+        // 99999999H overflows int64 nanoseconds: clamped.
+        test.assert_equal_int64(9223372036854775807,
+            test.assert_ok<duration.Duration>(timeouts.parse("99999999H")).to_nanos());
+        test.assert_err<duration.Duration>(timeouts.parse("123456789S"));
+        test.assert_err<duration.Duration>(timeouts.parse("S"));
+        test.assert_err<duration.Duration>(timeouts.parse("10"));
+        test.assert_err<duration.Duration>(timeouts.parse("10s"));
+        test.assert_err<duration.Duration>(timeouts.parse("-1S"));
+        test.assert_equal_string("1000000u", timeouts.format(duration.of_seconds(1)));
+        test.assert_equal_string("99999999n", timeouts.format(duration.of_nanos(99999999)));
+        test.assert_equal_string("100000u", timeouts.format(duration.of_nanos(100000000)));
+        // Rounds up: 100000001 ns -> 100001u.
+        test.assert_equal_string("100001u", timeouts.format(duration.of_nanos(100000001)));
+        test.assert_equal_string("0n", timeouts.format(duration.of_nanos(-5)));
+        test.assert_equal_string("2562048H", timeouts.format(duration.of_nanos(9223372036854775807)));
+        for (let text in ["1S", "250m", "3H", "12345678u"]) {
+            last span = test.assert_ok<duration.Duration>(timeouts.parse(text));
+            test.assert(test.assert_ok<duration.Duration>(timeouts.parse(timeouts.format(span))).equals(span));
+        }
+    };
+);

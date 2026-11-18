@@ -207,7 +207,7 @@ A 0.2 client (0.2.0, and the 0.2.1 candidates through rc.3) reads `neura-release
 
 None in the compiler: no stage, NeuraIR or NVR revision, tier, collector or ABI changes, and every image keeps its bytes. The milestone adds four versioned text formats, each independent of the Neura version: the component manifest (1), the install marker (2, reading 1), the component release metadata (1), and the journal (1, private to one build and never read by another). The legacy release metadata stays at 1.
 
-The lifecycle tools link the lifecycle library and the service's control client only, and stay inside the baseline's dependency and size rows: the legacy and SDK archives are each at most 25% larger than the rc.3 archive of their target, and the runtime archive is smaller than the SDK archive. The release workflow applies its library and version checks to every executable of every archive, not to `bin/neura` alone.
+The lifecycle tools link the lifecycle library and the service's control client only, and stay inside the baseline's dependency and size rows: the legacy and SDK archives are each at most 55% larger than the rc.3 archive of their target, and the runtime archive is smaller than the SDK archive. The release workflow applies its library and version checks to every executable of every archive, not to `bin/neura` alone.
 
 ## Diagnostics
 

@@ -1,0 +1,16 @@
+// status: 134
+// stderr: CidrBlock: host bits are set
+// The CidrBlock constructor traps when the network has host bits set (use CidrBlock.of to clear them).
+let cidr = import:Std.Net.Core.CidrBlock;
+let console = import:Std.Io.Console;
+let ips = import:Std.Net.Core.IpAddr;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        console.print_line((new cidr.CidrBlock(ips.IpAddr.V4(v4.of(10, 1, 0, 0)), 8)).to_string());
+        return program.ExitCode.Ok;
+    };
+);

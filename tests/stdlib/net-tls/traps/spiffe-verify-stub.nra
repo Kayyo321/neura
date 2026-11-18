@@ -1,0 +1,12 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Tls\.Spiffe\.verify_x509_svid is not implemented in Neura 0\.3\.0
+// X.509-SVID verification needs X.509 path validation.
+let program = import:Std.Program;
+let spiffe = import:Std.Net.Tls.Spiffe;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = spiffe.verify_x509_svid("", "");
+        return program.ExitCode.Ok;
+    };
+);

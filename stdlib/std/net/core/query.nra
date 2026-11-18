@@ -1,0 +1,403 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let optional = import:Std.Core.Optional;
+let percent = import:Std.Net.Core.PercentEncoding;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief A query string as an ordered list of key/value pairs, and a nested-key tree view of it.
+///
+/// RFC 3986 section 3.4 gives the query no inner structure. This module follows the common
+/// `key=value&key=value` convention (the WHATWG URL application/x-www-form-urlencoded parser): the raw query
+/// is split on `&`, each part on its first `=`, and only then are key and value percent-decoded, so an
+/// encoded `%26` or `%3D` is data. Empty parts (`a=1&&b=2`) are skipped. Keys repeat and keep their order. A
+/// part without `=` is a flag: its value is absent, which `a=` (an empty value) is not. Whether `+` means a
+/// space is the caller's choice (QueryMode).
+///
+/// The tree view reads keys of the form `a[b][c]` as a path (`a`, `b`, `c`): a convention of PHP, Rails and
+/// the `qs` package, not of any RFC. An empty segment `[]` appends a child named by its index (`0`, `1`, ...).
+/// A key whose brackets do not close in order (`a[b`, `a]b`, `[a]`) is a single plain name.
+/// @see [Std.Net.Core.Query](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Query)
+#Since("0.3.0")
+export let Query = module (
+    /// @brief How `+` is read and how text is encoded. Rfc3986: `+` is a literal plus and is written `%2B`, a
+    /// space is written `%20`, and keys and values keep the RFC 3986 query characters except `&`, `=`, `+`.
+    /// Form: application/x-www-form-urlencoded, where `+` is a space and only ALPHA, DIGIT, `*-._` stay
+    /// unencoded.
+    #Since("0.3.0")
+    export let QueryMode = enum (Rfc3986, Form);
+
+    /// @brief One decoded key and its optional value.
+    #[Final, Immutable, Since("0.3.0")]
+    export let QueryPair = class (
+        /// @brief The decoded key.
+        export last key: string;
+        /// @brief The decoded value, or None for a flag written without `=`.
+        export last value: optional.Optional<string>;
+
+        /// @brief A pair from a decoded key and an optional decoded value.
+        export let init = func(pair_key: string, pair_value: optional.Optional<string>) {
+            key = pair_key;
+            value = pair_value;
+        };
+
+        /// @brief The value, or the empty text for a flag.
+        #Pure
+        export let value_or_empty = func -> string => optional.value_or<string>(value, "");
+
+        /// @brief Pairs are equal when keys are equal and both values are absent or equal.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is QueryPair)) {
+                return false;
+            }
+            last pair = other as QueryPair;
+            return key == pair.key && optional.equals<string>(value, pair.value);
+        };
+
+        /// @brief Combines the key and value hashes.
+        #Pure
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(17, key.hash_code()), optional.hash<string>(value));
+
+        /// @brief The pair encoded in the Rfc3986 mode.
+        #Pure
+        export let.override to_string = func -> string =>
+            encode_pair(this_key: key, this_value: value, mode: QueryMode.Rfc3986);
+    );
+
+    /// @brief An ordered, mutable list of query pairs.
+    #[Final, Since("0.3.0"), NotThreadSafe]
+    export let QueryString = class (
+        /// @brief The pairs in order.
+        let entries: QueryPair[list] = new;
+
+        /// @brief An empty query.
+        export let init = func {
+        };
+
+        /// @brief The number of pairs.
+        export let size = func -> int => entries.length;
+
+        /// @brief The pair at an index from 0; an index out of range traps.
+        export let pair_at = func(index: int) -> QueryPair => entries[index];
+
+        /// @brief The first value for the key: Some("") for a flag, None when the key is missing.
+        export let get = func(key: string) -> optional.Optional<string> {
+            for (let pair in entries) {
+                if (pair.key == key) {
+                    return optional.Optional<string>.Some(pair.value_or_empty());
+                }
+            }
+            return optional.Optional<string>.None;
+        };
+
+        /// @brief Every value for the key in order, flags as empty text.
+        export let get_all = func(key: string) -> string[list] {
+            last values: string[list] = new;
+            for (let pair in entries) {
+                if (pair.key == key) {
+                    values.append(pair.value_or_empty());
+                }
+            }
+            return values;
+        };
+
+        /// @brief Tests whether any pair has the key.
+        export let contains = func(key: string) -> bool {
+            for (let pair in entries) {
+                if (pair.key == key) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// @brief Appends a pair with a value (`key=value`).
+        export let add = func(key: string, value: string) {
+            entries.append(new QueryPair(key, optional.Optional<string>.Some(value)));
+        };
+
+        /// @brief Appends a flag without a value (`key`).
+        export let add_flag = func(key: string) {
+            entries.append(new QueryPair(key, optional.Optional<string>.None));
+        };
+
+        /// @brief Removes every pair with the key and returns how many were removed.
+        export let remove_all = func(key: string) -> int {
+            last kept: QueryPair[list] = new;
+            for (let pair in entries) {
+                if (pair.key != key) {
+                    kept.append(pair);
+                }
+            }
+            last removed = entries.length - kept.length;
+            replace_entries(kept);
+            return removed;
+        };
+
+        /// @brief Replaces the pairs with the key by one pair at the place of the first, or appends it.
+        export let set = func(key: string, value: string) {
+            last replaced: QueryPair[list] = new;
+            let placed = false;
+            for (let pair in entries) {
+                if (pair.key != key) {
+                    replaced.append(pair);
+                } else if (!placed) {
+                    replaced.append(new QueryPair(key, optional.Optional<string>.Some(value)));
+                    placed = true;
+                }
+            }
+            if (!placed) {
+                replaced.append(new QueryPair(key, optional.Optional<string>.Some(value)));
+            }
+            replace_entries(replaced);
+        };
+
+        /// @brief Makes the entries equal to the given pairs.
+        let replace_entries = func(pairs: QueryPair[list]) {
+            while (entries.length > 0) {
+                entries.remove_at(entries.length - 1);
+            }
+            for (let pair in pairs) {
+                entries.append(pair);
+            }
+        };
+
+        /// @brief The raw query text (without `?`): pairs joined by `&`, keys and values encoded for the mode.
+        export let encode = func(mode: QueryMode) -> string {
+            let text = "";
+            for (let i = 0; i < entries.length; i++) {
+                if (i > 0) {
+                    text += "&";
+                }
+                last pair = entries[i];
+                text += encode_pair(this_key: pair.key, this_value: pair.value, mode: mode);
+            }
+            return text;
+        };
+
+        /// @brief The nested-key tree of the pairs (see the module comment).
+        export let tree = func -> QueryNode {
+            last root = new QueryNode("");
+            for (let pair in entries) {
+                last path = key_path(pair.key);
+                let node = root;
+                for (let segment in path) {
+                    node = node.child_for(segment);
+                }
+                node.values.append(pair.value_or_empty());
+            }
+            return root;
+        };
+
+        /// @brief Two queries are equal when their pairs are equal in order.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is QueryString)) {
+                return false;
+            }
+            last query = other as QueryString;
+            if (query.size() != entries.length) {
+                return false;
+            }
+            for (let i = 0; i < entries.length; i++) {
+                if (!entries[i].equals(query.pair_at(i))) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the pair hashes in order.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let pair in entries) {
+                hash = hashing.combine(hash, pair.hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief The query encoded in the Rfc3986 mode.
+        export let.override to_string = func -> string => encode(QueryMode.Rfc3986);
+    );
+
+    /// @brief One node of the nested-key tree: the values assigned at its path and its children in first-seen
+    /// order.
+    #[Final, Since("0.3.0"), NotThreadSafe]
+    export let QueryNode = class (
+        /// @brief The node's segment name; the root's is empty.
+        export last name: string;
+        /// @brief The values assigned at exactly this path, in order (a flag adds the empty text).
+        export last values: string[list] = new;
+        /// @brief The child nodes in first-seen order.
+        export last children: QueryNode[list] = new;
+
+        /// @brief A node with no values or children.
+        export let init = func(node_name: string) {
+            name = node_name;
+        };
+
+        /// @brief The child with the name, if any.
+        export let child = func(child_name: string) -> optional.Optional<QueryNode> {
+            for (let c in children) {
+                if (c.name == child_name) {
+                    return optional.Optional<QueryNode>.Some(c);
+                }
+            }
+            return optional.Optional<QueryNode>.None;
+        };
+
+        /// @brief The first value at this path, if any.
+        export let value = func -> optional.Optional<string> {
+            if (values.length == 0) {
+                return optional.Optional<string>.None;
+            }
+            return optional.Optional<string>.Some(values[0]);
+        };
+
+        /// @brief The names of the children in order.
+        export let child_names = func -> string[list] {
+            last names: string[list] = new;
+            for (let c in children) {
+                names.append(c.name);
+            }
+            return names;
+        };
+
+        /// @brief The existing child with the name, or a new one appended; the empty name appends a child named
+        /// by its index.
+        export let child_for = func(segment: string) -> QueryNode {
+            if (segment.byte_length == 0) {
+                last appended = new QueryNode(children.length.to_string());
+                children.append(appended);
+                return appended;
+            }
+            for (let c in children) {
+                if (c.name == segment) {
+                    return c;
+                }
+            }
+            last created = new QueryNode(segment);
+            children.append(created);
+            return created;
+        };
+
+        /// @brief The node as `name{values}[children]`, for diagnostics.
+        export let.override to_string = func -> string {
+            let text = name + "{";
+            for (let i = 0; i < values.length; i++) {
+                if (i > 0) {
+                    text += ",";
+                }
+                text += values[i];
+            }
+            text += "}[";
+            for (let i = 0; i < children.length; i++) {
+                if (i > 0) {
+                    text += " ";
+                }
+                text += children[i].to_string();
+            }
+            return text + "]";
+        };
+    );
+
+    /// @brief The pairs of a raw query (the text after `?`, without it).
+    ///
+    /// Errors: Parse InvalidCharacter at the offset in `raw` of a `%` not followed by two hex digits; Encoding at
+    /// the offset in `raw` of decoded bytes that are not UTF-8.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(raw: string, mode: QueryMode) -> Result<QueryString> {
+        last query = new QueryString();
+        last length = raw.byte_length;
+        let start = 0;
+        while (start <= length) {
+            let end = start;
+            while (end < length && raw.byte_at(end) != 38) {
+                end++;
+            }
+            if (end > start) {
+                let equals_at = -1;
+                for (let i = start; i < end; i++) {
+                    if (equals_at < 0 && raw.byte_at(i) == 61) {
+                        equals_at = i;
+                    }
+                }
+                if (equals_at < 0) {
+                    query.add_flag(decode_at(raw, start, end, mode)?);
+                } else {
+                    last key = decode_at(raw, start, equals_at, mode)?;
+                    query.add(key, decode_at(raw, equals_at + 1, end, mode)?);
+                }
+            }
+            start = end + 1;
+        }
+        return Result<QueryString>.Ok(query);
+    };
+
+    /// @brief The path segments of a key under the bracket convention; a key that does not fit it is one
+    /// segment.
+    #[Pure, ThreadSafe]
+    export let key_path = func(key: string) -> string[list] {
+        last path: string[list] = new;
+        last length = key.byte_length;
+        let open = -1;
+        for (let i = 0; i < length; i++) {
+            if (open < 0 && key.byte_at(i) == 91) {
+                open = i;
+            }
+        }
+        if (open <= 0 || key.byte_at(length - 1) != 93) {
+            path.append(key);
+            return path;
+        }
+        path.append(key.slice(0, open));
+        let i = open;
+        while (i < length) {
+            if (key.byte_at(i) != 91) {
+                last whole: string[list] = new;
+                whole.append(key);
+                return whole;
+            }
+            let close = i + 1;
+            while (close < length && key.byte_at(close) != 93 && key.byte_at(close) != 91) {
+                close++;
+            }
+            if (close >= length || key.byte_at(close) != 93) {
+                last whole: string[list] = new;
+                whole.append(key);
+                return whole;
+            }
+            path.append(key.slice(i + 1, close));
+            i = close + 1;
+        }
+        return path;
+    };
+
+    // Internal helpers.
+
+    /// @brief Decodes raw[start, end) and moves error offsets into `raw`.
+    let decode_at = func(raw: string, start: int, end: int, mode: QueryMode) -> Result<string> {
+        last part = raw.slice(start, end);
+        last decoded = mode == QueryMode.Form ? percent.decode_form(part) : percent.decode(part);
+        return match (decoded) {
+            Result.Ok(text) => Result<string>.Ok(text),
+            Result.Err(e) => Result<string>.Err(shift(e, start)),
+        };
+    };
+
+    /// @brief The error with its offset moved by `by`.
+    let shift = func(e: Error, by: int) -> Error => match (e) {
+        Error.Parse { kind, offset, message } => Error.Parse { kind: kind, offset: offset + by, message: message },
+        Error.Encoding { offset, message } => Error.Encoding { offset: offset + by, message: message },
+        _ => e,
+    };
+
+    /// @brief One pair's raw text in the mode.
+    let encode_pair = func(this_key: string, this_value: optional.Optional<string>, mode: QueryMode) -> string {
+        last set = mode == QueryMode.Form ? percent.EncodeSet.Form : percent.EncodeSet.QueryComponent;
+        last key_text = percent.encode(this_key, set);
+        return match (this_value) {
+            optional.Optional.Some(v) => key_text + "=" + percent.encode(v, set),
+            optional.Optional.None => key_text,
+        };
+    };
+);

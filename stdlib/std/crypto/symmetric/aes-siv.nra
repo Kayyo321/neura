@@ -16,7 +16,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// plaintext with the same items gives the same output: a database column encrypted this way can still be
 /// matched by equality, and nothing else about the plaintext leaks. The output is the 16-byte IV followed by
 /// the ciphertext.
-/// @see [Std.Crypto.Symmetric.AesSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesSiv)
+/// @see [Std.Crypto.Symmetric.AesSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesSiv)
 #Since("0.3.0")
 export let AesSiv = module (
     /// @brief AES-SIV with a 32-, 48- or 64-byte key: the first half keys CMAC, the second half CTR. As an
@@ -59,7 +59,7 @@ export let AesSiv = module (
             seal_items(items_of(nonce, associated_data), plaintext);
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> => open_items(items_of(nonce, associated_data), sealed);
+            -> Result<uint8[list]> => open_items(items_of(nonce, associated_data), sealed);
 
         let items_of = func(nonce: uint8[list], data: uint8[list]) -> uint8[list][list] {
             let items: uint8[list][list] = new([data]);

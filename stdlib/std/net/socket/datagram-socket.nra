@@ -1,0 +1,51 @@
+let.promote _ = import:Std.Io.Closeable;
+let.promote _ = import:Std.Time.Duration;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The unified datagram-socket contract: unconnected, message-oriented sockets that send to and receive
+/// from addresses of type `Addr`.
+///
+/// `UdpSocket` (`Std.Net.Core.SocketAddr`) and `UnixDatagram` (`Std.Net.Core.UnixAddr`) implement it. Each
+/// `receive_from` returns one whole datagram, truncated to the maximum the caller passes.
+/// @see [Std.Net.Socket.DatagramSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-DatagramSocket)
+#Since("0.3.0")
+export let DatagramSocket = module (
+    /// @brief One received datagram and the address of its sender, when it has one.
+    #Final
+    export let Datagram = class<Addr> (
+        /// @brief The payload, truncated to the maximum of the receive call.
+        export last data: uint8[list];
+        /// @brief The sender's address; `None` for an unnamed Unix-domain sender.
+        export last sender: Optional<Addr>;
+
+        /// @brief Pairs a payload with its sender.
+        export let init = func(payload: uint8[list], from: Optional<Addr>) {
+            data = payload;
+            sender = from;
+        };
+
+        /// @brief Text such as "Datagram(5 bytes from 127.0.0.1:9000)" or "Datagram(5 bytes from an unnamed
+        /// sender)".
+        export let.override to_string = func -> string => match (sender) {
+            Optional.Some(address) => "Datagram(" + data.length.to_string() + " bytes from " + address.to_string()
+                + ")",
+            Optional.None => "Datagram(" + data.length.to_string() + " bytes from an unnamed sender)",
+        };
+    );
+
+    /// @brief A socket that exchanges whole datagrams with addresses of type `Addr`.
+    export let DatagramSocket = interface<Addr>:Closeable (
+        /// @brief The address the socket is bound to. An implementation that needs a host service to learn it may
+        /// trap in Neura 0.3.0 (see `RawSocket.local_address`).
+        let local_address = func -> Result<Addr>;
+        /// @brief Sends `data` as one datagram to `target`; the count the host sent.
+        let send_to = func(data: uint8[list], target: Addr) -> Result<int>;
+        /// @brief Waits for one datagram of at most `max` bytes, up to the read timeout. A maximum below 1 traps.
+        let receive_from = func(max: int) -> Result<Datagram<Addr>>;
+        /// @brief The longest a receive waits; zero waits without limit.
+        let read_timeout = func -> Duration;
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        let set_read_timeout = func(timeout: Duration);
+    );
+);

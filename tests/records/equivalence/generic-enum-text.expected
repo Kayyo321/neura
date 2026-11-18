@@ -1,0 +1,6 @@
+Idle
+Succeeded(done)
+Succeeded(7)
+Failed(Custom{code: c, message: m})
+Cancelled
+Running

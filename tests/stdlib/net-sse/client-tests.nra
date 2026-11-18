@@ -1,0 +1,217 @@
+let client = import:Std.Net.Realtime.Sse.Client;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let int32s = import:Std.Core.Int32;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let sse_event = import:Std.Net.Realtime.Sse.SseEvent;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// The reconnecting client against a scripted fake server and a FixedClock.
+let ClientTests = module (
+    // A response body that hands out its chunks in order.
+    let Body = class (
+        last chunks: string[list];
+        let index: int = 0;
+
+        export let init = func(parts: string[list]) {
+            chunks = parts;
+        };
+
+        export let read = func -> result.Result<optional.Optional<uint8[list]>> {
+            if (index >= chunks.length) {
+                return result.Result<optional.Optional<uint8[list]>>.Ok(optional.Optional<uint8[list]>.None);
+            }
+            last chunk = strings.to_bytes(chunks[index]);
+            index = index + 1;
+            return result.Result<optional.Optional<uint8[list]>>.Ok(optional.Optional<uint8[list]>.Some(chunk));
+        };
+
+        export let.override to_string = func -> string => "Body";
+    );
+
+    // One scripted answer: a network error (status 0) or a status, media type and body chunks.
+    let Step = class (
+        export last status: int;
+        export last media: string;
+        export last chunks: string[list];
+
+        export let init = func(code: int, media_type: string, parts: string[list]) {
+            status = code;
+            media = media_type;
+            chunks = parts;
+        };
+
+        export let.override to_string = func -> string => "Step";
+    );
+
+    // Answers the attempts from its script and records the requests.
+    let FakeServer = class (
+        last steps: Step[list] = new;
+        export last requests: client.SseRequest[list] = new;
+
+        export let add = func(step: Step) {
+            steps.append(step);
+        };
+
+        export let fetch = func(request: client.SseRequest) -> result.Result<client.SseResponse> {
+            requests.append(request);
+            if (requests.length > steps.length) {
+                test.fail("unexpected attempt " + requests.length.to_string());
+            }
+            last step = steps[requests.length - 1];
+            if (step.status == 0) {
+                return result.Result<client.SseResponse>.Err(errors.custom("test.network", "connection refused"));
+            }
+            last body = new Body(step.chunks);
+            return result.Result<client.SseResponse>.Ok(new client.SseResponse(step.status, step.media, new bound(body.read)));
+        };
+
+        export let.override to_string = func -> string => "FakeServer";
+    );
+
+    let ok = func(parts: string[list]) -> Step => new Step(200, "text/event-stream", parts);
+
+    let network_error = func -> Step => new Step(0, "", new);
+
+    let no_content = func -> Step => new Step(204, "", new);
+
+    let new_clock = func -> fixed_clock.FixedClock => fixed_clock.of(instant.of_epoch_seconds(0, 0));
+
+    let elapsed_millis = func(clock: fixed_clock.FixedClock) -> int64 =>
+        test.assert_ok<duration.Duration>(clock.monotonic()).to_millis();
+
+    let next_event = func(source: client.EventSourceClient) -> sse_event.SseEvent =>
+        test.assert_some<sse_event.SseEvent>(test.assert_ok<optional.Optional<sse_event.SseEvent>>(source.next()));
+
+    let expect_end = func(source: client.EventSourceClient) {
+        test.assert_none<sse_event.SseEvent>(test.assert_ok<optional.Optional<sse_event.SseEvent>>(source.next()));
+    };
+
+    export let test_reconnects_with_last_event_id_and_retry = func {
+        last server = new FakeServer();
+        server.add(ok(new(["retry: 500\nid: 1\ndata: a\n\n", "data: b\n\nid: 2\ndata: half"])));
+        server.add(ok(new(["data: c\n\nid: 3\n\n"])));
+        server.add(ok(new([": nothing\n"])));
+        server.add(no_content());
+        last clock = new_clock();
+        last source = client.connect("https://example.test/stream", new bound(server.fetch), clock);
+        last a = next_event(source);
+        test.assert_equal_string("a", a.data);
+        test.assert_equal_string("1", a.id);
+        test.assert_equal<int64>(500, test.assert_some<int64>(a.retry));
+        test.assert(source.state == client.ReadyState.Open);
+        test.assert_equal_string("b", next_event(source).data);
+        // The body ends inside the block with id 2, which is discarded; the client resumes after 1.
+        last c = next_event(source);
+        test.assert_equal_string("c", c.data);
+        test.assert_equal_string("1", c.id);
+        test.assert_equal<int64>(500, elapsed_millis(clock));
+        expect_end(source);
+        test.assert(source.state == client.ReadyState.Closed);
+        // Two more waits of 500 ms: before the empty stream and before the 204.
+        test.assert_equal<int64>(1500, elapsed_millis(clock));
+        test.assert_equal<int>(4, server.requests.length);
+        test.assert_equal_string("", server.requests[0].last_event_id);
+        test.assert_equal<int>(2, server.requests[0].header_lines().length);
+        test.assert_equal_string("1", server.requests[1].last_event_id);
+        // A block with only an id still moves the cursor.
+        test.assert_equal_string("3", server.requests[2].last_event_id);
+        test.assert_equal_string("Last-Event-ID: 3", server.requests[3].header_lines()[2]);
+        test.assert_equal_string("SseRequest(https://example.test/stream, Last-Event-ID \"3\", attempt 4)",
+            server.requests[3].to_string());
+        // Value semantics: equal requests hash alike (and hashing long texts does not overflow).
+        last copy = new client.SseRequest("https://example.test/stream", "3", 4);
+        test.assert(copy.equals(server.requests[3]));
+        test.assert_equal<uint32>(copy.hash_code(), server.requests[3].hash_code());
+        // A closed client makes no further attempt.
+        expect_end(source);
+        test.assert_equal<int>(4, server.requests.length);
+    };
+
+    export let test_network_errors_back_off_then_succeed = func {
+        last server = new FakeServer();
+        server.add(network_error());
+        server.add(network_error());
+        server.add(network_error());
+        server.add(ok(new(["data: up\n\n"])));
+        server.add(no_content());
+        last clock = new_clock();
+        last source = new client.EventSourceClient("u", "41", new bound(server.fetch), clock);
+        source.max_backoff_millis = 10000;
+        test.assert_equal_string("up", next_event(source).data);
+        test.assert_equal_string("41", server.requests[0].last_event_id);
+        // Waits: none, 3000, 6000, then 12000 capped at 10000.
+        test.assert_equal<int64>(19000, elapsed_millis(clock));
+        test.assert_equal<int>(0, source.failures);
+        expect_end(source);
+        // After a successful open the wait is the reconnection time again.
+        test.assert_equal<int64>(22000, elapsed_millis(clock));
+        test.assert_equal<int>(5, source.attempts);
+    };
+
+    export let test_gives_up_after_max_attempts = func {
+        last server = new FakeServer();
+        server.add(network_error());
+        server.add(network_error());
+        last source = client.connect("u", new bound(server.fetch), new_clock());
+        source.max_attempts = 2;
+        last problem = test.assert_err<optional.Optional<sse_event.SseEvent>>(source.next());
+        test.assert(strings.contains(errors.message(problem), "gave up after 2 failed attempts"));
+        test.assert(source.state == client.ReadyState.Closed);
+        expect_end(source);
+    };
+
+    export let test_bad_responses_fail_the_connection = func {
+        last wrong_type = new FakeServer();
+        wrong_type.add(new Step(200, "text/plain", new(["data: x\n\n"])));
+        last first = client.connect("u", new bound(wrong_type.fetch), new_clock());
+        last problem = test.assert_err<optional.Optional<sse_event.SseEvent>>(first.next());
+        test.assert(strings.contains(errors.message(problem), "text/plain"));
+        expect_end(first);
+        test.assert_equal<int>(1, wrong_type.requests.length);
+        last server_error = new FakeServer();
+        server_error.add(new Step(500, "text/event-stream", new));
+        last second = client.connect("u", new bound(server_error.fetch), new_clock());
+        last status = test.assert_err<optional.Optional<sse_event.SseEvent>>(second.next());
+        test.assert(strings.contains(errors.message(status), "500"));
+        test.assert(second.state == client.ReadyState.Closed);
+    };
+
+    export let test_media_type_matching = func {
+        test.assert(client.is_event_stream("text/event-stream"));
+        test.assert(client.is_event_stream("Text/Event-Stream; charset=utf-8"));
+        test.assert(client.is_event_stream(" text/event-stream ;x=y"));
+        test.assert(!client.is_event_stream("text/event-streams"));
+        test.assert(!client.is_event_stream("text/plain"));
+        test.assert(!client.is_event_stream(""));
+    };
+
+    export let test_close_stops_the_client = func {
+        last server = new FakeServer();
+        server.add(ok(new(["data: one\n\ndata: two\n\n"])));
+        last source = client.connect("u", new bound(server.fetch), new_clock());
+        test.assert_equal_string("one", next_event(source).data);
+        test.assert_ok<unit.Unit>(source.close());
+        expect_end(source);
+        test.assert_equal<int>(1, server.requests.length);
+    };
+
+    let decode_number = func(event: sse_event.SseEvent) -> result.Result<int> => int32s.parse(event.data);
+
+    export let test_typed_events = func {
+        last server = new FakeServer();
+        server.add(ok(new(["data: 1\n\ndata: x\n\ndata: 3\n\n"])));
+        server.add(no_content());
+        last typed = new client.TypedEventSource<int>(client.connect("u", new bound(server.fetch), new_clock()), decode_number);
+        test.assert_equal<int>(1, test.assert_some<int>(test.assert_ok<optional.Optional<int>>(typed.next())));
+        test.assert_err<optional.Optional<int>>(typed.next());
+        test.assert_equal<int>(3, test.assert_some<int>(test.assert_ok<optional.Optional<int>>(typed.next())));
+        test.assert_none<int>(test.assert_ok<optional.Optional<int>>(typed.next()));
+        test.assert_equal_string("TypedEventSource(u)", typed.to_string());
+    };
+);

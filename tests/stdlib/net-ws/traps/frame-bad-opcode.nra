@@ -1,0 +1,11 @@
+// status: 134
+// stderr: invalid argument: opcode
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let program = import:Std.Program;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new frames.Frame(true, false, false, false, 16, new);
+        return program.ExitCode.Ok;
+    };
+);

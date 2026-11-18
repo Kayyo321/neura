@@ -1,0 +1,146 @@
+let limits = import:Std.Net.Resilience.AdaptiveLimit;
+let durations = import:Std.Time.Duration;
+let float64s = import:Std.Core.Float64;
+let maths = import:Std.Math.Math;
+
+/// @brief A delay-based concurrency limit after TCP Vegas (L. Brakmo and L. Peterson, "TCP Vegas: End to End
+/// Congestion Avoidance on a Global Internet", IEEE JSAC 13(8), 1995) as adapted by `VegasLimit` in Netflix's
+/// concurrency-limits library.
+///
+/// Vegas compares the expected throughput `limit / rtt_noload` with the actual `limit / rtt`; their difference times
+/// `rtt_noload` estimates how many requests are queued. With `log(x) = max(1, floor(log10(x)))` and `L` the current
+/// estimate (`int(L)` its integer part), each sample does:
+///
+/// 1. `rtt_noload` is the smallest RTT seen (since creation or `reset_rtt_noload`). A sample below it, or the first
+///    sample, only lowers `rtt_noload`.
+/// 2. `queue = ceil(L * (1 - rtt_noload / rtt))`.
+/// 3. If dropped: `new = L - log(int(L))`. Otherwise, if `in_flight * 2 < L` the client is not using its limit and
+///    nothing changes. Otherwise, with `alpha`, `beta` (defaults `3 * log(int(L))` and `6 * log(int(L))`) and
+///    `threshold = log(int(L))`: `queue <= threshold` gives `new = L + beta`; `queue < alpha` gives `new = L +
+///    log(int(L))`; `queue > beta` gives `new = L - log(int(L))`; otherwise nothing changes.
+/// 4. `new` is clamped to [min_limit, max_limit], then `L = (1 - smoothing) * L + smoothing * new`.
+///
+/// Netflix's version also re-probes `rtt_noload` after a random number of samples; this one re-probes only when
+/// `reset_rtt_noload` is called, so its behavior is deterministic.
+/// @see [Std.Net.Resilience.VegasLimit](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-VegasLimit)
+#Since("0.3.0")
+export let VegasLimit = module (
+    /// @brief A TCP Vegas style adaptive limit.
+    #[Final, NotThreadSafe]
+    export let VegasLimit = class implements limits.AdaptiveLimit (
+        /// @brief The smallest limit.
+        last min_limit: int;
+        /// @brief The largest limit.
+        last max_limit: int;
+        /// @brief The weight of a new limit, in (0, 1].
+        last smoothing: float64;
+        /// @brief A fixed alpha, or 0 for `3 * log(limit)`.
+        last fixed_alpha: int;
+        /// @brief A fixed beta, or 0 for `6 * log(limit)`.
+        last fixed_beta: int;
+        /// @brief The current estimate.
+        let estimate: float64;
+        /// @brief The no-load RTT in nanoseconds, 0 before the first sample.
+        let rtt_noload: int64 = 0;
+
+        /// @brief A limit starting at `initial`. Traps with "invalid argument: <name>" unless 1 <= min <= initial
+        /// <= max, 0 < smoothing <= 1, and alpha and beta are both 0 (the defaults) or 0 < alpha <= beta.
+        export let init = func(initial: int, minimum: int, maximum: int, weight: float64, alpha: int, beta: int) {
+            if (minimum < 1 || minimum > maximum) {
+                trap_with_message("invalid argument: min_limit");
+            }
+            if (initial < minimum || initial > maximum) {
+                trap_with_message("invalid argument: initial_limit");
+            }
+            if (!(weight > 0.0 && weight <= 1.0)) {
+                trap_with_message("invalid argument: smoothing");
+            }
+            if (!((alpha == 0 && beta == 0) || (alpha > 0 && alpha <= beta))) {
+                trap_with_message("invalid argument: alpha");
+            }
+            min_limit = minimum;
+            max_limit = maximum;
+            smoothing = weight;
+            fixed_alpha = alpha;
+            fixed_beta = beta;
+            estimate = initial as float64;
+        };
+
+        /// @brief The integer part of the estimate.
+        export let limit = func -> int => estimate as int;
+
+        /// @brief The estimate with its fraction.
+        export let estimated = func -> float64 => estimate;
+
+        /// @brief The no-load RTT, zero before the first sample.
+        export let rtt_no_load = func -> durations.Duration => durations.of_nanos(rtt_noload);
+
+        /// @brief Updates the estimate as described for the module. A non-positive RTT traps with "invalid argument:
+        /// rtt".
+        export let on_sample = func(rtt: durations.Duration, in_flight: int, dropped: bool) {
+            last sample = rtt.to_nanos();
+            if (sample <= 0) {
+                trap_with_message("invalid argument: rtt");
+            }
+            if (rtt_noload == 0 || sample < rtt_noload) {
+                rtt_noload = sample;
+                return;
+            }
+            last current = estimate as int;
+            last queue = float64s.ceil(estimate * (1.0 - (rtt_noload as float64) / (sample as float64)));
+            last step = log(current) as float64;
+            let next = estimate;
+            if (dropped) {
+                next = estimate - step;
+            } else {
+                if ((in_flight as float64) * 2.0 < estimate) {
+                    return;
+                }
+                last alpha = (fixed_alpha == 0 ? 3 * log(current) : fixed_alpha) as float64;
+                last beta = (fixed_beta == 0 ? 6 * log(current) : fixed_beta) as float64;
+                if (queue <= step) {
+                    next = estimate + beta;
+                } else if (queue < alpha) {
+                    next = estimate + step;
+                } else if (queue > beta) {
+                    next = estimate - step;
+                } else {
+                    return;
+                }
+            }
+            next = float64s.max(min_limit as float64, float64s.min(max_limit as float64, next));
+            estimate = (1.0 - smoothing) * estimate + smoothing * next;
+        };
+
+        /// @brief Forgets the no-load RTT; the next sample sets it again.
+        export let reset_rtt_noload = func {
+            rtt_noload = 0;
+        };
+
+        /// @brief Text such as "VegasLimit(limit 20)".
+        export let.override to_string = func -> string => "VegasLimit(limit " + limit().to_string() + ")";
+
+        /// @brief max(1, floor(log10(x))).
+        let log = func(x: int) -> int {
+            if (x < 10) {
+                return 1;
+            }
+            last value = maths.log10(x as float64) as int;
+            return value < 1 ? 1 : value;
+        };
+    );
+
+    /// @brief Netflix's defaults: initial 20, min 1, max 1000, smoothing 1, alpha `3 * log(L)`, beta `6 * log(L)`.
+    #NoDiscard
+    export let create = func -> VegasLimit => new VegasLimit(20, 1, 1000, 1.0, 0, 0);
+
+    /// @brief A limit with the default alpha and beta.
+    #NoDiscard
+    export let of = func(initial: int, min_limit: int, max_limit: int, smoothing: float64) -> VegasLimit =>
+        new VegasLimit(initial, min_limit, max_limit, smoothing, 0, 0);
+
+    /// @brief A limit with fixed queue thresholds, as in classic TCP Vegas.
+    #NoDiscard
+    export let with_thresholds = func(initial: int, min_limit: int, max_limit: int, smoothing: float64, alpha: int,
+        beta: int) -> VegasLimit => new VegasLimit(initial, min_limit, max_limit, smoothing, alpha, beta);
+);

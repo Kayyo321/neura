@@ -1,0 +1,80 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Net.Listener;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Core.UnixAddr;
+let.promote _ = import:Std.Net.Socket.UnixStream;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A `Std.Net.Listener` of `UnixStream`s bound to a Unix-domain address, including the Linux abstract
+/// namespace. Needs the net capability.
+///
+/// `bind` uses the host's `neura.net.unix.listen`; the host refuses a path that already exists. Accepting uses the host's shared accept
+/// service. Closing does not remove the socket file. After close, `accept` fails with Closed.
+/// @see [Std.Net.Socket.UnixListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UnixListener)
+#Since("0.3.0")
+export let UnixListener = module (
+    /// @brief A listening Unix-domain stream socket.
+    #[Final, NoDiscard(reason: "a listener must be closed"), NotThreadSafe]
+    export let UnixListener = class implements Listener<UnixAddr, UnixStream> (
+        /// @brief The host's listener ID.
+        last id: int64;
+        /// @brief The bound address.
+        last bound: UnixAddr;
+        /// @brief Tracks whether the listener may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `bind`; the ID comes from the library.
+        export let init = func(opened: int64, address: UnixAddr) {
+            id = opened;
+            bound = address;
+        };
+
+        /// @brief The bound address.
+        export let address = func -> UnixAddr => bound;
+
+        /// @brief Waits for the next connection; its local address is this listener's and its peer is unknown.
+        #NoDiscard
+        export let accept = func -> Result<UnixStream> {
+            if (!open_now) {
+                return Result<UnixStream>.Err(bytes.closed("listener", bound.to_string()));
+            }
+            return match (host.accept(id)) {
+                host.IdOutcome.Ok(accepted) => Result<UnixStream>.Ok(new UnixStream(
+                    new socket.Handle(accepted, bound.to_string()), Optional<UnixAddr>.None,
+                    Optional<UnixAddr>.Some(bound))),
+                host.IdOutcome.Error(code) => Result<UnixStream>.Err(
+                    host_error.io(code, "accept failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Releases the listener. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            if (!open_now) {
+                return bytes.ok();
+            }
+            open_now = false;
+            return match (host.close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(
+                    host_error.io(code, "listener close failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Text such as "UnixListener(/run/app.sock)".
+        export let.override to_string = func -> string => "UnixListener(" + bound.to_string() + ")";
+    );
+
+    /// @brief Listens on `address`.
+    #NoDiscard
+    export let bind = func(address: UnixAddr) -> Result<UnixListener> {
+        last text = address.to_string();
+        return match (host.unix_listen(text)) {
+            host.IdOutcome.Ok(id) => Result<UnixListener>.Ok(new UnixListener(id, address)),
+            host.IdOutcome.Error(code) => Result<UnixListener>.Err(host_error.io(code, "bind failed", text)),
+        };
+    };
+);

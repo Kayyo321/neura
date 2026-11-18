@@ -1,0 +1,431 @@
+let crcs = import:Std.Net.Mesh.Crc32c;
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let ips = import:Std.Net.Core.IpAddr;
+let optional = import:Std.Core.Optional;
+let pp = import:Std.Net.Mesh.ProxyProtocol;
+let result = import:Std.Core.Result;
+let sockets = import:Std.Net.Core.SocketAddr;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unixes = import:Std.Net.Core.UnixAddr;
+
+// CRC32C and the PROXY protocol codec.
+//
+// Version 1 lines come from the HAProxy text proxy-protocol.txt (HAProxy 2.9, fetched to
+// neura-gate/030/std-net/rfc/haproxy-proxy-protocol-2.9.txt), section 2.1. Version 2 headers were generated with
+// `python3 -I gen.py`, where gen.py is exactly:
+//
+//   import struct, ipaddress
+//   S = b'\r\n\r\n\x00\r\nQUIT\n'
+//   def hdr(vc, fam, body): return S + struct.pack('!BBH', vc, fam, len(body)) + body
+//   def tlv(t, v): return struct.pack('!BH', t, len(v)) + v
+//   def crc32c(d):
+//       c = 0xFFFFFFFF
+//       for b in d:
+//           c ^= b
+//           for _ in range(8): c = (c >> 1) ^ 0x82F63B78 if c & 1 else c >> 1
+//       return c ^ 0xFFFFFFFF
+//   assert crc32c(bytes(32)) == 0x8A9136AA  # RFC 3720 B.4: aa 36 91 8a
+//   v4 = lambda a: ipaddress.IPv4Address(a).packed
+//   v6 = lambda a: ipaddress.IPv6Address(a).packed
+//   print('tcp4', hdr(0x21, 0x11, v4('192.168.0.1') + v4('192.168.0.11') + struct.pack('!HH', 56324, 443)).hex())
+//   print('tcp6', hdr(0x21, 0x21, v6('2001:db8::1') + v6('2001:db8::2') + struct.pack('!HH', 1234, 443)).hex())
+//   print('udp4', hdr(0x21, 0x12, v4('10.0.0.1') + v4('10.0.0.2') + struct.pack('!HH', 53, 5353)).hex())
+//   print('local', hdr(0x20, 0x00, b'').hex())
+//   print('unix', hdr(0x21, 0x31, b'/tmp/a.sock'.ljust(108, b'\0') + b'\0svc'.ljust(108, b'\0')).hex())
+//   ssl = tlv(0x20, struct.pack('!BI', 7, 0) + tlv(0x21, b'TLSv1.3') + tlv(0x22, b'example.com')
+//       + tlv(0x23, b'ECDHE-RSA-AES128-GCM-SHA256') + tlv(0x24, b'SHA256') + tlv(0x25, b'RSA2048'))
+//   body = v4('192.168.0.1') + v4('192.168.0.11') + struct.pack('!HH', 56324, 443) + tlv(1, b'h2')
+//       + tlv(2, b'example.com') + tlv(5, b'\x01\x02\x03\x04') + ssl + tlv(0x30, b'blue') + tlv(4, b'\0\0\0')
+//       + tlv(0xE0, b'x') + tlv(3, b'\0\0\0\0')
+//   h = bytearray(hdr(0x21, 0x11, body)); h[-4:] = struct.pack('!I', crc32c(bytes(h)))
+//   print('tlvs', bytes(h).hex())
+//
+// (The `ssl =` and `body =` lines are each one line in gen.py; they are wrapped here.)
+let ProxyProtocolTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let ascii = func(text: string) -> uint8[list] => strings.to_bytes(text);
+
+    let repeated = func(value: uint8, count: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(value);
+        }
+        return out;
+    };
+
+    let Tcp4 = "0d0a0d0a000d0a515549540a2111000cc0a80001c0a8000bdc0401bb";
+    let Tcp6 = "0d0a0d0a000d0a515549540a2121002420010db800000000000000000000000120010db800000000000000000000000204d201bb";
+    let Udp4 = "0d0a0d0a000d0a515549540a2112000c0a0000010a000002003514e9";
+    let Local = "0d0a0d0a000d0a515549540a20000000";
+    let Tlvs = "0d0a0d0a000d0a515549540a2111008fc0a80001c0a8000bdc0401bb010002683202000b6578616d706c652e636f6d050004"
+        + "0102030420004e0700000000210007544c5376312e3322000b6578616d706c652e636f6d23001b45434448452d5253412d41"
+        + "45533132382d47434d2d53484132353624000653484132353625000752534132303438300004626c75650400030000"
+        + "00e0000178030004bede8467";
+
+    // The Unix header: "/tmp/a.sock" and the abstract name "svc", each padded with NULs to 108 bytes.
+    let unix_header = func -> uint8[list] {
+        last out = bytes_of("0d0a0d0a000d0a515549540a213100d8");
+        last a = ascii("/tmp/a.sock");
+        for (let b in a) {
+            out.append(b);
+        }
+        for (let b in repeated(0, 108 - a.length)) {
+            out.append(b);
+        }
+        out.append(0);
+        for (let b in ascii("svc")) {
+            out.append(b);
+        }
+        for (let b in repeated(0, 104)) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    let parse_kind = func(e: errors.Error) -> string => match (e) {
+        errors.Error.Parse { kind, offset, message } => errors.parse_kind_name(kind) + "@" + offset.to_string(),
+        errors.Error.Io { kind, message, path } => "io",
+        errors.Error.Encoding { offset, message } => "encoding",
+        errors.Error.Custom(detail) => detail.code(),
+        errors.Error.Context { message, cause } => "context",
+    };
+
+    let source_text = func(h: pp.ProxyHeader) -> string =>
+        test.assert_some<sockets.SocketAddr>(h.source()).to_string();
+
+    let destination_text = func(h: pp.ProxyHeader) -> string =>
+        test.assert_some<sockets.SocketAddr>(h.destination()).to_string();
+
+    // RFC 3720 appendix B.4 prints each CRC as the bytes sent, least significant first; the values below are
+    // those bytes read little-endian (aa 36 91 8a -> 0x8A9136AA = 2324772522).
+    export let test_crc32c_rfc3720_vectors = func {
+        test.assert_equal<uint32>(2324772522, crcs.of(repeated(0, 32)));
+        // 43 ab a8 62 -> 0x62A8AB43
+        test.assert_equal<uint32>(1655221059, crcs.of(repeated(255, 32)));
+        last up: uint8[list] = new;
+        last down: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            up.append(i as uint8);
+            down.append((31 - i) as uint8);
+        }
+        // 4e 79 dd 46 -> 0x46DD794E
+        test.assert_equal<uint32>(1188919630, crcs.of(up));
+        // 5c db 3f 11 -> 0x113FDB5C
+        test.assert_equal<uint32>(289397596, crcs.of(down));
+        // The iSCSI SCSI Read (10) Command PDU: 56 3a 96 d9 -> 0xD9963A56
+        last pdu = bytes_of("01c000000000000000000000000000001400000000000400000000140000001828000000000000000200000000000000");
+        test.assert_equal<uint32>(3650501206, crcs.of(pdu));
+        // of_range over the 32 zero bytes inside a longer list.
+        last framed = repeated(0, 34);
+        framed[0] = 9;
+        framed[33] = 9;
+        test.assert_equal<uint32>(2324772522, crcs.of_range(framed, 1, 33));
+    };
+
+    // proxy-protocol.txt section 2.1: "PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n".
+    export let test_v1_tcp4_example = func {
+        last line = "PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n";
+        last bytes = ascii(line + "GET / HTTP/1.1\r\n");
+        last h = test.assert_ok<pp.ProxyHeader>(pp.parse(bytes));
+        test.assert_equal<int>(1, h.version);
+        test.assert_equal_bool(false, h.is_local());
+        test.assert_equal_string("192.168.0.1:56324", source_text(h));
+        test.assert_equal_string("192.168.0.11:443", destination_text(h));
+        test.assert_equal_string(line, test.assert_ok<string>(pp.encode_v1(h)));
+        test.assert_equal_string("ProxyHeader(v1 PROXY STREAM 192.168.0.1:56324 -> 192.168.0.11:443, 0 TLVs)",
+            h.to_string());
+        test.assert_equal<pp.Detection>(pp.Detection.V1, pp.detect(bytes));
+    };
+
+    // Section 2.1 maximum lengths: the TCP4 worst case is 56 bytes, the TCP6 one 104 and UNKNOWN 15.
+    export let test_v1_maximum_lines = func {
+        last v4line = "PROXY TCP4 255.255.255.255 255.255.255.255 65535 65535\r\n";
+        test.assert_equal<int>(56, v4line.byte_length);
+        last h4 = test.assert_ok<pp.ProxyHeader>(pp.parse(ascii(v4line)));
+        test.assert_equal_string(v4line, test.assert_ok<string>(pp.encode_v1(h4)));
+        last full = "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
+        last v6line = "PROXY TCP6 " + full + " " + full + " 65535 65535\r\n";
+        test.assert_equal<int>(104, v6line.byte_length);
+        last h6 = test.assert_ok<pp.ProxyHeader>(pp.parse(ascii(v6line)));
+        test.assert_equal_string(v6line, test.assert_ok<string>(pp.encode_v1(h6)));
+        last unknown = test.assert_ok<pp.ProxyHeader>(pp.parse(ascii("PROXY UNKNOWN\r\n")));
+        test.assert_equal<int>(15, test.assert_ok<string>(pp.encode_v1(unknown)).byte_length);
+        test.assert_none<sockets.SocketAddr>(unknown.source());
+        // The worst case: UNKNOWN followed by addresses, 107 bytes; the rest of the line is ignored.
+        last worst = "PROXY UNKNOWN " + full + " " + full + " 65535 65535\r\n";
+        test.assert_equal<int>(107, worst.byte_length);
+        test.assert_equal_bool(true, unknown.equals(test.assert_ok<pp.ProxyHeader>(pp.parse(ascii(worst)))));
+    };
+
+    export let test_v1_tcp6_compressed_text = func {
+        last h = test.assert_ok<pp.ProxyHeader>(pp.parse(ascii("PROXY TCP6 2001:DB8::1 ::ffff:0:1 1 2\r\n")));
+        test.assert_equal_string("PROXY TCP6 2001:db8::1 ::ffff:0:1 1 2\r\n", test.assert_ok<string>(pp.encode_v1(h)));
+        // A mapped address is written as groups, never in the dotted form.
+        last mapped = test.assert_ok<pp.ProxyHeader>(pp.parse(ascii("PROXY TCP6 ::ffff:c000:201 ::1 80 81\r\n")));
+        test.assert_equal_string("PROXY TCP6 ::ffff:c000:201 ::1 80 81\r\n",
+            test.assert_ok<string>(pp.encode_v1(mapped)));
+    };
+
+    export let test_v1_rejections = func {
+        last cases: string[list] = new;
+        cases.append("PROXY TCP4 192.168.0.01 192.168.0.11 56324 443\r\n"); // leading zero in an octet
+        cases.append("PROXY TCP4 192.168.0.1 192.168.0.11 056324 443\r\n"); // leading zero in a port
+        cases.append("PROXY TCP4 192.168.0.1 192.168.0.11 65536 443\r\n"); // port above 65535
+        cases.append("PROXY TCP4 192.168.0.1  192.168.0.11 56324 443\r\n"); // two spaces
+        cases.append("PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\n"); // lone LF
+        cases.append("PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\rX"); // lone CR
+        cases.append("PROXY TCP4 ::1 ::1 1 2\r\n"); // wrong family for TCP4
+        cases.append("PROXY TCP6 1.2.3.4 1.2.3.4 1 2\r\n"); // wrong family for TCP6
+        cases.append("PROXY TCP6 ::ffff:1.2.3.4 ::1 1 2\r\n"); // dotted tail
+        cases.append("PROXY TCP6 fe80::1%eth0 ::1 1 2\r\n"); // zone
+        cases.append("PROXY UDP4 1.2.3.4 1.2.3.4 1 2\r\n"); // unknown protocol
+        cases.append("PROXY TCP4 1.2.3.4 1.2.3.4 1\r\n"); // missing port
+        for (let c in cases) {
+            last e = test.assert_err<pp.ProxyHeader>(pp.parse(ascii(c)));
+            test.assert_with(strings.starts_with(parse_kind(e), "Syntax@"), c);
+        }
+        // No CRLF within 107 bytes.
+        last long_line = "PROXY UNKNOWN " + strings.repeat("a", 100);
+        test.assert_equal_string("Syntax@107", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(ascii(long_line)))));
+        // A CRLF ending at byte 108 is one byte too long.
+        last over = "PROXY UNKNOWN " + strings.repeat("a", 92) + "\r\n";
+        test.assert_equal<int>(108, over.byte_length);
+        test.assert_err<pp.ProxyHeader>(pp.parse(ascii(over)));
+        // Something else entirely.
+        test.assert_equal_string("Syntax@0", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(ascii("GET / HTTP/1.1\r\n")))));
+        test.assert_equal<pp.Detection>(pp.Detection.NotProxy, pp.detect(ascii("PROXZ")));
+        test.assert_equal<pp.Detection>(pp.Detection.NeedMore, pp.detect(ascii("PROX")));
+        // Incomplete but plausible.
+        test.assert_equal_string("UnexpectedEnd@20",
+            parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(ascii("PROXY TCP4 192.168.0")))));
+        // Version 1 cannot say LOCAL, Unix or UDP.
+        test.assert_err<string>(pp.encode_v1(pp.local(new)));
+        test.assert_err<string>(pp.encode_v1(test.assert_ok<pp.ProxyHeader>(pp.parse(bytes_of(Udp4)))));
+        test.assert_err<string>(pp.encode_v1(test.assert_ok<pp.ProxyHeader>(pp.parse(unix_header()))));
+    };
+
+    export let test_v2_tcp4_and_tcp6 = func {
+        last h4 = test.assert_ok<pp.ProxyHeader>(pp.parse(bytes_of(Tcp4)));
+        test.assert_equal<int>(2, h4.version);
+        test.assert_equal<pp.Transport>(pp.Transport.Stream, h4.transport);
+        test.assert_equal_string("192.168.0.1:56324", source_text(h4));
+        test.assert_equal_string("192.168.0.11:443", destination_text(h4));
+        test.assert_equal_string(Tcp4, hex.encode(test.assert_ok<uint8[list]>(pp.encode(h4, false))));
+        last built = pp.tcp(2, test.assert_ok<sockets.SocketAddr>(sockets.parse("192.168.0.1:56324")),
+            test.assert_ok<sockets.SocketAddr>(sockets.parse("192.168.0.11:443")));
+        test.assert_equal_bool(true, built.equals(h4));
+        test.assert_equal<uint32>(built.hash_code(), h4.hash_code());
+        last h6 = test.assert_ok<pp.ProxyHeader>(pp.parse(bytes_of(Tcp6)));
+        test.assert_equal_string("[2001:db8::1]:1234", source_text(h6));
+        test.assert_equal_string("[2001:db8::2]:443", destination_text(h6));
+        test.assert_equal_string(Tcp6, hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(h6, false))));
+        last udp = test.assert_ok<pp.ProxyHeader>(pp.parse(bytes_of(Udp4)));
+        test.assert_equal<pp.Transport>(pp.Transport.Dgram, udp.transport);
+        test.assert_equal_string("10.0.0.1:53", source_text(udp));
+        test.assert_equal_string(Udp4, hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(udp, false))));
+        // The same addresses in version 1 form.
+        test.assert_equal_string("PROXY TCP4 192.168.0.1 192.168.0.11 56324 443\r\n",
+            test.assert_ok<string>(pp.encode_v1(h4)));
+    };
+
+    export let test_v2_local = func {
+        last h = test.assert_ok<pp.ProxyHeader>(pp.parse(bytes_of(Local)));
+        test.assert_equal_bool(true, h.is_local());
+        test.assert_none<sockets.SocketAddr>(h.source());
+        test.assert_equal_string(Local, hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(pp.local(new), false))));
+        // LOCAL with an INET family and addresses: the address block is skipped and ignored (section 2.2).
+        last odd = bytes_of(Tcp4);
+        odd[12] = 32;
+        last parsed = test.assert_ok<pp.ProxyHeader>(pp.parse(odd));
+        test.assert_equal_bool(true, parsed.is_local());
+        test.assert_none<sockets.SocketAddr>(parsed.source());
+    };
+
+    export let test_v2_unix = func {
+        last h = test.assert_ok<pp.ProxyHeader>(pp.parse(unix_header()));
+        test.assert_equal_string("ProxyHeader(v2 PROXY STREAM /tmp/a.sock -> @svc, 0 TLVs)", h.to_string());
+        test.assert_none<sockets.SocketAddr>(h.source());
+        test.assert_equal_string(hex.encode(unix_header()), hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(h, false))));
+        // All-zero addresses are unnamed sockets.
+        last zero = bytes_of("0d0a0d0a000d0a515549540a213100d8");
+        for (let b in repeated(0, 216)) {
+            zero.append(b);
+        }
+        last unnamed = test.assert_ok<pp.ProxyHeader>(pp.parse(zero));
+        test.assert_equal_string("ProxyHeader(v2 PROXY STREAM unnamed -> unnamed, 0 TLVs)", unnamed.to_string());
+        test.assert_equal_string(hex.encode(zero), hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(unnamed, false))));
+        // A 108-byte path with no NUL is rejected, not trapped on.
+        last full = bytes_of("0d0a0d0a000d0a515549540a213100d8");
+        for (let b in repeated(97, 108)) {
+            full.append(b);
+        }
+        for (let b in repeated(0, 108)) {
+            full.append(b);
+        }
+        test.assert_equal_string("Syntax@16", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(full))));
+        // A 107-byte path with its NUL is the longest accepted.
+        full[16 + 107] = 0;
+        last longest = test.assert_ok<pp.ProxyHeader>(pp.parse(full));
+        match (longest.addresses) {
+            pp.Addresses.Unix { source, destination } => {
+                test.assert_equal<int>(107, test.assert_some<unixes.UnixAddr>(source).path.byte_length);
+                test.assert_none<unixes.UnixAddr>(destination);
+            },
+            pp.Addresses.Unspecified => {
+                test.assert_with(false, "expected Unix addresses");
+            },
+            pp.Addresses.Inet { source, destination } => {
+                test.assert_with(false, "expected Unix addresses");
+            },
+        }
+    };
+
+    export let test_v2_tlvs = func {
+        last bytes = bytes_of(Tlvs);
+        last h = test.assert_ok<pp.ProxyHeader>(pp.parse(bytes));
+        test.assert_equal<int>(8, h.tlvs.length);
+        test.assert_equal_string("h2", strings.from_bytes_lossy(test.assert_some<uint8[list]>(h.alpn())));
+        test.assert_equal_string("example.com", test.assert_some<string>(h.authority()));
+        test.assert_equal_string("01020304", hex.encode(test.assert_some<uint8[list]>(h.unique_id())));
+        test.assert_equal_string("blue", test.assert_some<string>(h.netns()));
+        // 0xbede8467
+        test.assert_equal<uint32>(3202253927, test.assert_some<uint32>(h.crc32c()));
+        last ssl = test.assert_some<pp.SslInfo>(h.ssl());
+        test.assert_equal_bool(true, ssl.is_tls());
+        test.assert_equal_bool(true, ssl.cert_on_connection());
+        test.assert_equal_bool(true, ssl.cert_in_session());
+        test.assert_equal_bool(true, ssl.verified());
+        test.assert_equal_string("TLSv1.3", test.assert_some<string>(ssl.version()));
+        test.assert_equal_string("example.com", test.assert_some<string>(ssl.common_name()));
+        test.assert_equal_string("ECDHE-RSA-AES128-GCM-SHA256", test.assert_some<string>(ssl.cipher()));
+        test.assert_equal_string("SHA256", test.assert_some<string>(ssl.signature_algorithm()));
+        test.assert_equal_string("RSA2048", test.assert_some<string>(ssl.key_algorithm()));
+        // The custom 0xE0 TLV is kept raw.
+        test.assert_equal_string("x", strings.from_bytes_lossy(test.assert_some<uint8[list]>(h.tlv(224))));
+        // Re-encoding with a fresh CRC gives the generated bytes again.
+        test.assert_equal_string(Tlvs, hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(h, true))));
+        // Building the same header from parts.
+        last tlvs: pp.Tlv[list] = new;
+        tlvs.append(pp.text_tlv(pp.TypeAlpn, "h2"));
+        tlvs.append(pp.text_tlv(pp.TypeAuthority, "example.com"));
+        tlvs.append(new pp.Tlv(pp.TypeUniqueId, bytes_of("01020304")));
+        last subs: pp.Tlv[list] = new;
+        subs.append(pp.text_tlv(pp.SubtypeSslVersion, "TLSv1.3"));
+        subs.append(pp.text_tlv(pp.SubtypeSslCn, "example.com"));
+        subs.append(pp.text_tlv(pp.SubtypeSslCipher, "ECDHE-RSA-AES128-GCM-SHA256"));
+        subs.append(pp.text_tlv(pp.SubtypeSslSigAlg, "SHA256"));
+        subs.append(pp.text_tlv(pp.SubtypeSslKeyAlg, "RSA2048"));
+        tlvs.append(new pp.SslInfo(pp.ClientSsl + pp.ClientCertConn + pp.ClientCertSess, 0, subs).to_tlv());
+        tlvs.append(pp.text_tlv(pp.TypeNetns, "blue"));
+        tlvs.append(new pp.Tlv(pp.TypeNoop, repeated(0, 3)));
+        tlvs.append(pp.text_tlv(224, "x"));
+        last built = pp.v2(pp.Transport.Stream, h.addresses, tlvs);
+        test.assert_equal_string(Tlvs, hex.encode(test.assert_ok<uint8[list]>(pp.encode_v2(built, true))));
+        test.assert_equal_bool(false, built.equals(h)); // h also holds the CRC TLV
+    };
+
+    export let test_v2_rejections = func {
+        // A flipped address byte breaks the CRC.
+        last bad_crc = bytes_of(Tlvs);
+        bad_crc[16] = 193;
+        test.assert_equal_string("Syntax@152", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(bad_crc))));
+        // Version 1 in the version nibble.
+        last bad_version = bytes_of(Tcp4);
+        bad_version[12] = 17;
+        test.assert_equal_string("Syntax@0", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(bad_version))));
+        // Unassigned command 2.
+        last bad_command = bytes_of(Tcp4);
+        bad_command[12] = 34;
+        test.assert_equal_string("Syntax@12", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(bad_command))));
+        // Family 4, protocol 3.
+        last bad_family = bytes_of(Tcp4);
+        bad_family[13] = 65;
+        test.assert_equal_string("Syntax@13", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(bad_family))));
+        bad_family[13] = 19;
+        test.assert_equal_string("Syntax@13", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(bad_family))));
+        // An INET header whose length (11) cannot hold the 12 address bytes.
+        last short_block = bytes_of("0d0a0d0a000d0a515549540a2111000bc0a80001c0a8000bdc0401");
+        test.assert_equal_string("Syntax@14", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(short_block))));
+        // A TLV that runs past the header.
+        last runs_past = bytes_of("0d0a0d0a000d0a515549540a20000004010005ff");
+        test.assert_equal_string("UnexpectedEnd@16", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(runs_past))));
+        // A unique id of 129 bytes.
+        last long_id = bytes_of("0d0a0d0a000d0a515549540a20000084050081");
+        for (let b in repeated(1, 129)) {
+            long_id.append(b);
+        }
+        test.assert_equal_string("OutOfRange@16", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(long_id))));
+        // An SSL TLV shorter than its 5 fixed bytes.
+        last short_ssl = bytes_of("0d0a0d0a000d0a515549540a200000052000020700");
+        test.assert_equal_string("UnexpectedEnd@19", parse_kind(test.assert_err<pp.ProxyHeader>(pp.parse(short_ssl))));
+        // Not the signature.
+        test.assert_equal<pp.Detection>(pp.Detection.NotProxy, pp.detect(bytes_of("0d0a0d0b")));
+        test.assert_equal<pp.Detection>(pp.Detection.NeedMore, pp.detect(bytes_of("0d0a0d0a000d0a5155")));
+        // Encoding refuses mixed families and addresses without a transport.
+        last mixed = pp.v2(pp.Transport.Stream, pp.Addresses.Inet {
+            source: test.assert_ok<sockets.SocketAddr>(sockets.parse("1.2.3.4:1")),
+            destination: test.assert_ok<sockets.SocketAddr>(sockets.parse("[::1]:2")),
+        }, new);
+        test.assert_err<uint8[list]>(pp.encode_v2(mixed, false));
+        test.assert_err<string>(pp.encode_v1(mixed));
+        last untyped = pp.v2(pp.Transport.Unspec, test.assert_ok<pp.ProxyHeader>(pp.parse(bytes_of(Tcp4))).addresses,
+            new);
+        test.assert_err<uint8[list]>(pp.encode_v2(untyped, false));
+    };
+
+    export let test_decoder_over_chunks = func {
+        last stream = bytes_of(Tcp4);
+        for (let b in ascii("hello")) {
+            stream.append(b);
+        }
+        last decoder = new pp.ProxyDecoder();
+        test.assert_equal<int>(8, decoder.needed());
+        let got = false;
+        for (let i = 0; i < stream.length; i++) {
+            last one: uint8[list] = new;
+            one.append(stream[i]);
+            decoder.push(one);
+            last step = test.assert_ok<optional.Optional<pp.ProxyHeader>>(decoder.next());
+            match (step) {
+                optional.Optional.Some(h) => {
+                    if (!got) {
+                        test.assert_equal<int>(27, i);
+                        test.assert_equal_string("192.168.0.1:56324", source_text(h));
+                    }
+                    got = true;
+                },
+                optional.Optional.None => {
+                    test.assert_equal_bool(false, got);
+                    if (i == 7) {
+                        test.assert_equal<int>(8, decoder.needed());
+                    }
+                    if (i == 15) {
+                        test.assert_equal<int>(12, decoder.needed());
+                    }
+                },
+            }
+        }
+        test.assert_equal_bool(true, got);
+        test.assert_equal_string("hello", strings.from_bytes_lossy(decoder.remaining()));
+        test.assert_equal<int>(0, decoder.needed());
+        // A version 1 line in two chunks: the line ends inside the second.
+        last v1 = new pp.ProxyDecoder();
+        v1.push(ascii("PROXY TCP4 192.168.0.1 19"));
+        test.assert_none<pp.ProxyHeader>(test.assert_ok<optional.Optional<pp.ProxyHeader>>(v1.next()));
+        test.assert_equal<int>(1, v1.needed());
+        v1.push(ascii("2.168.0.11 56324 443\r\nGET"));
+        test.assert_some<pp.ProxyHeader>(test.assert_ok<optional.Optional<pp.ProxyHeader>>(v1.next()));
+        test.assert_equal_string("GET", strings.from_bytes_lossy(v1.remaining()));
+        // A failure is sticky.
+        last bad = new pp.ProxyDecoder();
+        bad.push(ascii("SSH-2.0"));
+        test.assert_err<optional.Optional<pp.ProxyHeader>>(bad.next());
+        bad.push(ascii("PROXY UNKNOWN\r\n"));
+        test.assert_err<optional.Optional<pp.ProxyHeader>>(bad.next());
+        test.assert_equal<int>(0, bad.needed());
+        test.assert_equal_string("ProxyDecoder(22 bytes buffered)", bad.to_string());
+    };
+);

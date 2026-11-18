@@ -77,7 +77,7 @@ export let Codec = module (
             if (carrier == Carrier.Bool || carrier == Carrier.Int8 || carrier == Carrier.UInt8 ||
                 carrier == Carrier.Int16 || carrier == Carrier.UInt16 || carrier == Carrier.Float32) {
                 trap_with_message("invalid argument: a variadic argument must be promoted to int, long, double, " +
-                                  "or an address");
+                    "or an address");
             }
         }
     };
@@ -205,7 +205,7 @@ export let Codec = module (
     /// @brief A signed argument as the integer carrier, when it fits.
     let integer_signed = func(value: int64, carrier: Carrier, layout: MemoryLayout) -> ForeignValue {
         if (value < 0 && (carrier == Carrier.UInt8 || carrier == Carrier.UInt16 || carrier == Carrier.UInt32 ||
-                          carrier == Carrier.UInt64)) {
+            carrier == Carrier.UInt64)) {
             return unfit(layout);
         }
         return (value < 0) ? fitted(value, carrier, layout) : integer_unsigned(value as uint64, carrier, layout);
@@ -261,51 +261,75 @@ export let Codec = module (
         last size = carrier_size(carrier) as int;
         match (value) {
             ForeignValue.Bool(v) => {
-                if (carrier != Carrier.Bool) { wrong(value, layout); }
+                if (carrier != Carrier.Bool) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, v ? 1 : 0, size);
             },
             ForeignValue.Int8(v) => {
-                if (carrier != Carrier.Int8) { wrong(value, layout); }
+                if (carrier != Carrier.Int8) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, native.signed_bits(v as int64), size);
             },
             ForeignValue.UInt8(v) => {
-                if (carrier != Carrier.UInt8) { wrong(value, layout); }
+                if (carrier != Carrier.UInt8) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, v as uint64, size);
             },
             ForeignValue.Int16(v) => {
-                if (carrier != Carrier.Int16) { wrong(value, layout); }
+                if (carrier != Carrier.Int16) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, native.signed_bits(v as int64), size);
             },
             ForeignValue.UInt16(v) => {
-                if (carrier != Carrier.UInt16) { wrong(value, layout); }
+                if (carrier != Carrier.UInt16) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, v as uint64, size);
             },
             ForeignValue.Int32(v) => {
-                if (carrier != Carrier.Int32) { wrong(value, layout); }
+                if (carrier != Carrier.Int32) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, native.signed_bits(v as int64), size);
             },
             ForeignValue.UInt32(v) => {
-                if (carrier != Carrier.UInt32) { wrong(value, layout); }
+                if (carrier != Carrier.UInt32) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, v as uint64, size);
             },
             ForeignValue.Int64(v) => {
-                if (carrier != Carrier.Int64) { wrong(value, layout); }
+                if (carrier != Carrier.Int64) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, native.signed_bits(v), size);
             },
             ForeignValue.UInt64(v) => {
-                if (carrier != Carrier.UInt64) { wrong(value, layout); }
+                if (carrier != Carrier.UInt64) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, v, size);
             },
             ForeignValue.Float32(v) => {
-                if (carrier != Carrier.Float32) { wrong(value, layout); }
+                if (carrier != Carrier.Float32) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, float32s.to_bits(v) as uint64, size);
             },
             ForeignValue.Float64(v) => {
-                if (carrier != Carrier.Float64) { wrong(value, layout); }
+                if (carrier != Carrier.Float64) {
+                    wrong(value, layout);
+                }
                 native.put(bytes, float64s.to_bits(v), size);
             },
             ForeignValue.Address(segment) => {
-                if (carrier != Carrier.Address) { wrong(value, layout); }
+                if (carrier != Carrier.Address) {
+                    wrong(value, layout);
+                }
                 if (!segment.is_null()) {
                     segment.scope().check_alive();
                 }

@@ -28,15 +28,15 @@ export let Linker = module (
         #Pure
         export let downcall_handle = func(symbol: MemorySegment, descriptor: FunctionDescriptor) -> MethodHandle =>
             new(symbol, descriptor, -1)
-        /// @brief A handle for a variadic C function such as printf. The descriptor lists every argument of the
-        /// calls the handle makes; arguments from `first_variadic` on are the variadic ones and must be promoted
-        /// layouts (int or wider integers, double, or addresses), as C's default argument promotions require.
-        or func(symbol: MemorySegment, descriptor: FunctionDescriptor, first_variadic: int) -> MethodHandle {
-            if (first_variadic < 0) {
-                trap_with_message("invalid argument: negative first variadic index");
-            }
-            return new(symbol, descriptor, first_variadic);
-        };
+            /// @brief A handle for a variadic C function such as printf. The descriptor lists every argument of the
+            /// calls the handle makes; arguments from `first_variadic` on are the variadic ones and must be promoted
+            /// layouts (int or wider integers, double, or addresses), as C's default argument promotions require.
+            or func(symbol: MemorySegment, descriptor: FunctionDescriptor, first_variadic: int) -> MethodHandle {
+                if (first_variadic < 0) {
+                    trap_with_message("invalid argument: negative first variadic index");
+                }
+                return new(symbol, descriptor, first_variadic);
+            };
 
         /// @brief A native function pointer that calls `target` with the C signature `descriptor` (Java's
         /// Linker.upcallStub), owned by `arena`. Native code may call it only during a downcall from this program
@@ -45,7 +45,7 @@ export let Linker = module (
         /// descriptor; a struct argument is a copy that lives until `target` returns. A trap in `target` ends the run
         /// when the downcall returns. A variadic signature cannot be an upcall.
         export let upcall_stub = func(target: func(ForeignValue[list]) -> ForeignValue,
-                                      descriptor: FunctionDescriptor, arena: Arena) -> MemorySegment {
+            descriptor: FunctionDescriptor, arena: Arena) -> MemorySegment {
             last signature = codec.signature(descriptor, -1);
             last stub = upcalls.register(target, descriptor);
             last address = native.create_upcall(arena.scope().id(), stub, signature);
@@ -61,7 +61,7 @@ export let Linker = module (
         /// None for any other name.
         export let canonical_layout = func(name: string) -> Optional<MemoryLayout> {
             last names = ["bool", "char", "short", "int", "long", "long long", "float", "double", "void*", "size_t",
-                         "wchar_t"];
+                "wchar_t"];
             for (let i = 0; i < names.length; i++) {
                 if (names[i] == name) {
                     return Optional<MemoryLayout>.Some(canonical(i).with_name(name));

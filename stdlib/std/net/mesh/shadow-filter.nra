@@ -1,0 +1,241 @@
+let channels = import:Std.Concurrent.Channel;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Net.Filter;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief Traffic mirroring: a filter that copies a configurable share of requests to a shadow service and answers
+/// from the primary service only.
+///
+/// Each request draws once from the injected `Std.Random.Random` (`next_int_below(10000)`); it is mirrored when the
+/// draw is below the rate in basis points (1 basis point is 0.01 %; `of_percent` converts). The shadow's answer is
+/// never returned to the caller and its errors do not affect the primary answer. Two forms exist, because a Neura
+/// task cannot outlive the scope that spawned it (Concurrency.md section 4) and a filter has no scope of its own
+/// that outlives a call:
+///
+/// - `ShadowFilter` never blocks the primary path. It offers each mirrored request to a bounded
+///   `Std.Concurrent.Channel` with `try_send` and drops it when the channel is full or closed (counted in
+///   `dropped`). The application runs `run_worker` as a task in its own scope, around the code that serves
+///   requests; the worker calls the shadow function for each request it receives until the channel is closed. The
+///   request type must be transferable (Concurrency.md section 5.1): strings, numbers, records or `#Immutable`
+///   classes of such fields, not an HTTP request object with a mutable header map. The compiler reports a
+///   violation at the program's use of the filter.
+/// - `ConcurrentShadowFilter` runs the shadow call as a task beside the primary call, inside one scope opened for
+///   that request. The primary call runs in the calling task at once, so the shadow adds no latency before the
+///   primary starts, but the filter returns only after both calls ended, because a scope waits for its tasks: a slow
+///   shadow delays the answer. The shadow function must be spawnable (see `Std.Net.Resilience.SpawnableService`:
+///   a named function or a closure with transferable captures, a transferable request type).
+///
+/// Transferability of a function value is decided per function type over the whole program (Concurrency.md section
+/// 5.1): if any closure of the shadow's type `func(Req) -> Result<Resp>` that the program creates captures an object,
+/// array or list, no function of that type can be spawned, including the shadow, and the compiler reports E0602 at
+/// the program's spawn or call into the filter. The primary handler given to `Std.Net.Service.of` often has the
+/// same type, so keep it a named function or give it transferable captures. `run_worker`'s `Resp` is independent of
+/// the filter's, so a shadow with a response type of its own keeps the rule local to the shadow.
+///
+/// In both forms a trap in the shadow function ends the whole run, like any trap in any task (Concurrency.md
+/// section 4.2); a shadow that can fail should return `Err`, which is counted in `shadow_failures`.
+/// @see [Std.Net.Mesh.ShadowFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-ShadowFilter)
+#Since("0.3.0")
+export let ShadowFilter = module (
+    /// @brief The rate that mirrors every request, in basis points.
+    export const AllBasisPoints: int = 10000;
+
+    /// @brief Mirrors requests to a channel that a shadow worker drains; never waits.
+    #[Final, NotThreadSafe]
+    export let ShadowFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief The channel the mirrored requests are offered to.
+        last sink: channels.Sender<Req>;
+        /// @brief The share mirrored, 0 to 10000 basis points.
+        last rate: int;
+        /// @brief The source of the per-request decision.
+        last random: Random;
+        /// @brief Requests offered and accepted by the channel.
+        let mirrored_count: int64 = 0;
+        /// @brief Requests selected but dropped because the channel was full or closed.
+        let dropped_count: int64 = 0;
+
+        /// @brief A filter mirroring `basis_points` of 10000 requests to `queue`. A rate outside 0 to 10000 traps with
+        /// "invalid argument: basis_points".
+        export let init = func(queue: channels.Sender<Req>, basis_points: int, source: Random) {
+            check_rate(basis_points);
+            sink = queue;
+            rate = basis_points;
+            random = source;
+        };
+
+        /// @brief Offers the request to the channel when selected, then calls `next` and returns its answer.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            if (random.next_int_below(AllBasisPoints) < rate) {
+                match (sink.try_send(request)) {
+                    channels.TrySendOutcome.Sent => {
+                        mirrored_count++;
+                    },
+                    channels.TrySendOutcome.Full => {
+                        dropped_count++;
+                    },
+                    channels.TrySendOutcome.Closed => {
+                        dropped_count++;
+                    },
+                }
+            }
+            return next.call(request);
+        };
+
+        /// @brief Requests handed to the channel so far.
+        #NoDiscard
+        export let mirrored = func -> int64 => mirrored_count;
+
+        /// @brief Requests selected but dropped so far.
+        #NoDiscard
+        export let dropped = func -> int64 => dropped_count;
+
+        /// @brief Text such as "ShadowFilter(500 bp, 3 mirrored, 1 dropped)".
+        export let.override to_string = func -> string => "ShadowFilter(" + rate.to_string() + " bp, "
+            + mirrored_count.to_string() + " mirrored, " + dropped_count.to_string() + " dropped)";
+    );
+
+    /// @brief Mirrors requests to a shadow task that runs beside the primary call; returns after both.
+    #[Final, NotThreadSafe]
+    export let ConcurrentShadowFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief The shadow function, run as a task.
+        last shadow: func(Req) -> Result<Resp>;
+        /// @brief The share mirrored, 0 to 10000 basis points.
+        last rate: int;
+        /// @brief The source of the per-request decision.
+        last random: Random;
+        /// @brief Shadow calls made.
+        let mirrored_count: int64 = 0;
+        /// @brief Shadow calls that returned Err.
+        let failed_count: int64 = 0;
+
+        /// @brief A filter mirroring `basis_points` of 10000 requests to `target`. A rate outside 0 to 10000 traps with
+        /// "invalid argument: basis_points".
+        export let init = func(target: func(Req) -> Result<Resp>, basis_points: int, source: Random) {
+            check_rate(basis_points);
+            shadow = target;
+            rate = basis_points;
+            random = source;
+        };
+
+        /// @brief When selected, spawns the shadow call, calls `next` in this task, waits for the shadow, and
+        /// returns the primary answer; otherwise just calls `next`.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            if (random.next_int_below(AllBasisPoints) >= rate) {
+                return next.call(request);
+            }
+            mirrored_count++;
+            last target = shadow;
+            scope {
+                last copy = spawn target(request);
+                last primary = next.call(request);
+                match (copy.join()) {
+                    Result.Ok(value) => {
+                    },
+                    Result.Err(e) => {
+                        failed_count++;
+                    },
+                }
+                return primary;
+            }
+        };
+
+        /// @brief Shadow calls made so far.
+        #NoDiscard
+        export let mirrored = func -> int64 => mirrored_count;
+
+        /// @brief Shadow calls that returned Err so far.
+        #NoDiscard
+        export let shadow_failures = func -> int64 => failed_count;
+
+        /// @brief Text such as "ConcurrentShadowFilter(500 bp, 3 mirrored, 0 failed)".
+        export let.override to_string = func -> string => "ConcurrentShadowFilter(" + rate.to_string() + " bp, "
+            + mirrored_count.to_string() + " mirrored, " + failed_count.to_string() + " failed)";
+    );
+
+    /// @brief What a shadow worker did before its channel closed.
+    #[Final, Immutable]
+    export let WorkerReport = class (
+        /// @brief Requests passed to the shadow function.
+        export last handled: int64;
+        /// @brief Of those, the calls that returned Err.
+        export last failed: int64;
+
+        /// @brief A report.
+        export let init = func(count: int64, failures: int64) {
+            handled = count;
+            failed = failures;
+        };
+
+        /// @brief Equal when both counts are.
+        export let.override equals = func(other: class) -> bool =>
+            other is WorkerReport && handled == (other as WorkerReport).handled
+            && failed == (other as WorkerReport).failed;
+
+        /// @brief Combines the counts.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine((handled & 4294967295) as uint32, (failed & 4294967295) as uint32);
+
+        /// @brief Text such as "WorkerReport(3 handled, 1 failed)".
+        export let.override to_string = func -> string =>
+            "WorkerReport(" + handled.to_string() + " handled, " + failed.to_string() + " failed)";
+    );
+
+    /// @brief Calls `shadow` for each request received from `queue`, in order, until the channel is closed (or this
+    /// task is cancelled); run it with `spawn` in the scope that serves requests.
+    #NoDiscard
+    export let run_worker = func<Req, Resp>(queue: channels.Receiver<Req>, shadow: func(Req) -> Result<Resp>)
+        -> WorkerReport {
+        let handled: int64 = 0;
+        let failed: int64 = 0;
+        while (true) {
+            match (queue.receive()) {
+                channels.Received.Value(request) => {
+                    handled++;
+                    match (shadow(request)) {
+                        Result.Ok(value) => {
+                        },
+                        Result.Err(e) => {
+                            failed++;
+                        },
+                    }
+                },
+                channels.Received.Closed => {
+                    return new WorkerReport(handled, failed);
+                },
+                channels.Received.Cancelled => {
+                    return new WorkerReport(handled, failed);
+                },
+            }
+        }
+        return new WorkerReport(handled, failed);
+    };
+
+    /// @brief A non-blocking filter mirroring `percent` % (0 to 100) of requests to `queue`.
+    #NoDiscard
+    export let of_percent = func<Req, Resp>(queue: channels.Sender<Req>, percent: int, random: Random)
+        -> ShadowFilter<Req, Resp> {
+        if (percent < 0 || percent > 100) {
+            trap_with_message("invalid argument: percent");
+        }
+        return new ShadowFilter<Req, Resp>(queue, percent * 100, random);
+    };
+
+    /// @brief A concurrent filter mirroring `percent` % (0 to 100) of requests to `shadow`.
+    #NoDiscard
+    export let concurrent_percent = func<Req, Resp>(shadow: func(Req) -> Result<Resp>, percent: int, random: Random)
+        -> ConcurrentShadowFilter<Req, Resp> {
+        if (percent < 0 || percent > 100) {
+            trap_with_message("invalid argument: percent");
+        }
+        return new ConcurrentShadowFilter<Req, Resp>(shadow, percent * 100, random);
+    };
+
+    /// @brief Traps unless 0 <= basis_points <= 10000.
+    let check_rate = func(basis_points: int) {
+        if (basis_points < 0 || basis_points > AllBasisPoints) {
+            trap_with_message("invalid argument: basis_points");
+        }
+    };
+);

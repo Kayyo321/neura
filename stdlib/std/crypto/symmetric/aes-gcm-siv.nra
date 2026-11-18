@@ -15,7 +15,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// Each nonce derives fresh message keys, and the tag (a POLYVAL of the data and plaintext) is the counter of
 /// the encryption. A repeated nonce reveals only whether two messages with the same associated data were
 /// equal; it does not break confidentiality or authenticity as it does for GCM.
-/// @see [Std.Crypto.Symmetric.AesGcmSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesGcmSiv)
+/// @see [Std.Crypto.Symmetric.AesGcmSiv](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesGcmSiv)
 #Since("0.3.0")
 export let AesGcmSiv = module (
     /// @brief AEAD_AES_128_GCM_SIV or AEAD_AES_256_GCM_SIV, chosen by the key length (16 or 32 bytes).
@@ -60,7 +60,7 @@ export let AesGcmSiv = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 12, "AES-GCM-SIV");
             if (sealed.length < 16) {
                 return aead.failure();
@@ -99,7 +99,7 @@ export let AesGcmSiv = module (
         };
 
         let tag_of = func(auth: uint8[list], encryption: aes.Cipher, nonce: uint8[list], plaintext: uint8[list],
-                data: uint8[list]) -> uint8[list] {
+            data: uint8[list]) -> uint8[list] {
             let polyval = new gf128.Hasher(auth, true);
             polyval.update_padded(data);
             polyval.update_padded(plaintext);

@@ -1,0 +1,113 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief Composable middleware around a `Service` (docs/design/Net030.md).
+///
+/// A `Filter<Req, Resp, In, Out>` takes a request of type `Req`, may call the next service with an `In`, and
+/// turns its `Out` into a `Resp`. Most filters keep the types and implement `SimpleFilter<Req, Resp>`. Bind a
+/// filter to a service with `bind` to get a service again, compose two filters with `compose`, and run a list
+/// of simple filters in order with `FilterChain`. Retries, hedging, circuit breaking, rate limiting, tracing,
+/// and shadowing in `Std.Net.Resilience` and `Std.Net.Mesh` are filters.
+/// @see [Std.Net.Filter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Filter)
+#Since("0.3.0")
+export let Filter = module (
+    /// @brief Middleware that handles a `Req` with the help of a `Service<In, Out>`.
+    export let Filter = interface<Req, Resp, In, Out> (
+        /// @brief Handles the request, calling `next` zero or more times.
+        let apply = func(request: Req, next: Service<In, Out>) -> Result<Resp>;
+    );
+
+    /// @brief A filter that passes requests and responses of the same types through.
+    export let SimpleFilter = interface<Req, Resp>:Filter<Req, Resp, Req, Resp> ();
+
+    /// @brief A filter bound to the service it calls: a service again.
+    #Final
+    export let FilteredService = class<Req, Resp, In, Out> implements Service<Req, Resp> (
+        /// @brief The filter applied to each request.
+        last filter: Filter<Req, Resp, In, Out>;
+        /// @brief The service the filter calls.
+        last next: Service<In, Out>;
+
+        /// @brief Binds `outer` to `inner`.
+        export let init = func(outer: Filter<Req, Resp, In, Out>, inner: Service<In, Out>) {
+            filter = outer;
+            next = inner;
+        };
+
+        /// @brief Applies the filter with the bound service.
+        export let call = func(request: Req) -> Result<Resp> => filter.apply(request, next);
+
+        /// @brief The fixed text "FilteredService".
+        export let.override to_string = func -> string => "FilteredService";
+    );
+
+    /// @brief Two filters run one inside the other: `outer` sees the request first and `inner` calls the service.
+    #Final
+    export let ComposedFilter = class<A, B, C, D, E, F> implements Filter<A, B, E, F> (
+        /// @brief The filter that sees the request first.
+        last outer: Filter<A, B, C, D>;
+        /// @brief The filter that calls the service.
+        last inner: Filter<C, D, E, F>;
+
+        /// @brief Composes `first` around `second`.
+        export let init = func(first: Filter<A, B, C, D>, second: Filter<C, D, E, F>) {
+            outer = first;
+            inner = second;
+        };
+
+        /// @brief Applies `outer` with `inner` bound to `next`.
+        export let apply = func(request: A, next: Service<E, F>) -> Result<B> =>
+            outer.apply(request, new FilteredService<C, D, E, F>(inner, next));
+
+        /// @brief The fixed text "ComposedFilter".
+        export let.override to_string = func -> string => "ComposedFilter";
+    );
+
+    /// @brief Simple filters run in list order around a service: the first filter added sees each request first
+    /// and each response last.
+    #[Final, NotThreadSafe]
+    export let FilterChain = class<Req, Resp> (
+        /// @brief The filters in the order they run.
+        last filters: SimpleFilter<Req, Resp>[list] = new;
+
+        /// @brief An empty chain.
+        export let init = func {
+        };
+
+        /// @brief Appends a filter; it runs after the filters added before it.
+        export let add = func(filter: SimpleFilter<Req, Resp>) {
+            filters.append(filter);
+        };
+
+        /// @brief The number of filters.
+        export let size = func -> int => filters.length;
+
+        /// @brief The service that runs every filter, in order, around `service`. Later changes to the chain do
+        /// not affect a service already built.
+        #NoDiscard
+        export let then = func(service: Service<Req, Resp>) -> Service<Req, Resp> {
+            let current = service;
+            for (let i = filters.length - 1; i >= 0; i--) {
+                current = new FilteredService<Req, Resp, Req, Resp>(filters[i], current);
+            }
+            return current;
+        };
+
+        /// @brief The text "FilterChain(N filters)".
+        export let.override to_string = func -> string => "FilterChain(" + filters.length.to_string() + " filters)";
+    );
+
+    /// @brief `filter` bound to `service`.
+    #NoDiscard
+    export let bind = func<Req, Resp, In, Out>(filter: Filter<Req, Resp, In, Out>, service: Service<In, Out>)
+        -> Service<Req, Resp> => new FilteredService<Req, Resp, In, Out>(filter, service);
+
+    /// @brief `outer` around `inner`.
+    #NoDiscard
+    export let compose = func<A, B, C, D, E, F>(outer: Filter<A, B, C, D>, inner: Filter<C, D, E, F>)
+        -> Filter<A, B, E, F> => new ComposedFilter<A, B, C, D, E, F>(outer, inner);
+
+    /// @brief A new empty chain.
+    #NoDiscard
+    export let chain = func<Req, Resp> -> FilterChain<Req, Resp> => new;
+);

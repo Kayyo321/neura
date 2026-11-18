@@ -12,7 +12,7 @@ The two products are **Neura-sdk** and **Neura-runtime**; archives and packages 
 
 | Component | CMake component | Holds | In Neura-sdk | In Neura-runtime |
 | --- | --- | --- | --- | --- |
-| Shared execution and delivery core | `core` | `neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, `lib/neura/libneura-core-<version>`, `share/doc/neura/LICENSE` | yes | yes |
+| Shared execution and delivery core | `core` | `neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, `neura-server-host` (Linux and macOS), `lib/neura/libneura-core-<version>`, `share/doc/neura/LICENSE` | yes | yes |
 | SDK tools | `sdk` | `neurac`, `neura-test`, `neura-debug`, `neura-lsp`, `neura-fmt`, `neura-doc`, `neura-cbind`, `neura-decompile`, `neura-asm`, `neura-disasm`, `neura-explain`, `neura-tags`, `lib/neura/libneura-sdk-<version>`, the standard library sources and the native launchers | yes | no |
 | Runtime service | `service` | `neurad` and service-manager files; empty in this milestone | no | yes, from the service milestone |
 
@@ -25,11 +25,12 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | Executable | Component | Unified commands | Direct form | Loads |
 | --- | --- | --- | --- | --- |
 | `neura` | core | `--version`, `version`, `--help`, `help`, `capabilities --json` (built in); every other command is forwarded | | nothing: a static executable on Linux, holding the registry, the version line and the usage text |
-| `neura-run` | core | `run`, `runtime` | `neura-run [run] ...`, `neura-run runtime ...` | `libneura-core` |
+| `neura-run` | core | `run`, `runtime`, `serve` | `neura-run [run] ...`, `neura-run runtime ...`, `neura-run serve ...` | `libneura-core` |
 | `neura-inspect` | core | `inspect`, `inspect-image` | `neura-inspect [inspect] ...`, `neura-inspect inspect-image ...` | `libneura-core` |
 | `neura-doctor` | core | `doctor` | `neura-doctor [doctor]` | `libneura-core`; in an SDK build it also holds the C import stage's libclang probe, linked statically, and does not load `libneura-sdk` |
 | `neura-update` | core | `update` | `neura-update [update] ...` | `libneura-core` |
 | `neura-uninstall` | core | `uninstall` | `neura-uninstall [uninstall] ...` | `libneura-core` |
+| `neura-server-host` | core | none: `neura serve` builds the image and starts it | `neura-server-host [options] <image.nvr>`, `neura-server-host migrate ...`; `--version` prints the line of `neura --version`, and `--help` begins `neura-server-host: the host that neura serve starts` | `libneura-core`; built on Linux and macOS ([Server host](../runtime/ServerHost.md)) |
 | `neurac` | sdk | `build`, `check`, `emit-ir` | `neurac [build] ...`, `neurac check ...`, `neurac emit-ir ...` | `libneura-sdk`, `libneura-core` |
 | `neura-test` | sdk | `test` | `neura-test [test] ...` | `libneura-sdk`, `libneura-core`: it compiles and runs each test in one process, as 0.2 does |
 | `neura-doc` | sdk | `docs` | `neura-doc [docs] ...` | `libneura-sdk`, `libneura-core` |
@@ -117,7 +118,7 @@ Each tool is a CMake executable with its install component. The build tree puts 
 
 ## Dependency budget
 
-The budget is the one frozen in [the 0.3.0 baseline](Release030.md): the dispatcher at most 1 MiB stripped, each archive at most 25% larger than rc.3's for its target, `neura --version` and a direct run of a hello-world image no slower than rc.3 within 5%, no system library beyond rc.3's, and an execution core without compiler code.
+The budget is the one frozen in [the 0.3.0 baseline](Release030.md): the dispatcher at most 1 MiB stripped, each archive at most 55% larger than rc.3's for its target (25% until the owner raised it on 2026-11-18), `neura --version` and a direct run of a hello-world image no slower than rc.3 within 5%, no system library beyond rc.3's, and an execution core without compiler code.
 
 Measured on x86-64 Linux, gcc 14, Release, GPU support compiled in. "Before" is the single binary of the base commit of this milestone.
 
@@ -145,7 +146,7 @@ Measured on x86-64 Linux, gcc 14, Release, GPU support compiled in. "Before" is 
 | `neura-run`, every other core tool and `libneura-core` hold no object of the lexer, parser, NeuraIR, optimizer, converter, decompiler or editor tooling, and none loads `libneura-sdk`. `scripts/check-core-closure.py` compares the global definitions of every object of the SDK's static libraries with each core binary, reads each one's `DT_NEEDED` (load commands on macOS), and checks that `libneura-sdk` holds no core object; a configure with `NEURA_SDK=OFF` builds the core without them. Weak definitions of header code, such as the inline members of `neura::Diagnostic`, are shared by design and not counted. | proposed; holds |
 | `neura-doctor` may contain the libclang probe (`c_import.cpp` and the libclang loader, which load libclang only when run). It is reported, and moving the probe behind the SDK is left to the lifecycle milestone. | proposed; holds in SDK builds, absent with `NEURA_SDK=OFF` |
 | Every shipped executable depends on no system library beyond rc.3's. | proposed; holds. The tools also load `libneura-core` and `libneura-sdk`, which ship with them; the frozen rule names the system libraries. A portable release needs only `libc`, `libm` and the loader, with glibc symbols no newer than 2.38 |
-| Each archive is at most 25% larger than rc.3's. | proposed; holds on x86-64 Linux (+15.1%, runtime-only −61%); the aarch64 Linux and macOS archives are built only by the release workflow and are not measured here |
+| Each archive is at most 55% larger than rc.3's (25% before the owner decision of 2026-11-18). | proposed; holds on x86-64 Linux (+45.8% with the server host and SQL providers in the core, runtime-only −44.6%); the aarch64 Linux and macOS archives are built only by the release workflow and are not measured here |
 | `neura --version` and `neura run` of a hello-world image within 5% of rc.3. | proposed; holds for the portable build (−72%, +3.5%) |
 | Position-independent code does not slow programs down. | proposed; holds: `scripts/bench-wall.py` at the full sizes, 5 runs, best median of two rounds each, gives a geometric mean of 0.998 against the single binary over 17 programs (0.945 to 1.017), with equal steps and peak heap cells |
 

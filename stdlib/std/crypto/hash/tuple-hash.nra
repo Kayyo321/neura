@@ -11,7 +11,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// A tuple hash covers a sequence of byte strings so that different sequences never collide by concatenation:
 /// ("ab", "c") and ("a", "bc") hash differently. Each item is absorbed as encode_string(item) into
 /// cSHAKE(N = "TupleHash", S = customization).
-/// @see [Std.Crypto.Hash.TupleHash](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-TupleHash)
+/// @see [Std.Crypto.Hash.TupleHash](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-TupleHash)
 #Since("0.3.0")
 export let TupleHash = module (
     /// @brief A running TupleHash128: `add` each item, then `finish(length)` for TupleHash128 or
@@ -66,7 +66,7 @@ export let TupleHash = module (
     /// @brief The first `length` bytes of TupleHashXOF128(items, customization).
     #[NoDiscard, Since("0.3.0")]
     export let tuple_hash128_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let hash = new TupleHash128(customization);
         for (let item in items) {
             hash.add(item);
@@ -126,7 +126,7 @@ export let TupleHash = module (
     /// @brief The first `length` bytes of TupleHashXOF256(items, customization).
     #[NoDiscard, Since("0.3.0")]
     export let tuple_hash256_xof = func(items: uint8[list][list], length: int, customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let hash = new TupleHash256(customization);
         for (let item in items) {
             hash.add(item);

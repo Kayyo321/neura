@@ -24,7 +24,7 @@
 #   --require-bridge   fail when a bridge check does not run
 #   --size-reference   the archive the size budget is measured against
 #                      (rc.3's of this target): the SDK and legacy archives may
-#                      be at most 25% larger, and the runtime archive must be
+#                      be at most 55% larger, and the runtime archive must be
 #                      smaller than the SDK archive
 #
 # The script installs into new temporary HOMEs, with a PATH that holds only
@@ -84,7 +84,7 @@ if [ -n "$size_reference" ]; then
 fi
 # The tools of each component (docs/design/Products030.md), as
 # src/cli/tool_registry.cpp lists them.
-core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall"
+core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall neura-server-host"
 sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
 
 failed=0
@@ -441,10 +441,10 @@ reason=""
 [ "$runtime_size" -lt "$sdk_size" ] || reason="the runtime archive is not smaller than the SDK archive;"
 if [ -n "$size_reference" ]; then
     reference=$(size_of "$size_reference")
-    limit=$((reference + reference / 4))
+    limit=$((reference + reference * 55 / 100))
     echo "size: the reference $(basename "$size_reference") is $reference bytes; the limit is $limit"
-    [ "$sdk_size" -le "$limit" ] || reason="$reason the SDK archive is more than 25% larger than the reference;"
-    [ "$legacy_size" -le "$limit" ] || reason="$reason the legacy archive is more than 25% larger than the reference;"
+    [ "$sdk_size" -le "$limit" ] || reason="$reason the SDK archive is more than 55% larger than the reference;"
+    [ "$legacy_size" -le "$limit" ] || reason="$reason the legacy archive is more than 55% larger than the reference;"
 fi
 if [ -z "$reason" ]; then
     pass 14 "archive sizes"

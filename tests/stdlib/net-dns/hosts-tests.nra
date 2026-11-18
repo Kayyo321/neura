@@ -1,0 +1,118 @@
+let hosts = import:Std.Net.Dns.HostsFile;
+let ips = import:Std.Net.Core.IpAddr;
+let test = import:Std.Test;
+
+// The /etc/hosts parser: comments, several names per line, both families, lookups, and skipped lines.
+let HostsTests = module (
+    let sample = func -> hosts.HostsFile => hosts.parse(
+        "# The loopback entries\n"
+        + "127.0.0.1\tlocalhost  loopback # trailing comment\n"
+        + "::1 localhost ip6-localhost\n"
+        + "\n"
+        + "   # an indented comment\n"
+        + "192.0.2.10 Web.Example.  www\n"
+        + "999.1.1.1 broken\n"
+        + "198.51.100.7\n"
+        + "203.0.113.5 bad_name\n"
+        + "203.0.113.6 -dash.example\n"
+        + "fe80::1%eth0 router.local\n"
+        + "192.0.2.11 web.example\n");
+
+    let texts = func(found: ips.IpAddr[list]) -> string {
+        let out = "";
+        for (let ip in found) {
+            out += (out == "" ? "" : ",") + ips.to_string(ip);
+        }
+        return out;
+    };
+
+    export let test_entries_in_file_order = func {
+        last table = sample();
+        test.assert_equal<int>(5, table.size());
+        last first = table.entries()[0];
+        test.assert_equal_string("127.0.0.1 localhost loopback", first.to_string());
+        test.assert_equal_string("localhost", first.canonical_name());
+        test.assert_equal<int>(2, first.names.length);
+        // The trailing dot is dropped; the case is kept.
+        test.assert_equal_string("Web.Example", table.entries()[2].canonical_name());
+    };
+
+    export let test_lookup_both_families_and_case = func {
+        last table = sample();
+        test.assert_equal_string("127.0.0.1,::1", texts(table.lookup("localhost")));
+        test.assert_equal_string("127.0.0.1,::1", texts(table.lookup("LOCALHOST.")));
+        test.assert_equal_string("127.0.0.1", texts(table.lookup_v4("localhost")));
+        test.assert_equal_string("::1", texts(table.lookup_v6("localhost")));
+        test.assert_equal_string("192.0.2.10,192.0.2.11", texts(table.lookup("web.example")));
+        test.assert_equal_string("192.0.2.10", texts(table.lookup("WWW")));
+        test.assert_equal_string("fe80::1%eth0", texts(table.lookup("router.local")));
+        test.assert_equal<int>(0, table.lookup("missing.example").length);
+        test.assert_equal<int>(0, table.lookup("broken").length);
+    };
+
+    export let test_reverse = func {
+        last table = sample();
+        last names = table.reverse(test.assert_ok<ips.IpAddr>(ips.parse("::1")));
+        test.assert_equal<int>(2, names.length);
+        test.assert_equal_string("localhost", names[0]);
+        test.assert_equal_string("ip6-localhost", names[1]);
+        test.assert_equal<int>(0, table.reverse(test.assert_ok<ips.IpAddr>(ips.parse("10.0.0.1"))).length);
+    };
+
+    export let test_invalid_lines_reported = func {
+        last problems = sample().problems();
+        test.assert_equal<int>(4, problems.length);
+        test.assert_equal<int>(7, problems[0].line);
+        test.assert_equal_string("999.1.1.1 broken", problems[0].text);
+        test.assert_equal_string("invalid address 999.1.1.1", problems[0].reason);
+        test.assert_equal<int>(8, problems[1].line);
+        test.assert_equal_string("line 8: no host name", problems[1].to_string());
+        test.assert_equal<int>(9, problems[2].line);
+        test.assert_equal_string("invalid host name bad_name: invalid character", problems[2].reason);
+        test.assert_equal<int>(10, problems[3].line);
+        test.assert_equal_string("invalid host name -dash.example: label must begin and end with a letter or digit",
+            problems[3].reason);
+    };
+
+    export let test_name_rules = func {
+        test.assert_equal_string("", hosts.name_problem("a1-b.example"));
+        test.assert_equal_string("", hosts.name_problem("1password.example."));
+        test.assert_equal_string("empty label", hosts.name_problem("a..b"));
+        test.assert_equal_string("empty name", hosts.name_problem("."));
+        last long_label = "a" + test_repeat("b", 63);
+        test.assert_equal_string("label longer than 63 bytes", hosts.name_problem(long_label));
+        test.assert_equal_string("", hosts.name_problem(test_repeat("b", 63)));
+        // 4 labels of 63 plus 3 dots is 255 bytes.
+        last label = test_repeat("c", 63);
+        test.assert_equal_string("name longer than 253 bytes",
+            hosts.name_problem(label + "." + label + "." + label + "." + label));
+    };
+
+    let test_repeat = func(s: string, count: int) -> string {
+        let out = "";
+        for (let i = 0; i < count; i++) {
+            out += s;
+        }
+        return out;
+    };
+
+    export let test_empty_and_values = func {
+        test.assert_equal<int>(0, hosts.parse("").size());
+        test.assert_equal<int>(0, hosts.parse("\n# only a comment\n\n").problems().length);
+        test.assert_equal<int>(0, hosts.empty().size());
+        test.assert_equal_string("HostsFile(5 entries, 4 problems)", sample().to_string());
+        last a = hosts.parse("10.0.0.1 a b").entries()[0];
+        last b = hosts.parse("10.0.0.1   a\tb").entries()[0];
+        last c = hosts.parse("10.0.0.1 a").entries()[0];
+        test.assert(a.equals(b));
+        test.assert_equal<uint32>(a.hash_code(), b.hash_code());
+        test.assert(!a.equals(c));
+        test.assert(a.has_name("B"));
+    };
+
+    export let test_crlf_lines = func {
+        last table = hosts.parse("10.0.0.1 a\r\n10.0.0.2 b\r\n");
+        test.assert_equal<int>(2, table.size());
+        test.assert_equal_string("10.0.0.2", texts(table.lookup("b")));
+    };
+);

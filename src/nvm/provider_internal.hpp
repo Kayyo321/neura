@@ -19,6 +19,11 @@ struct Upcall;
 struct UpcallDeleter {
     void operator()(Upcall* upcall) const;
 };
+// A TLS stream (tls_provider.cpp); destroyed with TlsDeleter.
+struct TlsStream;
+struct TlsDeleter {
+    void operator()(TlsStream* stream) const;
+};
 } // namespace provider
 
 struct StandardServices::Tables {
@@ -30,11 +35,18 @@ struct StandardServices::Tables {
     struct Socket {
         int descriptor = -1;
         bool listener = false;
+        // A UDP or Unix datagram socket (socket_provider.cpp).
+        bool datagram = false;
+        // One end of a pipe of neura.net.pipe, for neura.net.splice.
+        bool pipe = false;
     };
     std::map<std::int64_t, File> files;
     std::int64_t next_file = 1;
     std::map<std::int64_t, Socket> sockets;
     std::int64_t next_socket = 1;
+    // TLS streams of neura.net.tls.*, numbered on their own.
+    std::map<std::int64_t, std::unique_ptr<provider::TlsStream, provider::TlsDeleter>> tls;
+    std::int64_t next_tls = 1;
     // Native memory and libraries of Std.DynamicForeign. Arena 0 is the
     // global arena, released at the end of the run.
     using Upcall = provider::Upcall;
@@ -130,6 +142,12 @@ std::string native_triple();
 // Loads a shared object held in memory and returns its handle, or nullptr.
 void* load_embedded_object(const std::string& object);
 void close_sockets(StandardServices::Tables& tables);
+// UDP, Unix-domain sockets, options, resolution and send_file, over the same
+// socket table.
+void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
+// TLS client and server streams (OpenSSL when built with NEURA_NVM_TLS).
+void add_tls_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
+void close_tls(StandardServices::Tables& tables);
 
 } // namespace provider
 } // namespace neura::nvm

@@ -1,0 +1,111 @@
+let chunked = import:Std.Net.Http.Chunked;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Std.Net.Http.Chunked.ChunkedDecoder over arbitrary splits: a split may fall
+// inside a size line, an extension, a CRLF, the data or the trailer section.
+// The message follows the grammar of RFC 9112 sections 7.1 and 7.1.1.
+let ChunkedSplitTests = module (
+    const Sample: string = "4\r\nWiki\r\n5;name=val ; q = \"a\\\"b\"\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n"
+        + "000\r\nExpires: never\r\n\r\nNEXT";
+
+    const SampleData: string = "Wikipedia in\r\n\r\nchunks.";
+
+    let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
+    };
+
+    let append_all = func(into: uint8[list], bytes: uint8[list]) {
+        for (let b in bytes) {
+            into.append(b);
+        }
+    };
+
+    // Feeds bytes[start, end) and appends the decoded data.
+    let feed = func(decoder: chunked.ChunkedDecoder, bytes: uint8[list], start: int, end: int, data: uint8[list]) {
+        append_all(data, test.assert_ok<uint8[list]>(decoder.feed(slice(bytes, start, end))));
+    };
+
+    let check_done = func(decoder: chunked.ChunkedDecoder, data: uint8[list]) {
+        test.assert(decoder.is_done());
+        test.assert_equal_string(SampleData, strings.from_bytes_lossy(data));
+        test.assert_equal_string("never", test.assert_some<string>(decoder.trailers().get("Expires")));
+        test.assert_equal_string("NEXT", strings.from_bytes_lossy(decoder.remainder()));
+    };
+
+    export let test_every_split_in_two = func {
+        last bytes = strings.to_bytes(Sample);
+        for (let split = 0; split <= bytes.length; split++) {
+            last decoder = new chunked.ChunkedDecoder();
+            last data: uint8[list] = new;
+            feed(decoder, bytes, 0, split, data);
+            feed(decoder, bytes, split, bytes.length, data);
+            check_done(decoder, data);
+        }
+    };
+
+    export let test_one_byte_at_a_time = func {
+        last bytes = strings.to_bytes(Sample);
+        last decoder = new chunked.ChunkedDecoder();
+        last data: uint8[list] = new;
+        for (let i = 0; i < bytes.length; i++) {
+            feed(decoder, bytes, i, i + 1, data);
+        }
+        check_done(decoder, data);
+    };
+
+    // Splits in three at every pair of points a stride apart.
+    export let test_three_way_splits = func {
+        last bytes = strings.to_bytes(Sample);
+        for (let a = 0; a <= bytes.length; a += 3) {
+            for (let b = a; b <= bytes.length; b += 5) {
+                last decoder = new chunked.ChunkedDecoder();
+                last data: uint8[list] = new;
+                feed(decoder, bytes, 0, a, data);
+                feed(decoder, bytes, a, b, data);
+                feed(decoder, bytes, b, bytes.length, data);
+                check_done(decoder, data);
+            }
+        }
+    };
+
+    // A fault is found wherever the split falls: here the CRLF after the
+    // second chunk's data is missing, and the limit is passed by the third chunk.
+    export let test_errors_at_every_split = func {
+        last broken = strings.to_bytes("4\r\nWiki\r\n5\r\npediaX\r\n0\r\n\r\n");
+        last tight = strings.to_bytes("4\r\nWiki\r\n5\r\npedia\r\n2\r\nab\r\n0\r\n\r\n");
+        last limits = new wire.Limits(100, 10, 10);
+        for (let split = 0; split <= broken.length; split++) {
+            last decoder = new chunked.ChunkedDecoder();
+            let status = 0;
+            match (decoder.feed(slice(broken, 0, split))) {
+                Result.Ok(_) => {
+                    status = wire.rejection_status(test.assert_err<uint8[list]>(decoder.feed(slice(broken, split, broken.length))));
+                },
+                Result.Err(e) => {
+                    status = wire.rejection_status(e);
+                },
+            }
+            test.assert_equal<int>(400, status);
+        }
+        for (let split = 0; split <= tight.length; split++) {
+            last decoder = new chunked.ChunkedDecoder(limits);
+            let status = 0;
+            match (decoder.feed(slice(tight, 0, split))) {
+                Result.Ok(_) => {
+                    status = wire.rejection_status(test.assert_err<uint8[list]>(decoder.feed(slice(tight, split, tight.length))));
+                },
+                Result.Err(e) => {
+                    status = wire.rejection_status(e);
+                },
+            }
+            test.assert_equal<int>(413, status);
+        }
+    };
+);

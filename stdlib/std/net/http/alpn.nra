@@ -1,0 +1,180 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief Application-Layer Protocol Negotiation (RFC 7301): the HTTP protocol identifiers, the wire form of
+/// the ProtocolNameList, and server-side protocol selection.
+///
+/// Protocol names are opaque, non-empty byte strings of at most 255 bytes (RFC 7301 section 3.1). The
+/// ProtocolNameList is a two-byte big-endian length followed by the names, each prefixed with its one-byte
+/// length; the list holds at least one name and at most 65,535 bytes. Selection follows section 3.2: the
+/// server picks the first protocol of its own preference order that the client offers, and otherwise the
+/// handshake ends with the fatal `no_application_protocol` alert (120), which `select` returns as a value.
+/// The TLS handshake that carries these bytes is not part of this module.
+/// @see [Std.Net.Http.Alpn](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Alpn)
+#Since("0.3.0")
+export let Alpn = module (
+    /// @brief The TLS extension type of ALPN, application_layer_protocol_negotiation(16) (section 3.1).
+    export const ExtensionType: int = 16;
+
+    /// @brief The alert description no_application_protocol(120) (section 3.2).
+    export const NoApplicationProtocolAlert: int = 120;
+
+    /// @brief The longest protocol name in bytes (section 3.1).
+    export const MaxNameLength: int = 255;
+
+    /// @brief The identifier of HTTP/1.1 as text (RFC 7301 section 6).
+    export const Http11Id: string = "http/1.1";
+
+    /// @brief The identifier of HTTP/2 over TLS as text (RFC 9113 section 3).
+    export const H2Id: string = "h2";
+
+    /// @brief The identifier of HTTP/3 as text (RFC 9114 section 11.1).
+    export const H3Id: string = "h3";
+
+    /// @brief The outcome of server-side selection (section 3.2).
+    export let Selection = enum (Selected(uint8[list]), NoApplicationProtocol);
+
+    /// @brief The bytes of "http/1.1": 0x68 0x74 0x74 0x70 0x2f 0x31 0x2e 0x31 (RFC 7301 section 6).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let http11 = func -> uint8[list] => bytes_of(Http11Id);
+
+    /// @brief The bytes of "h2": 0x68 0x32 (RFC 9113 section 3).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let h2 = func -> uint8[list] => bytes_of(H2Id);
+
+    /// @brief The bytes of "h3": 0x68 0x33 (RFC 9114 section 11.1).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let h3 = func -> uint8[list] => bytes_of(H3Id);
+
+    /// @brief The bytes of a text protocol name (its UTF-8 encoding).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let bytes_of = func(name: string) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < name.byte_length; i++) {
+            bytes.append(name.byte_at(i));
+        }
+        return bytes;
+    };
+
+    /// @brief The ProtocolNameList holding `names` in order (section 3.1). Err (OutOfRange) for no names, an
+    /// empty name or one over 255 bytes (at the index of the name), or a list over 65,535 bytes.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let encode = func(names: uint8[list][list]) -> Result<uint8[list]> {
+        if (names.length == 0) {
+            return Result<uint8[list]>.Err(failure(ParseErrorKind.Empty, 0, "no protocol names"));
+        }
+        let total = 0;
+        for (let i = 0; i < names.length; i++) {
+            last count = names[i].length;
+            if (count < 1 || count > MaxNameLength) {
+                return Result<uint8[list]>.Err(failure(ParseErrorKind.OutOfRange, i, "protocol name length"));
+            }
+            total += count + 1;
+        }
+        if (total > 65535) {
+            return Result<uint8[list]>.Err(failure(ParseErrorKind.OutOfRange, 0, "protocol name list too long"));
+        }
+        last wire: uint8[list] = new;
+        wire.append((total / 256) as uint8);
+        wire.append((total % 256) as uint8);
+        for (let name in names) {
+            wire.append(name.length as uint8);
+            for (let b in name) {
+                wire.append(b);
+            }
+        }
+        return Result<uint8[list]>.Ok(wire);
+    };
+
+    /// @brief The names of a ProtocolNameList (section 3.1). Errors at the offending byte offset: UnexpectedEnd
+    /// for fewer than two bytes or a name cut short, Syntax when the length prefix disagrees with the size,
+    /// Empty for an empty list, OutOfRange for a zero-length name.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode = func(wire: uint8[list]) -> Result<uint8[list][list]> {
+        if (wire.length < 2) {
+            return Result<uint8[list][list]>.Err(
+                failure(ParseErrorKind.UnexpectedEnd, wire.length, "missing list length"));
+        }
+        last declared = (wire[0] as int) * 256 + (wire[1] as int);
+        if (declared != wire.length - 2) {
+            return Result<uint8[list][list]>.Err(failure(ParseErrorKind.Syntax, 0, "list length does not match"));
+        }
+        if (declared == 0) {
+            return Result<uint8[list][list]>.Err(failure(ParseErrorKind.Empty, 2, "empty protocol name list"));
+        }
+        last names: uint8[list][list] = new;
+        let at = 2;
+        while (at < wire.length) {
+            last count = wire[at] as int;
+            if (count == 0) {
+                return Result<uint8[list][list]>.Err(failure(ParseErrorKind.OutOfRange, at, "empty protocol name"));
+            }
+            if (at + 1 + count > wire.length) {
+                return Result<uint8[list][list]>.Err(
+                    failure(ParseErrorKind.UnexpectedEnd, wire.length, "truncated protocol name"));
+            }
+            last name: uint8[list] = new;
+            for (let i = at + 1; i < at + 1 + count; i++) {
+                name.append(wire[i]);
+            }
+            names.append(name);
+            at += 1 + count;
+        }
+        return Result<uint8[list][list]>.Ok(names);
+    };
+
+    /// @brief The protocol of a ServerHello ALPN extension: a ProtocolNameList with exactly one name (section
+    /// 3.1). Errors are those of `decode`, and Syntax when the list holds more than one name.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let decode_server_selection = func(wire: uint8[list]) -> Result<uint8[list]> {
+        last names = decode(wire)?;
+        if (names.length != 1) {
+            return Result<uint8[list]>.Err(
+                failure(ParseErrorKind.Syntax, 0, "server must select exactly one protocol"));
+        }
+        return Result<uint8[list]>.Ok(names[0]);
+    };
+
+    /// @brief Server-side selection (section 3.2): the first of `server_preference` that `client_offer`
+    /// contains, or `NoApplicationProtocol`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let select = func(server_preference: uint8[list][list], client_offer: uint8[list][list]) -> Selection {
+        for (let candidate in server_preference) {
+            for (let offered in client_offer) {
+                if (same(candidate, offered)) {
+                    return Selection.Selected(copy(candidate));
+                }
+            }
+        }
+        return Selection.NoApplicationProtocol;
+    };
+
+    /// @brief Whether two names hold the same bytes.
+    #[Pure, ThreadSafe]
+    export let same = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief A new list with the bytes of `name`.
+    #[Pure, ThreadSafe]
+    let copy = func(name: uint8[list]) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let b in name) {
+            bytes.append(b);
+        }
+        return bytes;
+    };
+
+    /// @brief A Parse error.
+    #[Pure, ThreadSafe]
+    let failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
+        Error.Parse { kind: kind, offset: offset, message: message };
+);

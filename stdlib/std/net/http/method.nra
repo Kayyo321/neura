@@ -1,0 +1,91 @@
+let.promote _ = import:Std.Core.Optional;
+let headers = import:Std.Net.Http.Headers;
+
+/// @brief HTTP request methods (RFC 9110 section 9) and their safety and idempotence (sections 9.2.1, 9.2.2).
+///
+/// Methods are case-sensitive tokens. The nine standard methods (the eight of RFC 9110 and PATCH of RFC 5789)
+/// have variants; any other token is `Extension`, which is neither safe nor idempotent.
+/// @see [Std.Net.Http.Method](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Method)
+#Since("0.3.0")
+export let Method = module (
+    /// @brief A request method.
+    export let HttpMethod = enum (Get, Head, Post, Put, Delete, Connect, Options, Trace, Patch, Extension(string));
+
+    /// @brief The method named by `text` (exact case), or None when `text` is not a token.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Optional<HttpMethod> {
+        if (!headers.is_token(text)) {
+            return Optional<HttpMethod>.None;
+        }
+        last known = standard(text);
+        return match (known) {
+            Optional.Some(m) => Optional<HttpMethod>.Some(m),
+            Optional.None => Optional<HttpMethod>.Some(HttpMethod.Extension(text)),
+        };
+    };
+
+    /// @brief One of the nine standard methods named by `text`, or None.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let standard = func(text: string) -> Optional<HttpMethod> {
+        if (text == "GET") {
+            return Optional<HttpMethod>.Some(HttpMethod.Get);
+        }
+        if (text == "HEAD") {
+            return Optional<HttpMethod>.Some(HttpMethod.Head);
+        }
+        if (text == "POST") {
+            return Optional<HttpMethod>.Some(HttpMethod.Post);
+        }
+        if (text == "PUT") {
+            return Optional<HttpMethod>.Some(HttpMethod.Put);
+        }
+        if (text == "DELETE") {
+            return Optional<HttpMethod>.Some(HttpMethod.Delete);
+        }
+        if (text == "CONNECT") {
+            return Optional<HttpMethod>.Some(HttpMethod.Connect);
+        }
+        if (text == "OPTIONS") {
+            return Optional<HttpMethod>.Some(HttpMethod.Options);
+        }
+        if (text == "TRACE") {
+            return Optional<HttpMethod>.Some(HttpMethod.Trace);
+        }
+        if (text == "PATCH") {
+            return Optional<HttpMethod>.Some(HttpMethod.Patch);
+        }
+        return Optional<HttpMethod>.None;
+    };
+
+    /// @brief The method's token.
+    #[Pure, ThreadSafe]
+    export let name = func(m: HttpMethod) -> string => match (m) {
+        HttpMethod.Get => "GET",
+        HttpMethod.Head => "HEAD",
+        HttpMethod.Post => "POST",
+        HttpMethod.Put => "PUT",
+        HttpMethod.Delete => "DELETE",
+        HttpMethod.Connect => "CONNECT",
+        HttpMethod.Options => "OPTIONS",
+        HttpMethod.Trace => "TRACE",
+        HttpMethod.Patch => "PATCH",
+        HttpMethod.Extension(text) => text,
+    };
+
+    /// @brief Whether the method is safe: GET, HEAD, OPTIONS, TRACE (RFC 9110 section 9.2.1).
+    #[Pure, ThreadSafe]
+    export let is_safe = func(m: HttpMethod) -> bool => is_safe_name(name(m));
+
+    /// @brief Whether the method is idempotent: the safe methods, PUT and DELETE (RFC 9110 section 9.2.2).
+    #[Pure, ThreadSafe]
+    export let is_idempotent = func(m: HttpMethod) -> bool => is_idempotent_name(name(m));
+
+    /// @brief `is_safe` for a method token.
+    #[Pure, ThreadSafe]
+    export let is_safe_name = func(text: string) -> bool =>
+        text == "GET" || text == "HEAD" || text == "OPTIONS" || text == "TRACE";
+
+    /// @brief `is_idempotent` for a method token.
+    #[Pure, ThreadSafe]
+    export let is_idempotent_name = func(text: string) -> bool => is_safe_name(text) || text == "PUT" || text == "DELETE";
+);

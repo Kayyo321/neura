@@ -450,6 +450,16 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
     "${SOURCE_DIR}/examples/modules/multi-file/main.nra")
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
+# Generic specializations for two classes of one name in different modules,
+# which share the specialization's name (copy_of_list<Row>), optimized and
+# unoptimized.
+build_image("${TEST_DIR}/specializations.nvr" -I "${tests}/specializations/lib" "${tests}/specializations/main.nra")
+build_image("${TEST_DIR}/specializations-unoptimized.nvr" --no-optimize -I "${tests}/specializations/lib"
+    "${tests}/specializations/main.nra")
+foreach(variant IN ITEMS "" -unoptimized)
+    expect_run("same-named specializations${variant}" "${TEST_DIR}/specializations${variant}.nvr" "abb\n1ba1\n" 0 "")
+endforeach()
+
 # Field accessors (Types.md, Accessors), optimized and unoptimized.
 build_image("${TEST_DIR}/accessors.nvr" "${SOURCE_DIR}/examples/types/accessors.nra")
 build_image("${TEST_DIR}/accessors-unoptimized.nvr" --no-optimize "${SOURCE_DIR}/examples/types/accessors.nra")

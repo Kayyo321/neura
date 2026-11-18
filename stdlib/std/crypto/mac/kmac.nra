@@ -8,7 +8,7 @@ let sp800_185 = import:Std.Crypto.Internal.Sp800185;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief KMAC128 and KMAC256 of NIST SP 800-185, section 4, and their XOF forms (Stdlib.md section 21.5).
-/// @see [Std.Crypto.Mac.Kmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kmac)
+/// @see [Std.Crypto.Mac.Kmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Kmac)
 #Since("0.3.0")
 export let Kmac = module (
     /// @brief The cSHAKE sponge of KMAC primed with bytepad(encode_string(key), rate).
@@ -96,11 +96,12 @@ export let Kmac = module (
     /// @brief The first `length` bytes of KMACXOF128(key, data, customization).
     #[NoDiscard, Since("0.3.0")]
     export let kmac128_xof = func(key: uint8[list], data: uint8[list], length: int, customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let mac = new Kmac128(key, customization, 32);
         mac.update(data);
         return mac.finish_xof(length);
     };
+
     /// @brief KMAC256 with a tag of a length fixed at construction (32 bytes by default for KMAC128, 64 for
     /// KMAC256, or any length of at least 4). `finish_xof(length)` and `squeeze` give KMACXOF256 instead.
     #[Final, Since("0.3.0")]
@@ -177,7 +178,7 @@ export let Kmac = module (
     /// @brief The first `length` bytes of KMACXOF256(key, data, customization).
     #[NoDiscard, Since("0.3.0")]
     export let kmac256_xof = func(key: uint8[list], data: uint8[list], length: int, customization: uint8[list])
-            -> uint8[list] {
+        -> uint8[list] {
         let mac = new Kmac256(key, customization, 32);
         mac.update(data);
         return mac.finish_xof(length);

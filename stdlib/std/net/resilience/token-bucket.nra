@@ -1,0 +1,111 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let limiters = import:Std.Net.Resilience.RateLimiter;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief A token bucket: `capacity` tokens, refilled continuously at `tokens` per `period` on the injected clock's
+/// monotonic reading.
+///
+/// The bucket starts full. Its level is kept exactly in integer units of one token times the period in nanoseconds,
+/// so after `e` nanoseconds it gains `e * tokens` units (up to `capacity * period` units) and a request for `n`
+/// permits needs `n * period` units. A request is granted whole or not at all. `retry_after` is the time until the
+/// level covers the request, and `reset_after` the time until the bucket is full, both rounded up to whole
+/// nanoseconds. `TokenBucketLimiter` keeps one bucket per key.
+/// @see [Std.Net.Resilience.TokenBucket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-TokenBucket)
+#Since("0.3.0")
+export let TokenBucket = module (
+    /// @brief One token bucket over an injected clock.
+    #[Final, NotThreadSafe]
+    export let TokenBucket = class (
+        /// @brief The most tokens the bucket holds.
+        last capacity: int;
+        /// @brief Tokens added per period.
+        last rate: int64;
+        /// @brief The refill period in nanoseconds.
+        last period: int64;
+        /// @brief The source of monotonic time.
+        last clock: Clock;
+        /// @brief The level in token-period units.
+        let level: int64;
+        /// @brief The monotonic reading of the last refill, or -1 before the first.
+        let stamp: int64 = -1;
+
+        /// @brief A full bucket. `capacity` and `tokens` must be positive and `period` positive, else the
+        /// constructor traps with "invalid argument: <name>".
+        export let init = func(size: int, tokens: int, refill_period: durations.Duration, source: Clock) {
+            if (size < 1) {
+                trap_with_message("invalid argument: capacity");
+            }
+            if (tokens < 1) {
+                trap_with_message("invalid argument: tokens");
+            }
+            if (refill_period.to_nanos() <= 0) {
+                trap_with_message("invalid argument: period");
+            }
+            capacity = size;
+            rate = tokens as int64;
+            period = refill_period.to_nanos();
+            clock = source;
+            level = (size as int64) * period;
+        };
+
+        /// @brief Takes `permits` tokens when the bucket holds them. `permits` must be from 1 through the capacity,
+        /// else the call traps with "invalid argument: permits". Err only when the clock fails.
+        #NoDiscard
+        export let try_acquire = func(permits: int) -> Result<limiters.RateDecision> {
+            if (permits < 1 || permits > capacity) {
+                trap_with_message("invalid argument: permits");
+            }
+            refill()?;
+            last needed = (permits as int64) * period;
+            if (level >= needed) {
+                level -= needed;
+                return Result<limiters.RateDecision>.Ok(decision(true, 0));
+            }
+            return Result<limiters.RateDecision>.Ok(decision(false, wait_for(needed - level)));
+        };
+
+        /// @brief The whole tokens available now. Err only when the clock fails.
+        #NoDiscard
+        export let available = func -> Result<int> {
+            refill()?;
+            return Result<int>.Ok((level / period) as int);
+        };
+
+        /// @brief Text such as "TokenBucket(capacity 10)".
+        export let.override to_string = func -> string => "TokenBucket(capacity " + capacity.to_string() + ")";
+
+        /// @brief Adds the units earned since the last refill.
+        let refill = func -> Result<bool> {
+            last reading = clock.monotonic()?;
+            last now = reading.to_nanos();
+            if (stamp >= 0 && now > stamp) {
+                last missing = full() - level;
+                last elapsed = now - stamp;
+                if (elapsed >= wait_for(missing)) {
+                    level = full();
+                } else {
+                    level += elapsed * rate;
+                }
+            }
+            stamp = now;
+            return Result<bool>.Ok(true);
+        };
+
+        /// @brief The level of a full bucket.
+        let full = func -> int64 => (capacity as int64) * period;
+
+        /// @brief Nanoseconds until `units` more units have been earned, rounded up.
+        let wait_for = func(units: int64) -> int64 => (units + rate - 1) / rate;
+
+        /// @brief The decision for the current level.
+        let decision = func(granted: bool, retry: int64) -> limiters.RateDecision =>
+            new limiters.RateDecision(granted, (level / period) as int, durations.of_nanos(retry),
+                durations.of_nanos(wait_for(full() - level)));
+    );
+
+    /// @brief A full bucket of `capacity` tokens refilled at `tokens` per `period`.
+    #NoDiscard
+    export let create = func(capacity: int, tokens: int, period: durations.Duration, clock: Clock) -> TokenBucket =>
+        new TokenBucket(capacity, tokens, period, clock);
+);

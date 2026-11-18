@@ -1,0 +1,114 @@
+let.promote _ = import:Std.Net.Quic.CongestionController;
+
+/// @brief The QUIC NewReno congestion controller of RFC 9002 section 7 and Appendix B.
+///
+/// The window starts at the initial window and grows by the acknowledged bytes in slow start (below `ssthresh`)
+/// and by `max_datagram_size * acked / window` in congestion avoidance, rounded down. A congestion event (a
+/// loss or an ECN-CE increase) for a packet sent after the current recovery period began starts a new recovery
+/// period at `now`, halves the window (kLossReductionFactor 0.5) into `ssthresh`, and sets the window to
+/// max(ssthresh, minimum window); acknowledgments of packets sent before or at the start of recovery do not grow
+/// the window. Persistent congestion sets the minimum window and ends recovery. The window does not grow while
+/// the sender is application-limited. "No recovery period" is represented by a start time of -1, since times
+/// may start at 0.
+/// @see [Std.Net.Quic.NewReno](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-NewReno)
+#Since("0.3.0")
+export let NewReno = module (
+    /// @brief One connection's NewReno state.
+    #[Final, NotThreadSafe]
+    export let NewReno = class implements CongestionController (
+        /// @brief The maximum datagram size in bytes.
+        export last max_datagram_size: int64;
+        /// @brief The congestion window.
+        let congestion_window: int64;
+        /// @brief The slow-start threshold; `MaxWindow` until the first congestion event.
+        let threshold: int64 = MaxWindow;
+        /// @brief The bytes in flight.
+        let in_flight: int64 = 0;
+        /// @brief When the current recovery period started, or -1.
+        let recovery_start: int64 = -1;
+        /// @brief True while application- or flow-control-limited.
+        let app_limited: bool = false;
+
+        /// @brief A controller for a path with this maximum datagram size (1,200 through 65,527 bytes, else a
+        /// trap).
+        export let init = func(datagram_size: int64) {
+            check_datagram_size(datagram_size);
+            max_datagram_size = datagram_size;
+            congestion_window = initial_window(datagram_size);
+        };
+
+        /// @brief The congestion window.
+        export let window = func -> int64 => congestion_window;
+
+        /// @brief The slow-start threshold.
+        #Pure
+        export let ssthresh = func -> int64 => threshold;
+
+        /// @brief The bytes in flight.
+        export let bytes_in_flight = func -> int64 => in_flight;
+
+        /// @brief True when the sender is in a recovery period for a packet sent at `sent_nanos`.
+        #Pure
+        export let in_recovery = func(sent_nanos: int64) -> bool => sent_nanos <= recovery_start;
+
+        /// @brief True when `bytes` more fit in the window.
+        export let can_send = func(bytes: int64) -> bool => in_flight + bytes <= congestion_window;
+
+        /// @brief Adds a sent packet to the bytes in flight (B.4).
+        export let on_packet_sent = func(bytes: int64, sent_nanos: int64) {
+            check_event(bytes, sent_nanos);
+            in_flight += bytes;
+        };
+
+        /// @brief OnPacketAcked (B.5).
+        export let on_packet_acked = func(bytes: int64, sent_nanos: int64, now_nanos: int64, delay_nanos: int64) {
+            check_event(bytes, now_nanos);
+            in_flight = remove_in_flight(in_flight, bytes);
+            if (app_limited || in_recovery(sent_nanos)) {
+                return;
+            }
+            if (congestion_window < threshold) {
+                congestion_window = capped(congestion_window + bytes);
+            } else {
+                congestion_window = capped(congestion_window + max_datagram_size * bytes / congestion_window);
+            }
+        };
+
+        /// @brief OnPacketsLost (B.8) without the persistent-congestion test, which loss detection makes.
+        export let on_packets_lost = func(bytes: int64, latest_sent_nanos: int64, now_nanos: int64) {
+            check_event(bytes, now_nanos);
+            in_flight = remove_in_flight(in_flight, bytes);
+            on_congestion_event(latest_sent_nanos, now_nanos);
+        };
+
+        /// @brief OnCongestionEvent (B.6).
+        export let on_congestion_event = func(sent_nanos: int64, now_nanos: int64) {
+            check_event(0, now_nanos);
+            if (in_recovery(sent_nanos)) {
+                return;
+            }
+            recovery_start = now_nanos;
+            threshold = congestion_window / 2;
+            last floor = minimum_window(max_datagram_size);
+            congestion_window = threshold > floor ? threshold : floor;
+        };
+
+        /// @brief Sets the minimum window and ends recovery (B.8).
+        export let on_persistent_congestion = func {
+            congestion_window = minimum_window(max_datagram_size);
+            recovery_start = -1;
+        };
+
+        /// @brief Whether the sender is application- or flow-control-limited.
+        export let set_app_limited = func(limited: bool) {
+            app_limited = limited;
+        };
+
+        /// @brief "NewReno".
+        export let name = func -> string => "NewReno";
+
+        /// @brief Text such as "NewReno(window 12000, in flight 0)".
+        export let.override to_string = func -> string => "NewReno(window " + congestion_window.to_string()
+            + ", in flight " + in_flight.to_string() + ")";
+    );
+);

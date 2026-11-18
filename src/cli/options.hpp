@@ -73,6 +73,8 @@ struct Options {
     std::optional<neura::nvm::TaskDumpFormat> task_dump;
     // check --task-safety: report every function instead of only checking.
     bool task_safety = false;
+    // run and test: --sql-pool <name>=<url> (docs/runtime/Sql.md).
+    std::vector<std::string> sql_pools;
     // check --show-derived[=Name]: print the derived codec modules (empty: all of them).
     std::optional<std::string> show_derived;
     // check --fix: apply machine-applicable suggestions in place.

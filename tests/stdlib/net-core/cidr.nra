@@ -1,0 +1,148 @@
+let cidr = import:Std.Net.Core.CidrBlock;
+let errors = import:Std.Core.Error;
+let ips = import:Std.Net.Core.IpAddr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+let net = import:Std.Net.Core.NetAddress;
+let test = import:Std.Test;
+
+// CidrBlock: parsing, text, membership across the /0, /32, /64, /65, /127 and /128 mask edges.
+let CidrTests = module (
+    let block = func(text: string) -> cidr.CidrBlock => test.assert_ok<cidr.CidrBlock>(cidr.parse(text));
+
+    let ip = func(text: string) -> ips.IpAddr => test.assert_ok<ips.IpAddr>(ips.parse(text));
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    // The addresses that python3 -I cidr.py tests against each network, in its order.
+    let addresses = func -> string[list] {
+        last list: string[list] = new;
+        list.append("0.0.0.0");
+        list.append("10.0.0.0");
+        list.append("10.255.255.255");
+        list.append("11.0.0.0");
+        list.append("172.31.255.255");
+        list.append("172.32.0.0");
+        list.append("192.168.1.127");
+        list.append("192.168.1.128");
+        list.append("10.1.2.3");
+        list.append("10.1.2.4");
+        list.append("::");
+        list.append("2001:db8::");
+        list.append("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff");
+        list.append("2001:db9::");
+        list.append("2001:db8::7fff:ffff:ffff:ffff");
+        list.append("2001:db8::8000:0:0:0");
+        list.append("2001:db8::1");
+        list.append("fe80::1");
+        list.append("febf::1");
+        list.append("fec0::1");
+        list.append("::ffff:10.0.0.1");
+        return list;
+    };
+
+    // `flags` holds one '1' or '0' per address, separated by spaces, as cidr.py prints them.
+    let check = func(text: string, canonical: string, flags: string) {
+        last b = block(text);
+        test.assert_equal_string(canonical, b.to_string());
+        test.assert(block(canonical).equals(b));
+        last list = addresses();
+        for (let i = 0; i < list.length; i++) {
+            last expected = flags.byte_at(i * 2) == 49;
+            test.assert_with(b.contains(ip(list[i])) == expected, text + " contains " + list[i]);
+        }
+    };
+
+    // Generated with python3 -I cidr.py (Python 3.13.5): for each network n it prints n, str(ip_network(n)) and,
+    // for each address a, 1 when a has the same version and a in ip_network(n).
+    export let test_python_containment = func {
+        check("0.0.0.0/0", "0.0.0.0/0", "1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0");
+        check("10.0.0.0/8", "10.0.0.0/8", "0 1 1 0 0 0 0 0 1 1 0 0 0 0 0 0 0 0 0 0 0");
+        check("172.16.0.0/12", "172.16.0.0/12", "0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0");
+        check("192.168.1.0/24", "192.168.1.0/24", "0 0 0 0 0 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0");
+        check("192.168.1.128/25", "192.168.1.128/25", "0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0");
+        check("10.1.2.3/32", "10.1.2.3/32", "0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0");
+        check("::/0", "::/0", "0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1");
+        check("2001:db8::/32", "2001:db8::/32", "0 0 0 0 0 0 0 0 0 0 0 1 1 0 1 1 1 0 0 0 0");
+        check("2001:db8:0:0:8000::/65", "2001:db8:0:0:8000::/65", "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0");
+        check("2001:db8::/64", "2001:db8::/64", "0 0 0 0 0 0 0 0 0 0 0 1 0 0 1 1 1 0 0 0 0");
+        check("fe80::/10", "fe80::/10", "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 0 0");
+        check("2001:db8::1/128", "2001:db8::1/128", "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0");
+        check("2001:db8::/127", "2001:db8::/127", "0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 0");
+    };
+
+    // python3 -I cidr.py also prints ip_network(t, strict=False) for these (strict=True rejects each one):
+    // 10.1.2.3/8 -> 10.0.0.0/8, 2001:db8::1/64 -> 2001:db8::/64, 192.168.1.200/25 -> 192.168.1.128/25,
+    // ::ffff:1.2.3.4/96 -> ::ffff:0.0.0.0/96. The `of` results are python3 -I -c "import ipaddress as I;
+    // print(I.ip_network(t, strict=False))" for 10.200.3.4/8, ffff::1/0, 2001:db8::ffff:0:0:1/65 and /128, fe80::1/64.
+    export let test_host_bits = func {
+        last host = test.assert_err<cidr.CidrBlock>(cidr.parse("10.1.2.3/8"));
+        test.assert(kind_of(host) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(8, offset_of(host) as int64);
+        test.assert_err<cidr.CidrBlock>(cidr.parse("2001:db8::1/64"));
+        test.assert_err<cidr.CidrBlock>(cidr.parse("192.168.1.200/25"));
+        test.assert_err<cidr.CidrBlock>(cidr.parse("::ffff:1.2.3.4/96"));
+        let lenient = func(text: string) -> string =>
+            test.assert_ok<cidr.CidrBlock>(cidr.parse_lenient(text)).to_string();
+        test.assert_equal_string("10.0.0.0/8", lenient("10.1.2.3/8"));
+        test.assert_equal_string("2001:db8::/64", lenient("2001:db8::1/64"));
+        test.assert_equal_string("192.168.1.128/25", lenient("192.168.1.200/25"));
+        test.assert_equal_string("::ffff:0.0.0.0/96", lenient("::ffff:1.2.3.4/96"));
+        test.assert_equal_string("fe80::/64", lenient("fe80::1%eth0/64"));
+        test.assert_equal_string("10.0.0.0/8", cidr.of(ip("10.200.3.4"), 8).to_string());
+        test.assert_equal_string("::/0", cidr.of(ip("ffff::1%x"), 0).to_string());
+        test.assert_equal_string("2001:db8:0:0:8000::/65", cidr.of(ip("2001:db8::ffff:0:0:1"), 65).to_string());
+        test.assert_equal_string("2001:db8::ffff:0:0:1/128", cidr.of(ip("2001:db8::ffff:0:0:1"), 128).to_string());
+    };
+
+    // Python ip_network accepts a bare address, a netmask, '/08' and a zone ('fe80::%eth0/64'); this parser does
+    // not (see CidrBlock.parse).
+    export let test_rejections = func {
+        test.assert(kind_of(test.assert_err<cidr.CidrBlock>(cidr.parse(""))) == errors.ParseErrorKind.Empty);
+        last bare = test.assert_err<cidr.CidrBlock>(cidr.parse("10.0.0.1"));
+        test.assert(kind_of(bare) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(8, offset_of(bare) as int64);
+        test.assert(kind_of(test.assert_err<cidr.CidrBlock>(cidr.parse("10.0.0.0/255.0.0.0")))
+            == errors.ParseErrorKind.InvalidCharacter);
+        last zero = test.assert_err<cidr.CidrBlock>(cidr.parse("10.0.0.0/08"));
+        test.assert(kind_of(zero) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_equal_int64(10, offset_of(zero) as int64);
+        last big = test.assert_err<cidr.CidrBlock>(cidr.parse("10.0.0.0/33"));
+        test.assert(kind_of(big) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal_int64(9, offset_of(big) as int64);
+        test.assert(kind_of(test.assert_err<cidr.CidrBlock>(cidr.parse("::/129"))) == errors.ParseErrorKind.OutOfRange);
+        test.assert(kind_of(test.assert_err<cidr.CidrBlock>(cidr.parse("::/1280")))
+            == errors.ParseErrorKind.OutOfRange);
+        test.assert(kind_of(test.assert_err<cidr.CidrBlock>(cidr.parse("10.0.0.0/")))
+            == errors.ParseErrorKind.UnexpectedEnd);
+        last zone = test.assert_err<cidr.CidrBlock>(cidr.parse("fe80::%eth0/64"));
+        test.assert(kind_of(zone) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(6, offset_of(zone) as int64);
+        last bad_ip = test.assert_err<cidr.CidrBlock>(cidr.parse("10.0.256.0/24"));
+        test.assert(kind_of(bad_ip) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal_int64(5, offset_of(bad_ip) as int64);
+    };
+
+    export let test_members = func {
+        last b = block("2001:db8::/32");
+        test.assert(b.family() == net.AddressFamily.Ipv6);
+        test.assert(block("10.0.0.0/8").family() == net.AddressFamily.Ipv4);
+        test.assert_equal_int64(32, b.prefix_length as int64);
+        test.assert_equal_string("2001:db8::", ips.to_string(b.network));
+        // The query's zone is ignored; an IPv4-mapped address is not in an IPv4 block.
+        test.assert(block("fe80::/10").contains(ip("fe80::1%eth0")));
+        test.assert(!block("10.0.0.0/8").contains(ip("::ffff:10.0.0.1")));
+        test.assert(!block("10.0.0.0/8").equals(block("10.0.0.0/9")));
+        test.assert(!block("0.0.0.0/0").equals(block("::/0")));
+        test.assert_equal_int64(block("2001:db8::/32").hash_code() as int64,
+            block("2001:DB8:0::/32").hash_code() as int64);
+        test.assert(new cidr.CidrBlock(ips.IpAddr.V6(v6.unspecified()), 0).equals(block("::/0")));
+    };
+);

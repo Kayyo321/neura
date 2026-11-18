@@ -1,0 +1,214 @@
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let fixed_clocks = import:Std.Time.FixedClock;
+let http = import:Std.Net.Http;
+let instants = import:Std.Time.Instant;
+let pool = import:Std.Net.Http.Pool;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Std.Net.Http.Client over a scripted transport, and the client pool (Std.Net.Http.Pool): per-origin limits,
+// idempotency-aware retries (RFC 9110 sections 9.2.2 and 10.2.3).
+let ClientTests = module (
+    // Answers each fetch with the next scripted status (0 for a connection error of the scripted kind) and
+    // records the requests.
+    let Scripted = class implements http.Transport (
+        last statuses: int[list];
+        last kinds: errors.IoErrorKind[list];
+        export last seen: http.ClientRequest[list] = new;
+        last retry_after: string;
+        let next: int = 0;
+
+        export let init = func(answers: int[list], failures: errors.IoErrorKind[list], wait: string) {
+            statuses = answers;
+            kinds = failures;
+            retry_after = wait;
+        };
+
+        export let fetch = func(request: http.ClientRequest) -> result.Result<http.Response> {
+            seen.append(request);
+            last status = statuses[next];
+            last kind = kinds[next];
+            next++;
+            if (status == 0) {
+                return result.Result<http.Response>.Err(errors.Error.Io { kind: kind, message: "scripted", path: "" });
+            }
+            last response = http.text(status, "s" + status.to_string());
+            if (retry_after.byte_length > 0) {
+                response.headers.set("Retry-After", retry_after);
+            }
+            return result.Result<http.Response>.Ok(response);
+        };
+
+        export let count = func -> int => seen.length;
+
+        export let.override to_string = func -> string => "Scripted";
+    );
+
+    let none = errors.IoErrorKind.Other;
+
+    let scripted = func(answers: int[list]) -> Scripted {
+        last kinds: errors.IoErrorKind[list] = new;
+        for (let a in answers) {
+            kinds.append(none);
+        }
+        return new Scripted(answers, kinds, "");
+    };
+
+    let clock = func -> fixed_clocks.FixedClock => fixed_clocks.of(instants.of_epoch_seconds(1700000000, 0));
+
+    export let test_client_send = func {
+        last transport = scripted(new([200, 201]));
+        last client = new http.Client(transport);
+        client.add_default_header("User-Agent", "neura-test");
+        last answer = test.assert_ok<http.Response>(client.get("https://example.com/a"));
+        test.assert_equal<int>(200, answer.status);
+        test.assert_equal_string("s200", answer.body_text());
+        test.assert_equal<int>(201, test.assert_ok<http.Response>(client.post("http://example.com/p", "text/plain",
+            strings.to_bytes("x"))).status);
+        test.assert_equal<int>(2, transport.count());
+        test.assert_equal_string("neura-test", test.assert_some<string>(transport.seen[1].headers.get("user-agent")));
+        test.assert_equal_string("text/plain", test.assert_some<string>(transport.seen[1].headers.get("content-type")));
+        test.assert_equal<int>(1, transport.seen[1].body().length);
+        // A relative or non-HTTP URL fails before the transport.
+        test.assert_err<http.Response>(client.get("/relative"));
+        test.assert_err<http.Response>(client.get("ftp://example.com/"));
+        test.assert_equal<int>(2, transport.count());
+    };
+
+    export let test_client_request_fields = func {
+        last request = new http.ClientRequest("PUT", "https://example.com/x");
+        test.assert(request.credentials_mode() == http.CredentialsMode.SameOrigin);
+        request.set_credentials(http.CredentialsMode.Include);
+        test.assert_equal<uint32>(2, http.credentials_code(request.credentials_mode()));
+        test.assert_equal<uint32>(0, http.credentials_code(http.CredentialsMode.Omit));
+        request.set_deadline(durations.of_seconds(5));
+        test.assert_equal<int64>(5000000000, request.deadline().to_nanos());
+        test.assert_equal_string("ClientRequest(PUT https://example.com/x)", request.to_string());
+    };
+
+    export let test_origin_keys = func {
+        test.assert_equal_string("https://example.com:443", pool.origin_key("HTTPS://Example.com/a?b"));
+        test.assert_equal_string("http://example.com:80", pool.origin_key("http://user@example.com:/x"));
+        test.assert_equal_string("http://example.com:8080", pool.origin_key("http://example.com:8080"));
+        test.assert_equal_string("http://[::1]:80", pool.origin_key("http://[::1]/"));
+        test.assert_equal_string("http://[::1]:81", pool.origin_key("http://[::1]:81/"));
+        test.assert_equal_string("", pool.origin_key("mailto:a@b"));
+    };
+
+    export let test_host_limits = func {
+        last limits = new pool.HostLimits(2);
+        limits.set_limit("https://slow.example", 1);
+        test.assert(limits.try_acquire("https://slow.example/a"));
+        test.assert(!limits.try_acquire("https://slow.example:443/b"));
+        test.assert(limits.try_acquire("https://fast.example/a"));
+        test.assert(limits.try_acquire("https://fast.example/b"));
+        test.assert(!limits.try_acquire("https://fast.example/c"));
+        test.assert_equal<int>(2, limits.in_flight("https://fast.example/"));
+        limits.release("https://slow.example/");
+        test.assert(limits.try_acquire("https://slow.example/again"));
+        test.assert_equal<int>(1, limits.limit_for("https://slow.example"));
+        test.assert_equal<int>(2, limits.limit_for("http://slow.example"));
+    };
+
+    export let test_backoff = func {
+        last policy = new pool.RetryPolicy(5, durations.of_millis(100), durations.of_millis(350));
+        test.assert_equal<int64>(100, policy.backoff(1).to_millis());
+        test.assert_equal<int64>(200, policy.backoff(2).to_millis());
+        test.assert_equal<int64>(350, policy.backoff(3).to_millis());
+        test.assert_equal<int64>(350, policy.backoff(9).to_millis());
+    };
+
+    export let test_retries_idempotent_on_503 = func {
+        last transport = scripted(new([503, 502, 200]));
+        last time = clock();
+        last client = new pool.PooledClient(transport, new pool.HostLimits(), new pool.RetryPolicy(), time);
+        last answer = test.assert_ok<http.Response>(client.send(new http.ClientRequest("GET", "https://example.com/")));
+        test.assert_equal<int>(200, answer.status);
+        test.assert_equal<int>(3, client.attempts());
+        // Slept 100 ms, then 200 ms.
+        test.assert_equal<int64>(300, test.assert_ok<durations.Duration>(time.monotonic()).to_millis());
+        test.assert_equal<int>(0, client.limits.in_flight("https://example.com/"));
+    };
+
+    export let test_attempts_are_bounded = func {
+        last transport = scripted(new([503, 503, 503, 503]));
+        last client = new pool.PooledClient(transport, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        last answer = test.assert_ok<http.Response>(client.send(new http.ClientRequest("DELETE", "https://example.com/1")));
+        test.assert_equal<int>(503, answer.status);
+        test.assert_equal<int>(3, transport.count());
+    };
+
+    export let test_post_is_not_retried_unless_keyed = func {
+        last transport = scripted(new([503, 200]));
+        last client = new pool.PooledClient(transport, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_equal<int>(503, test.assert_ok<http.Response>(client.send(new http.ClientRequest("POST", "https://e.example/"))).status);
+        test.assert_equal<int>(1, client.attempts());
+        last keyed_transport = scripted(new([503, 200]));
+        last keyed_client = new pool.PooledClient(keyed_transport, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        last keyed = new http.ClientRequest("POST", "https://e.example/");
+        keyed.headers.set("Idempotency-Key", "k-1");
+        test.assert_equal<int>(200, test.assert_ok<http.Response>(keyed_client.send(keyed)).status);
+        test.assert_equal<int>(2, keyed_client.attempts());
+        last strict = new pool.RetryPolicy();
+        strict.set_honor_idempotency_key(false);
+        test.assert(!strict.is_repeatable(keyed));
+    };
+
+    export let test_connection_errors = func {
+        // A refused connection never sent the request: retried even for POST. A reset POST is not retried.
+        last kinds: errors.IoErrorKind[list] = new([errors.IoErrorKind.ConnectionRefused, none]);
+        last refused = new Scripted(new([0, 200]), kinds, "");
+        last client = new pool.PooledClient(refused, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_equal<int>(200, test.assert_ok<http.Response>(client.send(new http.ClientRequest("POST", "https://e.example/"))).status);
+        last reset_kinds: errors.IoErrorKind[list] = new([errors.IoErrorKind.ConnectionReset, none]);
+        last reset = new Scripted(new([0, 200]), reset_kinds, "");
+        last post_client = new pool.PooledClient(reset, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_err<http.Response>(post_client.send(new http.ClientRequest("POST", "https://e.example/")));
+        last reset_again = new Scripted(new([0, 200]), new([errors.IoErrorKind.ConnectionReset, none]), "");
+        last get_client = new pool.PooledClient(reset_again, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_ok<http.Response>(get_client.send(new http.ClientRequest("GET", "https://e.example/")));
+        last denied = new Scripted(new([0, 200]), new([errors.IoErrorKind.CapabilityDenied, none]), "");
+        last denied_client = new pool.PooledClient(denied, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_err<http.Response>(denied_client.send(new http.ClientRequest("GET", "https://e.example/")));
+        test.assert_equal<int>(1, denied_client.attempts());
+    };
+
+    export let test_retry_after = func {
+        // delay-seconds within the cap replaces the backoff; over the cap stops; 429 retries only with it.
+        last waited = new Scripted(new([503, 200]), new([none, none]), "1");
+        last time = clock();
+        last client = new pool.PooledClient(waited, new pool.HostLimits(), new pool.RetryPolicy(), time);
+        test.assert_ok<http.Response>(client.send(new http.ClientRequest("GET", "https://e.example/")));
+        test.assert_equal<int64>(1000, test.assert_ok<durations.Duration>(time.monotonic()).to_millis());
+        last too_long = new Scripted(new([503, 200]), new([none, none]), "120");
+        last long_client = new pool.PooledClient(too_long, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_equal<int>(503, test.assert_ok<http.Response>(long_client.send(new http.ClientRequest("GET", "https://e.example/"))).status);
+        last throttled = scripted(new([429, 200]));
+        last throttled_client = new pool.PooledClient(throttled, new pool.HostLimits(), new pool.RetryPolicy(), clock());
+        test.assert_equal<int>(429, test.assert_ok<http.Response>(throttled_client.send(new http.ClientRequest("GET", "https://e.example/"))).status);
+        // An HTTP-date: the clock is at 2023-11-14T22:13:20Z (epoch 1700000000), the date 2 s later.
+        // Generator: python3 -I -c 'import email.utils; print(email.utils.formatdate(1700000002, usegmt=True))'
+        last dated = http.text(503, "");
+        dated.headers.set("Retry-After", "Tue, 14 Nov 2023 22:13:22 GMT");
+        test.assert_equal<int64>(2000, test.assert_some<durations.Duration>(pool.retry_after(dated, clock())).to_millis());
+        last past = http.text(503, "");
+        past.headers.set("Retry-After", "Tue, 14 Nov 2023 22:13:00 GMT");
+        test.assert_equal<int64>(0, test.assert_some<durations.Duration>(pool.retry_after(past, clock())).to_millis());
+        last junk = http.text(503, "");
+        junk.headers.set("Retry-After", "soon");
+        test.assert_none<durations.Duration>(pool.retry_after(junk, clock()));
+    };
+
+    export let test_pool_busy_origin = func {
+        last limits = new pool.HostLimits(1);
+        test.assert(limits.try_acquire("https://e.example/"));
+        last transport = scripted(new([200]));
+        last client = new pool.PooledClient(transport, limits, new pool.RetryPolicy(), clock());
+        last problem = test.assert_err<http.Response>(client.send(new http.ClientRequest("GET", "https://e.example/x")));
+        test.assert(strings.contains(errors.message(problem), "https://e.example:443"));
+        test.assert_equal<int>(0, transport.count());
+        test.assert_err<http.Response>(client.send(new http.ClientRequest("GET", "relative")));
+    };
+);

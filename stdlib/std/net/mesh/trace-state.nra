@@ -1,0 +1,277 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief The W3C Trace Context `tracestate` header: up to 32 vendor `key=value` list-members, newest first.
+///
+/// Follows `spec/20-http_request_header_format.md` of w3c/trace-context (main branch, fetched 2026-11-17). A key
+/// starts with a lowercase letter or digit and continues with up to 255 of `a-z 0-9 _ - * / @`; a value is 1 to
+/// 256 printable ASCII characters other than `,` and `=`, not ending in a space. Members are separated by commas;
+/// spaces and tabs around a member are ignored and empty members are allowed (they are skipped). A list with more
+/// than 32 members, an invalid member, or a key that appears twice fails the parse as a whole: the spec leaves
+/// duplicates to the vendor, and this library ignores such a header rather than guess which entry is current.
+/// A `TraceState` is immutable: `put` and `remove` return a new state. `put` moves the key to the front, as the
+/// spec requires of a modified key, and drops the right-most member when the list would exceed 32. Several
+/// `tracestate` fields are combined with commas (RFC 9110 section 5.3) before parsing.
+/// @see [Std.Net.Mesh.TraceState](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TraceState)
+#Since("0.3.0")
+export let TraceState = module (
+    /// @brief The most list-members a `tracestate` may hold.
+    export const MaxMembers: int = 32;
+    /// @brief The longest key and the longest value, in characters.
+    export const MaxPartLength: int = 256;
+    /// @brief The length above which a member is removed first when truncating.
+    export const LongMember: int = 128;
+    /// @brief The combined length every vendor should propagate at least.
+    export const MinPropagated: int = 512;
+
+    /// @brief An ordered list of vendor entries, leftmost first.
+    #Final
+    export let TraceState = class (
+        /// @brief The keys in order.
+        last keys: string[list];
+        /// @brief The values, parallel to `keys`.
+        last values: string[list];
+
+        /// @brief A state over parallel key and value lists (copied). Use `parse`, `empty` and `put`.
+        export let init = func(key_list: string[list], value_list: string[list]) {
+            if (key_list.length != value_list.length || key_list.length > MaxMembers) {
+                trap_with_message("invalid argument: entries");
+            }
+            keys = new;
+            values = new;
+            for (let i = 0; i < key_list.length; i++) {
+                keys.append(key_list[i]);
+                values.append(value_list[i]);
+            }
+        };
+
+        /// @brief The number of list-members.
+        #NoDiscard
+        export let size = func -> int => keys.length;
+
+        /// @brief Whether there are no list-members.
+        #NoDiscard
+        export let is_empty = func -> bool => keys.length == 0;
+
+        /// @brief The key at `index` (0 is the leftmost).
+        #NoDiscard
+        export let key_at = func(index: int) -> string => keys[index];
+
+        /// @brief The value at `index`.
+        #NoDiscard
+        export let value_at = func(index: int) -> string => values[index];
+
+        /// @brief The value of `key`.
+        #NoDiscard
+        export let get = func(key: string) -> Optional<string> {
+            last at = index_of(key);
+            return at < 0 ? Optional<string>.None : Optional<string>.Some(values[at]);
+        };
+
+        /// @brief A state with `key` set to `value` and moved to the front; the right-most member is dropped when
+        /// the list would exceed 32. Fails with a Parse error when the key or value is invalid.
+        #NoDiscard
+        export let put = func(key: string, value: string) -> Result<TraceState> {
+            if (!is_valid_key(key)) {
+                return fail(0, "invalid key '" + key + "'");
+            }
+            if (!is_valid_value(value)) {
+                return fail(0, "invalid value for key '" + key + "'");
+            }
+            last new_keys: string[list] = new;
+            last new_values: string[list] = new;
+            new_keys.append(key);
+            new_values.append(value);
+            for (let i = 0; i < keys.length && new_keys.length < MaxMembers; i++) {
+                if (keys[i] != key) {
+                    new_keys.append(keys[i]);
+                    new_values.append(values[i]);
+                }
+            }
+            return Result<TraceState>.Ok(new TraceState(new_keys, new_values));
+        };
+
+        /// @brief A state without `key`; the others keep their order.
+        #NoDiscard
+        export let remove = func(key: string) -> TraceState {
+            last new_keys: string[list] = new;
+            last new_values: string[list] = new;
+            for (let i = 0; i < keys.length; i++) {
+                if (keys[i] != key) {
+                    new_keys.append(keys[i]);
+                    new_values.append(values[i]);
+                }
+            }
+            return new TraceState(new_keys, new_values);
+        };
+
+        /// @brief A state whose header is at most `max_length` characters: whole members are removed, first those
+        /// longer than 128 characters (right to left), then from the right (spec "tracestate Limits").
+        #NoDiscard
+        export let truncated = func(max_length: int) -> TraceState {
+            last kept_keys: string[list] = new;
+            last kept_values: string[list] = new;
+            for (let i = 0; i < keys.length; i++) {
+                kept_keys.append(keys[i]);
+                kept_values.append(values[i]);
+            }
+            let at = kept_keys.length - 1;
+            while (length_of(kept_keys, kept_values) > max_length && at >= 0) {
+                if (kept_keys[at].byte_length + 1 + kept_values[at].byte_length > LongMember) {
+                    kept_keys.remove_at(at);
+                    kept_values.remove_at(at);
+                }
+                at--;
+            }
+            while (length_of(kept_keys, kept_values) > max_length && kept_keys.length > 0) {
+                kept_keys.remove_at(kept_keys.length - 1);
+                kept_values.remove_at(kept_values.length - 1);
+            }
+            return new TraceState(kept_keys, kept_values);
+        };
+
+        /// @brief The header value: `key=value` members joined by commas without spaces ("" when empty).
+        #NoDiscard
+        export let to_header = func -> string {
+            let text = "";
+            for (let i = 0; i < keys.length; i++) {
+                text += (i > 0 ? "," : "") + keys[i] + "=" + values[i];
+            }
+            return text;
+        };
+
+        /// @brief Equal when the members and their order are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is TraceState)) {
+                return false;
+            }
+            return to_header() == (other as TraceState).to_header();
+        };
+
+        /// @brief The hash of the header value.
+        export let.override hash_code = func -> uint32 => strings.hash(to_header());
+
+        /// @brief The header value.
+        export let.override to_string = func -> string => to_header();
+
+        /// @brief The index of `key`, or -1.
+        let index_of = func(key: string) -> int {
+            for (let i = 0; i < keys.length; i++) {
+                if (keys[i] == key) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+    );
+
+    /// @brief A state with no members.
+    #NoDiscard
+    export let empty = func -> TraceState => new TraceState(new, new);
+
+    /// @brief Parses a combined `tracestate` value by the rules described for the module.
+    #NoDiscard
+    export let parse = func(text: string) -> Result<TraceState> {
+        last keys: string[list] = new;
+        last values: string[list] = new;
+        let start = 0;
+        while (start <= text.byte_length) {
+            let end = start;
+            while (end < text.byte_length && text.byte_at(end) != 44) {
+                end++;
+            }
+            last member = trim_ows(text.slice(start, end));
+            if (member.byte_length > 0) {
+                last eq = strings.index_of(member, "=");
+                if (eq <= 0) {
+                    return fail(start, "a list-member is not key=value");
+                }
+                last key = member.slice(0, eq);
+                last value = member.slice(eq + 1, member.byte_length);
+                if (!is_valid_key(key)) {
+                    return fail(start, "invalid key '" + key + "'");
+                }
+                if (!is_valid_value(value)) {
+                    return fail(start, "invalid value for key '" + key + "'");
+                }
+                for (let k in keys) {
+                    if (k == key) {
+                        return fail(start, "key '" + key + "' appears twice");
+                    }
+                }
+                if (keys.length == MaxMembers) {
+                    return fail(start, "more than 32 list-members");
+                }
+                keys.append(key);
+                values.append(value);
+            }
+            start = end + 1;
+        }
+        return Result<TraceState>.Ok(new TraceState(keys, values));
+    };
+
+    /// @brief Whether `key` is a valid list-member key.
+    #NoDiscard
+    export let is_valid_key = func(key: string) -> bool {
+        if (key.byte_length == 0 || key.byte_length > MaxPartLength) {
+            return false;
+        }
+        last first = key.byte_at(0);
+        if (!((first >= 97 && first <= 122) || (first >= 48 && first <= 57))) {
+            return false;
+        }
+        for (let i = 1; i < key.byte_length; i++) {
+            last b = key.byte_at(i);
+            if (!((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95 or 45 or 42 or 47 or 64)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether `value` is a valid list-member value: 1 to 256 characters of 0x20 to 0x7E other than `,`
+    /// and `=`, the last not a space.
+    #NoDiscard
+    export let is_valid_value = func(value: string) -> bool {
+        if (value.byte_length == 0 || value.byte_length > MaxPartLength) {
+            return false;
+        }
+        for (let i = 0; i < value.byte_length; i++) {
+            last b = value.byte_at(i);
+            if (b < 32 || b > 126 || b == 44 || b == 61) {
+                return false;
+            }
+        }
+        return value.byte_at(value.byte_length - 1) != 32;
+    };
+
+    /// @brief The header length of the parallel lists.
+    let length_of = func(keys: string[list], values: string[list]) -> int {
+        let total = keys.length > 0 ? keys.length - 1 : 0;
+        for (let i = 0; i < keys.length; i++) {
+            total += keys[i].byte_length + 1 + values[i].byte_length;
+        }
+        return total;
+    };
+
+    /// @brief `text` without leading and trailing spaces and tabs.
+    let trim_ows = func(text: string) -> string {
+        let start = 0;
+        let end = text.byte_length;
+        while (start < end && text.byte_at(start) == 32 or 9) {
+            start++;
+        }
+        while (end > start && text.byte_at(end - 1) == 32 or 9) {
+            end--;
+        }
+        return text.slice(start, end);
+    };
+
+    /// @brief A parse error at `offset`.
+    let fail = func(offset: int, text: string) -> Result<TraceState> =>
+        Result<TraceState>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
+            message: "tracestate: " + text });
+);

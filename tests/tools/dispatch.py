@@ -152,6 +152,12 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["run", "--tier=7", "{HELLO_NVR}"], None, []),
     (["run", "--tier-stats", "{ARGS_NVR}", "--", "x"], None, []),
     (["run", "{HELLO}"], None, []),
+    # `neura serve` cases that end before the host binds a port: usage, a
+    # build failure, and a host option that the server host refuses.
+    (["serve"], None, []),
+    (["serve", "--help"], None, []),
+    (["serve", "{BAD}"], None, []),
+    (["serve", "{HELLO_NVR}", "--max-workers", "0"], None, []),
     (["test", "-I", "{GUIDE}", "{MATH}"], None, []),
     (["test", "-I", "{GUIDE}", "--list", "--format=json", "{MATH}"], None, []),
     (["test", "--list"], None, []),
@@ -261,7 +267,10 @@ def parity(bin_dir: Path) -> None:
             check(run([str(bin_dir / f"{tool}{SUFFIX}"), "--version"], work, None) == version,
                   f"{tool} --version prints neura --version")
             status, out, _ = run([str(bin_dir / f"{tool}{SUFFIX}"), "--help"], work, None)
-            check(status == 0 and out.startswith(f"{tool}: the direct form of".encode()), f"{tool} --help")
+            # A tool with no command words (the server host) serves no `neura`
+            # command directly; its help names what starts it.
+            heading = f"{tool}: the direct form of" if tools[tool][1] else f"{tool}: the host that neura serve starts"
+            check(status == 0 and out.startswith(heading.encode()), f"{tool} --help")
         check(run([str(neura), "version"], work, None) == version, "neura version")
         help_text = run([str(neura), "help"], work, None)
         check(help_text[0] == 0 and help_text[1].startswith(b"usage: neura lsp --stdio\n"), "neura help")

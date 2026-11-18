@@ -72,7 +72,7 @@ Launch time of a whole process, measured on the machine of the benchmark table w
 | Every shipped executable depends on no library beyond the five above, and on libclang only where `neura` uses it today | frozen |
 | The `neura` dispatcher, stripped, is at most 1 MiB | frozen |
 | The execution core, the executables a runtime-only installation contains, contains no compiler, parser, lowering or decompiler code | frozen |
-| Each archive is at most 25% larger than the rc.3 archive for its target, excluding application target components (browser, desktop and database providers), which are measured separately | frozen |
+| Each archive is at most 55% larger than the rc.3 archive for its target, excluding application target components (browser, desktop and database providers), which are measured separately | frozen; raised from 25% by owner decision 2026-11-18: the server host and the SQL providers stay in the core, and the portable x86-64 Linux SDK archive measured +45.8% (14,588,864 bytes against rc.3's 10,008,390) after they merged, so the limit is the next multiple of 5 above that plus 5 points |
 | `neura --version` and a direct run of a hello-world image take no longer than with rc.3, within 5% | frozen |
 
 ## Format revisions

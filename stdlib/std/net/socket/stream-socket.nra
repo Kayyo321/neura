@@ -1,0 +1,44 @@
+let.promote _ = import:Std.Time.Duration;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Transport;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The unified stream-socket contract: a connected, ordered, reliable byte stream with addresses, a
+/// half-close and a read timeout (Stdlib.md section 11, Std.Net.Socket).
+///
+/// `TcpSocket`, `UnixStream` and `Std.Net.Tls.TlsStream` implement it. As a `Std.Net.Transport`, `receive`
+/// returns the next bytes the peer sent (at most `ReceiveChunk` bytes) and `None` at the orderly end of the
+/// peer's data, and `send` writes every byte or fails. The same objects serve blocking code and tasks: in a
+/// program with tasks the host's read, write and accept services overlap, so one task waits while the others
+/// run; the runtime's driver owns the waiting (see `Std.Net.Socket.EventLoop`).
+/// @see [Std.Net.Socket.StreamSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-StreamSocket)
+#Since("0.3.0")
+export let StreamSocket = module (
+    /// @brief The most bytes one `receive` returns: 65,536.
+    export const ReceiveChunk: int = 65536;
+
+    /// @brief Which direction `shutdown` ends: reading, writing (the peer then reads the end of the stream), or
+    /// both.
+    export let Shutdown = enum (Read, Write, Both);
+
+    /// @brief A connected byte stream between two addresses of type `Addr`.
+    export let StreamSocket = interface<Addr>:Transport<uint8[list], uint8[list]> (
+        /// @brief The local address of the connection. An implementation that needs a host service to learn it
+        /// may trap in Neura 0.3.0 (see `TcpSocket.local_address`).
+        let local_address = func -> Result<Addr>;
+        /// @brief The peer's address, or `None` when the host did not report it (an accepted TCP connection in
+        /// Neura 0.3.0, or an unnamed Unix-domain peer).
+        let peer_address = func -> Optional<Addr>;
+        /// @brief Up to `max` bytes; an empty list once the peer has finished sending. A maximum below 1 traps.
+        let read = func(max: int) -> Result<uint8[list]>;
+        /// @brief Writes every byte or fails.
+        let write = func(data: uint8[list]) -> Result<Unit>;
+        /// @brief Ends one or both directions without releasing the socket.
+        let shutdown = func(how: Shutdown) -> Result<Unit>;
+        /// @brief The longest a read waits; zero waits without limit.
+        let read_timeout = func -> Duration;
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        let set_read_timeout = func(timeout: Duration);
+    );
+);

@@ -8,7 +8,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// Memory is one list of 64-bit words, 128 per 1 KiB block; lanes are filled one after another within each
 /// slice, which gives the same result as filling them in parallel. Argon2d and Argon2i are not offered.
-/// @see [Std.Crypto.Kdf.Argon2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Argon2)
+/// @see [Std.Crypto.Kdf.Argon2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Argon2)
 #Since("0.3.0")
 export let Argon2 = module (
     /// @brief The cost parameters of an Argon2id hash.
@@ -68,7 +68,7 @@ export let Argon2 = module (
     /// @brief Argon2id with the optional secret value K and associated data X of RFC 9106, section 3.1.
     #[NoDiscard, Since("0.3.0")]
     export let argon2id_with = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
-            associated_data: uint8[list], params: Argon2Params) -> uint8[list] {
+        associated_data: uint8[list], params: Argon2Params) -> uint8[list] {
         crypto_policy.require(Algorithm.Argon2id);
         if (salt.length < 8) {
             trap_with_message("invalid argument: Argon2 salt must be at least 8 bytes");
@@ -127,7 +127,7 @@ export let Argon2 = module (
         };
 
         export let run = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
-                associated_data: uint8[list]) -> uint8[list] {
+            associated_data: uint8[list]) -> uint8[list] {
             let h0_input: uint8[list] = new;
             words.append32_le(h0_input, lanes as uint32);
             words.append32_le(h0_input, tag_length as uint32);

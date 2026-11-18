@@ -1,0 +1,369 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief eBPF socket interception: programs for the sockops, sk_msg and sk_lookup attach points and the socket
+/// redirect maps they use, for transparent capture and redirection of a host's traffic.
+///
+/// The types, their validation, and the shape of every operation are real. Loading a program, creating a map,
+/// attaching, updating a map and detaching need the kernel's `bpf(2)` system call, which no Neura 0.3.0 host
+/// service exposes; each of those calls goes through one private host wrapper that is a stub and traps with an
+/// "unsupported" message. Validation runs first, so a malformed program or a mismatched attach point is reported as
+/// an `InvalidInput` Io error without reaching the stub. The bytecode is supplied by the program (compiled by an
+/// external toolchain such as clang's BPF target); this module does not compile, verify or interpret eBPF.
+/// @see [Std.Net.Mesh.Ebpf](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-Ebpf)
+#Since("0.3.0")
+export let Ebpf = module (
+    /// @brief The longest program or map name in bytes (the kernel's 16-byte name with its NUL).
+    export const MaxNameLength: int = 15;
+    /// @brief The size of one eBPF instruction in bytes.
+    export const InstructionBytes: int = 8;
+    /// @brief The most instructions a privileged loader accepts.
+    export const MaxInstructions: int = 1000000;
+
+    /// @brief Where a socket program runs.
+    export let AttachPoint = enum (
+        /// @brief `BPF_PROG_TYPE_SOCK_OPS` on a cgroup: sees TCP socket events, can add sockets to a redirect map.
+        SockOps,
+            /// @brief `BPF_PROG_TYPE_SK_MSG` on a redirect map: sees each sendmsg and can redirect it to another socket.
+            SkMsg,
+            /// @brief `BPF_PROG_TYPE_SK_LOOKUP` on a network namespace: picks the listening socket for a new connection.
+            SkLookup
+    );
+
+    /// @brief The kind of socket redirect map.
+    export let MapKind = enum (
+        /// @brief `BPF_MAP_TYPE_SOCKMAP`: sockets indexed by a 4-byte key.
+        SockMap,
+            /// @brief `BPF_MAP_TYPE_SOCKHASH`: sockets indexed by a key of any fixed size.
+            SockHash
+    );
+
+    /// @brief An eBPF socket program: a name, an attach point, its license, and its bytecode.
+    #Final
+    export let EbpfProgram = class (
+        /// @brief The program name.
+        export last name: string;
+        /// @brief Where it attaches.
+        export last attach_point: AttachPoint;
+        /// @brief The license string the kernel checks for GPL-only helpers.
+        export last license: string;
+        /// @brief The bytecode, 8 bytes per instruction, in the target's byte order.
+        export last instructions: uint8[list];
+
+        /// @brief A program (the bytecode is copied). Use `validate` before loading.
+        export let init = func(program_name: string, point: AttachPoint, program_license: string, code: uint8[list]) {
+            name = program_name;
+            attach_point = point;
+            license = program_license;
+            instructions = new;
+            for (let b in code) {
+                instructions.append(b);
+            }
+        };
+
+        /// @brief The number of instructions.
+        #NoDiscard
+        export let instruction_count = func -> int => instructions.length / InstructionBytes;
+
+        /// @brief Equal when the name, attach point, license and bytecode are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is EbpfProgram)) {
+                return false;
+            }
+            last that = other as EbpfProgram;
+            if (name != that.name || attach_point != that.attach_point || license != that.license
+                || instructions.length != that.instructions.length) {
+                return false;
+            }
+            for (let i = 0; i < instructions.length; i++) {
+                if (instructions[i] != that.instructions[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the name and the bytecode.
+        export let.override hash_code = func -> uint32 {
+            let hash = strings.hash(name);
+            for (let b in instructions) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief Text such as "EbpfProgram(redirect, SkMsg, 12 instructions)".
+        export let.override to_string = func -> string => "EbpfProgram(" + name + ", " + attach_point.to_string()
+            + ", " + instruction_count().to_string() + " instructions)";
+    );
+
+    /// @brief A socket redirect map description.
+    #[Final, Immutable]
+    export let RedirectMap = class (
+        /// @brief The map name.
+        export last name: string;
+        /// @brief The map kind.
+        export last kind: MapKind;
+        /// @brief The key size in bytes (4 for a SockMap).
+        export last key_size: int;
+        /// @brief The most entries.
+        export last max_entries: int;
+
+        /// @brief A map description. Use `validate_map` before creating it.
+        export let init = func(map_name: string, map_kind: MapKind, key_bytes: int, capacity: int) {
+            name = map_name;
+            kind = map_kind;
+            key_size = key_bytes;
+            max_entries = capacity;
+        };
+
+        /// @brief Equal when every field is.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is RedirectMap)) {
+                return false;
+            }
+            last that = other as RedirectMap;
+            return name == that.name && kind == that.kind && key_size == that.key_size
+                && max_entries == that.max_entries;
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 => strings.hash(to_string());
+
+        /// @brief Text such as "RedirectMap(socks, SockHash, key 12 bytes, 1024 entries)".
+        export let.override to_string = func -> string => "RedirectMap(" + name + ", " + kind.to_string() + ", key "
+            + key_size.to_string() + " bytes, " + max_entries.to_string() + " entries)";
+    );
+
+    /// @brief A program loaded into the kernel, by its host handle.
+    #[Final, Immutable]
+    export let LoadedProgram = class (
+        /// @brief The host's handle (a file descriptor on Linux).
+        export last handle: int64;
+        /// @brief The program's attach point.
+        export last attach_point: AttachPoint;
+
+        /// @brief Wraps a host handle.
+        export let init = func(host_handle: int64, point: AttachPoint) {
+            handle = host_handle;
+            attach_point = point;
+        };
+
+        /// @brief Equal when the handles are.
+        export let.override equals = func(other: class) -> bool =>
+            other is LoadedProgram && handle == (other as LoadedProgram).handle;
+
+        /// @brief The low bits of the handle.
+        export let.override hash_code = func -> uint32 => (handle & 4294967295) as uint32;
+
+        /// @brief Text such as "LoadedProgram(7, SkMsg)".
+        export let.override to_string = func -> string =>
+            "LoadedProgram(" + handle.to_string() + ", " + attach_point.to_string() + ")";
+    );
+
+    /// @brief A redirect map created in the kernel, by its host handle.
+    #[Final, Immutable]
+    export let LoadedMap = class (
+        /// @brief The host's handle.
+        export last handle: int64;
+        /// @brief The map description.
+        export last map: RedirectMap;
+
+        /// @brief Wraps a host handle.
+        export let init = func(host_handle: int64, description: RedirectMap) {
+            handle = host_handle;
+            map = description;
+        };
+
+        /// @brief Equal when the handles are.
+        export let.override equals = func(other: class) -> bool =>
+            other is LoadedMap && handle == (other as LoadedMap).handle;
+
+        /// @brief The low bits of the handle.
+        export let.override hash_code = func -> uint32 => (handle & 4294967295) as uint32;
+
+        /// @brief Text such as "LoadedMap(8, socks)".
+        export let.override to_string = func -> string => "LoadedMap(" + handle.to_string() + ", " + map.name + ")";
+    );
+
+    /// @brief Checks a program: a name of 1 to 15 bytes of letters, digits, `_` and `.`; a non-empty license
+    /// without NUL; 1 to 1000000 whole 8-byte instructions.
+    #NoDiscard
+    export let validate = func(program: EbpfProgram) -> Result<Unit> {
+        if (!is_valid_name(program.name)) {
+            return invalid("program name must be 1 to 15 letters, digits, '_' or '.'");
+        }
+        if (program.license.byte_length == 0 || has_nul(program.license)) {
+            return invalid("license must be non-empty text");
+        }
+        if (program.instructions.length == 0 || program.instructions.length % InstructionBytes != 0) {
+            return invalid("bytecode must be whole 8-byte instructions");
+        }
+        if (program.instruction_count() > MaxInstructions) {
+            return invalid("more than 1000000 instructions");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Checks a map: a valid name, at least one entry, and a key of 4 bytes for a SockMap or 1 to 512 bytes
+    /// for a SockHash.
+    #NoDiscard
+    export let validate_map = func(map: RedirectMap) -> Result<Unit> {
+        if (!is_valid_name(map.name)) {
+            return invalid("map name must be 1 to 15 letters, digits, '_' or '.'");
+        }
+        if (map.max_entries < 1) {
+            return invalid("a map needs at least one entry");
+        }
+        last key_ok = match (map.kind) {
+            MapKind.SockMap => map.key_size == 4,
+            MapKind.SockHash => map.key_size >= 1 && map.key_size <= 512,
+        };
+        if (!key_ok) {
+            return invalid("key size " + map.key_size.to_string() + " does not suit a " + map.kind.to_string());
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Validates and loads `program`. Needs the host's eBPF service (see the module).
+    #NoDiscard
+    export let load = func(program: EbpfProgram) -> Result<LoadedProgram> {
+        validate(program)?;
+        return Result<LoadedProgram>.Ok(new LoadedProgram(host_load(program), program.attach_point));
+    };
+
+    /// @brief Validates and creates `map`. Needs the host's eBPF service.
+    #NoDiscard
+    export let create_map = func(map: RedirectMap) -> Result<LoadedMap> {
+        validate_map(map)?;
+        return Result<LoadedMap>.Ok(new LoadedMap(host_create_map(map), map));
+    };
+
+    /// @brief Attaches a SockOps program to the cgroup at `cgroup_path` (cgroup v2). Needs the host's eBPF service.
+    #NoDiscard
+    export let attach_cgroup = func(program: LoadedProgram, cgroup_path: string) -> Result<Unit> {
+        expect_point(program, AttachPoint.SockOps)?;
+        expect_path(cgroup_path)?;
+        host_attach(program.handle, 0, cgroup_path, -1);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Attaches an SkMsg program to a redirect map. Needs the host's eBPF service.
+    #NoDiscard
+    export let attach_map = func(program: LoadedProgram, map: LoadedMap) -> Result<Unit> {
+        expect_point(program, AttachPoint.SkMsg)?;
+        host_attach(program.handle, 1, "", map.handle);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Attaches an SkLookup program to the network namespace at `netns_path` (such as
+    /// "/proc/self/ns/net"). Needs the host's eBPF service.
+    #NoDiscard
+    export let attach_netns = func(program: LoadedProgram, netns_path: string) -> Result<Unit> {
+        expect_point(program, AttachPoint.SkLookup)?;
+        expect_path(netns_path)?;
+        host_attach(program.handle, 2, netns_path, -1);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Stores the socket `socket_handle` under `key` in a redirect map. The key must have the map's key
+    /// size. Needs the host's eBPF service.
+    #NoDiscard
+    export let map_update = func(map: LoadedMap, key: uint8[list], socket_handle: int64) -> Result<Unit> {
+        if (key.length != map.map.key_size) {
+            return invalid("key is " + key.length.to_string() + " bytes; the map's keys are "
+                + map.map.key_size.to_string());
+        }
+        host_map_update(map.handle, key, socket_handle);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Detaches and unloads a program. Needs the host's eBPF service.
+    #NoDiscard
+    export let detach = func(program: LoadedProgram) -> Result<Unit> {
+        host_detach(program.handle);
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Whether `name` is 1 to 15 bytes of letters, digits, `_` and `.`.
+    #NoDiscard
+    export let is_valid_name = func(name: string) -> bool {
+        if (name.byte_length == 0 || name.byte_length > MaxNameLength) {
+            return false;
+        }
+        for (let i = 0; i < name.byte_length; i++) {
+            last b = name.byte_at(i);
+            if (!((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 or 46)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Whether `text` holds a NUL byte.
+    let has_nul = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief An InvalidInput Io error.
+    let invalid = func(text: string) -> Result<Unit> =>
+        Result<Unit>.Err(errors.Error.Io { kind: errors.IoErrorKind.InvalidInput, message: "ebpf: " + text, path: "" });
+
+    /// @brief Ok when the program attaches at `point`.
+    let expect_point = func(program: LoadedProgram, point: AttachPoint) -> Result<Unit> {
+        if (program.attach_point != point) {
+            return invalid("a " + program.attach_point.to_string() + " program cannot attach as "
+                + point.to_string());
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Ok when `path` is absolute.
+    let expect_path = func(path: string) -> Result<Unit> {
+        if (!strings.starts_with(path, "/")) {
+            return invalid("the target path must be absolute");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Loads the program and returns its host handle (`bpf(BPF_PROG_LOAD)`).
+    /// @stub needs the host service neura.net.ebpf.prog_load, which the Neura 0.3.0 runtime lacks
+    let host_load = func(program: EbpfProgram) -> int64 {
+        trap_with_message("unsupported: Std.Net.Mesh.Ebpf.host_load is not implemented in Neura 0.3.0 (needs the host service neura.net.ebpf.prog_load)");
+        return -1;
+    };
+
+    /// @brief Creates the map and returns its host handle (`bpf(BPF_MAP_CREATE)`).
+    /// @stub needs the host service neura.net.ebpf.map_create, which the Neura 0.3.0 runtime lacks
+    let host_create_map = func(map: RedirectMap) -> int64 {
+        trap_with_message("unsupported: Std.Net.Mesh.Ebpf.host_create_map is not implemented in Neura 0.3.0 (needs the host service neura.net.ebpf.map_create)");
+        return -1;
+    };
+
+    /// @brief Attaches a program: target 0 a cgroup path, 1 a map handle, 2 a network namespace path
+    /// (`bpf(BPF_PROG_ATTACH)` or `BPF_LINK_CREATE`).
+    /// @stub needs the host service neura.net.ebpf.prog_attach, which the Neura 0.3.0 runtime lacks
+    let host_attach = func(program: int64, target: int, path: string, map: int64) {
+        trap_with_message("unsupported: Std.Net.Mesh.Ebpf.host_attach is not implemented in Neura 0.3.0 (needs the host service neura.net.ebpf.prog_attach)");
+    };
+
+    /// @brief Stores a socket in a map (`bpf(BPF_MAP_UPDATE_ELEM)`).
+    /// @stub needs the host service neura.net.ebpf.map_update, which the Neura 0.3.0 runtime lacks
+    let host_map_update = func(map: int64, key: uint8[list], socket_handle: int64) {
+        trap_with_message("unsupported: Std.Net.Mesh.Ebpf.host_map_update is not implemented in Neura 0.3.0 (needs the host service neura.net.ebpf.map_update)");
+    };
+
+    /// @brief Detaches and closes a program handle.
+    /// @stub needs the host service neura.net.ebpf.close, which the Neura 0.3.0 runtime lacks
+    let host_detach = func(program: int64) {
+        trap_with_message("unsupported: Std.Net.Mesh.Ebpf.host_detach is not implemented in Neura 0.3.0 (needs the host service neura.net.ebpf.close)");
+    };
+);

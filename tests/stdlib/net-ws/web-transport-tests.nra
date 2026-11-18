@@ -1,0 +1,142 @@
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let session = import:Std.Net.Realtime.WebTransport.Session;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Realtime.WebTransport.Wire;
+
+// The pure parts of Std.Net.Realtime.WebTransport: wire rules and the session request.
+let WebTransportTests = module (
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let read_one = func(text: string) -> uint64 {
+        last reader = new wire.WireReader(bytes_of(text));
+        last value = test.assert_ok<uint64>(reader.read_varint());
+        test.assert_equal<int>(0, reader.remaining());
+        return value;
+    };
+
+    // RFC 9000 appendix A.1: 0xc2197c5eff14e88c is 151,288,809,941,952,652; 0x9d7f3e7d is 494,878,333; 0x7bbd is
+    // 15,293; 0x25 is 37, as is 0x4025.
+    export let test_rfc9000_varint_examples = func {
+        test.assert_equal<uint64>(151288809941952652, read_one("c2197c5eff14e88c"));
+        test.assert_equal<uint64>(494878333, read_one("9d7f3e7d"));
+        test.assert_equal<uint64>(15293, read_one("7bbd"));
+        test.assert_equal<uint64>(37, read_one("25"));
+        test.assert_equal<uint64>(37, read_one("4025"));
+        test.assert_equal_string("c2197c5eff14e88c", hex.encode(wire.encode_varint(151288809941952652)));
+        test.assert_equal_string("9d7f3e7d", hex.encode(wire.encode_varint(494878333)));
+        test.assert_equal_string("7bbd", hex.encode(wire.encode_varint(15293)));
+        test.assert_equal_string("25", hex.encode(wire.encode_varint(37)));
+        // RFC 9000 section 16, Table 4: the range boundaries.
+        test.assert_equal<int>(1, wire.encode_varint(63).length);
+        test.assert_equal<int>(2, wire.encode_varint(64).length);
+        test.assert_equal<int>(2, wire.encode_varint(16383).length);
+        test.assert_equal<int>(4, wire.encode_varint(16384).length);
+        test.assert_equal<int>(4, wire.encode_varint(1073741823).length);
+        test.assert_equal<int>(8, wire.encode_varint(1073741824).length);
+        test.assert_equal<uint64>(wire.MaxVarint, read_one(hex.encode(wire.encode_varint(wire.MaxVarint))));
+        // Truncated input fails rather than trapping.
+        test.assert_err<uint64>(new wire.WireReader(bytes_of("c2197c")).read_varint());
+        test.assert_err<uint64>(new wire.WireReader(bytes_of("")).read_varint());
+    };
+
+    // RFC 9000 section 2.1, Table 1.
+    export let test_rfc9000_stream_types = func {
+        test.assert(wire.stream_type(0) == wire.StreamType.ClientBidirectional);
+        test.assert(wire.stream_type(1) == wire.StreamType.ServerBidirectional);
+        test.assert(wire.stream_type(2) == wire.StreamType.ClientUnidirectional);
+        test.assert(wire.stream_type(7) == wire.StreamType.ServerUnidirectional);
+        test.assert(wire.is_bidirectional(5) && !wire.is_client_initiated(5));
+        test.assert(!wire.is_bidirectional(6) && wire.is_client_initiated(6));
+        test.assert_equal<int64>(11, wire.nth_stream_id(wire.StreamType.ServerUnidirectional, 2));
+        test.assert(wire.is_valid_session_id(0) && wire.is_valid_session_id(8));
+        test.assert(!wire.is_valid_session_id(2) && !wire.is_valid_session_id(-4));
+    };
+
+    // draft-ietf-webtrans-http3-14 sections 4.2 and 4.3: type 0x54 or signal 0x41, then the session ID.
+    export let test_stream_headers = func {
+        test.assert_equal_string("4054" + "04", hex.encode(wire.uni_stream_header(4)));
+        test.assert_equal_string("4041" + "00", hex.encode(wire.bidi_stream_header(0)));
+        last stream = wire.bidi_stream_header(400);
+        stream.append(170);
+        last reader = new wire.WireReader(stream);
+        test.assert_equal<int64>(400, test.assert_ok<int64>(wire.read_stream_header(reader, true)));
+        test.assert_equal<int>(1, reader.remaining());
+        test.assert_err<int64>(wire.read_stream_header(new wire.WireReader(wire.uni_stream_header(4)), true));
+        test.assert_ok<int64>(wire.read_stream_header(new wire.WireReader(wire.uni_stream_header(4)), false));
+        // A session ID must be a client-initiated bidirectional stream ID.
+        test.assert_err<int64>(wire.read_stream_header(new wire.WireReader(bytes_of("405405")), false));
+    };
+
+    // RFC 9297 section 2.1: the quarter stream ID, then the payload.
+    export let test_datagrams = func {
+        last datagram = wire.encode_datagram(8, strings.to_bytes("hi"));
+        test.assert_equal_string("026869", hex.encode(datagram));
+        last decoded = test.assert_ok<wire.Datagram>(wire.decode_datagram(datagram));
+        test.assert_equal<int64>(8, decoded.session);
+        test.assert_equal_string("hi", strings.from_bytes_lossy(decoded.payload));
+        // 2^60 is one above the largest quarter stream ID.
+        test.assert_err<wire.Datagram>(wire.decode_datagram(wire.encode_varint(1152921504606846976)));
+        test.assert_ok<wire.Datagram>(wire.decode_datagram(wire.encode_varint(1152921504606846975)));
+    };
+
+    // draft-ietf-webtrans-http3-14 section 6: WT_CLOSE_SESSION (0x2843), a 32-bit code and the message.
+    export let test_close_capsule = func {
+        last capsule = wire.encode_close_capsule(new wire.SessionClose(258, "bye"));
+        test.assert_equal_string("6843" + "07" + "00000102" + "627965", hex.encode(capsule));
+        last decoded = test.assert_ok<wire.SessionClose>(wire.decode_close_capsule(capsule));
+        test.assert(decoded.equals(new wire.SessionClose(258, "bye")));
+        test.assert_err<wire.SessionClose>(wire.decode_close_capsule(bytes_of("684303000001")));
+        test.assert_err<wire.SessionClose>(wire.decode_close_capsule(bytes_of("68430500000102ff")));
+        test.assert_err<wire.SessionClose>(wire.decode_close_capsule(bytes_of("6844040000000000")));
+        test.assert_err<wire.SessionClose>(wire.decode_close_capsule(bytes_of("6843080000000000")));
+        last longest = wire.encode_close_capsule(new wire.SessionClose(0, strings.repeat("m", 1024)));
+        test.assert_ok<wire.SessionClose>(wire.decode_close_capsule(longest));
+    };
+
+    // draft-ietf-webtrans-http3-14 section 4.4, Figure 4. Generated with:
+    // python3 -I -c 'first=0x52e4a40fa8db
+    // f=lambda n: first+n+n//0x1e
+    // print([(n, f(n)) for n in [0,1,0x1d,0x1e,0x1f,0x3c,0xffffffff]])'
+    // and the reserved codepoints (h - 0x21) % 0x1f == 0 among the first 80: 91141958510841, 91141958510872.
+    export let test_application_error_mapping = func {
+        test.assert_equal<uint64>(91141958510811, wire.to_http3_error(0));
+        test.assert_equal<uint64>(91141958510812, wire.to_http3_error(1));
+        test.assert_equal<uint64>(91141958510840, wire.to_http3_error(29));
+        test.assert_equal<uint64>(91141958510842, wire.to_http3_error(30));
+        test.assert_equal<uint64>(91141958510843, wire.to_http3_error(31));
+        test.assert_equal<uint64>(91141958510873, wire.to_http3_error(60));
+        test.assert_equal<uint64>(91146396643682, wire.to_http3_error(4294967295));
+        for (let n: uint32 = 0; n < 100; n++) {
+            test.assert_equal<uint32>(n, test.assert_ok<uint32>(wire.from_http3_error(wire.to_http3_error(n))));
+        }
+        test.assert_equal<uint32>(4294967295, test.assert_ok<uint32>(wire.from_http3_error(91146396643682)));
+        test.assert_err<uint32>(wire.from_http3_error(91141958510841));
+        test.assert_err<uint32>(wire.from_http3_error(91141958510872));
+        test.assert_err<uint32>(wire.from_http3_error(91141958510810));
+        test.assert_err<uint32>(wire.from_http3_error(91146396643683));
+    };
+
+    // draft-ietf-webtrans-http3-14 section 3.2: the extended CONNECT that opens a session.
+    export let test_session_request = func {
+        last fields = session.connect_request("example.com", "/wt", "https://example.com");
+        last request = test.assert_ok<session.SessionRequest>(session.validate_connect_request(fields));
+        test.assert_equal_string("SessionRequest(example.com/wt, origin https://example.com)", request.to_string());
+        test.assert_equal_string(":protocol: webtransport", fields[1].to_string());
+        last http: session.Field[list] = new;
+        for (let field in fields) {
+            http.append(field.name == ":scheme" ? new session.Field(":scheme", "http") : field);
+        }
+        test.assert_err<session.SessionRequest>(session.validate_connect_request(http));
+        last websocket: session.Field[list] = new;
+        for (let field in fields) {
+            websocket.append(field.name == ":protocol" ? new session.Field(":protocol", "websocket") : field);
+        }
+        last message = errors.message(test.assert_err<session.SessionRequest>(session.validate_connect_request(websocket)));
+        test.assert(strings.contains(message, "websocket"));
+        test.assert(session.accepts(200) && !session.accepts(404));
+        last value = new session.WebTransportSession(0, 4, true);
+        test.assert_equal_string("WebTransportSession(4, client)", value.to_string());
+    };
+);

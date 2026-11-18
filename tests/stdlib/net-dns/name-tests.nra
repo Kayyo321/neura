@@ -1,0 +1,164 @@
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let names = import:Std.Net.Dns.Name;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let wire = import:Std.Net.Dns.Wire;
+
+// Domain names: text form, label limits, and the wire codec with compression (RFC 1035 sections 2.3.4, 4.1.4).
+let NameTests = module (
+    let name_of = func(text: string) -> names.DnsName => test.assert_ok<names.DnsName>(names.parse(text));
+
+    export let test_parse_and_text = func {
+        test.assert_equal_string("www.example.com.", name_of("www.example.com").to_string());
+        test.assert_equal_string("www.example.com.", name_of("www.example.com.").to_string());
+        test.assert_equal_string(".", name_of(".").to_string());
+        test.assert(name_of("").is_root());
+        test.assert_equal<int>(3, name_of("www.example.com").label_count());
+        test.assert_equal<int>(17, name_of("www.example.com").wire_length());
+        // Escapes: a dot inside a label and a \DDD byte.
+        last escaped = name_of("a\\.b.c\\032d");
+        test.assert_equal<int>(2, escaped.label_count());
+        test.assert_equal<int>(3, escaped.label(0).length);
+        test.assert_equal_string("a\\.b.c\\032d.", escaped.to_string());
+    };
+
+    export let test_case_insensitive_equality = func {
+        test.assert(name_of("WWW.Example.COM").equals(name_of("www.example.com.")));
+        test.assert_equal<uint32>(name_of("WWW.Example.COM").hash_code(), name_of("www.example.com").hash_code());
+        test.assert_equal_string("WWW.Example.COM.", name_of("WWW.Example.COM").to_string());
+        test.assert_equal_string("www.example.com.", name_of("WWW.Example.COM").key());
+    };
+
+    export let test_within_on_label_boundaries = func {
+        test.assert(name_of("a.corp.example").is_within(name_of("CORP.example")));
+        test.assert(name_of("corp.example").is_within(name_of("corp.example")));
+        test.assert(!name_of("notcorp.example").is_within(name_of("corp.example")));
+        test.assert(name_of("x.y").is_within(names.root()));
+        test.assert_equal_string("example.", name_of("a.corp.example").suffix(2).to_string());
+    };
+
+    export let test_label_limits = func {
+        // A 63-byte label is accepted and a 64-byte label rejected (RFC 1035 section 2.3.4).
+        last ok63 = test.assert_ok<names.DnsName>(names.parse(repeat("a", 63) + ".com"));
+        test.assert_equal<int>(63, ok63.label(0).length);
+        test.assert_err<names.DnsName>(names.parse(repeat("a", 64) + ".com"));
+        test.assert_err<names.DnsName>(names.parse("a..b"));
+        test.assert_err<names.DnsName>(names.parse(".a"));
+        test.assert_err<names.DnsName>(names.parse("a\\256"));
+        test.assert_err<names.DnsName>(names.parse("a\\2"));
+        // 4 labels of 63 bytes: 4 * 64 + 1 = 257 wire bytes, above 255.
+        last label63 = repeat("b", 63);
+        test.assert_err<names.DnsName>(names.parse(label63 + "." + label63 + "." + label63 + "." + label63));
+        // 3 labels of 63 and one of 61: 3 * 64 + 62 + 1 = 255, the maximum.
+        last longest = test.assert_ok<names.DnsName>(names.parse(label63 + "." + label63 + "." + label63 + "."
+            + repeat("c", 61)));
+        test.assert_equal<int>(255, longest.wire_length());
+    };
+
+    // RFC 1035 section 4.1.4: F.ISI.ARPA at offset 20, FOO.F.ISI.ARPA at 40 (FOO then a pointer to 20), ARPA at 64
+    // (a pointer to 26), and the root at 92.
+    let rfc1035_example = func -> uint8[list] {
+        last message: uint8[list] = new;
+        for (let i = 0; i < 93; i++) {
+            message.append(0);
+        }
+        last f_isi_arpa: uint8[] = [1, 70, 3, 73, 83, 73, 4, 65, 82, 80, 65, 0];
+        for (let i = 0; i < 12; i++) {
+            message[20 + i] = f_isi_arpa[i];
+        }
+        last foo: uint8[] = [3, 70, 79, 79, 192, 20];
+        for (let i = 0; i < 6; i++) {
+            message[40 + i] = foo[i];
+        }
+        message[64] = 192;
+        message[65] = 26;
+        message[92] = 0;
+        return message;
+    };
+
+    export let test_rfc1035_compression_example_decode = func {
+        last message = rfc1035_example();
+        last at20 = new wire.WireReader(message, 20);
+        test.assert_equal_string("F.ISI.ARPA.", test.assert_ok<names.DnsName>(at20.read_name()).to_string());
+        test.assert_equal<int>(32, at20.offset());
+        last at40 = new wire.WireReader(message, 40);
+        test.assert_equal_string("FOO.F.ISI.ARPA.", test.assert_ok<names.DnsName>(at40.read_name()).to_string());
+        test.assert_equal<int>(46, at40.offset());
+        last at64 = new wire.WireReader(message, 64);
+        test.assert_equal_string("ARPA.", test.assert_ok<names.DnsName>(at64.read_name()).to_string());
+        test.assert_equal<int>(66, at64.offset());
+        last at92 = new wire.WireReader(message, 92);
+        test.assert(test.assert_ok<names.DnsName>(at92.read_name()).is_root());
+    };
+
+    // Expected bytes from:
+    // python3 -I -c "import struct
+    // def n(*ls): return b''.join(bytes([len(l)])+l for l in ls)+b'\0'
+    // print((n(b'F',b'ISI',b'ARPA')+n(b'FOO')[:-1]+struct.pack('>H',0xC000|0)+struct.pack('>H',0xC000|6)+b'\0').hex())
+    // print((n(b'example',b'com')+n(b'WWW')[:-1]+struct.pack('>H',0xC000)).hex())
+    // print((n(b'a',b'b')+n(b'a',b'b')).hex())"
+    export let test_rfc1035_compression_example_encode = func {
+        // Writing the three names in order reproduces the compressed forms of section 4.1.4 relative to the
+        // first name's offset: FOO then a pointer to F.ISI.ARPA, and ARPA as a pointer into it.
+        last writer = new wire.WireWriter();
+        writer.write_name(name_of("F.ISI.ARPA"), true);
+        writer.write_name(name_of("FOO.F.ISI.ARPA"), true);
+        writer.write_name(name_of("ARPA"), true);
+        writer.write_name(names.root(), true);
+        // 01 46 03 495349 04 41525041 00 | 03 464f4f c000 | c006 | 00
+        test.assert_equal_string("01460349534904415250410003464f4fc000c00600", hex.encode(writer.bytes()));
+        // Case is ignored when matching suffixes.
+        last mixed = new wire.WireWriter();
+        mixed.write_name(name_of("example.com"), true);
+        mixed.write_name(name_of("WWW.EXAMPLE.COM"), true);
+        test.assert_equal_string("076578616d706c6503636f6d0003575757c000", hex.encode(mixed.bytes()));
+        // Without compression the name is written in full.
+        last plain = new wire.WireWriter();
+        plain.write_name(name_of("a.b"), true);
+        plain.write_name(name_of("a.b"), false);
+        test.assert_equal_string("01610162000161016200", hex.encode(plain.bytes()));
+    };
+
+    export let test_pointer_loops_and_forward_pointers_rejected = func {
+        // A pointer to itself.
+        last self_loop: uint8[list] = new;
+        self_loop.append(192);
+        self_loop.append(0);
+        test.assert_err<names.DnsName>(new wire.WireReader(self_loop).read_name());
+        // A forward pointer: offset 0 points to 2, where a valid name lies.
+        last forward = test.assert_ok<uint8[list]>(hex.decode("c002016100"));
+        test.assert_err<names.DnsName>(new wire.WireReader(forward).read_name());
+        // Two pointers pointing at each other: 0 -> 2 is forward, 2 -> 0 then loops.
+        last mutual = test.assert_ok<uint8[list]>(hex.decode("0161c000"));
+        // From offset 0: label "a" then a pointer to 0, which is not before the run start 0.
+        test.assert_err<names.DnsName>(new wire.WireReader(mutual).read_name());
+        // A label running past the end, and a reserved label type (01xxxxxx).
+        test.assert_err<names.DnsName>(new wire.WireReader(test.assert_ok<uint8[list]>(hex.decode("0561"))).read_name());
+        test.assert_err<names.DnsName>(new wire.WireReader(test.assert_ok<uint8[list]>(hex.decode("4000"))).read_name());
+        // An empty input.
+        test.assert_err<names.DnsName>(new wire.WireReader(new).read_name());
+    };
+
+    export let test_expanded_name_over_255_rejected = func {
+        // Four 63-byte labels, ending in the root: 257 bytes once expanded.
+        last message: uint8[list] = new;
+        for (let n = 0; n < 4; n++) {
+            message.append(63);
+            for (let i = 0; i < 63; i++) {
+                message.append(97);
+            }
+        }
+        message.append(0);
+        last problem = test.assert_err<names.DnsName>(new wire.WireReader(message).read_name());
+        test.assert(errors.message(problem) != "");
+    };
+
+    let repeat = func(text: string, count: int) -> string {
+        let out = "";
+        for (let i = 0; i < count; i++) {
+            out = out + text;
+        }
+        return out;
+    };
+);

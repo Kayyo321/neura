@@ -1,0 +1,179 @@
+let errors = import:Std.Core.Error;
+let fixed_clocks = import:Std.Time.FixedClock;
+let http = import:Std.Net.Http;
+let instants = import:Std.Time.Instant;
+let logging = import:Std.Log.Logger;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// Std.Net.Http authentication, same-origin and CORS middleware, and the request log.
+let AuthTests = module (
+    let whoami = func(request: http.Request, params: http.Params) -> result.Result<http.Response> {
+        last who = request.principal();
+        return match (who) {
+            optional.Optional.Some(p) => result.Result<http.Response>.Ok(http.text(200, p.subject)),
+            optional.Optional.None => result.Result<http.Response>.Ok(http.text(200, "nobody")),
+        };
+    };
+
+    let change = func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+        result.Result<http.Response>.Ok(http.text(200, "changed"));
+
+    // The application's token check: "t-alice" is alice; "t-broken" makes the check fail.
+    let check_token = func(token: string) -> result.Result<optional.Optional<http.Principal>> {
+        if (token == "t-alice") {
+            return result.Result<optional.Optional<http.Principal>>.Ok(
+                optional.Optional<http.Principal>.Some(new http.Principal("alice", "bearer")));
+        }
+        if (token == "t-broken") {
+            return result.Result<optional.Optional<http.Principal>>.Err(errors.custom("auth.store", "token store down"));
+        }
+        return result.Result<optional.Optional<http.Principal>>.Ok(optional.Optional<http.Principal>.None);
+    };
+
+    let request_with = func(method: string, target: string, names: string[list], values: string[list]) -> http.Request {
+        last fields = new http.Headers();
+        for (let i = 0; i < names.length; i++) {
+            fields.add(names[i], values[i]);
+        }
+        return http.request_with(method, target, fields, new uint8[list]());
+    };
+
+    let authorized = func(value: string) -> http.Request => request_with("GET", "/me", new(["Authorization"]), new([value]));
+
+    export let test_bearer_token_syntax = func {
+        test.assert_equal_string("t-alice", test.assert_some<string>(http.bearer_token(authorized("Bearer t-alice"))));
+        test.assert_equal_string("abc+/=", test.assert_some<string>(http.bearer_token(authorized("bearer   abc+/="))));
+        test.assert_none<string>(http.bearer_token(authorized("Basic dXNlcg==")));
+        test.assert_none<string>(http.bearer_token(authorized("Bearer ")));
+        test.assert_none<string>(http.bearer_token(authorized("Bearer a b")));
+        test.assert_none<string>(http.bearer_token(authorized("Bearer a=b")));
+        test.assert_none<string>(http.bearer_token(http.request("GET", "/")));
+        // A multi-byte character across the scheme's end is not a bearer token (and does not trap).
+        test.assert_none<string>(http.bearer_token(authorized("Beareréxyzab")));
+        test.assert_equal_string("BearerAuthenticator", http.bearer(check_token).to_string());
+    };
+
+    export let test_require = func {
+        last router = new http.Router();
+        router.on_error(new func(line: string) {});
+        router.use(http.require(http.bearer(check_token)));
+        router.get("/me", whoami);
+        last ok = router.dispatch(authorized("Bearer t-alice"));
+        test.assert_equal<int>(200, ok.status);
+        test.assert_equal_string("alice", ok.body_text());
+        last unknown = router.dispatch(authorized("Bearer t-bob"));
+        test.assert_equal<int>(401, unknown.status);
+        test.assert_equal_string("Bearer", test.assert_some<string>(unknown.headers.get("WWW-Authenticate")));
+        test.assert(strings.contains(unknown.body_text(), "\"code\":\"unauthorized\""));
+        test.assert_equal<int>(401, router.dispatch(http.request("GET", "/me")).status);
+        // The check failing is an Err: 500.
+        test.assert_equal<int>(500, router.dispatch(authorized("Bearer t-broken")).status);
+    };
+
+    export let test_principal_cannot_come_from_a_field = func {
+        // Case 33 (in spirit): only the authenticator sets the principal.
+        last router = new http.Router();
+        router.get("/me", whoami);
+        last forged = request_with("GET", "/me", new(["X-Principal"]), new(["alice"]));
+        test.assert_equal_string("nobody", router.dispatch(forged).body_text());
+    };
+
+    export let test_same_origin = func {
+        // Case 32: a cookie-authenticated POST with a cross-site Origin: 403.
+        last router = new http.Router();
+        router.use(http.same_origin());
+        router.post("/parts", change);
+        router.get("/parts", change);
+        last cross = request_with("POST", "/parts", new(["Host", "Origin"]), new(["shop.example", "https://evil.example"]));
+        test.assert_equal<int>(403, router.dispatch(cross).status);
+        last same = request_with("POST", "/parts", new(["Host", "Origin"]), new(["shop.example", "http://SHOP.example:80"]));
+        test.assert_equal<int>(200, router.dispatch(same).status);
+        last fetch_site = request_with("POST", "/parts", new(["Sec-Fetch-Site", "Origin"]), new(["same-origin", "https://evil.example"]));
+        test.assert_equal<int>(200, router.dispatch(fetch_site).status);
+        last cross_site = request_with("POST", "/parts", new(["Sec-Fetch-Site"]), new(["cross-site"]));
+        test.assert_equal<int>(403, router.dispatch(cross_site).status);
+        last bare = request_with("POST", "/parts", new(["Host"]), new(["shop.example"]));
+        test.assert_equal<int>(403, router.dispatch(bare).status);
+        // A safe method passes.
+        test.assert_equal<int>(200, router.dispatch(request_with("GET", "/parts", new(["Origin"]), new(["https://evil.example"]))).status);
+    };
+
+    let policy = func -> http.CorsPolicy {
+        last p = new http.CorsPolicy(new(["https://app.example"]));
+        p.allow_methods(new(["GET", "PUT"]));
+        p.allow_headers(new(["Content-Type", "X-Trace"]));
+        p.expose_headers(new(["X-Total"]));
+        p.allow_credentials(true);
+        p.set_max_age(600);
+        return p;
+    };
+
+    export let test_cors_preflight = func {
+        last router = new http.Router();
+        router.use(http.cors(policy()));
+        router.put("/parts/{id}", change);
+        last preflight = request_with("OPTIONS", "/parts/1",
+            new(["Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"]),
+            new(["https://app.example", "PUT", "content-type, x-trace"]));
+        last answer = router.dispatch(preflight);
+        test.assert_equal<int>(204, answer.status);
+        test.assert_equal_string("https://app.example", test.assert_some<string>(answer.headers.get("Access-Control-Allow-Origin")));
+        test.assert_equal_string("GET, PUT", test.assert_some<string>(answer.headers.get("Access-Control-Allow-Methods")));
+        test.assert_equal_string("content-type, x-trace", test.assert_some<string>(answer.headers.get("Access-Control-Allow-Headers")));
+        test.assert_equal_string("600", test.assert_some<string>(answer.headers.get("Access-Control-Max-Age")));
+        test.assert_equal_string("true", test.assert_some<string>(answer.headers.get("Access-Control-Allow-Credentials")));
+        test.assert_equal_string("Origin", test.assert_some<string>(answer.headers.get("Vary")));
+        last refused = request_with("OPTIONS", "/parts/1", new(["Origin", "Access-Control-Request-Method"]),
+            new(["https://evil.example", "PUT"]));
+        test.assert_equal<int>(403, router.dispatch(refused).status);
+        last bad_method = request_with("OPTIONS", "/parts/1", new(["Origin", "Access-Control-Request-Method"]),
+            new(["https://app.example", "DELETE"]));
+        test.assert_equal<int>(403, router.dispatch(bad_method).status);
+        last bad_header = request_with("OPTIONS", "/parts/1",
+            new(["Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"]),
+            new(["https://app.example", "PUT", "x-other"]));
+        test.assert_equal<int>(403, router.dispatch(bad_header).status);
+    };
+
+    export let test_cors_actual_requests = func {
+        last router = new http.Router();
+        router.use(http.cors(policy()));
+        router.put("/parts/{id}", change);
+        last admitted = router.dispatch(request_with("PUT", "/parts/1", new(["Origin"]), new(["https://app.example"])));
+        test.assert_equal<int>(200, admitted.status);
+        test.assert_equal_string("https://app.example", test.assert_some<string>(admitted.headers.get("Access-Control-Allow-Origin")));
+        test.assert_equal_string("X-Total", test.assert_some<string>(admitted.headers.get("Access-Control-Expose-Headers")));
+        last other = router.dispatch(request_with("PUT", "/parts/1", new(["Origin"]), new(["https://evil.example"])));
+        test.assert_equal<int>(200, other.status);
+        test.assert_none<string>(other.headers.get("Access-Control-Allow-Origin"));
+        last plain = router.dispatch(http.request("PUT", "/parts/1"));
+        test.assert_none<string>(plain.headers.get("Access-Control-Allow-Origin"));
+        test.assert_equal_string("CorsPolicy(https://app.example)", policy().to_string());
+    };
+
+    export let test_request_log = func {
+        last lines: string[list] = new;
+        last logger = logging.create("http", new func(line: string) {
+            lines.append(line);
+        }, logging.LogLevel.Info);
+        last clock = fixed_clocks.of(instants.of_epoch_seconds(0, 0));
+        last router = new http.Router();
+        router.on_error(new func(line: string) {});
+        router.use(http.request_log_to(logger, clock));
+        router.get("/parts/{id}", change);
+        router.get("/fail", new func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+            result.Result<http.Response>.Err(errors.custom("x", "y")));
+        last fields = new http.Headers();
+        last request = new http.Request("GET", "/parts/3?x=1", fields, new http.MemoryBody(new uint8[list]()), 10, "", "http", "rq-1");
+        test.assert_equal<int>(200, router.dispatch(request).status);
+        test.assert_equal<int>(404, router.dispatch(http.request("GET", "/none")).status);
+        test.assert_equal<int>(500, router.dispatch(http.request("GET", "/fail")).status);
+        test.assert_equal<int>(3, lines.length);
+        test.assert_equal_string("INFO http: rq-1 GET /parts/3 200 0ms", lines[0]);
+        test.assert_equal_string("INFO http:  GET /none 404 0ms", lines[1]);
+        test.assert_equal_string("INFO http:  GET /fail error 0ms", lines[2]);
+    };
+);

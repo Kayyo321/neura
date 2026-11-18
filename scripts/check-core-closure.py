@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CORE_TOOLS = ["neura", "neura-run", "neura-inspect", "neura-doctor", "neura-update", "neura-uninstall"]
+CORE_TOOLS = ["neura", "neura-run", "neura-inspect", "neura-doctor", "neura-update", "neura-uninstall", "neura-server-host"]
 # The service component (docs/design/Service030.md) links the execution core
 # only, like the core tools; it is checked when it is built.
 SERVICE_TOOLS = ["neurad"]

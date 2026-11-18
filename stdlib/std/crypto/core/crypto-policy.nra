@@ -8,7 +8,7 @@ let.promote _ = import:Std.Crypto.Algorithm;
 /// at run time only; checking a policy at compile time is outside 0.3.0. The policy is held in one
 /// Std.Concurrent.AtomicInt64, so primitives can be created in spawned tasks; set it at startup, because a
 /// change while tasks run takes effect for each task at its next creation of a primitive.
-/// @see [Std.Crypto.Core.CryptoPolicy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-CryptoPolicy)
+/// @see [Std.Crypto.Core.CryptoPolicy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Core-CryptoPolicy)
 #Since("0.3.0")
 export let CryptoPolicy = module (
     /// @brief The policies. `Modern` (the default) allows everything Std.Crypto implements and denies MD5,

@@ -8,7 +8,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The `info` argument of `expand` carries the domain-separation label: give each use of a key its own
 /// label, such as the UTF-8 bytes of "myapp v1 file key", so that keys for different purposes never coincide.
-/// @see [Std.Crypto.Kdf.Hkdf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hkdf)
+/// @see [Std.Crypto.Kdf.Hkdf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Hkdf)
 #Since("0.3.0")
 export let Hkdf = module (
     /// @brief The pseudorandom key HMAC-H(salt, input key material). An empty salt stands for H's output length
@@ -48,7 +48,7 @@ export let Hkdf = module (
     /// @brief `expand(extract(salt, input_key), info, length)`.
     #[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(salt: uint8[list], input_key: uint8[list], info: uint8[list],
-            length: int) -> uint8[list] {
+        length: int) -> uint8[list] {
         let prk = extract<H>(salt, input_key);
         last out = expand<H>(prk, info, length);
         words.wipe(prk);

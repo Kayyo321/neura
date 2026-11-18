@@ -1,0 +1,53 @@
+let.promote _ = import:Std.Net.Connector;
+let.promote _ = import:Std.Time.Duration;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.SocketOptions;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Net.Socket.TcpSocket;
+
+/// @brief A `Std.Net.Connector` that dials one TCP address with a timeout and an option set. Needs the net
+/// capability.
+///
+/// Each `connect` opens a new `TcpSocket` as `TcpSocket.connect_with` does: a multipath option set needs a
+/// Multipath TCP host service that no runtime offers yet and traps, and a non-empty option set is applied with the
+/// host's option service after connecting.
+/// @see [Std.Net.Socket.TcpConnector](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpConnector)
+#Since("0.3.0")
+export let TcpConnector = module (
+    /// @brief Dials `address()` for each `connect`.
+    #Final
+    export let TcpConnector = class implements Connector<SocketAddr, TcpSocket> (
+        /// @brief The address dialed.
+        last target: SocketAddr;
+        /// @brief The connect timeout; zero waits without limit.
+        export last timeout: Duration;
+        /// @brief The options applied to each socket.
+        last settings: SocketOptions;
+
+        /// @brief A connector for `address`. A negative timeout traps with "invalid argument: negative timeout";
+        /// options built for another kind than `SocketKind.TcpStream` trap with "invalid argument".
+        export let init = func(address: SocketAddr, connect_timeout: Duration, options: SocketOptions) {
+            support.timeout_nanos(connect_timeout);
+            support.check_kind(options, SocketKind.TcpStream);
+            target = address;
+            timeout = connect_timeout;
+            settings = options;
+        };
+
+        /// @brief The address this connector dials.
+        export let address = func -> SocketAddr => target;
+
+        /// @brief Opens a new connection to `address()`.
+        #NoDiscard
+        export let connect = func -> Result<TcpSocket> => connect_with(target, timeout, settings);
+
+        /// @brief Text such as "TcpConnector(127.0.0.1:8080)".
+        export let.override to_string = func -> string => "TcpConnector(" + target.to_string() + ")";
+    );
+
+    /// @brief A connector for `address` with `timeout` and no options.
+    #NoDiscard
+    export let create = func(address: SocketAddr, timeout: Duration) -> TcpConnector =>
+        new TcpConnector(address, timeout, none(SocketKind.TcpStream));
+);

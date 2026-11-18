@@ -1,0 +1,180 @@
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief SPIFFE identities (the SPIFFE ID standard, `SPIFFE-ID.md`): parsing and validation of SPIFFE IDs and
+/// trust domains, which are real, and SVID verification, which is a stub.
+///
+/// A SPIFFE ID is `spiffe://<trust domain><path>`. The parser applies section 2: the scheme is `spiffe`, matched
+/// without regard to case (section 2.4) and kept as `spiffe`; the trust domain is non-empty, at most 255 bytes,
+/// and only lowercase letters, digits, dots, dashes and underscores, so a port, userinfo, percent-encoding or
+/// uppercase letter is rejected (section 2.1); the path is empty or `/`-separated segments of letters, digits,
+/// dots, dashes and underscores, with no empty, `.` or `..` segment and no trailing `/` (section 2.2), so a
+/// query or fragment is rejected; and the whole ID is at most 2,048 bytes (section 2.3). Failures are Parse
+/// errors with the byte offset of the problem. Equality is exact: the trust domain is lowercase by the rules and
+/// the path is case-sensitive.
+///
+/// Verifying an X.509-SVID or JWT-SVID needs X.509 path validation or JWS verification against a trust bundle,
+/// which Neura 0.3.0 does not provide; those functions trap.
+/// @see [Std.Net.Tls.Spiffe](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Tls-Spiffe)
+#Since("0.3.0")
+export let Spiffe = module (
+    /// @brief The longest SPIFFE ID implementations must support, in bytes (section 2.3).
+    export const MaxIdLength: int = 2048;
+    /// @brief The longest trust domain name, in bytes (section 2.3).
+    export const MaxTrustDomainLength: int = 255;
+
+    /// @brief Restricts construction to this module's checks.
+    let Seal = enum (Token);
+
+    /// @brief A validated SPIFFE ID.
+    #[Final, Immutable]
+    export let SpiffeId = class (
+        /// @brief The trust domain name.
+        export last trust_domain: string;
+        /// @brief The path, empty or starting with `/`.
+        export last path: string;
+
+        /// @brief Use `parse` or `of`.
+        export let init = func(seal: Seal, domain: string, path_text: string) {
+            trust_domain = domain;
+            path = path_text;
+        };
+
+        /// @brief True when the ID belongs to `domain`.
+        #Pure
+        export let member_of = func(domain: string) -> bool => trust_domain == domain;
+
+        /// @brief The path segments; empty for an ID without a path.
+        #NoDiscard
+        export let segments = func -> string[list] {
+            if (path.byte_length == 0) {
+                return new;
+            }
+            return strings.split(path.slice(1, path.byte_length), "/");
+        };
+
+        /// @brief The ID of the trust domain itself (`spiffe://<domain>`), as a signing authority uses.
+        #NoDiscard
+        export let trust_domain_id = func -> SpiffeId => new SpiffeId(Seal.Token, trust_domain, "");
+
+        /// @brief Equal when the trust domain and path are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SpiffeId)) {
+                return false;
+            }
+            last that = other as SpiffeId;
+            return trust_domain == that.trust_domain && path == that.path;
+        };
+
+        /// @brief A hash consistent with equals.
+        export let.override hash_code = func -> uint32 => hashing.combine(trust_domain.hash_code(), path.hash_code());
+
+        /// @brief The URI text, `spiffe://<trust domain><path>`.
+        export let.override to_string = func -> string => "spiffe://" + trust_domain + path;
+    );
+
+    /// @brief Parses a SPIFFE ID (see the module documentation).
+    #NoDiscard
+    export let parse = func(text: string) -> Result<SpiffeId> {
+        if (text.byte_length > MaxIdLength) {
+            return fail(ParseErrorKind.OutOfRange, MaxIdLength, "a SPIFFE ID is longer than 2048 bytes");
+        }
+        if (text.byte_length < 9 || !strings.equals_ignore_ascii_case(text.slice(0, 9), "spiffe://")) {
+            return fail(ParseErrorKind.Syntax, 0, "a SPIFFE ID starts with spiffe://");
+        }
+        last rest = text.slice(9, text.byte_length);
+        last slash = strings.index_of(rest, "/");
+        last domain_end = slash < 0 ? rest.byte_length : slash;
+        check_trust_domain(rest.slice(0, domain_end), 9)?;
+        check_path(rest.slice(domain_end, rest.byte_length), 9 + domain_end)?;
+        return Result<SpiffeId>.Ok(new SpiffeId(Seal.Token, rest.slice(0, domain_end),
+            rest.slice(domain_end, rest.byte_length)));
+    };
+
+    /// @brief A SPIFFE ID from a trust domain and a path (empty, or starting with `/`), checked as by `parse`;
+    /// offsets refer to the joined text.
+    #NoDiscard
+    export let of = func(trust_domain: string, path: string) -> Result<SpiffeId> =>
+        parse("spiffe://" + trust_domain + path);
+
+    /// @brief Ok when `domain` is a valid trust domain name (section 2.1).
+    #NoDiscard
+    export let check_trust_domain_name = func(domain: string) -> Result<string> {
+        check_trust_domain(domain, 0)?;
+        return Result<string>.Ok(domain);
+    };
+
+    /// @brief Verifies an X.509-SVID chain (PEM) against a trust bundle (PEM) and returns its SPIFFE ID.
+    /// @stub needs X.509 certificate path validation, not in Neura 0.3.0
+    #NoDiscard
+    export let verify_x509_svid = func(chain_pem: string, bundle_pem: string) -> Result<SpiffeId> {
+        trap_with_message("unsupported: Std.Net.Tls.Spiffe.verify_x509_svid is not implemented in Neura 0.3.0 (needs X.509 certificate path validation, not in Neura 0.3.0)");
+    };
+
+    /// @brief Verifies a JWT-SVID against a JWK set (JSON) and an audience and returns its SPIFFE ID.
+    /// @stub needs JWS signature verification, not in Neura 0.3.0
+    #NoDiscard
+    export let verify_jwt_svid = func(token: string, jwks_json: string, audience: string) -> Result<SpiffeId> {
+        trap_with_message("unsupported: Std.Net.Tls.Spiffe.verify_jwt_svid is not implemented in Neura 0.3.0 (needs JWS signature verification, not in Neura 0.3.0)");
+    };
+
+    /// @brief Checks a trust domain whose first byte is at `base` in the parsed text.
+    let check_trust_domain = func(domain: string, base: int) -> Result<bool> {
+        if (domain.byte_length == 0) {
+            return fail_bool(ParseErrorKind.Empty, base, "the trust domain is empty");
+        }
+        if (domain.byte_length > MaxTrustDomainLength) {
+            return fail_bool(ParseErrorKind.OutOfRange, base, "the trust domain is longer than 255 bytes");
+        }
+        let i = 0;
+        while (i < domain.byte_length) {
+            last c = domain.byte_at(i);
+            if (!((c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 46 || c == 45 || c == 95)) {
+                return fail_bool(ParseErrorKind.InvalidCharacter, base + i,
+                    "a trust domain holds only lowercase letters, digits, dots, dashes and underscores");
+            }
+            i++;
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    /// @brief Checks a path (empty or starting with `/`) whose first byte is at `base`.
+    let check_path = func(path: string, base: int) -> Result<bool> {
+        if (path.byte_length == 0) {
+            return Result<bool>.Ok(true);
+        }
+        let start = 1;
+        while (start <= path.byte_length) {
+            let end = start;
+            while (end < path.byte_length && path.byte_at(end) != 47) {
+                last c = path.byte_at(end);
+                if (!((c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c == 46 || c == 45
+                    || c == 95)) {
+                    return fail_bool(ParseErrorKind.InvalidCharacter, base + end,
+                        "a path segment holds only letters, digits, dots, dashes and underscores");
+                }
+                end++;
+            }
+            last segment = path.slice(start, end);
+            if (segment.byte_length == 0) {
+                return fail_bool(ParseErrorKind.Syntax, base + start - 1,
+                    end == path.byte_length ? "a SPIFFE ID path has no trailing /" : "a path segment is empty");
+            }
+            if (segment == "." || segment == "..") {
+                return fail_bool(ParseErrorKind.Syntax, base + start, "a path segment is . or ..");
+            }
+            start = end + 1;
+        }
+        return Result<bool>.Ok(true);
+    };
+
+    /// @brief A parse failure.
+    let fail = func(kind: ParseErrorKind, offset: int, message: string) -> Result<SpiffeId> =>
+        Result<SpiffeId>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+
+    /// @brief A parse failure of a check.
+    let fail_bool = func(kind: ParseErrorKind, offset: int, message: string) -> Result<bool> =>
+        Result<bool>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+);

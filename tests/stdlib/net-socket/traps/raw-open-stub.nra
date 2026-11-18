@@ -1,0 +1,13 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Socket\.Internal\.HostCalls\.raw_open is not implemented in Neura 0\.3\.0
+// RawSocket.open needs a raw-socket host service.
+let net_address = import:Std.Net.Core.NetAddress;
+let program = import:Std.Program;
+let raw = import:Std.Net.Socket.RawSocket;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = raw.open(net_address.AddressFamily.Ipv6, 58);
+        return program.ExitCode.Ok;
+    };
+);

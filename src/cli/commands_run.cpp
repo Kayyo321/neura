@@ -1,4 +1,7 @@
 #include "commands.hpp"
+#ifdef NEURA_HAS_SQL
+#include "sql/sql_engine.hpp"
+#endif
 
 #include "argument_lists.hpp"
 #include "gpu_run.hpp"
@@ -145,6 +148,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     int first_status = 0;
     const auto finished = [&](std::size_t member, const neura::nvm::RunResult& result) {
         host.services.end_run();
+        host.secrets.release_all();
         if (options.stats) {
             steps.add(result.steps);
             requests.add(result.host_requests);
@@ -248,7 +252,13 @@ int run_image(const Options& options, std::span<const std::uint8_t> bytes, const
 #ifdef _WIN32
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
+#ifdef NEURA_HAS_SQL
+    neura::sql::LocalSql sql(options.sql_pools);
+    Host host(options.capabilities, nullptr, neura::nvm::default_response_bytes, sql.exchange());
+#else
+    if (!options.sql_pools.empty()) throw std::runtime_error("this build has no SQL providers");
     Host host(options.capabilities);
+#endif
     provide_native_library(image, host.services);
     if (options.each) {
         return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device(), started), options.stats);

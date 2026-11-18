@@ -3,21 +3,36 @@
 #include "nvr/format.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <deque>
-#include <random>
 #include <thread>
 
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#include <cpuid.h>
+#endif
 #ifndef _WIN32
 #include <poll.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
 #ifdef __linux__
+#include <filesystem>
+#include <linux/netlink.h>
+#include <sys/auxv.h>
 #include <sys/random.h>
+#include <sys/socket.h>
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#include <sys/random.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <bcrypt.h>
 #endif
 
 namespace neura::nvm {
@@ -249,6 +264,155 @@ void replay_console_output(const std::string& import, std::uint32_t version, con
     }
 }
 
+namespace {
+
+// Fills `size` bytes from the operating system's cryptographic generator.
+bool fill_entropy(char* data, std::size_t size) {
+#if defined(__linux__)
+    std::size_t filled = 0;
+    while (filled < size) {
+        const auto got = ::getrandom(data + filled, size - filled, 0);
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        filled += static_cast<std::size_t>(got);
+    }
+    return true;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    for (std::size_t filled = 0; filled < size; filled += 256) {
+        if (::getentropy(data + filled, std::min<std::size_t>(256, size - filled)) != 0) return false;
+    }
+    return true;
+#elif defined(_WIN32)
+    return BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(data), static_cast<ULONG>(size),
+                           BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+    (void)data;
+    return size == 0;
+#endif
+}
+
+
+// Hardware random words for neura.entropy.hardware: RDSEED on x86-64 and
+// RNDR on AArch64 Linux. False when the processor has no such source or it
+// keeps failing.
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+__attribute__((target("rdseed"))) bool hardware_word(std::uint64_t& word) {
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        unsigned long long value = 0;
+        if (__builtin_ia32_rdseed_di_step(&value)) {
+            word = value;
+            return true;
+        }
+        __builtin_ia32_pause();
+    }
+    return false;
+}
+bool hardware_available() {
+    unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+    return __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) && (ebx & (1u << 18)) != 0;
+}
+#elif defined(__aarch64__) && defined(__linux__)
+bool hardware_word(std::uint64_t& word) {
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        std::uint64_t value = 0;
+        int ok = 0;
+        // RNDR sets NZCV to 0b0100 on failure; cset on ne reads success.
+        asm volatile("mrs %0, s3_3_c2_c4_0\n\tcset %w1, ne" : "=r"(value), "=r"(ok) : : "cc");
+        if (ok) {
+            word = value;
+            return true;
+        }
+    }
+    return false;
+}
+bool hardware_available() { return (::getauxval(AT_HWCAP2) & HWCAP2_RNG) != 0; }
+#else
+bool hardware_word(std::uint64_t&) { return false; }
+bool hardware_available() { return false; }
+#endif
+
+#ifdef __linux__
+// A virtual machine generation change: the vmgenid driver (Linux 5.18 and
+// later; ACPI "VM Generation ID" under QEMU, Hyper-V and VMware, or the
+// device tree "microsoft,vmgenid") sends a uevent carrying NEW_VMGENID=1 when
+// the machine is restored from a snapshot or cloned. The socket is opened
+// only when such a device exists; without one, nothing is listened to.
+int vm_generation_socket() {
+    static const int descriptor = [] {
+        namespace fs = std::filesystem;
+        bool present = false;
+        for (const char* driver : {"/sys/bus/acpi/drivers/vmgenid", "/sys/bus/platform/drivers/vmgenid"}) {
+            std::error_code error;
+            for (const auto& entry : fs::directory_iterator(driver, error)) {
+                if (entry.is_symlink(error) && entry.path().filename() != "module") present = true;
+            }
+        }
+        if (!present) return -1;
+        const int socket = ::socket(AF_NETLINK, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, NETLINK_KOBJECT_UEVENT);
+        if (socket < 0) return -1;
+        sockaddr_nl address{};
+        address.nl_family = AF_NETLINK;
+        address.nl_groups = 1; // Kernel uevents.
+        if (::bind(socket, reinterpret_cast<sockaddr*>(&address), sizeof address) != 0) {
+            ::close(socket);
+            return -1;
+        }
+        return socket;
+    }();
+    return descriptor;
+}
+
+// How many VM generation uevents arrived since the last call.
+std::uint64_t vm_generation_events() {
+    const int socket = vm_generation_socket();
+    if (socket < 0) return 0;
+    std::uint64_t count = 0;
+    char message[8192];
+    for (;;) {
+        const auto got = ::recv(socket, message, sizeof message, MSG_DONTWAIT);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) break;
+        if (vm_generation_uevent(std::string_view(message, static_cast<std::size_t>(got)))) ++count;
+    }
+    return count;
+}
+#endif
+
+// The process generation for neura.process.generation: it grows by one in a
+// child created by fork (detected by a change of process ID) and, on Linux
+// with a vmgenid device, after each restore or clone of the virtual machine.
+std::uint64_t process_generation() {
+#ifndef _WIN32
+    static std::atomic<std::uint64_t> generation{0};
+    static std::atomic<long> owner{static_cast<long>(::getpid())};
+    const long now = static_cast<long>(::getpid());
+    long seen = owner.load();
+    if (seen != now && owner.compare_exchange_strong(seen, now)) generation.fetch_add(1);
+#ifdef __linux__
+    if (const auto events = vm_generation_events(); events != 0) generation.fetch_add(events);
+#endif
+    return generation.load();
+#else
+    return 0;
+#endif
+}
+
+} // namespace
+
+bool vm_generation_uevent(std::string_view message) {
+    // NUL-separated fields: "change@/devices/...", then KEY=VALUE pairs.
+    while (!message.empty()) {
+        const auto end = message.find('\0');
+        const auto field = message.substr(0, end);
+        if (field == "NEW_VMGENID=1") return true;
+        if (end == std::string_view::npos) break;
+        message.remove_prefix(end + 1);
+    }
+    return false;
+}
+
 StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, ConsoleSource& input,
                                    Capabilities capabilities)
     : output_(output), error_(error), input_(input), capabilities_(std::move(capabilities)),
@@ -288,8 +452,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         const auto descriptor = input_.descriptor();
         if (max < 1 || descriptor < 0) return read_input(request);
         PendingOperation operation;
-        operation.descriptor = descriptor;
-        operation.readable = true;
+        operation.wait_source = PosixWait{{descriptor, PosixWait::Events::Read}};
         const auto count = std::min(static_cast<std::size_t>(max), max_read_bytes);
         operation.attempt = [this, descriptor, count](bool cancelled) -> std::optional<HostCompletion> {
             if (!readable_now(descriptor)) {
@@ -374,26 +537,39 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         return operation;
     });
 
+    // RDSEED or RNDR words; Unsupported (13) without a hardware source,
+    // Other (100) when the source keeps failing.
+    add(signature("neura.entropy.hardware", {int32()}, byte_list()), [this](const HostRequest& request) {
+        if (!capabilities_.entropy) return denied();
+        const auto count = as_int32(request.arguments.at(0));
+        if (count < 0 || count > max_entropy_bytes) return fail(host_error::invalid_input);
+        if (count > 0 && !hardware_available()) return fail(host_error::unsupported);
+        std::string bytes;
+        bytes.reserve(static_cast<std::size_t>(count) + 8);
+        while (bytes.size() < static_cast<std::size_t>(count)) {
+            std::uint64_t word = 0;
+            if (!hardware_word(word)) return fail(host_error::other);
+            for (int i = 0; i < 8; ++i) bytes += static_cast<char>(word >> (8 * i));
+        }
+        bytes.resize(static_cast<std::size_t>(count));
+        return HostCompletion::ok(bytes_value(std::move(bytes)));
+    });
+
+    add(signature("neura.process.generation", {}, HostType(Kind::Unsigned, 64)), [this](const HostRequest&) {
+        if (!capabilities_.entropy) return denied();
+        return HostCompletion::ok(scalar(process_generation()));
+    });
+
     add(signature("neura.entropy.fill", {int32()}, byte_list()), [this](const HostRequest& request) {
         if (!capabilities_.entropy) return denied();
         const auto count = as_int32(request.arguments.at(0));
         if (count < 0 || count > max_entropy_bytes) return fail(host_error::invalid_input);
         std::string bytes(static_cast<std::size_t>(count), '\0');
-        std::size_t filled = 0;
-#ifdef __linux__
-        while (filled < bytes.size()) {
-            const auto got = ::getrandom(bytes.data() + filled, bytes.size() - filled, 0);
-            if (got < 0) {
-                if (errno == EINTR) continue;
-                break;
-            }
-            filled += static_cast<std::size_t>(got);
-        }
-#endif
-        if (filled < bytes.size()) {
-            std::random_device device;
-            for (; filled < bytes.size(); ++filled) bytes[filled] = static_cast<char>(device() & 0xff);
-        }
+        // Only the operating system's cryptographic generator: getrandom on
+        // Linux, getentropy on macOS and the BSDs, BCryptGenRandom on
+        // Windows. When it fails the request fails with code 100; there is
+        // no weaker fallback.
+        if (!fill_entropy(bytes.data(), bytes.size())) return fail(host_error::other);
         return HostCompletion::ok(bytes_value(std::move(bytes)));
     });
 
@@ -406,6 +582,8 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         add_overlapping(std::move(signature), std::move(handler), std::move(begin));
     };
     add_net_services(adder, overlap, *tables_, capabilities_);
+    add_socket_services(adder, *tables_, capabilities_);
+    add_tls_services(adder, *tables_, capabilities_);
     add_ffi_services(adder, *tables_, capabilities_);
 }
 
@@ -435,6 +613,7 @@ void StandardServices::register_all(HostRegistry& registry) {
 
 void StandardServices::end_run() {
     close_files(*tables_);
+    close_tls(*tables_);
     close_sockets(*tables_);
     close_native(*tables_);
 }

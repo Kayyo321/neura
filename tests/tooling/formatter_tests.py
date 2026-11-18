@@ -373,6 +373,193 @@ let derive = 1;
 let after = derive < 2;
 ''')
 
+    def test_grouping_parentheses_and_brackets_are_spaced_as_operands(self):
+        # A '(' or '[' written against an operand opens a call, an index or a
+        # parameter list; after an operator or a keyword it groups and is
+        # spaced like any operand (docs/style/CodingStyle.md, section 3).
+        source = '''let f=func(a:int,b:int)->bool=>a==(b+1)&&(a<<2)>(b)||!(a>b);
+let g=func(v:int)->int{return (v>>1)|(v<<(3-v));};
+let h=func(x:int[list],y:int)->int=>x[0]+[1,2][y]-(-y);
+let grid=[["a","b"],["c"]];
+let t=f<int>(1)(2)[0];
+let s=new(0);
+'''
+        self.assertEqual(self.formatted(source), '''let f = func(a: int, b: int) -> bool => a == (b + 1) && (a << 2) > (b) || !(a > b);
+let g = func(v: int) -> int {
+    return (v >> 1) | (v << (3 - v));
+};
+let h = func(x: int[list], y: int) -> int => x[0] + [1, 2][y] - (-y);
+let grid = [["a", "b"], ["c"]];
+let t = f<int>(1)(2)[0];
+let s = new(0);
+''')
+
+    def test_tag_groups_stay_on_one_line(self):
+        # A tag group is one line above its declaration (CodingStyle.md,
+        # section 6), also after a member that spans several lines, and a
+        # group that an earlier formatter split is joined again.
+        source = '''let M=module(
+#[Final,Immutable,Since("0.3.0")]
+export let C=class(export last x:int;);
+#[Since("0.3.0"),NoDiscard]
+export let f=func(a:int)->int=>a;
+#[
+
+NoDiscard, Pure]
+export let g=func(a:int)->int=>a;
+);
+'''
+        self.assertEqual(self.formatted(source), '''let M = module (
+    #[Final, Immutable, Since("0.3.0")]
+    export let C = class (
+        export last x: int;
+    );
+
+    #[Since("0.3.0"), NoDiscard]
+    export let f = func(a: int) -> int => a;
+    #[NoDiscard, Pure]
+    export let g = func(a: int) -> int => a;
+);
+''')
+
+    def test_member_separation_comments_and_one_line_members(self):
+        # A blank line follows a member that spans several lines and goes
+        # before the comments above the next member; one-line members, such
+        # as a one-line enum, need none.
+        source = '''let M = module (
+    let E = enum (A, B);
+    let Pair = enum<T> (Both(T, T), Neither);
+    // about f
+    let f = func -> int => 1;
+    let g = func {
+        work();
+    };
+    // about I
+    /// Documented.
+    let I = interface<T>:Iterable<T> (
+        let size = func -> int;
+    );
+);
+'''
+        self.assertEqual(self.formatted(source), '''let M = module (
+    let E = enum (A, B);
+    let Pair = enum<T> (Both(T, T), Neither);
+    // about f
+    let f = func -> int => 1;
+    let g = func {
+        work();
+    };
+
+    // about I
+    /// Documented.
+    let I = interface<T>:Iterable<T> (
+        let size = func -> int;
+    );
+);
+''')
+
+    def test_statement_layout(self):
+        # A do-while's `while` follows its '}', a while statement after a
+        # block starts its own line, a ',' in a statement never ends a line,
+        # a braced range stays inline, and a member named scope is called as
+        # any member is.
+        source = '''let run = func(arena: Arena) {
+    do { step(); } while (more());
+    while (more()) { step(); }
+    let [left, right]: [Point, Point] = make("a"), new;
+    last indices = {0 .. 10};
+    last s = arena.scope();
+    scope(handle) { step(); }
+    match (pick()) { Shape.Line(n) => { step(); }, _ => {}, }
+};
+'''
+        self.assertEqual(self.formatted(source), '''let run = func(arena: Arena) {
+    do {
+        step();
+    } while (more());
+    while (more()) {
+        step();
+    }
+    let [left, right]: [Point, Point] = make("a"), new;
+    last indices = {0 .. 10};
+    last s = arena.scope();
+    scope (handle) {
+        step();
+    }
+    match (pick()) {
+        Shape.Line(n) => {
+            step();
+        },
+        _ => {},
+    }
+};
+''')
+
+    def test_wrapped_lines_are_kept(self):
+        # A line break written inside a statement is kept, one level deeper
+        # than the line that opened the innermost open parenthesis, bracket
+        # or brace, or than the statement's first line. A closing delimiter
+        # written on its own line after an opening one that ends its line
+        # stays there.
+        source = '''let f = func(a: int, b: int) -> string =>
+                a.to_string() + b.to_string();
+let g = func(first: int,
+                         second: int) -> int {
+    return combine(
+        first,   // the first
+        Error.Io {
+            kind: Kind.Missing,
+            path: "x",
+        },
+        second
+    );
+};
+let C = class (
+    export let.as int16 = func -> int16 => value as int16
+        or as int64 = func -> int64 => value;
+);
+let h = func(values: int[list]) -> int {
+    return values.length
+        + 1;
+};
+'''
+        self.assertEqual(self.formatted(source), '''let f = func(a: int, b: int) -> string =>
+    a.to_string() + b.to_string();
+let g = func(first: int,
+    second: int) -> int {
+    return combine(
+        first, // the first
+        Error.Io {
+            kind: Kind.Missing,
+            path: "x",
+        },
+        second
+    );
+};
+let C = class (
+    export let.as int16 = func -> int16 => value as int16
+        or as int64 = func -> int64 => value;
+);
+let h = func(values: int[list]) -> int {
+    return values.length
+        + 1;
+};
+''')
+
+    def test_accessor_block_indentation(self):
+        source = '''let Gauge = class (
+    export let level: int = 0;
+        | get: level;
+        | set: {
+            if (value < 0) {
+                trap_with_message("negative");
+            }
+            level = value;
+        };
+);
+'''
+        self.assertEqual(self.formatted(source), source)
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))
@@ -380,7 +567,9 @@ let after = derive < 2;
         self.assertGreater(len(sources), 100)
         for source in sources:
             with self.subTest(source=str(source.relative_to(repository))):
-                self.formatted(source.read_bytes())
+                # The standard library and the examples are formatted:
+                # `neura fmt --check` passes on both trees.
+                self.assertEqual(self.formatted(source.read_bytes()), source.read_text())
 
 
 if __name__ == '__main__':

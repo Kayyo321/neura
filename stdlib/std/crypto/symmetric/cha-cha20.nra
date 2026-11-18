@@ -8,7 +8,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The output is unauthenticated: anyone can flip ciphertext bits and flip the same plaintext bits. Use
 /// ChaCha20Poly1305 or XChaCha20Poly1305 for data.
-/// @see [Std.Crypto.Symmetric.ChaCha20](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-ChaCha20)
+/// @see [Std.Crypto.Symmetric.ChaCha20](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-ChaCha20)
 #Since("0.3.0")
 export let ChaCha20 = module (
     /// @brief The bytes XORed with the ChaCha20 keystream for a 32-byte key and 12-byte nonce, starting at block

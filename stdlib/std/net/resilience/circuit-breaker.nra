@@ -1,0 +1,329 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A sliding-window failure-rate circuit breaker with Closed, Open, and HalfOpen states.
+///
+/// The breaker follows the model of Resilience4j's CircuitBreaker. In Closed it admits every call and records each
+/// outcome in a sliding window: the last N calls (a count window) or the calls of the last N time buckets (a time
+/// window, buckets of a fixed span on the injected clock's monotonic reading). Once the window holds at least
+/// `minimum_calls` outcomes and `failures * 100 >= threshold * calls`, the breaker opens. In Open it rejects every
+/// call until `open_duration` has passed since it opened; the first `try_acquire` after that moves it to HalfOpen.
+/// HalfOpen admits `half_open_calls` trial calls and rejects the rest; when all trials have reported, the same
+/// failure-rate test over the trials opens the breaker again or closes it with an empty window. Outcomes reported
+/// while Open (calls admitted before it opened) are ignored. Which results count as failures is the caller's
+/// choice (`CircuitBreakerFilter` takes a classifier).
+/// @see [Std.Net.Resilience.CircuitBreaker](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-CircuitBreaker)
+#Since("0.3.0")
+export let CircuitBreaker = module (
+    /// @brief The three breaker states.
+    export let CircuitState = enum (Closed, Open, HalfOpen);
+
+    /// @brief The window of recent outcomes the failure rate is computed over: the last `Count` calls, or the calls
+    /// of the last `buckets` time buckets of length `span`.
+    export let SlidingWindow = enum (Count(int), Time { buckets: int, span: durations.Duration });
+
+    /// @brief A failure-rate circuit breaker over an injected clock.
+    #[Final, NotThreadSafe]
+    export let CircuitBreaker = class (
+        /// @brief The window shape.
+        last window: SlidingWindow;
+        /// @brief The failure-rate threshold in percent, 1 through 100.
+        last threshold: int;
+        /// @brief The outcomes the window needs before the rate is evaluated.
+        last minimum: int;
+        /// @brief How long the breaker stays open, in nanoseconds.
+        last open_nanos: int64;
+        /// @brief The number of trial calls admitted in HalfOpen.
+        last trials: int;
+        /// @brief The source of monotonic time.
+        last clock: Clock;
+
+        /// @brief The current state.
+        let current: CircuitState = CircuitState.Closed;
+        /// @brief The monotonic reading, in nanoseconds, at which the breaker last opened.
+        let opened_at: int64 = 0;
+
+        /// @brief Count window: one slot per call, true for a failure.
+        last slots: bool[list] = new;
+        /// @brief Count window: the next slot to write.
+        let next_slot: int = 0;
+        /// @brief Count window: the slots written, up to the window size.
+        let filled: int = 0;
+        /// @brief Count window: the failures among the written slots.
+        let slot_failures: int = 0;
+
+        /// @brief Time window: the bucket number each bucket holds (monotonic nanoseconds divided by the span).
+        last epochs: int64[list] = new;
+        /// @brief Time window: the calls of each bucket.
+        last bucket_calls: int[list] = new;
+        /// @brief Time window: the failures of each bucket.
+        last bucket_failures: int[list] = new;
+
+        /// @brief HalfOpen: trial calls admitted.
+        let admitted: int = 0;
+        /// @brief HalfOpen: trial calls that reported.
+        let reported: int = 0;
+        /// @brief HalfOpen: trial calls that failed.
+        let trial_failures: int = 0;
+
+        /// @brief A closed breaker. `threshold` is a percentage from 1 through 100; `minimum_calls`,
+        /// `half_open_calls`, and the window size or bucket count must be positive; `open_duration` and a bucket span
+        /// must be positive. A violation traps with "invalid argument: <name>".
+        export let init = func(shape: SlidingWindow, failure_rate_threshold: int, minimum_calls: int,
+            open_duration: durations.Duration, half_open_calls: int, source: Clock) {
+            if (failure_rate_threshold < 1 || failure_rate_threshold > 100) {
+                trap_with_message("invalid argument: failure_rate_threshold");
+            }
+            if (minimum_calls < 1) {
+                trap_with_message("invalid argument: minimum_calls");
+            }
+            if (half_open_calls < 1) {
+                trap_with_message("invalid argument: half_open_calls");
+            }
+            if (open_duration.to_nanos() <= 0) {
+                trap_with_message("invalid argument: open_duration");
+            }
+            window = shape;
+            threshold = failure_rate_threshold;
+            minimum = minimum_calls;
+            open_nanos = open_duration.to_nanos();
+            trials = half_open_calls;
+            clock = source;
+            match (shape) {
+                SlidingWindow.Count(size) => {
+                    if (size < 1) {
+                        trap_with_message("invalid argument: window size");
+                    }
+                    for (let i = 0; i < size; i++) {
+                        slots.append(false);
+                    }
+                },
+                SlidingWindow.Time { buckets, span } => {
+                    if (buckets < 1) {
+                        trap_with_message("invalid argument: window buckets");
+                    }
+                    if (span.to_nanos() <= 0) {
+                        trap_with_message("invalid argument: window span");
+                    }
+                    for (let i = 0; i < buckets; i++) {
+                        epochs.append(-1);
+                        bucket_calls.append(0);
+                        bucket_failures.append(0);
+                    }
+                },
+            }
+        };
+
+        /// @brief The state as last changed; reading it does not move Open to HalfOpen (`try_acquire` does).
+        export let state = func -> CircuitState => current;
+
+        /// @brief Asks to make a call. Closed admits it; Open rejects it until the open duration has passed and then
+        /// moves to HalfOpen; HalfOpen admits up to `half_open_calls` trials. An admitted call must report with
+        /// `record_success` or `record_failure`. Err only when the clock fails.
+        #NoDiscard
+        export let try_acquire = func -> Result<bool> {
+            if (current == CircuitState.Open) {
+                last now = monotonic_nanos()?;
+                if (now - opened_at < open_nanos) {
+                    return Result<bool>.Ok(false);
+                }
+                current = CircuitState.HalfOpen;
+                admitted = 0;
+                reported = 0;
+                trial_failures = 0;
+            }
+            if (current == CircuitState.HalfOpen) {
+                if (admitted >= trials) {
+                    return Result<bool>.Ok(false);
+                }
+                admitted++;
+            }
+            return Result<bool>.Ok(true);
+        };
+
+        /// @brief Records a call that succeeded.
+        export let record_success = func -> Result<Unit> => record(false);
+
+        /// @brief Records a call that failed.
+        export let record_failure = func -> Result<Unit> => record(true);
+
+        /// @brief The calls in the closed window, after dropping expired time buckets.
+        #NoDiscard
+        export let window_calls = func -> Result<int> {
+            expire()?;
+            return Result<int>.Ok(calls_in_window());
+        };
+
+        /// @brief The failures in the closed window, after dropping expired time buckets.
+        #NoDiscard
+        export let window_failures = func -> Result<int> {
+            expire()?;
+            return Result<int>.Ok(failures_in_window());
+        };
+
+        /// @brief Closes the breaker and empties the window.
+        export let reset = func {
+            current = CircuitState.Closed;
+            clear_window();
+        };
+
+        /// @brief Text such as "CircuitBreaker(Closed)".
+        export let.override to_string = func -> string => "CircuitBreaker(" + current.to_string() + ")";
+
+        /// @brief Records one outcome in the current state.
+        let record = func(failed: bool) -> Result<Unit> {
+            match (current) {
+                CircuitState.Open => {
+                    return Result<Unit>.Ok(Unit.Value);
+                },
+                CircuitState.HalfOpen => {
+                    reported++;
+                    if (failed) {
+                        trial_failures++;
+                    }
+                    if (reported >= trials) {
+                        if (trial_failures * 100 >= threshold * reported) {
+                            open()?;
+                        } else {
+                            current = CircuitState.Closed;
+                            clear_window();
+                        }
+                    }
+                    return Result<Unit>.Ok(Unit.Value);
+                },
+                CircuitState.Closed => {
+                    add(failed)?;
+                    last calls = calls_in_window();
+                    if (calls >= minimum && failures_in_window() * 100 >= threshold * calls) {
+                        open()?;
+                    }
+                    return Result<Unit>.Ok(Unit.Value);
+                },
+            }
+        };
+
+        /// @brief Moves to Open now.
+        let open = func -> Result<Unit> {
+            opened_at = monotonic_nanos()?;
+            current = CircuitState.Open;
+            clear_window();
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Adds an outcome to the window.
+        let add = func(failed: bool) -> Result<Unit> {
+            match (window) {
+                SlidingWindow.Count(size) => {
+                    if (filled == size) {
+                        if (slots[next_slot]) {
+                            slot_failures--;
+                        }
+                    } else {
+                        filled++;
+                    }
+                    slots[next_slot] = failed;
+                    if (failed) {
+                        slot_failures++;
+                    }
+                    next_slot = (next_slot + 1) % size;
+                },
+                SlidingWindow.Time { buckets, span } => {
+                    last now = monotonic_nanos()?;
+                    last epoch = now / span.to_nanos();
+                    expire_at(epoch, buckets);
+                    last index = (epoch % (buckets as int64)) as int;
+                    if (epochs[index] != epoch) {
+                        epochs[index] = epoch;
+                        bucket_calls[index] = 0;
+                        bucket_failures[index] = 0;
+                    }
+                    bucket_calls[index] = bucket_calls[index] + 1;
+                    if (failed) {
+                        bucket_failures[index] = bucket_failures[index] + 1;
+                    }
+                },
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Drops time buckets that fell out of the window.
+        let expire = func -> Result<Unit> {
+            match (window) {
+                SlidingWindow.Time { buckets, span } => {
+                    last now = monotonic_nanos()?;
+                    expire_at(now / span.to_nanos(), buckets);
+                },
+                SlidingWindow.Count(size) => {
+                },
+            }
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Clears every bucket whose number is at or below `epoch - buckets`.
+        let expire_at = func(epoch: int64, buckets: int) {
+            for (let i = 0; i < epochs.length; i++) {
+                if (epochs[i] >= 0 && epochs[i] <= epoch - (buckets as int64)) {
+                    epochs[i] = -1;
+                    bucket_calls[i] = 0;
+                    bucket_failures[i] = 0;
+                }
+            }
+        };
+
+        /// @brief The calls the window holds.
+        let calls_in_window = func -> int {
+            let total = filled;
+            for (let i = 0; i < bucket_calls.length; i++) {
+                total += bucket_calls[i];
+            }
+            return total;
+        };
+
+        /// @brief The failures the window holds.
+        let failures_in_window = func -> int {
+            let total = slot_failures;
+            for (let i = 0; i < bucket_failures.length; i++) {
+                total += bucket_failures[i];
+            }
+            return total;
+        };
+
+        /// @brief Empties the window.
+        let clear_window = func {
+            for (let i = 0; i < slots.length; i++) {
+                slots[i] = false;
+            }
+            next_slot = 0;
+            filled = 0;
+            slot_failures = 0;
+            for (let i = 0; i < epochs.length; i++) {
+                epochs[i] = -1;
+                bucket_calls[i] = 0;
+                bucket_failures[i] = 0;
+            }
+        };
+
+        /// @brief The clock's monotonic reading in nanoseconds.
+        let monotonic_nanos = func -> Result<int64> {
+            last reading = clock.monotonic()?;
+            return Result<int64>.Ok(reading.to_nanos());
+        };
+    );
+
+    /// @brief A breaker over the last `size` calls.
+    #NoDiscard
+    export let count_based = func(size: int, failure_rate_threshold: int, minimum_calls: int,
+        open_duration: durations.Duration, half_open_calls: int, clock: Clock) -> CircuitBreaker =>
+            new CircuitBreaker(SlidingWindow.Count(size), failure_rate_threshold, minimum_calls, open_duration,
+                half_open_calls, clock);
+
+    /// @brief A breaker over the calls of the last `buckets` buckets of length `span`.
+    #NoDiscard
+    export let time_based = func(buckets: int, span: durations.Duration, failure_rate_threshold: int,
+        minimum_calls: int, open_duration: durations.Duration, half_open_calls: int, clock: Clock)
+        -> CircuitBreaker =>
+            new CircuitBreaker(SlidingWindow.Time { buckets: buckets, span: span }, failure_rate_threshold, minimum_calls,
+                open_duration, half_open_calls, clock);
+);

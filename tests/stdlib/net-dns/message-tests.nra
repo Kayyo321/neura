@@ -1,0 +1,215 @@
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let ipv6 = import:Std.Net.Core.Ipv6Addr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// The message codec (RFC 1035 section 4) with every supported record type.
+//
+// The vectors come from this Python script, run as `python3 -I vec.py` (struct and ipaddress only; its name
+// compression is written independently from the library and follows RFC 1035 section 4.1.4: a pointer to the
+// earliest copy of the longest known suffix, suffixes remembered below offset 16384, SRV targets and NAPTR
+// replacements written in full):
+//
+//   import struct, ipaddress
+//   def nm(n, out, t, c=True):
+//       ls = [l for l in n.split('.') if l]
+//       for i in range(len(ls)):
+//           k = '.'.join(ls[i:]).lower()
+//           if c and k in t: out += struct.pack('>H', 0xC000 | t[k]); return out
+//           if len(out) < 16384 and k not in t: t[k] = len(out)
+//           out += bytes([len(ls[i])]) + ls[i].encode()
+//       return out + b'\0'
+//   def rr(out, t, n, ty, ttl, rd):
+//       out = nm(n, out, t); out += struct.pack('>HHI', ty, 1, ttl); at = len(out); out += b'\0\0'
+//       out = rd(out, t); return out[:at] + struct.pack('>H', len(out) - at - 2) + out[at + 2:]
+//   def cs(s): return bytes([len(s)]) + s
+//   t = {}; m = struct.pack('>HHHHHH', 0x1234, 0x0100, 1, 0, 0, 0); m = nm('www.example.com', m, t)
+//   m += struct.pack('>HH', 1, 1); print('query', m.hex())
+//   t = {}; m = struct.pack('>HHHHHH', 0x1234, 0x8580, 1, 10, 1, 2)
+//   m = nm('www.example.com', m, t); m += struct.pack('>HH', 1, 1)
+//   m = rr(m, t, 'www.example.com', 5, 300, lambda o, t: nm('host.example.com', o, t))
+//   m = rr(m, t, 'host.example.com', 1, 300, lambda o, t: o + ipaddress.ip_address('192.0.2.1').packed)
+//   m = rr(m, t, 'host.example.com', 28, 300, lambda o, t: o + ipaddress.ip_address('2001:db8::1').packed)
+//   m = rr(m, t, '1.2.0.192.in-addr.arpa', 12, 60, lambda o, t: nm('host.example.com', o, t))
+//   m = rr(m, t, 'example.com', 15, 3600, lambda o, t: nm('mail.example.com', o + struct.pack('>H', 10), t))
+//   m = rr(m, t, 'example.com', 16, 3600, lambda o, t: o + cs(b'v=spf1 -all') + cs(b'second'))
+//   m = rr(m, t, '_sip._tcp.example.com', 33, 86400,
+//          lambda o, t: nm('sip.example.com', o + struct.pack('>HHH', 10, 60, 5060), t, False))
+//   m = rr(m, t, 'example.com', 35, 86400, lambda o, t: nm('_sip._udp.example.com',
+//          o + struct.pack('>HH', 100, 10) + cs(b'S') + cs(b'SIP+D2U') + cs(b''), t, False))
+//   m = rr(m, t, 'example.com', 65280, 10, lambda o, t: o + bytes([0xde, 0xad, 0xbe, 0xef]))
+//   m = rr(m, t, 'example.com', 2, 7200, lambda o, t: nm('ns1.example.com', o, t))
+//   m = rr(m, t, 'example.com', 6, 3600, lambda o, t: nm('hostmaster.example.com', nm('ns1.example.com', o, t), t)
+//          + struct.pack('>IIIII', 2024010101, 7200, 900, 1209600, 300))
+//   m = rr(m, t, 'ns1.example.com', 1, 7200, lambda o, t: o + ipaddress.ip_address('192.0.2.53').packed)
+//   m = nm('', m, t) + struct.pack('>HHIH', 41, 1232, 0x00008000, 8) + struct.pack('>HH', 10, 4) + b'\x01\x02\x03\x04'
+//   print('response', len(m), m.hex())
+let MessageTests = module (
+    let QueryHex = "12340100000100000000000003777777076578616d706c6503636f6d0000010001";
+
+    let ResponseHex = "123485800001000a0001000203777777076578616d706c6503636f6d0000010001c00c000500010000012c000704686f7374c010c02d000100010000012c0004c0000201c02d001c00010000012c001020010db80000000000000000000000010131013201300331393207696e2d61646472046172706100000c00010000003c0002c02dc010000f000100000e100009000a046d61696cc010c0100010000100000e1000130b763d73706631202d616c6c067365636f6e64045f736970045f746370c01000210001000151800017000a003c13c403736970076578616d706c6503636f6d00c010002300010001518000260064000a0153075349502b44325500045f736970045f756470076578616d706c6503636f6d00c010ff0000010000000a0004deadbeefc0100002000100001c200006036e7331c010c0100006000100000e100023c1330a686f73746d6173746572c01078a3f17500001c2000000384001275000000012cc1330001000100001c200004c000023500002904d0000080000008000a000401020304";
+
+    let name_of = func(text: string) -> names.DnsName => test.assert_ok<names.DnsName>(names.parse(text));
+
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let record = func(owner: string, rtype: int, ttl: int64, data: messages.RecordData) -> messages.ResourceRecord =>
+        new messages.ResourceRecord(name_of(owner), rtype, messages.ClassIn, ttl, data);
+
+    let expected_response = func -> messages.Message {
+        last message = new messages.Message();
+        message.header.id = 4660;
+        message.header.set_flags(34176);
+        message.questions.append(new messages.Question(name_of("www.example.com"), messages.TypeA, messages.ClassIn));
+        message.answers.append(record("www.example.com", messages.TypeCname, 300,
+            messages.RecordData.Cname(name_of("host.example.com"))));
+        message.answers.append(record("host.example.com", messages.TypeA, 300,
+            messages.RecordData.A(ipv4.of(192, 0, 2, 1))));
+        message.answers.append(record("host.example.com", messages.TypeAaaa, 300,
+            messages.RecordData.Aaaa(test.assert_ok<ipv6.Ipv6Addr>(ipv6.parse("2001:db8::1")))));
+        message.answers.append(record("1.2.0.192.in-addr.arpa", messages.TypePtr, 60,
+            messages.RecordData.Ptr(name_of("host.example.com"))));
+        message.answers.append(record("example.com", messages.TypeMx, 3600,
+            messages.RecordData.Mx { preference: 10, exchange: name_of("mail.example.com") }));
+        last texts: string[list] = new;
+        texts.append("v=spf1 -all");
+        texts.append("second");
+        message.answers.append(record("example.com", messages.TypeTxt, 3600, messages.txt_of(texts)));
+        message.answers.append(record("_sip._tcp.example.com", messages.TypeSrv, 86400,
+            messages.RecordData.Srv { priority: 10, weight: 60, port: 5060, target: name_of("sip.example.com") }));
+        message.answers.append(record("example.com", messages.TypeNaptr, 86400,
+            messages.RecordData.Naptr { order: 100, preference: 10, flags: "S", services: "SIP+D2U", regexp: "",
+                replacement: name_of("_sip._udp.example.com") }));
+        message.answers.append(record("example.com", 65280, 10, messages.RecordData.Unknown(bytes_of("deadbeef"))));
+        message.answers.append(record("example.com", messages.TypeNs, 7200,
+            messages.RecordData.Ns(name_of("ns1.example.com"))));
+        message.authorities.append(record("example.com", messages.TypeSoa, 3600, messages.RecordData.Soa {
+            mname: name_of("ns1.example.com"), rname: name_of("hostmaster.example.com"), serial: 2024010101,
+            refresh: 7200, retry: 900, expire: 1209600, minimum: 300 }));
+        message.additionals.append(record("ns1.example.com", messages.TypeA, 7200,
+            messages.RecordData.A(ipv4.of(192, 0, 2, 53))));
+        last options: messages.EdnsOption[list] = new;
+        options.append(new messages.EdnsOption(10, bytes_of("01020304")));
+        message.edns = optional.Optional<messages.Edns>.Some(new messages.Edns(1232, 0, 0, true, options));
+        return message;
+    };
+
+    export let test_query_encode = func {
+        last query = messages.query(4660, name_of("www.example.com"), messages.TypeA);
+        test.assert_equal_string(QueryHex, hex.encode(test.assert_ok<uint8[list]>(messages.encode(query))));
+        last decoded = test.assert_ok<messages.Message>(messages.decode(bytes_of(QueryHex)));
+        test.assert_equal<int>(4660, decoded.header.id);
+        test.assert(decoded.header.recursion_desired);
+        test.assert(!decoded.header.is_response);
+        test.assert_equal_string("www.example.com. IN A", decoded.question().to_string());
+    };
+
+    export let test_response_encode_matches_python = func {
+        last encoded = test.assert_ok<uint8[list]>(messages.encode(expected_response()));
+        test.assert_equal<int>(395, encoded.length);
+        test.assert_equal_string(ResponseHex, hex.encode(encoded));
+    };
+
+    export let test_response_decode = func {
+        last decoded = test.assert_ok<messages.Message>(messages.decode(bytes_of(ResponseHex)));
+        last header = decoded.header;
+        test.assert_equal<int>(4660, header.id);
+        test.assert(header.is_response && header.authoritative && header.recursion_desired && header.recursion_available);
+        test.assert(!header.truncated);
+        test.assert_equal<int>(0, header.opcode);
+        test.assert_equal<int>(messages.RcodeNoError, decoded.rcode());
+        test.assert_equal<int>(1, header.question_count);
+        test.assert_equal<int>(10, header.answer_count);
+        test.assert_equal<int>(1, header.authority_count);
+        test.assert_equal<int>(2, header.additional_count);
+        test.assert_equal<int>(1, decoded.additionals.length);
+        last expected = expected_response();
+        for (let i = 0; i < expected.answers.length; i++) {
+            test.assert_equal_string(expected.answers[i].to_string(), decoded.answers[i].to_string());
+            test.assert(expected.answers[i].equals(decoded.answers[i]));
+        }
+        test.assert(expected.authorities[0].equals(decoded.authorities[0]));
+        test.assert(expected.additionals[0].equals(decoded.additionals[0]));
+        last edns = test.assert_some<messages.Edns>(decoded.edns);
+        test.assert(edns.equals(test.assert_some<messages.Edns>(expected.edns)));
+        test.assert_equal<int>(1232, edns.udp_payload_size);
+        test.assert(edns.dnssec_ok);
+        test.assert_equal_string("_sip._tcp.example.com. 86400 IN SRV 10 60 5060 sip.example.com.",
+            decoded.answers[6].to_string());
+        test.assert_equal_string("example.com. 86400 IN NAPTR 100 10 \"S\" \"SIP+D2U\" \"\" _sip._udp.example.com.",
+            decoded.answers[7].to_string());
+        test.assert_equal_string("example.com. 10 IN TYPE65280 \\# 4 deadbeef", decoded.answers[8].to_string());
+        test.assert_equal_string("example.com. 3600 IN SOA ns1.example.com. hostmaster.example.com. 2024010101 7200 900 1209600 300",
+            decoded.authorities[0].to_string());
+        last texts = messages.txt_strings(decoded.answers[5].data);
+        test.assert_equal<int>(2, texts.length);
+        test.assert_equal_string("second", texts[1]);
+        // Re-encoding the decoded message gives the same bytes.
+        test.assert_equal_string(ResponseHex, hex.encode(test.assert_ok<uint8[list]>(messages.encode(decoded))));
+    };
+
+    export let test_every_prefix_is_an_error_not_a_trap = func {
+        last whole = bytes_of(ResponseHex);
+        last prefix: uint8[list] = new;
+        for (let i = 0; i < whole.length; i++) {
+            test.assert_err<messages.Message>(messages.decode(prefix));
+            prefix.append(whole[i]);
+        }
+        test.assert_ok<messages.Message>(messages.decode(prefix));
+        // A trailing byte is rejected.
+        prefix.append(0);
+        test.assert_err<messages.Message>(messages.decode(prefix));
+    };
+
+    // Messages from (n as in the name tests):
+    // q=struct.pack('>HHHHHH',0x1234,0x8180,1,1,0,0)+n(b'www',b'example',b'com')+struct.pack('>HH',1,1)
+    // print((q+struct.pack('>HHHIH',0xC00C,1,1,5,5)+bytes([192,0,2,1,0])).hex())
+    // print((q+struct.pack('>HHHIH',0xC00C,5,1,5,3)+struct.pack('>H',0xC00C)+b'\0').hex())
+    // print((q+struct.pack('>HHHIH',0xC00C,5,1,5,2)+struct.pack('>H',0xC00C)).hex())
+    export let test_rdlength_must_match = func {
+        // The query plus one A answer whose RDLENGTH says 5 with 5 bytes present: A data must be 4 bytes.
+        last bad_a = bytes_of("12348180000100010000000003777777076578616d706c6503636f6d0000010001c00c00010001000000050005c000020100");
+        test.assert_err<messages.Message>(messages.decode(bad_a));
+        // A CNAME whose name ends before RDLENGTH (3 bytes said, 2 used: a pointer).
+        last bad_cname = bytes_of("12348180000100010000000003777777076578616d706c6503636f6d0000010001c00c00050001000000050003c00c00");
+        test.assert_err<messages.Message>(messages.decode(bad_cname));
+        // The same CNAME with the right RDLENGTH decodes.
+        last good_cname = bytes_of("12348180000100010000000003777777076578616d706c6503636f6d0000010001c00c00050001000000050002c00c");
+        last decoded = test.assert_ok<messages.Message>(messages.decode(good_cname));
+        test.assert_equal_string("www.example.com. 5 IN CNAME www.example.com.", decoded.answers[0].to_string());
+    };
+
+    export let test_header_flags_and_extended_rcode = func {
+        last header = new messages.Header();
+        header.set_flags(34176);
+        test.assert_equal<int>(34176, header.flags());
+        header.truncated = true;
+        header.rcode = messages.RcodeNameError;
+        test.assert_equal<int>(34176 + 512 + 3, header.flags());
+        last message = new messages.Message();
+        message.header.rcode = 0;
+        message.edns = optional.Optional<messages.Edns>.Some(new messages.Edns(4096, 1, 0, false, new));
+        // BADVERS is 16: extended RCODE 1, header RCODE 0 (RFC 6891 section 6.1.3).
+        test.assert_equal<int>(16, message.rcode());
+        last round = test.assert_ok<messages.Message>(messages.decode(test.assert_ok<uint8[list]>(
+            messages.encode(message))));
+        test.assert_equal<int>(16, round.rcode());
+        test.assert_equal<int>(4096, test.assert_some<messages.Edns>(round.edns).udp_payload_size);
+    };
+
+    // opt=b'\0'+struct.pack('>HHIH',41,512,0,0)
+    // print((struct.pack('>HHHHHH',0,0,0,0,0,2)+opt+opt).hex()); print((struct.pack('>HHHHHH',0,0,0,0,0,1)+opt).hex())
+    export let test_two_opt_records_rejected = func {
+        // Header with ARCOUNT 2 and two root OPT records.
+        last twice = bytes_of("000000000000000000000002" + "0000290200000000000000" + "0000290200000000000000");
+        test.assert_err<messages.Message>(messages.decode(twice));
+        last once = bytes_of("000000000000000000000001" + "0000290200000000000000");
+        test.assert_equal<int>(512, test.assert_some<messages.Edns>(
+            test.assert_ok<messages.Message>(messages.decode(once)).edns).udp_payload_size);
+    };
+);

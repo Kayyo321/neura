@@ -1,0 +1,87 @@
+let durations = import:Std.Time.Duration;
+let optional = import:Std.Core.Optional;
+
+/// @brief A sliding window of the last N latency samples with nearest-rank percentiles.
+///
+/// `percentile(p)` sorts a copy of the samples and returns the sample of rank `ceil(p * n / 100)` (1-based), the
+/// nearest-rank definition, so p95 of 20 samples is the 19th smallest and p100 the largest. `HedgingFilter` uses it
+/// to choose its hedge delay.
+/// @see [Std.Net.Resilience.LatencyWindow](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-LatencyWindow)
+#Since("0.3.0")
+export let LatencyWindow = module (
+    /// @brief The last `capacity` latencies.
+    #[Final, NotThreadSafe]
+    export let LatencyWindow = class (
+        /// @brief The samples in nanoseconds, a ring once full.
+        last samples: int64[list] = new;
+        /// @brief The most samples kept.
+        last capacity: int;
+        /// @brief The slot the next sample replaces once the window is full.
+        let next_slot: int = 0;
+
+        /// @brief An empty window of `size` samples; a size below 1 traps with "invalid argument: capacity".
+        export let init = func(size: int) {
+            if (size < 1) {
+                trap_with_message("invalid argument: capacity");
+            }
+            capacity = size;
+        };
+
+        /// @brief Adds a sample, replacing the oldest when the window is full. A negative latency counts as zero.
+        export let record = func(latency: durations.Duration) {
+            last nanos = latency.is_negative() ? 0 as int64 : latency.to_nanos();
+            if (samples.length < capacity) {
+                samples.append(nanos);
+                return;
+            }
+            samples[next_slot] = nanos;
+            next_slot = (next_slot + 1) % capacity;
+        };
+
+        /// @brief The number of samples held.
+        export let size = func -> int => samples.length;
+
+        /// @brief The nearest-rank `p`-th percentile, or None when the window is empty. `p` must be from 1 through
+        /// 100, else the call traps with "invalid argument: percentile".
+        #NoDiscard
+        export let percentile = func(p: int) -> optional.Optional<durations.Duration> {
+            if (p < 1 || p > 100) {
+                trap_with_message("invalid argument: percentile");
+            }
+            last n = samples.length;
+            if (n == 0) {
+                return optional.Optional<durations.Duration>.None;
+            }
+            last sorted: int64[list] = new;
+            for (let i = 0; i < n; i++) {
+                // Insertion sort of a small window.
+                last value = samples[i];
+                sorted.append(value);
+                let j = sorted.length - 1;
+                while (j > 0 && sorted[j - 1] > value) {
+                    sorted[j] = sorted[j - 1];
+                    j--;
+                }
+                sorted[j] = value;
+            }
+            last rank = (p * n + 99) / 100;
+            return optional.Optional<durations.Duration>.Some(durations.of_nanos(sorted[rank - 1]));
+        };
+
+        /// @brief Removes every sample.
+        export let clear = func {
+            while (samples.length > 0) {
+                samples.remove_at(samples.length - 1);
+            }
+            next_slot = 0;
+        };
+
+        /// @brief Text such as "LatencyWindow(12 of 100 samples)".
+        export let.override to_string = func -> string =>
+            "LatencyWindow(" + samples.length.to_string() + " of " + capacity.to_string() + " samples)";
+    );
+
+    /// @brief An empty window of `capacity` samples.
+    #NoDiscard
+    export let of = func(capacity: int) -> LatencyWindow => new LatencyWindow(capacity);
+);

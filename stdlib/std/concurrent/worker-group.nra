@@ -26,7 +26,7 @@ export let WorkerGroup = module (
 
         /// @brief Wraps the ends of a group's channels. Use with_workers.
         export let init = func(jobs: channels.Sender<T>, closing: channels.Closer<T>,
-                stops: channels.Receiver<int>, worker_count: int) {
+            stops: channels.Receiver<int>, worker_count: int) {
             queue = jobs;
             closer = closing;
             stopped = stops;
@@ -80,7 +80,7 @@ export let WorkerGroup = module (
     /// captures, as for any spawn. Fewer than one worker or a negative capacity traps with `invalid argument:
     /// workers` or `invalid argument: capacity`.
     export let with_workers = func<T>(workers: int, capacity: int, work: func(T) -> void,
-            body: func(WorkerGroup<T>) -> void) {
+        body: func(WorkerGroup<T>) -> void) {
         if (workers < 1) {
             trap_with_message("invalid argument: workers");
         }

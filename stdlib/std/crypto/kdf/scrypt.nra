@@ -9,7 +9,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The working memory is 128 * r * N bytes, held as 32-bit words; a call whose memory would exceed 1 GiB traps
 /// before allocating.
-/// @see [Std.Crypto.Kdf.Scrypt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Scrypt)
+/// @see [Std.Crypto.Kdf.Scrypt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Scrypt)
 #Since("0.3.0")
 export let Scrypt = module (
     /// @brief `length` bytes derived from the password and salt with cost N (a power of two above 1), block size
@@ -17,10 +17,10 @@ export let Scrypt = module (
     /// parameters".
     #[NoDiscard, Since("0.3.0")]
     export let derive = func(password: uint8[list], salt: uint8[list], n: int, r: int, p: int, length: int)
-            -> uint8[list] {
+        -> uint8[list] {
         crypto_policy.require(Algorithm.Scrypt);
         if (n < 2 || (n & (n - 1)) != 0 || r < 1 || p < 1 || (r as int64) * (p as int64) >= 1073741824
-                || (n as int64) * (r as int64) * 128 > 1073741824 || length < 0) {
+            || (n as int64) * (r as int64) * 128 > 1073741824 || length < 0) {
             trap_with_message("invalid argument: scrypt parameters");
         }
         let blocks = pbkdf2.derive<sha2.Sha256>(password, salt, 1, p * 128 * r);

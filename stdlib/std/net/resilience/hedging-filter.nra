@@ -1,0 +1,208 @@
+let.promote _ = import:Std.Time.Clock;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Net.Filter;
+let windows = import:Std.Net.Resilience.LatencyWindow;
+let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let budgets = import:Std.Net.Resilience.RetryBudget;
+let.promote _ = import:Std.Net.Service;
+let spawnables = import:Std.Net.Resilience.SpawnableService;
+let timers = import:Std.Concurrent.Timer;
+
+/// @brief Tail-latency request hedging: when the primary request has not answered within a latency percentile of
+/// recent requests, a backup request is sent and the first successful answer wins.
+///
+/// The filter keeps a `LatencyWindow` of recent request latencies. While it holds fewer than `min_samples` samples,
+/// or while that percentile is zero, a request just calls the service in the calling task. Otherwise the hedge delay is the window's `percentile` (95 or 99, say), and a
+/// request runs as tasks (Concurrency.md section 4):
+///
+/// 1. The primary call is spawned and a `Std.Concurrent.Timer` is armed for the hedge delay.
+/// 2. If the primary answers first, its result is returned. If the timer fires first and the `RetryBudget` allows
+///    one more request (each request deposits once), the backup call is spawned; otherwise the filter waits for the
+///    primary.
+/// 3. The first call to answer `Ok` wins: the filter cancels the scope, which cancels the other call, and returns.
+///    If the first answer is an `Err`, the filter waits for the other call and returns its answer if it is `Ok`, else
+///    the first `Err`.
+///
+/// Each request's latency, up to the moment its result is chosen, is added to the window, measured on the injected
+/// clock. **Constraints.** Cancellation is cooperative: the cancelled call stops at its next cancellable wait (a
+/// timer, a channel operation, a cancellable host request such as a socket read) or when it asks
+/// `Cancellation.requested()`, and the filter returns only after it has stopped, because a scope waits for its
+/// tasks. The next service must be a `SpawnableService` (any other service returns the `Custom` error
+/// `resilience.hedging_unsupported` without being called), so the filter is the last in a chain, and the backup goes
+/// to the same function unless a separate replica function is given. Both functions run in tasks, so they must be
+/// spawnable as `SpawnableService` describes; in particular no closure of the type `func(Req) -> Result<Resp>`
+/// anywhere in the program may capture an object (E0602 at the program's call). The timer runs on the runtime's monotonic
+/// clock, so the injected clock should be `Std.Time.SystemClock`, which `neura test --virtual-time` makes
+/// deterministic.
+/// @see [Std.Net.Resilience.HedgingFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-HedgingFilter)
+#Since("0.3.0")
+export let HedgingFilter = module (
+    /// @brief The error code when the next service is not a `SpawnableService`.
+    export const UnsupportedCode = "resilience.hedging_unsupported";
+
+    /// @brief Hedges slow requests with a backup request.
+    #[Final, NotThreadSafe]
+    export let HedgingFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief Recent request latencies.
+        last window: windows.LatencyWindow;
+        /// @brief The percentile used as the hedge delay, 1 through 100.
+        last percentile: int;
+        /// @brief Samples needed before hedging starts.
+        last min_samples: int;
+        /// @brief The budget backups draw from.
+        last budget: budgets.RetryBudget;
+        /// @brief The clock latencies are measured on.
+        last clock: Clock;
+        /// @brief The backup function, when it differs from the primary.
+        last replica: optional.Optional<func(Req) -> Result<Resp>>;
+        /// @brief Backup requests sent.
+        let hedged: int64 = 0;
+        /// @brief Requests whose backup answered first.
+        let backup_won: int64 = 0;
+
+        /// @brief A hedging filter. Traps with "invalid argument: <name>" unless 1 <= percentile <= 100 and
+        /// min_samples >= 1.
+        export let init = func(recent: windows.LatencyWindow, p: int, minimum: int, limit: budgets.RetryBudget,
+            source: Clock, backup: optional.Optional<func(Req) -> Result<Resp>>) {
+            if (p < 1 || p > 100) {
+                trap_with_message("invalid argument: percentile");
+            }
+            if (minimum < 1) {
+                trap_with_message("invalid argument: min_samples");
+            }
+            window = recent;
+            percentile = p;
+            min_samples = minimum;
+            budget = limit;
+            clock = source;
+            replica = backup;
+        };
+
+        /// @brief The hedge delay now: the window's percentile, or None while it holds fewer than `min_samples` or
+        /// when the percentile is zero (a zero delay would hedge every request).
+        #NoDiscard
+        export let hedge_delay = func -> optional.Optional<durations.Duration> {
+            if (window.size() < min_samples) {
+                return optional.Optional<durations.Duration>.None;
+            }
+            last delay = window.percentile(percentile);
+            return match (delay) {
+                optional.Optional.Some(value) => value.to_nanos() > 0 ? delay : optional.Optional<durations.Duration>.None,
+                optional.Optional.None => delay,
+            };
+        };
+
+        /// @brief Runs the request as described for the module.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            if (!(next is spawnables.SpawnableService<Req, Resp>)) {
+                return Result<Resp>.Err(errors.custom(UnsupportedCode,
+                    "HedgingFilter needs a SpawnableService as its next service"));
+            }
+            last primary = (next as spawnables.SpawnableService<Req, Resp>).function();
+            last backup = match (replica) {
+                optional.Optional.Some(f) => f,
+                optional.Optional.None => primary,
+            };
+            budget.deposit();
+            last start = clock.monotonic()?;
+            return match (hedge_delay()) {
+                optional.Optional.Some(delay) => race(request, primary, backup, delay, start),
+                optional.Optional.None => settle(start, primary(request)),
+            };
+        };
+
+        /// @brief Backup requests sent so far.
+        export let hedges = func -> int64 => hedged;
+
+        /// @brief Requests whose backup answered first, so far.
+        export let backup_wins = func -> int64 => backup_won;
+
+        /// @brief The latency window.
+        export let latencies = func -> windows.LatencyWindow => window;
+
+        /// @brief Text such as "HedgingFilter(p95, 3 hedges)".
+        export let.override to_string = func -> string =>
+            "HedgingFilter(p" + percentile.to_string() + ", " + hedged.to_string() + " hedges)";
+
+        /// @brief The primary and, after `delay`, the backup as tasks; the first Ok wins.
+        let race = func(request: Req, primary: func(Req) -> Result<Resp>, backup: func(Req) -> Result<Resp>,
+            delay: durations.Duration, start: durations.Duration) -> Result<Resp> {
+            scope (tasks) {
+                let first = spawn primary(request);
+                last timer = timers.after(delay)?;
+                let fired = false;
+                select {
+                    let outcome = first.join() => {
+                        return settle(start, outcome);
+                    },
+                    let waited = timer.wait() => {
+                        fired = waited == timers.TimerOutcome.Fired;
+                    },
+                }
+                if (!fired || !budget.try_withdraw()) {
+                    return settle(start, first.join());
+                }
+                hedged++;
+                let second = spawn backup(request);
+                select {
+                    let outcome = first.join() => {
+                        if (is_ok(outcome)) {
+                            tasks.cancel();
+                            return settle(start, outcome);
+                        }
+                        last other = second.join();
+                        if (is_ok(other)) {
+                            backup_won++;
+                            return settle(start, other);
+                        }
+                        return settle(start, outcome);
+                    },
+                    let outcome = second.join() => {
+                        if (is_ok(outcome)) {
+                            tasks.cancel();
+                            backup_won++;
+                            return settle(start, outcome);
+                        }
+                        last other = first.join();
+                        return settle(start, is_ok(other) ? other : outcome);
+                    },
+                }
+            }
+        };
+
+        /// @brief Records the latency since `start` (skipped if the clock fails) and returns `outcome`.
+        let settle = func(start: durations.Duration, outcome: Result<Resp>) -> Result<Resp> {
+            match (clock.monotonic()) {
+                Result.Ok(now) => {
+                    window.record(now.minus(start));
+                },
+                Result.Err(e) => {
+                },
+            }
+            return outcome;
+        };
+
+        /// @brief Whether `outcome` is Ok.
+        let is_ok = func(outcome: Result<Resp>) -> bool => match (outcome) {
+            Result.Ok(value) => true,
+            Result.Err(e) => false,
+        };
+    );
+
+    /// @brief A filter hedging at percentile `percentile` of the last `window` latencies once it holds
+    /// `min_samples`, with backups bounded by `budget`, sending backups to the same function.
+    #NoDiscard
+    export let of = func<Req, Resp>(window: int, percentile: int, min_samples: int, budget: budgets.RetryBudget,
+        clock: Clock) -> HedgingFilter<Req, Resp> =>
+            new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
+                optional.Optional<func(Req) -> Result<Resp>>.None);
+
+    /// @brief As `of`, sending backups to `replica`.
+    #NoDiscard
+    export let with_replica = func<Req, Resp>(window: int, percentile: int, min_samples: int,
+        budget: budgets.RetryBudget, clock: Clock, replica: func(Req) -> Result<Resp>) -> HedgingFilter<Req, Resp> =>
+            new HedgingFilter<Req, Resp>(windows.of(window), percentile, min_samples, budget, clock,
+                optional.Optional<func(Req) -> Result<Resp>>.Some(replica));
+);

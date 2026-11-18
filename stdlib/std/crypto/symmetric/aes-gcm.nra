@@ -14,7 +14,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// A nonce must never repeat under one key: a repeat reveals the XOR of two plaintexts and lets an attacker
 /// forge tags. Where nonces cannot be guaranteed unique, prefer AesGcmSiv or XChaCha20Poly1305.
-/// @see [Std.Crypto.Symmetric.AesGcm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesGcm)
+/// @see [Std.Crypto.Symmetric.AesGcm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesGcm)
 #Since("0.3.0")
 export let AesGcm = module (
     /// @brief AES-128-GCM, AES-192-GCM or AES-256-GCM, chosen by the key length.
@@ -59,7 +59,7 @@ export let AesGcm = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 12, "AES-GCM");
             if (sealed.length < 16) {
                 return aead.failure();

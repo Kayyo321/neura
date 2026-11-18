@@ -1,0 +1,421 @@
+let.promote _ = import:Std.Core.Comparable;
+let.promote _ = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let.promote _ = import:Std.Net.Core.NetAddress;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Ordering;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief IPv6 addresses (RFC 4291) with an optional zone index (RFC 4007 section 11): the 128-bit value,
+/// the text forms of RFC 4291 section 2.2, and the canonical text of RFC 5952.
+///
+/// An `Ipv6Addr` is an immutable class, so each value is one heap object reclaimed by the tracing collector:
+/// this runtime does not provide zero-allocation value types. The zone is kept as text (`eth0`, `3`); it
+/// takes part in equality, hashing and ordering, as in Python's `ipaddress`, and `without_zone` drops it.
+/// Mapping a zone name to an interface index is a host matter and is not done here.
+///
+/// `to_string` follows RFC 5952 section 4: lowercase hex, no leading zeros in a group, the longest run of two
+/// or more zero groups shortened to `::` (the first such run on a tie), a single zero group written `0`, and
+/// (section 5) an IPv4-mapped address written `::ffff:a.b.c.d`.
+/// @see [Std.Net.Core.Ipv6Addr](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-Ipv6Addr)
+#Since("0.3.0")
+export let Ipv6Addr = module (
+    /// @brief An IPv6 address and zone, ordered by the unsigned 128-bit value and then by the zone's bytes.
+    #[Final, NoDiscard, Immutable, ThreadSafe, Since("0.3.0")]
+    export let Ipv6Addr = class implements NetAddress, Comparable<Ipv6Addr> (
+        /// @brief The most significant 64 bits (groups 1 to 4).
+        export last high: uint64;
+        /// @brief The least significant 64 bits (groups 5 to 8).
+        export last low: uint64;
+        /// @brief The zone index text without `%`; "" when there is none.
+        export last zone: string;
+
+        /// @brief Constructs the address from its halves and zone; traps when the zone contains `%`.
+        export let init = func(first: uint64, second: uint64, zone_id: string) {
+            for (let i = 0; i < zone_id.byte_length; i++) {
+                if (zone_id.byte_at(i) == 37) {
+                    trap_with_message("Ipv6Addr: a zone cannot contain '%'");
+                }
+            }
+            high = first;
+            low = second;
+            zone = zone_id;
+        };
+
+        /// @brief The eight 16-bit groups, most significant first, as a new list.
+        #Pure
+        export let segments = func -> uint16[list] {
+            last groups: uint16[list] = new;
+            for (let i = 0; i < 8; i++) {
+                groups.append(group(i) as uint16);
+            }
+            return groups;
+        };
+
+        /// @brief The sixteen bytes in network order, as a new list.
+        #Pure
+        export let octets = func -> uint8[list] {
+            last bytes: uint8[list] = new;
+            for (let i = 0; i < 16; i++) {
+                last word = i < 8 ? high : low;
+                last shift = (56 - (i % 8) * 8) as uint64;
+                bytes.append(((word >> shift) & 255) as uint8);
+            }
+            return bytes;
+        };
+
+        /// @brief The same address with no zone.
+        #Pure
+        export let without_zone = func -> Ipv6Addr => new Ipv6Addr(high, low, "");
+
+        /// @brief The IPv4 address of an IPv4-mapped address (`::ffff:a.b.c.d`, RFC 4291 section 2.5.5.2);
+        /// None for any other address.
+        #[NoDiscard, Pure]
+        export let to_ipv4_mapped = func -> Optional<v4.Ipv4Addr> {
+            if (!is_ipv4_mapped()) {
+                return Optional<v4.Ipv4Addr>.None;
+            }
+            return Optional<v4.Ipv4Addr>.Some(new v4.Ipv4Addr((low & 4294967295) as uint32));
+        };
+
+        /// @brief Tests for `::` (zone ignored).
+        #Pure
+        export let is_unspecified = func -> bool => high == 0 && low == 0;
+
+        /// @brief Tests for `::1` (zone ignored).
+        #Pure
+        export let is_loopback = func -> bool => high == 0 && low == 1;
+
+        /// @brief Tests for `ff00::/8` (RFC 4291 section 2.7).
+        #Pure
+        export let is_multicast = func -> bool => (high >> 56) == 255;
+
+        /// @brief Tests for the link-local unicast prefix `fe80::/10` (RFC 4291 section 2.5.6).
+        #Pure
+        export let is_link_local = func -> bool => (high >> 54) == 1018;
+
+        /// @brief Tests for unique local addresses, `fc00::/7` (RFC 4193).
+        #Pure
+        export let is_unique_local = func -> bool => (high >> 57) == 126;
+
+        /// @brief Tests for `::ffff:0:0/96` (RFC 4291 section 2.5.5.2).
+        #Pure
+        export let is_ipv4_mapped = func -> bool => high == 0 && (low >> 32) == 65535;
+
+        /// @brief Tests for the documentation prefix `2001:db8::/32` (RFC 3849).
+        #Pure
+        export let is_documentation = func -> bool => (high >> 32) == 536939960;
+
+        /// @brief Always `AddressFamily.Ipv6`.
+        #Pure
+        export let family = func -> AddressFamily => AddressFamily.Ipv6;
+
+        /// @brief Compares the unsigned 128-bit values, then the zones bytewise ("" first).
+        #Pure
+        export let compare_to = func(other: Ipv6Addr) -> Ordering {
+            if (high != other.high) {
+                return high < other.high ? Ordering.Less : Ordering.Greater;
+            }
+            if (low != other.low) {
+                return low < other.low ? Ordering.Less : Ordering.Greater;
+            }
+            return compare_text(zone, other.zone);
+        };
+
+        /// @brief Tests whether another object is an `Ipv6Addr` with the same value and zone.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Ipv6Addr)) {
+                return false;
+            }
+            last address = other as Ipv6Addr;
+            return high == address.high && low == address.low && zone == address.zone;
+        };
+
+        /// @brief Combines 17 with both halves and the zone's hash.
+        #Pure
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(hashing.combine(17, hashing.of_uint64(high)), hashing.of_uint64(low)),
+                zone.hash_code());
+
+        /// @brief The RFC 5952 text, followed by `%` and the zone when there is one.
+        #Pure
+        export let.override to_string = func -> string {
+            let text = "";
+            if (is_ipv4_mapped()) {
+                text = "::ffff:" + (new v4.Ipv4Addr((low & 4294967295) as uint32)).to_string();
+            } else {
+                // The longest run of zero groups of length 2 or more; the first one wins a tie.
+                let best_start = -1;
+                let best_length = 1;
+                let run_start = -1;
+                for (let i = 0; i <= 8; i++) {
+                    if (i < 8 && group(i) == 0) {
+                        if (run_start < 0) {
+                            run_start = i;
+                        }
+                    } else if (run_start >= 0) {
+                        if (i - run_start > best_length) {
+                            best_start = run_start;
+                            best_length = i - run_start;
+                        }
+                        run_start = -1;
+                    }
+                }
+                let i = 0;
+                while (i < 8) {
+                    if (i == best_start) {
+                        text += "::";
+                        i += best_length;
+                    } else {
+                        if (i > 0 && i != best_start + best_length) {
+                            text += ":";
+                        }
+                        text += hex_group(group(i));
+                        i++;
+                    }
+                }
+            }
+            if (zone.byte_length > 0) {
+                text = text + "%" + zone;
+            }
+            return text;
+        };
+
+        /// @brief Group `index` (0 is the most significant) as an int.
+        let group = func(index: int) -> int {
+            last word = index < 4 ? high : low;
+            last shift = (48 - (index % 4) * 16) as uint64;
+            return ((word >> shift) & 65535) as int;
+        };
+    );
+
+    /// @brief The lowercase hex digits.
+    const HexDigits: string = "0123456789abcdef";
+
+    /// @brief Parses the text forms of RFC 4291 section 2.2, optionally followed by `%` and a zone.
+    ///
+    /// Accepted: eight groups of 1 to 4 hex digits in either case (`2001:DB8:0:0:8:800:200C:417A`); one `::`
+    /// standing for one or more zero groups (`ff01::101`, `::1`, `::`); and a final dotted IPv4 address in
+    /// place of the last two groups (`::ffff:129.144.52.38`, `0:0:0:0:0:0:13.1.68.3`), parsed as strictly as
+    /// `Ipv4Addr.parse`. The zone is everything after the first `%`; it must be non-empty and contain no
+    /// further `%`.
+    ///
+    /// Errors: Empty for ""; InvalidCharacter at the first unexpected byte (a group of five digits fails at its
+    /// fifth digit); Syntax for a second `::`, a lone leading or trailing `:`, a wrong group count (at the end
+    /// of the address), an IPv4 part not at the end, or an empty or invalid zone; UnexpectedEnd when the text
+    /// stops after `:`; errors of the embedded IPv4 part are reported at their offset in the whole text.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let parse = func(text: string) -> Result<Ipv6Addr> {
+        last length = text.byte_length;
+        if (length == 0) {
+            return failed(ParseErrorKind.Empty, 0, "empty input");
+        }
+        let end = length;
+        let zone = "";
+        for (let i = 0; i < length; i++) {
+            if (text.byte_at(i) == 37) {
+                end = i;
+                zone = text.slice(i + 1, length);
+                if (zone.byte_length == 0) {
+                    return failed(ParseErrorKind.Syntax, i, "empty zone after '%'");
+                }
+                for (let j = i + 1; j < length; j++) {
+                    if (text.byte_at(j) == 37) {
+                        return failed(ParseErrorKind.Syntax, j, "'%' inside the zone");
+                    }
+                }
+                break;
+            }
+        }
+        if (end == 0) {
+            return failed(ParseErrorKind.Syntax, 0, "no address before the zone");
+        }
+        last head: int[list] = new;
+        last tail: int[list] = new;
+        let compressed = false;
+        let i = 0;
+        if (text.byte_at(0) == 58) {
+            if (end < 2 || text.byte_at(1) != 58) {
+                return failed(ParseErrorKind.Syntax, 0, "a lone ':' at the start");
+            }
+            compressed = true;
+            i = 2;
+        }
+        while (i < end) {
+            last start = i;
+            let value = 0;
+            while (i < end && hex_value(text.byte_at(i) as int) >= 0) {
+                if (i - start >= 4) {
+                    return failed(ParseErrorKind.InvalidCharacter, i, "more than four hex digits in a group");
+                }
+                value = value * 16 + hex_value(text.byte_at(i) as int);
+                i++;
+            }
+            if (i < end && text.byte_at(i) == 46) {
+                // A dotted IPv4 tail: it must run to the end of the address.
+                last dotted = v4.parse(text.slice(start, end));
+                if (is_err<v4.Ipv4Addr>(dotted)) {
+                    return shifted(dotted, start);
+                }
+                last bits: uint32 = match (dotted) {
+                    Result.Ok(address) => address.bits,
+                    Result.Err(_) => 0,
+                };
+                last groups = compressed ? tail : head;
+                groups.append((bits >> 16) as int);
+                groups.append((bits & 65535) as int);
+                i = end;
+                break;
+            }
+            if (i == start) {
+                return failed(ParseErrorKind.InvalidCharacter, i, "expected a hex digit");
+            }
+            if (compressed) {
+                tail.append(value);
+            } else {
+                head.append(value);
+            }
+            if (i == end) {
+                break;
+            }
+            if (text.byte_at(i) != 58) {
+                return failed(ParseErrorKind.InvalidCharacter, i, "expected ':' or a hex digit");
+            }
+            i++;
+            if (i < end && text.byte_at(i) == 58) {
+                if (compressed) {
+                    return failed(ParseErrorKind.Syntax, i - 1, "a second '::'");
+                }
+                compressed = true;
+                i++;
+            } else if (i == end) {
+                return failed(ParseErrorKind.UnexpectedEnd, i, "expected a group after ':'");
+            }
+        }
+        last count = head.length + tail.length;
+        if (compressed && count > 7) {
+            return failed(ParseErrorKind.Syntax, end, "'::' with eight groups");
+        }
+        if (!compressed && count != 8) {
+            return failed(ParseErrorKind.Syntax, end, "an address needs eight groups or '::'");
+        }
+        last groups: int[list] = new;
+        for (let g in head) {
+            groups.append(g);
+        }
+        for (let k = count; k < 8; k++) {
+            groups.append(0);
+        }
+        for (let g in tail) {
+            groups.append(g);
+        }
+        return Result<Ipv6Addr>.Ok(new Ipv6Addr(pack(groups, 0), pack(groups, 4), zone));
+    };
+
+    /// @brief The address held in `bytes[offset]` to `bytes[offset + 15]`, network order, with no zone;
+    /// traps when fewer than sixteen bytes follow `offset`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv6Addr {
+        if (offset < 0 || offset + 16 > bytes.length) {
+            trap_with_message("Ipv6Addr.from_bytes: fewer than 16 bytes at the offset");
+        }
+        let first: uint64 = 0;
+        let second: uint64 = 0;
+        for (let i = 0; i < 8; i++) {
+            first = (first << 8) | (bytes[offset + i] as uint64);
+            second = (second << 8) | (bytes[offset + 8 + i] as uint64);
+        }
+        return new Ipv6Addr(first, second, "");
+    };
+
+    /// @brief The address with the eight given groups, most significant first, and no zone; traps unless the
+    /// list holds exactly eight groups.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of_segments = func(segments: uint16[list]) -> Ipv6Addr {
+        if (segments.length != 8) {
+            trap_with_message("Ipv6Addr.of_segments: exactly 8 groups are needed");
+        }
+        last groups: int[list] = new;
+        for (let s in segments) {
+            groups.append(s as int);
+        }
+        return new Ipv6Addr(pack(groups, 0), pack(groups, 4), "");
+    };
+
+    /// @brief The IPv4-mapped address `::ffff:a.b.c.d` (RFC 4291 section 2.5.5.2).
+    #[NoDiscard, Pure, ThreadSafe]
+    export let from_ipv4_mapped = func(address: v4.Ipv4Addr) -> Ipv6Addr =>
+        new Ipv6Addr(0, (65535 << 32) | (address.bits as uint64), "");
+
+    /// @brief `::1`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let localhost = func -> Ipv6Addr => new Ipv6Addr(0, 1, "");
+
+    /// @brief `::`.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let unspecified = func -> Ipv6Addr => new Ipv6Addr(0, 0, "");
+
+    /// @brief Four groups from `groups[start]` packed into 64 bits.
+    let pack = func(groups: int[list], start: int) -> uint64 {
+        let word: uint64 = 0;
+        for (let i = start; i < start + 4; i++) {
+            word = (word << 16) | (groups[i] as uint64);
+        }
+        return word;
+    };
+
+    /// @brief One group in lowercase hex without leading zeros.
+    let hex_group = func(value: int) -> string {
+        if (value == 0) {
+            return "0";
+        }
+        let text = "";
+        let rest = value;
+        while (rest > 0) {
+            text = HexDigits.slice(rest % 16, rest % 16 + 1) + text;
+            rest = rest / 16;
+        }
+        return text;
+    };
+
+    /// @brief Compares two strings by their bytes, unsigned; a proper prefix orders first.
+    let compare_text = func(a: string, b: string) -> Ordering {
+        last shorter = a.byte_length < b.byte_length ? a.byte_length : b.byte_length;
+        for (let i = 0; i < shorter; i++) {
+            if (a.byte_at(i) != b.byte_at(i)) {
+                return a.byte_at(i) < b.byte_at(i) ? Ordering.Less : Ordering.Greater;
+            }
+        }
+        if (a.byte_length == b.byte_length) {
+            return Ordering.Equal;
+        }
+        return a.byte_length < b.byte_length ? Ordering.Less : Ordering.Greater;
+    };
+
+    /// @brief Decodes one ASCII hex digit, or returns -1.
+    let hex_value = func(b: int) -> int {
+        if (b >= 48 && b <= 57) {
+            return b - 48;
+        }
+        if (b >= 97 && b <= 102) {
+            return b - 87;
+        }
+        if (b >= 65 && b <= 70) {
+            return b - 55;
+        }
+        return -1;
+    };
+
+    /// @brief Creates an IPv6 parse error at a UTF-8 byte offset.
+    let failed = func(kind: ParseErrorKind, offset: int, message: string) -> Result<Ipv6Addr> =>
+        Result<Ipv6Addr>.Err(Error.Parse { kind: kind, offset: offset, message: message });
+
+    /// @brief Moves an embedded IPv4 parse error to its offset in the whole text.
+    let shifted = func(r: Result<v4.Ipv4Addr>, start: int) -> Result<Ipv6Addr> => match (r) {
+        Result.Err(Error.Parse { kind, offset, message }) =>
+            failed(kind, start + offset, "in the IPv4 part: " + message),
+        Result.Err(e) => Result<Ipv6Addr>.Err(e),
+        Result.Ok(_) => failed(ParseErrorKind.Syntax, start, "unreachable"),
+    };
+);

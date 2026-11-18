@@ -1,0 +1,398 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief The pure wire rules of WebTransport over HTTP/3 (draft-ietf-webtrans-http3-14), with the QUIC and
+/// HTTP/3 rules they rest on (RFC 9000, RFC 9297).
+///
+/// Covered: QUIC variable-length integers (RFC 9000 section 16); stream ID types (RFC 9000 section 2.1); the
+/// session ID, which is the ID of the client-initiated bidirectional stream that carried the extended CONNECT;
+/// the headers that tie a stream to a session (unidirectional stream type 0x54, bidirectional signal 0x41,
+/// each followed by the session ID; draft sections 4.2 and 4.3); HTTP/3 datagrams, a quarter stream ID followed
+/// by the payload (RFC 9297 section 2.1); the WT_CLOSE_SESSION capsule 0x2843 with a 32-bit code and a UTF-8
+/// message of at most 1024 bytes (draft section 6); and the mapping of 32-bit application error codes into the
+/// WT_APPLICATION_ERROR range (draft section 4.4). The draft is not final; its codepoints may change. Failures
+/// are Parse errors at the offending offset.
+/// @see [Std.Net.Realtime.WebTransport.Wire](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-WebTransport-Wire)
+#Since("0.3.0")
+export let Wire = module (
+    /// @brief The largest QUIC variable-length integer, 2^62 - 1.
+    export const MaxVarint: uint64 = 4611686018427387903;
+    /// @brief The largest quarter stream ID of an HTTP/3 datagram, 2^60 - 1 (RFC 9297 section 2.1).
+    export const MaxQuarterStreamId: uint64 = 1152921504606846975;
+    /// @brief The HTTP/3 unidirectional stream type of a WebTransport stream (0x54).
+    export const UniStreamType: uint64 = 84;
+    /// @brief The signal that starts a bidirectional WebTransport stream, WT_STREAM (0x41).
+    export const BidiSignal: uint64 = 65;
+    /// @brief The WT_CLOSE_SESSION capsule type (0x2843).
+    export const CloseSessionCapsule: uint64 = 10307;
+    /// @brief The longest WT_CLOSE_SESSION message in bytes.
+    export const MaxCloseMessageBytes: int = 1024;
+    /// @brief The first WT_APPLICATION_ERROR codepoint (0x52e4a40fa8db).
+    export const FirstApplicationError: uint64 = 91141958510811;
+    /// @brief The last WT_APPLICATION_ERROR codepoint (0x52e5ac983162).
+    export const LastApplicationError: uint64 = 91146396643682;
+
+    /// @brief The four stream types of RFC 9000 section 2.1, by the two low bits of the ID.
+    export let StreamType = enum (
+        ClientBidirectional, ServerBidirectional, ClientUnidirectional,
+        ServerUnidirectional
+    );
+
+    /// @brief The type of a stream ID. A negative ID or one above 2^62 - 1 traps with "invalid argument: stream
+    /// id".
+    #NoDiscard
+    export let stream_type = func(id: int64) -> StreamType {
+        check_stream_id(id);
+        last low = id % 4;
+        if (low == 0) {
+            return StreamType.ClientBidirectional;
+        }
+        if (low == 1) {
+            return StreamType.ServerBidirectional;
+        }
+        return low == 2 ? StreamType.ClientUnidirectional : StreamType.ServerUnidirectional;
+    };
+
+    /// @brief Whether the stream ID names a bidirectional stream.
+    #NoDiscard
+    export let is_bidirectional = func(id: int64) -> bool {
+        check_stream_id(id);
+        return (id / 2) % 2 == 0;
+    };
+
+    /// @brief Whether the client opened the stream.
+    #NoDiscard
+    export let is_client_initiated = func(id: int64) -> bool {
+        check_stream_id(id);
+        return id % 2 == 0;
+    };
+
+    /// @brief Whether the ID can be a session ID: a client-initiated bidirectional stream.
+    #NoDiscard
+    export let is_valid_session_id = func(id: int64) -> bool => id >= 0 && id <= (MaxVarint as int64) && id % 4 == 0;
+
+    /// @brief The `index`-th stream ID (from 0) of a type: `4 * index` plus the type's low bits.
+    #NoDiscard
+    export let nth_stream_id = func(kind: StreamType, index: int64) -> int64 {
+        last low: int64 = match (kind) {
+            StreamType.ClientBidirectional => 0,
+            StreamType.ServerBidirectional => 1,
+            StreamType.ClientUnidirectional => 2,
+            StreamType.ServerUnidirectional => 3,
+        };
+        if (index < 0 || index > (MaxVarint as int64) / 4) {
+            trap_with_message("invalid argument: stream index");
+        }
+        return index * 4 + low;
+    };
+
+    /// @brief Appends the shortest QUIC variable-length encoding of the value (RFC 9000 section 16). A value
+    /// above 2^62 - 1 traps with "invalid argument: varint".
+    export let append_varint = func(out: uint8[list], value: uint64) {
+        if (value > MaxVarint) {
+            trap_with_message("invalid argument: varint");
+        }
+        let length = 8;
+        let prefix: uint64 = 3;
+        if (value <= 63) {
+            length = 1;
+            prefix = 0;
+        } else if (value <= 16383) {
+            length = 2;
+            prefix = 1;
+        } else if (value <= 1073741823) {
+            length = 4;
+            prefix = 2;
+        }
+        last top_shift = (length - 1) * 8;
+        out.append((((value >> top_shift) & 63) | (prefix << 6)) as uint8);
+        for (let shift = top_shift - 8; shift >= 0; shift = shift - 8) {
+            out.append(((value >> shift) & 255) as uint8);
+        }
+    };
+
+    /// @brief The shortest encoding of the value as a new list.
+    #NoDiscard
+    export let encode_varint = func(value: uint64) -> uint8[list] {
+        last out: uint8[list] = new;
+        append_varint(out, value);
+        return out;
+    };
+
+    /// @brief Reads values from a byte list with an offset.
+    #[Final, NotThreadSafe]
+    export let WireReader = class (
+        /// @brief The bytes read.
+        last bytes: uint8[list];
+        /// @brief The offset of the next byte.
+        export let offset: int = 0;
+            | get: offset;
+
+        /// @brief A reader at the start of the bytes.
+        export let init = func(data: uint8[list]) {
+            bytes = data;
+        };
+
+        /// @brief The number of bytes not yet read.
+        #NoDiscard
+        export let remaining = func -> int => bytes.length - offset;
+
+        /// @brief The next variable-length integer; any length is accepted, as RFC 9000 allows. Fails with
+        /// UnexpectedEnd when the bytes run out.
+        #NoDiscard
+        export let read_varint = func -> Result<uint64> {
+            if (offset >= bytes.length) {
+                return truncated<uint64>("expected a variable-length integer", offset);
+            }
+            last first = bytes[offset] as uint64;
+            last length = 1 << ((first >> 6) as int);
+            if (bytes.length - offset < length) {
+                return truncated<uint64>("variable-length integer cut short", offset);
+            }
+            let value = first & 63;
+            for (let i = 1; i < length; i++) {
+                value = (value << 8) | (bytes[offset + i] as uint64);
+            }
+            offset += length;
+            return Result<uint64>.Ok(value);
+        };
+
+        /// @brief The next 32-bit big-endian integer.
+        #NoDiscard
+        export let read_uint32 = func -> Result<uint32> {
+            if (bytes.length - offset < 4) {
+                return truncated<uint32>("expected a 32-bit integer", offset);
+            }
+            let value: uint32 = 0;
+            for (let i = 0; i < 4; i++) {
+                value = (value << 8) | (bytes[offset + i] as uint32);
+            }
+            offset += 4;
+            return Result<uint32>.Ok(value);
+        };
+
+        /// @brief The next `count` bytes, as a new list.
+        #NoDiscard
+        export let read_bytes = func(count: int) -> Result<uint8[list]> {
+            if (count < 0 || bytes.length - offset < count) {
+                return truncated<uint8[list]>("expected " + count.to_string() + " bytes", offset);
+            }
+            last out: uint8[list] = new;
+            for (let i = 0; i < count; i++) {
+                out.append(bytes[offset + i]);
+            }
+            offset += count;
+            return Result<uint8[list]>.Ok(out);
+        };
+
+        /// @brief The rest of the bytes, as a new list.
+        #NoDiscard
+        export let read_rest = func -> uint8[list] {
+            last out: uint8[list] = new;
+            for (let i = offset; i < bytes.length; i++) {
+                out.append(bytes[i]);
+            }
+            offset = bytes.length;
+            return out;
+        };
+
+        /// @brief The offset and length.
+        export let.override to_string = func -> string =>
+            "WireReader(" + offset.to_string() + " of " + bytes.length.to_string() + ")";
+    );
+
+    /// @brief The header of a unidirectional WebTransport stream for the session: 0x54 and the session ID. An
+    /// invalid session ID traps with "invalid argument: session id".
+    #NoDiscard
+    export let uni_stream_header = func(session: int64) -> uint8[list] {
+        check_session(session);
+        last out = encode_varint(UniStreamType);
+        append_varint(out, session as uint64);
+        return out;
+    };
+
+    /// @brief The header of a bidirectional WebTransport stream for the session: 0x41 and the session ID.
+    #NoDiscard
+    export let bidi_stream_header = func(session: int64) -> uint8[list] {
+        check_session(session);
+        last out = encode_varint(BidiSignal);
+        append_varint(out, session as uint64);
+        return out;
+    };
+
+    /// @brief Reads the header of a unidirectional stream (`bidirectional` false) or a bidirectional one and
+    /// returns the session ID; the reader is left at the stream data. Fails for another type or signal and for
+    /// a session ID that is not a client-initiated bidirectional stream ID.
+    #NoDiscard
+    export let read_stream_header = func(reader: WireReader, bidirectional: bool) -> Result<int64> {
+        last start = reader.offset;
+        last kind = reader.read_varint()?;
+        if (kind != (bidirectional ? BidiSignal : UniStreamType)) {
+            return syntax<int64>("not a WebTransport stream: type " + kind.to_string(), start);
+        }
+        last at = reader.offset;
+        last session = reader.read_varint()?;
+        if (session % 4 != 0) {
+            return syntax<int64>("a session ID must be a client-initiated bidirectional stream ID", at);
+        }
+        return Result<int64>.Ok(session as int64);
+    };
+
+    /// @brief An HTTP/3 datagram for the session: the quarter stream ID (session / 4) and the payload.
+    #NoDiscard
+    export let encode_datagram = func(session: int64, payload: uint8[list]) -> uint8[list] {
+        check_session(session);
+        last out = encode_varint((session / 4) as uint64);
+        for (let b in payload) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    /// @brief A received HTTP/3 datagram: its session and payload.
+    #[Final]
+    export let Datagram = class (
+        /// @brief The session ID (4 times the quarter stream ID).
+        export last session: int64;
+        /// @brief The payload.
+        export last payload: uint8[list];
+
+        /// @brief Stores the fields.
+        export let init = func(session_id: int64, data: uint8[list]) {
+            session = session_id;
+            payload = data;
+        };
+
+        /// @brief The session and payload length.
+        export let.override to_string = func -> string =>
+            "Datagram(session " + session.to_string() + ", " + payload.length.to_string() + " bytes)";
+    );
+
+    /// @brief Reads an HTTP/3 datagram. A quarter stream ID above 2^60 - 1 fails (RFC 9297 section 2.1).
+    #NoDiscard
+    export let decode_datagram = func(bytes: uint8[list]) -> Result<Datagram> {
+        last reader = new WireReader(bytes);
+        last quarter = reader.read_varint()?;
+        if (quarter > MaxQuarterStreamId) {
+            return syntax<Datagram>("quarter stream ID above 2^60 - 1", 0);
+        }
+        return Result<Datagram>.Ok(new Datagram((quarter * 4) as int64, reader.read_rest()));
+    };
+
+    /// @brief The reason a session ended, as a WT_CLOSE_SESSION capsule carries it.
+    #[Final, Immutable]
+    export let SessionClose = class (
+        /// @brief The 32-bit application error code.
+        export last code: uint32;
+        /// @brief The UTF-8 message, at most 1024 bytes.
+        export last message: string;
+
+        /// @brief Stores the code and message.
+        export let init = func(error_code: uint32, text: string) {
+            code = error_code;
+            message = text;
+        };
+
+        /// @brief Equal when the code and message are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is SessionClose)) {
+                return false;
+            }
+            last that = other as SessionClose;
+            return code == that.code && message == that.message;
+        };
+
+        /// @brief Combines the code and message.
+        export let.override hash_code = func -> uint32 => hashing.combine(code, strings.hash(message));
+
+        /// @brief `code: message`.
+        export let.override to_string = func -> string => code.to_string() + ": " + message;
+    );
+
+    /// @brief The WT_CLOSE_SESSION capsule (type 0x2843, length, code, message). A message over 1024 bytes
+    /// traps with "invalid argument: close message".
+    #NoDiscard
+    export let encode_close_capsule = func(close: SessionClose) -> uint8[list] {
+        last text = strings.to_bytes(close.message);
+        if (text.length > MaxCloseMessageBytes) {
+            trap_with_message("invalid argument: close message");
+        }
+        last out = encode_varint(CloseSessionCapsule);
+        append_varint(out, (4 + text.length) as uint64);
+        for (let shift = 24; shift >= 0; shift = shift - 8) {
+            out.append(((close.code >> shift) & 255) as uint8);
+        }
+        for (let b in text) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    /// @brief Reads a WT_CLOSE_SESSION capsule. Fails for another capsule type, a length below 4 or past the
+    /// bytes, a message over 1024 bytes, or a message that is not UTF-8.
+    #NoDiscard
+    export let decode_close_capsule = func(bytes: uint8[list]) -> Result<SessionClose> {
+        last reader = new WireReader(bytes);
+        last kind = reader.read_varint()?;
+        if (kind != CloseSessionCapsule) {
+            return syntax<SessionClose>("not a WT_CLOSE_SESSION capsule: type " + kind.to_string(), 0);
+        }
+        last length = reader.read_varint()?;
+        if (length < 4 || length > ((4 + MaxCloseMessageBytes) as uint64)) {
+            return syntax<SessionClose>("WT_CLOSE_SESSION length " + length.to_string() + " out of range", 0);
+        }
+        last code = reader.read_uint32()?;
+        last text = reader.read_bytes((length as int) - 4)?;
+        if (utf8.validate(text) >= 0) {
+            return syntax<SessionClose>("the WT_CLOSE_SESSION message is not UTF-8", 0);
+        }
+        return Result<SessionClose>.Ok(new SessionClose(code, strings.from_bytes_lossy(text)));
+    };
+
+    /// @brief The HTTP/3 error code of a WebTransport application error code (draft section 4.4):
+    /// `first + n + floor(n / 0x1e)`, skipping the reserved codepoints `0x1f * N + 0x21`.
+    #NoDiscard
+    export let to_http3_error = func(code: uint32) -> uint64 {
+        last n = code as uint64;
+        return FirstApplicationError + n + n / 30;
+    };
+
+    /// @brief The WebTransport application error code of an HTTP/3 error code, or a failure when the code is
+    /// outside the WT_APPLICATION_ERROR range or a reserved codepoint.
+    #NoDiscard
+    export let from_http3_error = func(code: uint64) -> Result<uint32> {
+        if (code < FirstApplicationError || code > LastApplicationError) {
+            return syntax<uint32>("not a WT_APPLICATION_ERROR code", 0);
+        }
+        if ((code - 33) % 31 == 0) {
+            return syntax<uint32>("a reserved HTTP/3 codepoint", 0);
+        }
+        last shifted = code - FirstApplicationError;
+        return Result<uint32>.Ok((shifted - shifted / 31) as uint32);
+    };
+
+    /// @brief Traps unless the ID is a valid stream ID.
+    let check_stream_id = func(id: int64) {
+        if (id < 0 || id > (MaxVarint as int64)) {
+            trap_with_message("invalid argument: stream id");
+        }
+    };
+
+    /// @brief Traps unless the ID is a valid session ID.
+    let check_session = func(session: int64) {
+        if (!is_valid_session_id(session)) {
+            trap_with_message("invalid argument: session id");
+        }
+    };
+
+    /// @brief A Syntax failure at the offset.
+    let syntax = func<T>(message: string, at: int) -> Result<T> =>
+        Result<T>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: at, message: message });
+
+    /// @brief An UnexpectedEnd failure at the offset.
+    let truncated = func<T>(message: string, at: int) -> Result<T> =>
+        Result<T>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at, message: message });
+);

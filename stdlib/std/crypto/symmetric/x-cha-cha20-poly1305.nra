@@ -15,7 +15,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The first 16 bytes of the nonce derive a subkey with HChaCha20; the last 8 form the ChaCha20 nonce. A nonce
 /// of 24 random bytes does not repeat in practice, so random nonces are safe.
-/// @see [Std.Crypto.Symmetric.XChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-XChaCha20Poly1305)
+/// @see [Std.Crypto.Symmetric.XChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-XChaCha20Poly1305)
 #Since("0.3.0")
 export let XChaCha20Poly1305 = module (
     /// @brief The AEAD under a 32-byte key.
@@ -52,7 +52,7 @@ export let XChaCha20Poly1305 = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 24, "XChaCha20-Poly1305");
             let subkey = chacha.hchacha20(key_bytes, words.slice(nonce, 0, 16));
             last out = chacha20_poly1305.open_with(subkey, chacha20.short_nonce(nonce), sealed, associated_data);

@@ -4,7 +4,7 @@
 /// and loops only over public lengths. The runtime does not guarantee constant time: the interpreter, the
 /// tiers and the processor may still take time that depends on values. Use these functions so that the
 /// source adds no timing leak of its own, and do not rely on them against a local attacker.
-/// @see [Std.Crypto.Core.ConstantTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-ConstantTime)
+/// @see [Std.Crypto.Core.ConstantTime](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Core-ConstantTime)
 #Since("0.3.0")
 export let ConstantTime = module (
     /// @brief 1 when `a` equals `b`, otherwise 0, as a uint32.
