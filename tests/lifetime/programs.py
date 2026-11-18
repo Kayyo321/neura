@@ -13,7 +13,9 @@ tier 1 (NEURA_TIER_CHECK=2), with native tier 3 checked by its verifier
 (NEURA_TIER3_VERIFY=1), and with native code off (NEURA_JIT=off).
 
 Every image round-trips through disassemble and assemble byte for byte,
-and decompiles with and without provenance. Every run of one image must
+and decompiles with and without provenance. A program with a generator
+shows its state layout as inferred generator state when it decompiles with
+names, and not without them or from the build without names. Every run of one image must
 print the expected output and give the same
 exit status, trap text, steps and peak heap cells, and the builds from
 source, from `.nir` and without names give the same steps and peak heap
@@ -22,7 +24,9 @@ gives its status in `<name>.status`; its output is what it printed before
 the trap. A program with `<name>.deopt` must form native tier 3 programs
 and deoptimize out of one in each mode that file lists, one per line, so
 that the deoptimization tests do not pass vacuously (the unoptimized build
-is exempt: its calls are not inlined).
+is exempt: its calls are not inlined). A program with `<name>.deopt-in`
+must deoptimize, in those modes, with the innermost frame in a function
+whose provenance name ends with the text in that file, such as `.$resume`.
 
 A program may list modes in `<name>.skip`, one per line after a line that
 says why; the reason is printed.
@@ -45,6 +49,8 @@ import tempfile
 NEURA = pathlib.Path(sys.argv[1]).resolve()
 DIRECTORY = pathlib.Path(sys.argv[2]).resolve()
 LIFETIME_MINOR = 14
+GENERATOR_STATE = 'inferred from provenance names, not from the circuit: generator state; resume index'
+YIELD = re.compile(r'^\s*yield\b', re.MULTILINE)
 
 BASE = {'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin'}
 # (name, environment, run options)
@@ -64,6 +70,8 @@ MODES = [
 STATS = re.compile(r'^stats: steps (\d+), peak heap cells (\d+)', re.M)
 NATIVE = re.compile(r'^tier: native programs (\d+) ', re.M)
 DEOPTIMIZED = re.compile(r'^tier: native deoptimized (\d+) times', re.M)
+DEOPTIMIZED_AT = re.compile(r'^tier: native deoptimized \d+ times at function (\d+) block', re.M)
+FUNCTION = re.compile(r'^function f(\d+)\(.*// provenance: (.+)$', re.M)
 TRAP = re.compile(r'^.*trap.*$', re.M)
 
 
@@ -87,12 +95,15 @@ def main():
             status = int(status_path.read_text()) if status_path.exists() else 0
             deopt_path = expected_path.with_suffix('.deopt')
             deopt_modes = set(deopt_path.read_text().split()) if deopt_path.exists() else set()
+            within_path = expected_path.with_suffix('.deopt-in')
+            within = within_path.read_text().strip() if within_path.exists() else None
             skip_path = expected_path.with_suffix('.skip')
             skipped = set()
             if skip_path.exists():
                 reason, *names = skip_path.read_text().splitlines()
                 skipped = {name.strip() for name in names if name.strip()}
                 print(f'{source.name}: skips {", ".join(sorted(skipped))}: {reason}')
+            generator = YIELD.search(source.read_text()) is not None
             module = scratch / (source.name + '.nir')
             result = run(['emit-ir', str(source), '-o', str(module)])
             if result.returncode != 0:
@@ -116,10 +127,19 @@ def main():
                         failures.append(f'{source.name} {build}: {command[0]} failed\n{result.stderr}')
                 if again.exists() and again.read_bytes() != image.read_bytes():
                     failures.append(f'{source.name} {build}: assemble did not give back the image')
+                functions = {}
                 for flags in ([], ['--no-provenance']):
                     result = run(['decompile', *flags, str(image)])
+                    if not flags:
+                        functions = {int(number): name for number, name in FUNCTION.findall(result.stdout)}
                     if result.returncode != 0 or not result.stdout:
                         failures.append(f'{source.name} {build}: decompile {flags} failed\n{result.stderr}')
+                    # The generator state is inferred from names: shown with
+                    # them, absent without them.
+                    labelled = GENERATOR_STATE in result.stdout
+                    if labelled != (generator and not flags and build != 'stripped'):
+                        failures.append(f'{source.name} {build}: decompile {flags} '
+                                        f'{"shows" if labelled else "does not show"} the generator state')
                 observed = {}
                 for mode, environment, options in MODES:
                     if mode in skipped:
@@ -143,6 +163,13 @@ def main():
                         if native == 0 or deoptimized == 0:
                             failures.append(f'{where}: expected native programs and a deoptimization, found '
                                             f'{native} programs and {deoptimized} deoptimizations\n{result.stderr}')
+                        # The innermost frame after the deoptimization, by
+                        # its provenance name; the build without names has
+                        # none to compare.
+                        places = [functions.get(int(number), '?') for number in DEOPTIMIZED_AT.findall(result.stderr)]
+                        if within and build != 'stripped' and not any(place.endswith(within) for place in places):
+                            failures.append(f'{where}: expected a deoptimization in a function named *{within}, '
+                                            f'found {places}\n{result.stderr}')
                 reference = observed.get('tier0')
                 counts[build] = reference[0] if reference else None
                 for mode, value in observed.items():
