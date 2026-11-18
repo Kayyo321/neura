@@ -326,6 +326,14 @@ a,   b: float64, // after a group
         self.assertIn("// after a group", formatted)
         self.assertIn("a, b: float64,", formatted)
 
+    def test_typeof_and_not_after_the_rewrite(self):
+        # docs/design/Expressions030.md: `typeof(x)` is written against its
+        # parenthesis like a call; `not` is a word and groups what follows.
+        formatted = self.formatted("let a=typeof (v).name;\nlet b=not(x);\nlet c=not [x];\n")
+        self.assertIn("typeof(v).name", formatted)
+        self.assertIn("not (x)", formatted)
+        self.assertIn("not [x]", formatted)
+
     def test_labels_defaults_interpolation_and_nameof(self):
         # docs/design/Calls030.md, Grammar: a label is written 'name: value',
         # a default 'name: Type = value', and an interpolated string is

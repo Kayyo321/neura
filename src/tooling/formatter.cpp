@@ -1055,7 +1055,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
              (before == ">" && hints.angles.contains(previous->offset)) ||
              previous->kind == TokenKind::Identifier || previous->kind == TokenKind::Integer ||
              previous->kind == TokenKind::Float || previous->kind == TokenKind::String ||
-             keyword_of(*previous, "func") || keyword_of(*previous, "new")) &&
+             keyword_of(*previous, "func") || keyword_of(*previous, "new") ||
+             keyword_of(*previous, "typeof")) &&
             // `not` is an operator word: `not (a)`, `not [x]` (Expressions030.md).
             before != "not";
         if ((text == "(" || text == "[") && after_operand) space = false;

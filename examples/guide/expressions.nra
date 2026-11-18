@@ -11,7 +11,7 @@ let Expressions = module (
         export let sides: int32 = 0;
     );
 
-    export let Circle = class : Shape (
+    export let Circle = class:Shape (
         export let radius: int32 = 1;
     );
 
