@@ -84,8 +84,30 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
 
+      # This job builds with the server components of the release archives
+      # (TLS, HTTP/2 and the PostgreSQL provider), so every pull request runs
+      # the HTTPS, HTTP/2 and PostgreSQL tests. The built libraries are
+      # cached under a key of the component lock and the script that builds
+      # them; release.yml rebuilds them from verified sources every time.
+      - name: Restore the server components
+        id: server-components
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/server-components
+          key: server-components-${{ runner.os }}-${{ runner.arch }}-gcc-14-${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+
+      - name: Build the server components
+        if: ${{ steps.server-components.outputs.cache-hit != 'true' }}
+        run: sh packaging/build-server-components.sh --jobs "$(nproc)" "$HOME/server-components"
+
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DNEURA_ENABLE_SERVER_TLS=ON "-DOPENSSL_ROOT_DIR=$HOME/server-components/openssl"
+          -DNEURA_ENABLE_SERVER_HTTP2=ON "-DNEURA_NGHTTP2_ROOT=$HOME/server-components/nghttp2"
+          -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$HOME/server-components/postgresql"
+          "-DNEURA_LIBPQ_BUILD=$HOME/server-components/postgresql"
+          "-DNEURA_COMPONENT_LICENSES=$HOME/server-components/licenses"
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log

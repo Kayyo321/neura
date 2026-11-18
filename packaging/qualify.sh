@@ -5,7 +5,7 @@
 #                   --version VERSION --triple TRIPLE --examples DIR
 #                   [--previous FILE] [--require-previous]
 #                   [--bridge FILE]... [--require-bridge]
-#                   [--size-reference FILE]
+#                   [--size-reference FILE] [--server-components]
 #
 #   --archive          the legacy archive neura-<version>-<triple>.tar.gz
 #   --sdk-archive      neura-sdk-<version>-<triple>.tar.gz
@@ -26,6 +26,12 @@
 #                      (rc.3's of this target): the SDK and legacy archives may
 #                      be at most 55% larger, and the runtime archive must be
 #                      smaller than the SDK archive
+#   --server-components the archives are built with the server components
+#                      (TLS, HTTP/2, PostgreSQL): their licence texts must be
+#                      in share/doc/neura/third-party, and the installed
+#                      server host must serve HTTPS with HTTP/2 and h2c and
+#                      have its PostgreSQL provider (check 15, which needs
+#                      curl with HTTP/2 and openssl on the machine)
 #
 # The script installs into new temporary HOMEs, with a PATH that holds only
 # the system directories, so nothing from a development checkout can take
@@ -48,6 +54,7 @@ require_previous=0
 bridges=""
 require_bridge=0
 size_reference=""
+server_components=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --archive) archive=$2; shift 2 ;;
@@ -61,6 +68,7 @@ while [ $# -gt 0 ]; do
         --bridge) bridges="$bridges $(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2 ;;
         --require-bridge) require_bridge=1; shift ;;
         --size-reference) size_reference=$2; shift 2 ;;
+        --server-components) server_components=1; shift ;;
         *) echo "qualify.sh: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -142,6 +150,11 @@ else
     for path in bin/neura install.sh share/doc/neura/LICENSE share/neura/stdlib/std share/neura/components/core.txt share/neura/components/sdk.txt; do
         [ -e "$top/$path" ] || reason="$reason $path is missing;"
     done
+    if [ "$server_components" = 1 ]; then
+        for path in openssl-LICENSE.txt nghttp2-COPYING postgresql-COPYRIGHT; do
+            [ -f "$top/share/doc/neura/third-party/$path" ] || reason="$reason share/doc/neura/third-party/$path is missing;"
+        done
+    fi
     [ "$(cat "$top/VERSION" 2> /dev/null)" = "$version" ] || reason="$reason VERSION is not $version;"
     for tool in $core_tools $sdk_tools; do
         [ -x "$top/bin/$tool" ] || reason="$reason bin/$tool is missing;"
@@ -450,6 +463,63 @@ if [ -z "$reason" ]; then
     pass 14 "archive sizes"
 else
     fail 14 "archive sizes" "$reason"
+fi
+
+# 15. The installed server host serves HTTPS with HTTP/2 negotiated by ALPN,
+# and h2c with prior knowledge, and has its PostgreSQL provider: a
+# postgresql:// pool is refused for its connection, not for a missing
+# provider.
+if [ "$server_components" = 0 ]; then
+    skip 15 "server host" "the archives are not declared to hold the server components (--server-components)"
+elif ! command -v curl > /dev/null 2>&1 || ! command -v openssl > /dev/null 2>&1; then
+    fail 15 "server host" "curl and openssl are needed on this machine"
+else
+    server=$work/server
+    mkdir "$server"
+    reason=""
+    if ! (cd "$server" && clean "$home" neura build "$examples/server/hello-server.nra" -o hello-server.nvr) > "$server/build.log" 2>&1; then
+        reason="building the server example failed: $(tail -n 3 "$server/build.log" | tr '\n' ' ')"
+    elif ! openssl req -x509 -newkey rsa:2048 -nodes -keyout "$server/key.pem" -out "$server/cert.pem" -days 2 \
+        -subj /CN=localhost -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" > "$server/openssl.log" 2>&1; then
+        reason="openssl could not make a certificate: $(tail -n 3 "$server/openssl.log" | tr '\n' ' ')"
+    else
+        env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" LC_ALL=C neura-server-host --listen 127.0.0.1:0 \
+            --tls-listen 127.0.0.1:0 --cert "$server/cert.pem" --key "$server/key.pem" --h2c \
+            --config greeting=hello "$server/hello-server.nvr" > "$server/host.out" 2> "$server/host.err" &
+        host_pid=$!
+        tries=0
+        while [ "$tries" -lt 60 ] && [ "$(grep -c 'listening on' "$server/host.out" 2> /dev/null)" -lt 2 ]; do
+            sleep 0.5
+            tries=$((tries + 1))
+        done
+        https_port=$(sed -n 's|^neura-server-host: listening on https://127.0.0.1:\([0-9]*\)$|\1|p' "$server/host.out")
+        http_port=$(sed -n 's|^neura-server-host: listening on http://127.0.0.1:\([0-9]*\)$|\1|p' "$server/host.out")
+        if [ -z "$https_port" ] || [ -z "$http_port" ]; then
+            reason="the host did not listen: $(tail -n 3 "$server/host.err" | tr '\n' ' ')"
+        else
+            got=$(curl -sS --http2 --cacert "$server/cert.pem" -o "$server/https.body" -w '%{http_version}' \
+                "https://127.0.0.1:$https_port/hello?name=qualify" 2> "$server/curl.log") || true
+            [ "$got" = 2 ] && [ "$(cat "$server/https.body")" = "hello, qualify" ] ||
+                reason="$reason HTTPS with --http2 answered HTTP version '$got' and '$(cat "$server/https.body" 2> /dev/null)';"
+            got=$(curl -sS --http2-prior-knowledge -o "$server/h2c.body" -w '%{http_version}' \
+                "http://127.0.0.1:$http_port/hello" 2>> "$server/curl.log") || true
+            [ "$got" = 2 ] && [ "$(cat "$server/h2c.body")" = "hello, world" ] ||
+                reason="$reason h2c answered HTTP version '$got' and '$(cat "$server/h2c.body" 2> /dev/null)';"
+        fi
+        kill "$host_pid" 2> /dev/null || true
+        wait "$host_pid" 2> /dev/null || true
+        if clean "$home" neura-server-host migrate --sql-pool "main=postgresql://neura@127.0.0.1:1/neura" \
+            "$server/hello-server.nvr" > "$server/postgres.log" 2>&1; then
+            reason="$reason a pool on a closed port was accepted;"
+        elif grep -q "no PostgreSQL provider" "$server/postgres.log"; then
+            reason="$reason the server host has no PostgreSQL provider;"
+        fi
+    fi
+    if [ -z "$reason" ]; then
+        pass 15 "server host: HTTPS with HTTP/2, h2c, PostgreSQL provider"
+    else
+        fail 15 "server host" "$reason $(tail -n 2 "$server/curl.log" 2> /dev/null | tr '\n' ' ')"
+    fi
 fi
 
 echo "$failed failed, $not_run not run."

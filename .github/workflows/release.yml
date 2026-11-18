@@ -99,15 +99,17 @@ jobs:
             minimum: 180
             exclude: "^$"
           # macOS has no native launcher, so the six native-* tests are not
-          # registered there.
+          # registered there. Its runners have no Docker, which the
+          # PostgreSQL provider's test starts its servers in: there it is
+          # left out instead of being reported as skipped.
           - triple: aarch64-apple-darwin
             runner: macos-15
             minimum: 174
-            exclude: "^$"
+            exclude: "^server-sql-postgres$"
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
             minimum: 174
-            exclude: "^$"
+            exclude: "^server-sql-postgres$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       NEURA_USERNS_REQUIRED: "1"
@@ -143,12 +145,54 @@ jobs:
           echo "PKG_CONFIG_PATH=$(brew --prefix libffi)/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "JOBS=$(sysctl -n hw.ncpu)" >> "$GITHUB_ENV"
 
+      # The server components that every archive links statically: OpenSSL
+      # (TLS), nghttp2 (HTTP/2) and libpq (the PostgreSQL provider), built
+      # from the sources packaging/server-components.lock.toml pins
+      # (docs/runtime/ServerHost.md, "Release archives"). Only the source
+      # archives are cached; the script checks each against the lock's
+      # SHA-256 before it builds, so a restored cache cannot change what is
+      # linked.
+      - name: Restore the server component sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: server-downloads
+          key: server-sources-${{ hashFiles('packaging/server-components.lock.toml') }}
+
+      - name: Build the server components
+        run: |
+          sh packaging/build-server-components.sh --downloads server-downloads --jobs "$JOBS" \
+            "$RUNNER_TEMP/server-components" 2>&1 | tee server-components.log
+          echo "SERVER_COMPONENTS=$RUNNER_TEMP/server-components" >> "$GITHUB_ENV"
+
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           -DNEURA_PORTABLE_RELEASE=ON
           "-DNEURA_VERSION_PRERELEASE=$PRERELEASE"
           "-DNEURA_BUILD_COMMIT=$GITHUB_SHA"
+          -DNEURA_ENABLE_SERVER_TLS=ON "-DOPENSSL_ROOT_DIR=$SERVER_COMPONENTS/openssl"
+          -DNEURA_ENABLE_SERVER_HTTP2=ON "-DNEURA_NGHTTP2_ROOT=$SERVER_COMPONENTS/nghttp2"
+          -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$SERVER_COMPONENTS/postgresql"
+          "-DNEURA_LIBPQ_BUILD=$SERVER_COMPONENTS/postgresql"
+          "-DNEURA_COMPONENT_LICENSES=$SERVER_COMPONENTS/licenses"
+          "-DNEURA_SERVER_TEST_OPENSSL=$SERVER_COMPONENTS/openssl/bin/openssl"
+
+      # The build must link the pinned libraries, never a system or Homebrew
+      # OpenSSL that happens to be 3.5 as well.
+      - name: Require the pinned server components
+        run: |
+          status=0
+          for entry in OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY NEURA_NGHTTP2_LIBRARY; do
+            value=$(sed -n "s/^$entry:FILEPATH=//p" build/CMakeCache.txt)
+            echo "$entry: $value"
+            case "$value" in
+              "$SERVER_COMPONENTS"/*) ;;
+              *) echo "::error::$entry is $value, not under $SERVER_COMPONENTS"; status=1 ;;
+            esac
+          done
+          "$SERVER_COMPONENTS/openssl/bin/openssl" version
+          cat "$SERVER_COMPONENTS/components.txt"
+          exit "$status"
 
       - name: Build
         run: cmake --build build --parallel "$JOBS" 2>&1 | tee build/build.log
@@ -240,6 +284,36 @@ jobs:
           echo "minimum macOS version: $(otool -l stage/bin/neura | awk '/LC_BUILD_VERSION/ { found = 1 } found && /minos/ { print $2; exit }')"
           exit "$status"
 
+      # The server components' C functions stay inside the tools and
+      # libneura-core (hidden visibility, and on Linux --exclude-libs as
+      # well), so a program that loads its own OpenSSL or libpq through C
+      # import binds to its own copy. On macOS the assembly routines of
+      # OpenSSL are global symbols of the objects; the check covers the C
+      # interfaces there.
+      - name: Require the server components to stay private
+        run: |
+          status=0
+          if [ "$RUNNER_OS" = Linux ]; then
+            files="stage/bin/* stage/lib/neura/*.so stage/lib/neura/launchers/*/*"
+            pattern='^(SSL_|SSL_CTX_|EVP_|OPENSSL_|CRYPTO_|OSSL_|ossl_|X509_|BIO_|ERR_|PEM_|BN_|RSA_|EC_|PQ|pq|pg_|nghttp2_)'
+          else
+            files="stage/bin/* stage/lib/neura/*.dylib"
+            pattern='^_(SSL_|SSL_CTX_|EVP_|X509_|BIO_|PEM_|OSSL_|PQ|pg_|nghttp2_)'
+          fi
+          for file in $files; do
+            if [ "$RUNNER_OS" = Linux ]; then
+              names=$(nm -D --defined-only "$file" 2> /dev/null | awk '{ print $NF }' || true)
+            else
+              names=$(nm -gU "$file" 2> /dev/null | awk '{ print $NF }' || true)
+            fi
+            exported=$(printf '%s\n' "$names" | grep -E "$pattern" || true)
+            if [ -n "$exported" ]; then
+              echo "::error::$file exports $(printf '%s\n' "$exported" | wc -l | tr -d ' ') server component symbols, such as $(printf '%s\n' "$exported" | head -n 3 | tr '\n' ' ')"
+              status=1
+            fi
+          done
+          exit "$status"
+
       - name: Require the built version to be the planned one
         run: |
           reported=$(stage/bin/neura --version)
@@ -295,6 +369,7 @@ jobs:
             build/build.log
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
+            server-components.log
           if-no-files-found: warn
           retention-days: 90
 
@@ -384,6 +459,8 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             set -- "$@" --require-bridge
           fi
+          # Every archive links the server components (the build job above).
+          set -- "$@" --server-components
           sh packaging/qualify.sh "$@" | tee "qualify-$TRIPLE.txt"
 
       - name: Upload the qualification report
