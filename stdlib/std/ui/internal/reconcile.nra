@@ -448,7 +448,7 @@ export let Reconcile = module (
                 values.append(nil);
                 i += 1;
             }
-            let slot = view.slots;
+            let slot = view.last_slot;
             while (slot != nil) {
                 values[slot.index as int] = slot;
                 slot = slot.next;
@@ -551,16 +551,10 @@ export let Reconcile = module (
             } else {
                 last items = (value as storage.Payload<build.Items>).value;
                 last seen = string_maps.create<bool>();
-                // The builder links the newest item first; commit them in iteration order.
-                last ordered: build.Item[list] = new();
-                let link = items.first;
-                while (link != nil) {
-                    ordered.append(link);
-                    link = link.next;
-                }
+                last ordered = build.items_in_order(items);
                 let position: int64 = 0;
                 while (position < ordered.length as int64 && state.refusal == nil) {
-                    last item = ordered[ordered.length - 1 - position as int];
+                    last item = ordered[position as int];
                     if (position == MaxItems as int64) {
                         refuse(state, ui.DiagnosticKind.LimitExceeded, "U-4: an @for commits at most 10000 items",
                                index, position, item.key);

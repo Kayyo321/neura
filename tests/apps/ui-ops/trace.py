@@ -30,16 +30,7 @@ let console = import:Std.Io.Console;
 export let Testing = module (
     export let walk = func(view: ui.View, depth: string) {
         console.print_line(depth + "view " + view.fragment.to_string());
-        // The builder links the newest slot first: print them in the order they were recorded.
-        last slots: storage.Slot[list] = new();
-        let link = view.slots;
-        while (link != nil) {
-            slots.append(link);
-            link = link.next;
-        }
-        let i = slots.length - 1;
-        while (i >= 0) {
-            last slot = slots[i];
+        for (let slot in build.slots_in_order(view)) {
             last at = depth + "  slot " + slot.index.to_string() + ": ";
             if (slot is storage.Payload<string>) {
                 console.print_line(at + "text " + (slot as storage.Payload<string>).value);
@@ -48,22 +39,13 @@ export let Testing = module (
                 walk((slot as storage.Payload<ui.View>).value, depth + "    ");
             } else if (slot is storage.Payload<build.Items>) {
                 console.print_line(at + "items");
-                last items: build.Item[list] = new();
-                let item = (slot as storage.Payload<build.Items>).value.first;
-                while (item != nil) {
-                    items.append(item);
-                    item = item.next;
-                }
-                let j = items.length - 1;
-                while (j >= 0) {
-                    console.print_line(depth + "    key " + items[j].key);
-                    walk(items[j].view, depth + "    ");
-                    j -= 1;
+                for (let item in build.items_in_order((slot as storage.Payload<build.Items>).value)) {
+                    console.print_line(depth + "    key " + item.key);
+                    walk(item.view, depth + "    ");
                 }
             } else {
                 console.print_line(at + "other");
             }
-            i -= 1;
         }
     };
 );
@@ -96,7 +78,7 @@ let board = html(title: string, rows: string[], columns: int32[], show: bool, di
         } @else {
             <p>{ "hidden " + title }</p>
         }
-        <footer>{ cell("end") }{ 100 / divisor }</footer>
+        <footer>{ cell("end") }{ 100 / divisor }{ rows[(divisor == 0) ? 9 : 0] }</footer>
     </section>
 };
 
@@ -116,8 +98,8 @@ let App = module:program.Entry (
 
 # Derived by hand from Html030.md, "Evaluation": attributes before children, document order, an @if condition
 # once and only the chosen branch, an @for source once and then each item's key before its body. Fragment numbers
-# are the descriptor's: the body is 0, then each control block's bodies in document order. The footer's two holes
-# are a child view and a text.
+# are the descriptor's: the body is 0, then each control block's bodies in document order. The footer's three holes
+# are a child view, a text, and a text whose index would trap in the call where the division traps first.
 SHOWN = """\
 view 0
   slot 0: text T
@@ -153,6 +135,7 @@ view 0
     view 0
       slot 0: text end
   slot 4: text 25
+  slot 5: text a
 """
 SKIPPED = """\
 view 0
@@ -165,6 +148,7 @@ view 0
     view 0
       slot 0: text end
   slot 4: text 20
+  slot 5: text a
 """
 
 
@@ -190,7 +174,10 @@ with TemporaryDirectory() as temporary:
         for tier in ("--tier=0", "--tier=1", "--tier=2"):
             run = subprocess.run([neura, "run", f"{name}.nvr", tier], cwd=root, env=ENV, capture_output=True,
                                  text=True)
-            check(run.returncode != 0 and "trap" in run.stderr, f"{name} {tier}: the hole did not trap\n{run.stderr}")
+            # The division hole traps first; the index hole after it, which would trap differently, never runs.
+            check(run.returncode != 0 and "source arithmetic failure" in run.stderr and
+                  "main.nra:28:34" in run.stderr and "index" not in run.stderr,
+                  f"{name} {tier}: the first trapping hole did not end the call\n{run.stderr}")
             check(run.stdout == expected, f"{name} {tier}: trace differs\n{run.stdout}")
 
 print("evaluation trace matches at every tier, optimized and unoptimized")

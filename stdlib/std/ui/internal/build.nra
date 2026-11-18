@@ -12,34 +12,35 @@ export let Build = module (
     #NotThreadSafe
     export let Builder = class (
         /// The slot evaluated last; each slot's `next` is the one evaluated before it.
-        export let first: storage.Slot = nil;
+        export let last_slot: storage.Slot = nil;
     );
 
     #NotThreadSafe
     export let Item = class (
         export last key: string;
         export last view: ui.View;
-        /// The item before this one in iteration order.
-        export last next: Item;
+        /// The item before this one in iteration order; `add_item` sets it.
+        export let next: Item = nil;
 
-        export let init = func(key: string, view: ui.View, next: Item) => set;
+        export let init = func(key: string, view: ui.View) => set;
     );
 
     #NotThreadSafe
     export let Items = class (
-        /// The last item in iteration order.
-        export let first: Item = nil;
-        export let count: int64 = 0;
+        /// The last item in iteration order. Walk the items in order with `items_in_order`.
+        export let last_item: Item = nil;
     );
 
     export let begin = func -> Builder => new Builder();
 
     export let put = func<T>(builder: Builder, slot: uint32, value: T) {
-        builder.first = new storage.Payload<T>(slot, value, builder.first);
+        last payload = new storage.Payload<T>(slot, value);
+        payload.next = builder.last_slot;
+        builder.last_slot = payload;
     };
 
     export let finish = func(builder: Builder, descriptor: string, fragment: uint32) -> ui.View =>
-        new ui.View(descriptor, fragment, builder.first);
+        new ui.View(descriptor, fragment, builder.last_slot);
 
     export let stylesheet = func(digest: string) -> ui.Stylesheet => new ui.Stylesheet(digest);
 
@@ -48,7 +49,42 @@ export let Build = module (
     export let begin_items = func -> Items => new Items();
 
     export let add_item = func(items: Items, key: string, view: ui.View) {
-        items.first = new Item(key, view, items.first);
-        items.count += 1;
+        last item = new Item(key, view);
+        item.next = items.last_item;
+        items.last_item = item;
+    };
+
+    /// @brief The slot values of `view` in the order their holes were evaluated (document order).
+    export let slots_in_order = func(view: ui.View) -> storage.Slot[list] {
+        last reversed: storage.Slot[list] = new();
+        let slot = view.last_slot;
+        while (slot != nil) {
+            reversed.append(slot);
+            slot = slot.next;
+        }
+        last result: storage.Slot[list] = new();
+        let i = reversed.length - 1;
+        while (i >= 0) {
+            result.append(reversed[i]);
+            i -= 1;
+        }
+        return result;
+    };
+
+    /// @brief The items of an `@for` in iteration order.
+    export let items_in_order = func(items: Items) -> Item[list] {
+        last reversed: Item[list] = new();
+        let item = items.last_item;
+        while (item != nil) {
+            reversed.append(item);
+            item = item.next;
+        }
+        last result: Item[list] = new();
+        let i = reversed.length - 1;
+        while (i >= 0) {
+            result.append(reversed[i]);
+            i -= 1;
+        }
+        return result;
     };
 );
