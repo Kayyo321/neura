@@ -236,7 +236,7 @@ export let ArrayDeque = module (
             last walk = iterator();
             let i = 0;
             while (walk.has_next()) {
-                if (i >= count || !walk.next().equals(get(i))) {
+                if (i >= count || not walk.next().equals(get(i))) {
                     trap_with_message("invalid state: deque order");
                 }
                 i += 1;
@@ -300,11 +300,12 @@ export let ArrayDeque = module (
                 trap_with_message("no such element");
             }
             position += 1;
-            if (index < split) {
-                return front[split - 1 - index];
-            }
-            return back[index - split];
+            return if (index < split) -> front[split - 1 - index] else -> back[index - split];
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "ArrayDequeIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty deque.

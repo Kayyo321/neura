@@ -58,7 +58,7 @@ export let PriorityQueue = module (
             while (index > 0) {
                 last parent = (index - 1) / 2;
                 last above = heap[parent];
-                if (!less(item, above, expected)) {
+                if (not less(item, above, expected)) {
                     break;
                 }
                 heap[index] = above;
@@ -83,7 +83,7 @@ export let PriorityQueue = module (
                     child = right;
                 }
                 last below = heap[child];
-                if (!less(below, item, expected)) {
+                if (not less(below, item, expected)) {
                     break;
                 }
                 heap[index] = below;
@@ -259,6 +259,10 @@ export let PriorityQueue = module (
             position += 1;
             return value;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "PriorityQueueIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty queue using the total order defined by `c`.

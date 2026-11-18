@@ -147,17 +147,16 @@ export let Frozen = module (
         /// @brief Another FrozenList of the same element type with equal elements (`===`) at each index.
         /// `==` stays reference identity.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FrozenList<T>)) {
+            if (other is not that: FrozenList<T>) {
                 return false;
             }
-            last that = other as FrozenList<T>;
             last count = storage.length;
             if (that.length() != count) {
                 return false;
             }
             let i = 0;
             while (i < count) {
-                if (!(storage[i] === that.get(i))) {
+                if (not (storage[i] === that.get(i))) {
                     return false;
                 }
                 i += 1;
@@ -199,7 +198,7 @@ export let Frozen = module (
         };
 
         /// @brief Names the traversal and its position.
-        export let.override to_string = func -> string => "FrozenListIterator(" + position.to_string() + ")";
+        export let.override to_string = func -> string => "FrozenListIterator(" .. position.to_string() .. ")";
     );
 
     /// @brief Copies the elements of `source` into a new FrozenList.

@@ -346,10 +346,10 @@ export let ArrayList = module (
         /// @brief Another ArrayList with the same element type, size, and equal
         /// elements at each index.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ArrayList<T>)) {
+            if (other is not that: ArrayList<T>) {
                 return false;
             }
-            return storage.equals((other as ArrayList<T>).items());
+            return storage.equals(that.items());
         };
 
         /// @brief Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
@@ -403,6 +403,10 @@ export let ArrayList = module (
             position += 1;
             return value;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "ArrayListIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty list with independent backing storage.

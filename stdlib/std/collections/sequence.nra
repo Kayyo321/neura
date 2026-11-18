@@ -122,7 +122,7 @@ export let Sequence = module (
             last pull = next;
             last skipped = cell.of<bool>(false);
             let ready = new func -> bool {
-                if (!skipped.value) {
+                if (not skipped.value) {
                     skipped.value = true;
                     let i = 0;
                     while (i < n && more()) {
@@ -133,7 +133,7 @@ export let Sequence = module (
                 return more();
             };
             return new Sequence<T>(ready, new func() -> T {
-                if (!ready()) {
+                if (not ready()) {
                     trap_with_message("no such element");
                 }
                 return pull();
@@ -171,11 +171,11 @@ export let Sequence = module (
             last started = cell.of<bool>(false);
             last buffer: T[list] = new;
             return buffered<T>(buffer, new func() -> bool {
-                if (!started.value) {
+                if (not started.value) {
                     started.value = true;
                     while (more()) {
                         last value = pull();
-                        if (!test(value)) {
+                        if (not test(value)) {
                             buffer.append(value);
                             return true;
                         }
@@ -231,10 +231,7 @@ export let Sequence = module (
             return new Sequence<T>(new func() -> bool {
                 return more() || other_more();
             }, new func() -> T {
-                if (more()) {
-                    return pull();
-                }
-                return other_pull();
+                return if (more()) -> pull() else -> other_pull();
             });
         };
 
@@ -260,9 +257,7 @@ export let Sequence = module (
             last pull = next;
             last buffer: T[list][list] = new;
             return buffered<T[list]>(buffer, new func() -> bool {
-                if (!more()) {
-                    return false;
-                }
+                return false unless more();
                 last chunk: T[list] = new;
                 while (chunk.length < n && more()) {
                     chunk.append(pull());
@@ -286,16 +281,12 @@ export let Sequence = module (
             last buffer: T[list][list] = new;
             return buffered<T[list]>(buffer, new func() -> bool {
                 if (window.length == n) {
-                    if (!more()) {
-                        return false;
-                    }
+                    return false unless more();
                     window.remove_at(0);
                     window.append(pull());
                 } else {
                     while (window.length < n) {
-                        if (!more()) {
-                            return false;
-                        }
+                        return false unless more();
                         window.append(pull());
                     }
                 }
@@ -452,9 +443,7 @@ export let Sequence = module (
         export let all = func(test: func(T) -> bool) -> bool {
             begin();
             while (has_next()) {
-                if (!test(next())) {
-                    return false;
-                }
+                return false unless test(next());
             }
             return true;
         };
@@ -474,9 +463,7 @@ export let Sequence = module (
         #NoDiscard
         export let reduce = func(f: func(T, T) -> T) -> optional.Optional<T> {
             begin();
-            if (!has_next()) {
-                return optional.Optional<T>.None;
-            }
+            return optional.Optional<T>.None unless has_next();
             let accumulator = next();
             while (has_next()) {
                 accumulator = f(accumulator, next());
@@ -488,9 +475,7 @@ export let Sequence = module (
         #NoDiscard
         export let first = func -> optional.Optional<T> {
             begin();
-            if (!has_next()) {
-                return optional.Optional<T>.None;
-            }
+            return optional.Optional<T>.None unless has_next();
             return optional.Optional<T>.Some(next());
         };
 
@@ -498,9 +483,7 @@ export let Sequence = module (
         #NoDiscard
         export let last = func -> optional.Optional<T> {
             begin();
-            if (!has_next()) {
-                return optional.Optional<T>.None;
-            }
+            return optional.Optional<T>.None unless has_next();
             let value = next();
             while (has_next()) {
                 value = next();
@@ -596,9 +579,7 @@ export let Sequence = module (
         /// @brief Scans the sequence for the first comparator minimum or maximum, as selected by `wanted`.
         let extreme = func(c: func(T, T) -> ordering.Ordering, wanted: ordering.Ordering) -> optional.Optional<T> {
             begin();
-            if (!has_next()) {
-                return optional.Optional<T>.None;
-            }
+            return optional.Optional<T>.None unless has_next();
             let best = next();
             while (has_next()) {
                 last value = next();
@@ -628,11 +609,14 @@ export let Sequence = module (
 
         /// @brief Returns the next output and advances. Traps with `no such element` at exhaustion.
         export let next = func -> T {
-            if (!more()) {
+            if (not more()) {
                 trap_with_message("no such element");
             }
             return pull();
         };
+
+        /// @brief Names the iterator.
+        export let.override to_string = func -> string => "SequenceIterator";
     );
 
     /// @brief A sequence whose elements come from `buffer`, which `refill` appends
@@ -651,7 +635,7 @@ export let Sequence = module (
             return refill();
         };
         return new Sequence<U>(more, new func() -> U {
-            if (!more()) {
+            if (not more()) {
                 trap_with_message("no such element");
             }
             last value = buffer[position.value];
@@ -673,7 +657,7 @@ export let Sequence = module (
             return position.value < items.length;
         };
         return new Sequence<T>(more, new func() -> T {
-            if (!more()) {
+            if (not more()) {
                 trap_with_message("no such element");
             }
             last value = items[position.value];
@@ -732,7 +716,7 @@ export let Sequence = module (
         last position = cell.of<int>(start);
         let more = new func -> bool => position.value < end;
         return new Sequence<int>(more, new func() -> int {
-            if (!more()) {
+            if (not more()) {
                 trap_with_message("no such element");
             }
             last value = position.value;
@@ -780,9 +764,7 @@ export let Sequence = module (
     /// @brief Consumes the sequence by adding left to right starting from the first element. Returns 0.0 when empty.
     export let sum_float64 = func(s: Sequence<float64>) -> float64 {
         last items = s.iterator();
-        if (!items.has_next()) {
-            return 0.0;
-        }
+        return 0.0 unless items.has_next();
         let total = items.next();
         while (items.has_next()) {
             total = total + items.next();
