@@ -1039,7 +1039,11 @@ def main():
              test_http2_curl, test_http2_streams, test_http2_reload]
     # These read /proc or need the worker zygote, which exists on Linux only
     # (docs/runtime/ServerHost.md, "Worker start").
-    linux_only = {"test_dead_ready_worker", "test_zygote_restart", "test_process_bound"}
+    # test_refused_assignment's hook refuses with shutdown(SHUT_RD), which
+    # makes the host's send of the Assign fail on Linux only: on macOS the
+    # send succeeds and the request waits for its deadline (504). The retry
+    # it checks is the host's own code, the same on every system.
+    linux_only = {"test_dead_ready_worker", "test_zygote_restart", "test_process_bound", "test_refused_assignment"}
     for test in tests:
         if args.only and args.only != test.__name__:
             continue
