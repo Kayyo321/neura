@@ -67,6 +67,9 @@ bool FunctionCompiler::has_cleanup(std::size_t depth) const {
 // it, so a Return in the list (a failed close) is a return edge of the
 // enclosing blocks alone; the stack is then restored for the other paths.
 void FunctionCompiler::leave_scopes(std::size_t depth, const Span& span, ExitEdge edge) {
+    // Interned here as before the exit stack, so that the image's type
+    // table keeps its order for a program whose first void is a scope's.
+    c_.scalar(nvr::TypeKind::Void);
     for (auto i = exit_stack_.size(); i > depth && open(); --i) {
         const auto entry = exit_stack_[i - 1];
         if (entry.kind != ExitWorkKind::Cleanup) {
