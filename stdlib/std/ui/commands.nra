@@ -1,0 +1,265 @@
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+/// @brief Work that waits, started from a handler and finished in a later turn. A `Command<I, O>`
+/// runs `work(input)` as a task; `run(root)` is the root's event loop with the scope that owns
+/// those tasks, and it takes host events and command completions as turns.
+/// This module is separate from `Std.Ui` because it uses tasks: a program that uses it cannot also
+/// use `Std.DynamicForeign` or a C import (docs/lang/Concurrency.md, C15), while one that uses only
+/// `Std.Ui` can.
+#Since("0.3.0")
+export let Commands = module (
+    /// @brief What `Command.run` did: started the work, or started nothing.
+    export let RunOutcome = enum (Started, Rejected);
+
+    /// @brief The state of a command: never run, running, or how its latest run ended.
+    export let CommandState = enum<O> (Idle, Running, Succeeded(O), Failed(error.PortableError), Cancelled);
+
+    /// One finished run and the generation it was started in.
+    #[Final, Immutable]
+    let Finished = class<O> (
+        export last generation: uint64;
+        export last state: CommandState<O>;
+
+        export let init = func(generation: uint64, state: CommandState<O>) => set;
+
+        /// @brief `Finished(generation N)`.
+        export let.override to_string = func -> string => "Finished(generation " + generation.to_string() + ")";
+    );
+
+    // The task of one command run: it runs `work` in a scope of its own, so that stopping the run
+    // cancels only that work, then reports the outcome and the ticket.
+    let perform = func<I, O>(work: func(I) -> result.Result<O>, input: I, generation: uint64,
+                             results: channels.Sender<Finished<O>>, stop: channels.Receiver<int>,
+                             done: channels.Sender<uint64>, ticket: uint64) {
+        scope (own) {
+            let job = spawn work(input);
+            select {
+                let outcome = job.join() => {
+                    match (outcome) {
+                        result.Result.Ok(value) => {
+                            results.try_send(new Finished<O>(generation, CommandState<O>.Succeeded(value)));
+                        },
+                        result.Result.Err(problem) => {
+                            results.try_send(new Finished<O>(generation,
+                                CommandState<O>.Failed(error.to_portable(problem))));
+                        },
+                    }
+                },
+                let _ = stop.receive() => {
+                    own.cancel();
+                    let _ = job.join();
+                    results.try_send(new Finished<O>(generation, CommandState<O>.Cancelled));
+                },
+            }
+        }
+        done.send(ticket);
+    };
+
+    /// @brief Work that waits. `work` runs as a task in the scope of `Commands.run`, so it must be
+    /// task-safe and its captures, `I` and `O` transferable (E0601, E0602); its failure reaches the
+    /// component as a `PortableError`. `state` is a `ui.State` that components render. Each `run`,
+    /// each `cancel` of a running command and each unmount of the component the command is bound to
+    /// raise its generation, and a completion of an older generation changes nothing. `work` learns
+    /// of a cancellation through `Std.Concurrent.Cancellation.requested()` or a parked operation that
+    /// returns `Cancelled`.
+    #[Final, NotThreadSafe]
+    export let Command = class<I, O> (
+        last work: func(I) -> result.Result<O>;
+        /// @brief `Idle` until the first run, `Running` while the latest run works, then how it ended.
+        export last state: ui.State<CommandState<O>>;
+        let owner: ui.Component = nil;
+        let generation_count: uint64 = 0;
+        let in_flight: uint64[list] = new;
+        let running_root: ui.Root = nil;
+
+        /// @brief A command that runs `work`; `work` is retained. Bind it to a component before running it.
+        export let init = func(work: func(I) -> result.Result<O>) {
+            instance.work = work;
+            state = new ui.State<CommandState<O>>(CommandState<O>.Idle);
+        };
+
+        /// @brief Makes `component` the command's owner: the command runs on the owner's root, and
+        /// unmounting the owner cancels the command and raises its generation. A command is bound once.
+        export let bind = func(component: ui.Component) {
+            if (owner != nil) {
+                trap_with_message("a command is bound to one component");
+            }
+            owner = component;
+            last self = instance;
+            component.unmount_actions.append(new func() {
+                self.abandon();
+            });
+        };
+
+        /// @brief Starts `work(input)` on the owner's root and sets the state to `Running`. `Rejected`,
+        /// with nothing started, when the command is not bound to a mounted component or the root already
+        /// has its limit of commands in flight (U-10, 32 by default). The task starts when the root's
+        /// `Commands.run` next takes a turn.
+        export let run = func(input: I) -> RunOutcome {
+            if (owner == nil || !owner.is_mounted() || !owner.owner.can_launch()) {
+                return RunOutcome.Rejected;
+            }
+            last root = owner.owner;
+            generation_count += 1;
+            last generation = generation_count;
+            const [results, outcomes, _] = channels.open<Finished<O>>(1);
+            const [_, stop, stopping] = channels.open<int>(0);
+            last job = work;
+            last self = instance;
+            last ticket = root.launch(
+                new func(launch: ui.Launch, done: channels.Sender<uint64>) {
+                    perform<I, O>(job, input, generation, results, stop, done, launch.ticket);
+                },
+                new func(id: uint64) -> bool => self.finish(id, outcomes),
+                new func() {
+                    stopping.close();
+                });
+            in_flight.append(ticket);
+            running_root = root;
+            state.set(CommandState<O>.Running);
+            return RunOutcome.Started;
+        };
+
+        /// @brief Cancels the runs in flight, raises the generation and sets the state to `Cancelled`.
+        /// A command with no run in flight is left as it is.
+        export let cancel = func {
+            if (in_flight.length == 0) {
+                return;
+            }
+            stop_all();
+            generation_count += 1;
+            state.set(CommandState<O>.Cancelled);
+        };
+
+        /// @brief Raised by each run, each cancel of a running command and each unmount of the owner.
+        export let generation = func -> uint64 => generation_count;
+
+        /// @brief The number of this command's runs that have not finished.
+        export let runs_in_flight = func -> int32 => in_flight.length as int32;
+
+        /// Unmounting the owner: cancel the runs in flight and raise the generation.
+        #Internal
+        export let abandon = func {
+            last running = in_flight.length > 0;
+            stop_all();
+            generation_count += 1;
+            if (running) {
+                state.set(CommandState<O>.Cancelled);
+            }
+        };
+
+        /// Applies a finished run in the root's turn; false when its generation is old.
+        #Internal
+        export let finish = func(ticket: uint64, outcomes: channels.Receiver<Finished<O>>) -> bool {
+            forget(ticket);
+            match (outcomes.try_receive()) {
+                channels.TryReceived.Value(finished) => {
+                    if (finished.generation != generation_count) {
+                        return false;
+                    }
+                    state.set(finished.state);
+                    return true;
+                },
+                _ => {
+                    return false;
+                },
+            }
+        };
+
+        let stop_all = func {
+            let i = 0;
+            while (i < in_flight.length) {
+                if (running_root == nil || running_root.stop_ticket(in_flight[i])) {
+                    in_flight.remove_at(i);
+                } else {
+                    i += 1;
+                }
+            }
+        };
+
+        let forget = func(ticket: uint64) {
+            for (let i = 0; i < in_flight.length; i++) {
+                if (in_flight[i] == ticket) {
+                    in_flight.remove_at(i);
+                    return;
+                }
+            }
+        };
+
+        /// @brief `Command(generation N, M in flight)`.
+        export let.override to_string = func -> string =>
+            "Command(generation " + generation_count.to_string() + ", " + in_flight.length.to_string() + " in flight)";
+    );
+
+    /// @brief Runs `root`'s turns, as `root.run()` does, inside a scope that owns every command task
+    /// the root starts. Each turn is either the next event or the completion of a command. With
+    /// commands in flight and no event queued, the root waits for both together when its host is a
+    /// `ui.TaskHost`, and otherwise for the next completion first. It returns when the root is closed
+    /// or faulted, or when the host has no more events and no command is in flight; it cancels the
+    /// commands still running and returns after their tasks have finished.
+    export let run = func(root: ui.Root) {
+        if (!root.begin_commands()) {
+            trap_with_message("Std.Ui.Commands.run is already running for this root");
+        }
+        scope (tasks) {
+            const [done, completions, _] = channels.open<uint64>(1024);
+            while (true) {
+                let next = root.next_launch();
+                while (next != nil) {
+                    last start = next.launch;
+                    spawn start(new ui.Launch(next.id), done);
+                    next = root.next_launch();
+                }
+                if (root.is_stopped()) {
+                    break;
+                }
+                match (completions.try_receive()) {
+                    channels.TryReceived.Value(ticket) => {
+                        root.complete(ticket);
+                        continue;
+                    },
+                    _ => {},
+                }
+                if (root.has_queued()) {
+                    root.turn();
+                    continue;
+                }
+                if (root.commands_in_flight() == 0) {
+                    if (!root.wait_for_events()) {
+                        break;
+                    }
+                    continue;
+                }
+                last waiting = root.task_host();
+                if (waiting != nil) {
+                    match (waiting.wait_with(root, completions)) {
+                        ui.Wake.Events => {},
+                        ui.Wake.Completed(ticket) => {
+                            root.complete(ticket);
+                        },
+                        ui.Wake.Idle => {
+                            await_completion(root, completions);
+                        },
+                    }
+                } else {
+                    await_completion(root, completions);
+                }
+            }
+            root.stop_commands();
+            tasks.cancel();
+        }
+        root.end_commands();
+    };
+
+    let await_completion = func(root: ui.Root, completions: channels.Receiver<uint64>) {
+        match (completions.receive()) {
+            channels.Received.Value(ticket) => {
+                root.complete(ticket);
+            },
+            _ => {},
+        }
+    };
+);

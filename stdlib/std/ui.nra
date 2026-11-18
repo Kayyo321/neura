@@ -1,4 +1,5 @@
 let build = import:Std.Ui.Internal.Build;
+let channels = import:Std.Concurrent.Channel;
 let console = import:Std.Io.Console;
 let error = import:Std.Core.Error;
 let result = import:Std.Core.Result;
@@ -486,6 +487,12 @@ export let Ui = module (
         export let view: View = nil;
         let generation_count: uint64 = 0;
         let render_total: int64 = 0;
+        /// Called with the root each time the component is mounted, after it subscribes.
+        #Internal
+        export let mount_actions: (func(Root) -> void)[list] = new;
+        /// Called each time the component is unmounted, after its children and before its generation rises.
+        #Internal
+        export let unmount_actions: (func() -> void)[list] = new;
 
         #Internal
         export let init = func(render_view: func() -> View, attach: func(Component) -> Subscription) => set;
@@ -526,6 +533,10 @@ export let Ui = module (
             last subscribe = attach;
             subscription = subscribe(instance);
             dirty = true;
+            for (let i = 0; i < mount_actions.length; i++) {
+                last action = mount_actions[i];
+                action(root);
+            }
         };
 
         #Internal
@@ -537,6 +548,10 @@ export let Ui = module (
             if (subscription != nil) {
                 subscription.close();
                 subscription = nil;
+            }
+            for (let i = 0; i < unmount_actions.length; i++) {
+                last action = unmount_actions[i];
+                action();
             }
             owner = nil;
             dirty = false;
@@ -676,6 +691,93 @@ export let Ui = module (
         };
     );
 
+    /// The listener number of a navigation in a root's queue.
+    let navigation_listener: uint64 = 18446744073709551615;
+
+    /// Starts one command run; its only use is to give a run's start function a type of its own.
+    #[Final, Immutable]
+    #Internal
+    export let Launch = class (
+        export last ticket: uint64;
+
+        export let init = func(ticket: uint64) => set;
+
+        /// @brief `Launch(` the ticket `)`.
+        export let.override to_string = func -> string => "Launch(" + ticket.to_string() + ")";
+    );
+
+    /// One command run registered with a root.
+    #[Final, NotThreadSafe]
+    #Internal
+    export let Ticket = class (
+        export last id: uint64;
+        export last launch: func(Launch, channels.Sender<uint64>) -> void;
+        export last finish: func(uint64) -> bool;
+        export last cancel: func() -> void;
+        export let stopped: bool = false;
+
+        export let init = func(id: uint64, launch: func(Launch, channels.Sender<uint64>) -> void,
+                               finish: func(uint64) -> bool, cancel: func() -> void) => set;
+
+        /// Asks the run to cancel, once.
+        export let stop = func {
+            if (!stopped) {
+                stopped = true;
+                last request = cancel;
+                request();
+            }
+        };
+
+        /// @brief `Ticket(` the id `)`.
+        export let.override to_string = func -> string => "Ticket(" + id.to_string() + ")";
+    );
+
+    /// What one turn's renders changed in the component tree, so that a refused commit can undo it.
+    #[Final, NotThreadSafe]
+    let Journal = class (
+        export last nodes: Component[list] = new;
+        export last old_children: (Component[list])[list] = new;
+        export last old_views: View[list] = new;
+        export last attached: Component[list] = new;
+        export last removed: Component[list] = new;
+
+        /// Records `node`'s children and view before it renders.
+        export let rendering = func(node: Component) {
+            nodes.append(node);
+            old_children.append(node.children);
+            old_views.append(node.view);
+        };
+
+        /// Reports whether `child` was dropped earlier in this turn, and takes it off that list.
+        export let moved = func(child: Component) -> bool {
+            for (let i = 0; i < removed.length; i++) {
+                if (removed[i] == child) {
+                    removed.remove_at(i);
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// Unmounts the children this turn mounted and restores every rendered component's children and view.
+        export let roll_back = func {
+            for (let i = attached.length - 1; i >= 0; i--) {
+                if (attached[i].owner != nil) {
+                    attached[i].detach();
+                }
+            }
+            for (let i = nodes.length - 1; i >= 0; i--) {
+                nodes[i].children = old_children[i];
+                nodes[i].view = old_views[i];
+            }
+        };
+
+        /// @brief `Journal(` the numbers of renders, mounts and unmounts `)`.
+        export let.override to_string = func -> string =>
+            "Journal(" + nodes.length.to_string() + " renders, " + attached.length.to_string() + " mounted, "
+            + removed.length.to_string() + " unmounted)";
+    );
+
     /// @brief Counts that show what a root holds and has done.
     #[Final, Immutable]
     export let RootStats = class (
@@ -734,6 +836,16 @@ export let Ui = module (
         let commit_total: uint64 = 0;
         let dropped_total: uint64 = 0;
         let discarded_total: uint64 = 0;
+        // Commands: every ticket in flight, the launches not yet started, and the U-10 limit.
+        let tickets: Ticket[list] = new;
+        let launches: Ticket[list] = new;
+        let ticket_count: uint64 = 0;
+        let command_limit: int = 32;
+        let running_commands: bool = false;
+        let stale_total: uint64 = 0;
+        // Navigations the host reports, and the element to focus after the turn's commit.
+        let navigation: Subscriber<string>[list] = new;
+        let pending_focus: string = "";
 
         #Internal
         export let init = func(host: Host, handle: uint64, top: Component) {
@@ -874,11 +986,222 @@ export let Ui = module (
             return !closed && !faulted;
         };
 
-        /// @brief Runs turns until the root is closed or faulted, or the host has no more events.
+        /// @brief Runs turns until the root is closed or faulted, or the host has no more events. A root
+        /// whose components run commands is run by `Std.Ui.Commands.run` instead: a command started
+        /// under `run` traps with `a command needs Std.Ui.Commands.run(root)`.
         export let run = func {
-            while (turn()) {
+            while (true) {
+                if (launches.length > 0) {
+                    trap_with_message("a command needs Std.Ui.Commands.run(root)");
+                }
+                if (!turn()) {
+                    return;
+                }
             }
         };
+
+        /// Marks the root as running commands; false when it already is.
+        #Internal
+        export let begin_commands = func -> bool {
+            if (running_commands) {
+                return false;
+            }
+            running_commands = true;
+            return true;
+        };
+
+        /// The next run to start under `Std.Ui.Commands.run`, taken off the list, or nil.
+        #Internal
+        export let next_launch = func -> Ticket {
+            if (launches.length == 0) {
+                return nil;
+            }
+            last next = launches[0];
+            launches.remove_at(0);
+            return next;
+        };
+
+        /// Reports whether the loop of `Std.Ui.Commands.run` should stop: the root is closed or faulted.
+        #Internal
+        export let is_stopped = func -> bool => closed || faulted;
+
+        /// Reports whether an event is queued.
+        #Internal
+        export let has_queued = func -> bool => queue.length > 0;
+
+        /// Waits for host events with `wait`, or with `TaskHost.wait_with` when the host is one.
+        #Internal
+        export let wait_for_events = func -> bool => host.wait(instance);
+
+        /// The host as a `TaskHost`, or nil.
+        #Internal
+        export let task_host = func -> TaskHost {
+            if (host is TaskHost) {
+                return host as TaskHost;
+            }
+            return nil;
+        };
+
+        /// Asks every run in flight to cancel and forgets the runs not started.
+        #Internal
+        export let stop_commands = func {
+            for (let i = 0; i < tickets.length; i++) {
+                tickets[i].stop();
+            }
+            launches = new;
+        };
+
+        /// After every command task has finished: applies what the remaining runs reported, outside any turn.
+        #Internal
+        export let end_commands = func {
+            last remaining = tickets;
+            tickets = new;
+            for (let i = 0; i < remaining.length; i++) {
+                last finish = remaining[i].finish;
+                if (!finish(remaining[i].id)) {
+                    stale_total += 1;
+                }
+            }
+            running_commands = false;
+        };
+
+        /// @brief Sets the number of commands in flight at which `Std.Ui.Commands.Command.run` is rejected (U-10, default 32; at most 1,024).
+        export let set_command_limit = func(limit: int) {
+            if (limit < 1 || limit > 1024) {
+                trap_with_message("invalid argument: a command limit is 1 to 1,024 commands");
+            }
+            command_limit = limit;
+        };
+
+        /// @brief The number of command runs started and not yet finished, the stopped ones included.
+        export let commands_in_flight = func -> int32 => tickets.length as int32;
+
+        /// @brief How many command completions were discarded because their generation was old.
+        export let stale_completions = func -> uint64 => stale_total;
+
+        /// @brief The host as a `HistoryHost`, or nil when it keeps no history.
+        export let history = func -> HistoryHost {
+            if (host is HistoryHost) {
+                return host as HistoryHost;
+            }
+            return nil;
+        };
+
+        /// @brief Adds a listener for navigations the program did not make (back, forward, an edited
+        /// address), which the host reports with `post_navigation`.
+        export let on_navigation = func(listener: func(string) -> void) -> Subscription {
+            last handle = new Subscription();
+            navigation.append(new Subscriber<string>(handle, listener));
+            return handle;
+        };
+
+        /// @brief Queues a navigation to `path`, called by a host. A queued navigation is replaced by a
+        /// later one, and navigations are never dropped by the queue limit.
+        export let post_navigation = func(path: string) {
+            if (closed) {
+                return;
+            }
+            last self = instance;
+            last deliver = new func() {
+                self.navigated(path);
+            };
+            for (let i = 0; i < queue.length; i++) {
+                if (queue[i].listener == navigation_listener && queue[i].target == nil) {
+                    queue[i].deliver = deliver;
+                    return;
+                }
+            }
+            queue.append(new QueuedEvent(navigation_listener, nil, 0, true, deliver, 0));
+        };
+
+        /// @brief Asks the host to focus the element whose `id` is `element_id` once the current turn has
+        /// committed. A later request in the same turn replaces it; a host that is not a `FocusHost` ignores it.
+        export let request_focus = func(element_id: string) {
+            pending_focus = element_id;
+        };
+
+        #Internal
+        export let navigated = func(path: string) {
+            last count = navigation.length;
+            for (let i = 0; i < count; i++) {
+                last entry = navigation[i];
+                if (entry.handle.is_open()) {
+                    last listener = entry.listener;
+                    listener(path);
+                }
+            }
+            let j = 0;
+            while (j < navigation.length) {
+                if (navigation[j].handle.is_open()) {
+                    j += 1;
+                } else {
+                    navigation.remove_at(j);
+                }
+            }
+        };
+
+        /// @brief Reports whether another command may start: fewer than the limit are in flight.
+        #Internal
+        export let can_launch = func -> bool => tickets.length < command_limit;
+
+        /// @brief Registers a command run; `launch` starts its task under `Std.Ui.Commands.run`, `finish`
+        /// applies its completion in a turn, and `stop` asks it to cancel.
+        #Internal
+        export let launch = func(start: func(Launch, channels.Sender<uint64>) -> void, finish: func(uint64) -> bool,
+                                 stop: func() -> void) -> uint64 {
+            ticket_count += 1;
+            last ticket = new Ticket(ticket_count, start, finish, stop);
+            tickets.append(ticket);
+            launches.append(ticket);
+            return ticket_count;
+        };
+
+        /// @brief Asks the run `id` to cancel. A run not started yet is dropped, never completes, and
+        /// true is returned.
+        #Internal
+        export let stop_ticket = func(id: uint64) -> bool {
+            for (let i = 0; i < launches.length; i++) {
+                if (launches[i].id == id) {
+                    launches.remove_at(i);
+                    remove_ticket(id);
+                    return true;
+                }
+            }
+            for (let i = 0; i < tickets.length; i++) {
+                if (tickets[i].id == id) {
+                    tickets[i].stop();
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        let remove_ticket = func(id: uint64) -> Ticket {
+            for (let i = 0; i < tickets.length; i++) {
+                if (tickets[i].id == id) {
+                    last found = tickets[i];
+                    tickets.remove_at(i);
+                    return found;
+                }
+            }
+            return nil;
+        };
+
+        /// One turn: the completion of the run `id`.
+        #Internal
+        export let complete = func(id: uint64) {
+            last ticket = remove_ticket(id);
+            if (ticket == nil || closed || faulted) {
+                return;
+            }
+            turn_total += 1;
+            last finish = ticket.finish;
+            if (!finish(id)) {
+                stale_total += 1;
+            }
+            flush();
+        };
+
 
         /// @brief Clears a fault: the host empties the root, every component renders again and the root takes events.
         export let reset = func {
@@ -940,8 +1263,23 @@ export let Ui = module (
             if (closed || faulted) {
                 return;
             }
+            commit_renders();
+            if (pending_focus != "" && !closed && !faulted) {
+                last element = pending_focus;
+                pending_focus = "";
+                if (host is FocusHost) {
+                    (host as FocusHost).focus(handle, element);
+                }
+            }
+        };
+
+        // Renders the dirty components and commits them. The children a render embeds are mounted
+        // at once, and the ones it drops are unmounted only when the host commits; a refused or failed
+        // commit unmounts the new children and restores each rendered component's children and view.
+        let commit_renders = func {
+            last journal = new Journal();
             last rendered: Rendered[list] = new;
-            render_tree(top, rendered);
+            render_tree(top, rendered, journal);
             if (rendered.length == 0) {
                 return;
             }
@@ -951,14 +1289,21 @@ export let Ui = module (
                     match (outcome) {
                         RenderOutcome.Committed => {
                             commit_total += 1;
+                            for (let i = 0; i < journal.removed.length; i++) {
+                                if (journal.removed[i].owner != nil) {
+                                    journal.removed[i].detach();
+                                }
+                            }
                         },
                         RenderOutcome.Invalid(diagnostic) => {
+                            journal.roll_back();
                             last handler = failure_handler;
                             handler(RenderFailure.Invalid(diagnostic));
                         },
                     }
                 },
                 result.Result.Err(problem) => {
+                    journal.roll_back();
                     faulted = true;
                     last handler = failure_handler;
                     handler(RenderFailure.Fault(problem));
@@ -966,8 +1311,9 @@ export let Ui = module (
             }
         };
 
-        let render_tree = func(node: Component, out: Rendered[list]) {
+        let render_tree = func(node: Component, out: Rendered[list], journal: Journal) {
             if (node.dirty) {
+                journal.rendering(node);
                 last view = node.render_now();
                 render_total += 1;
                 out.append(new Rendered(node, view));
@@ -976,22 +1322,26 @@ export let Ui = module (
                 for (let i = 0; i < node.children.length; i++) {
                     last old = node.children[i];
                     if (!contains_component(found, old)) {
-                        old.detach();
+                        journal.removed.append(old);
                     }
                 }
                 for (let i = 0; i < found.length; i++) {
                     last child = found[i];
                     if (!contains_component(node.children, child)) {
-                        if (child.owner != nil) {
+                        if (child.owner == nil) {
+                            child.attach_to(instance);
+                            journal.attached.append(child);
+                        } else if (child.owner == instance && journal.moved(child)) {
+                            // Dropped by a parent rendered earlier in this turn: the child moves.
+                        } else {
                             trap_with_message("a component is mounted twice");
                         }
-                        child.attach_to(instance);
                     }
                 }
                 node.children = found;
             }
             for (let i = 0; i < node.children.length; i++) {
-                render_tree(node.children[i], out);
+                render_tree(node.children[i], out, journal);
             }
         };
 
@@ -1043,6 +1393,51 @@ export let Ui = module (
         RenderFailure.Invalid(diagnostic) => "invalid commit: " + diagnostic.to_string(),
         RenderFailure.Fault(problem) => "host fault: " + error.message(problem),
     };
+
+    // Commands and the optional host services (docs/apps/Components.md#commands).
+
+    /// @brief What a root's `TaskHost.wait_with` saw first.
+    export let Wake = enum (
+        /// The host posted events to the root.
+        Events,
+        /// A command run finished; its ticket, received from the completions channel.
+        Completed(uint64),
+        /// No event is ready and none will be posted until a command completes: the root waits for
+        /// the next completion itself.
+        Idle
+    );
+
+    /// @brief A host that can wait for its own events and for command completions together. A root
+    /// run by `Std.Ui.Commands.run`, with commands in flight and no event queued, calls `wait_with`
+    /// instead of `wait`. The host returns `Events` after posting events, or `Completed` with a
+    /// ticket it received from `completions`, whichever comes first; or `Idle` when it will post
+    /// nothing until a command completes. A host may open a scope of its own for the wait, for
+    /// example to race a cancellable host request against the channel, as long as every task it
+    /// starts has finished when `wait_with` returns.
+    export let TaskHost = interface (
+        let wait_with = func(root: Root, completions: channels.Receiver<uint64>) -> Wake;
+    );
+
+    /// @brief A host that keeps the history of a document: the router reads and changes the location
+    /// through it. Paths are absolute (`/parts/7`). The host reports a navigation the program did not
+    /// make with `root.post_navigation(path)`.
+    export let HistoryHost = interface (
+        /// @brief The current path.
+        let location = func() -> string;
+        /// @brief Adds `path` to the history without loading a page; returns the current path.
+        let push_location = func(path: string) -> string;
+        /// @brief Replaces the current entry with `path`; returns the current path.
+        let replace_location = func(path: string) -> string;
+        /// @brief The `href` text of a link to `path` in this host's routing mode (`#/parts/7` for hash routing).
+        let link = func(path: string) -> string;
+    );
+
+    /// @brief A host that can move the keyboard focus to an element of a root, named by its `id`.
+    export let FocusHost = interface (
+        /// @brief Focuses the element; false when the root has no element with that `id`.
+        let focus = func(root: uint64, element_id: string) -> bool;
+    );
+
 
     /// @brief Opens a root on `target` of `host`, renders `top` and commits it. `Err` when the host
     /// refuses the target (a second root on one element, more than U-9 roots) or `top` is mounted.
