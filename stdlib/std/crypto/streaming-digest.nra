@@ -1,0 +1,24 @@
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+
+/// @brief The contract of an incremental hash (Stdlib.md section 20.1).
+/// @see [Std.Crypto.StreamingDigest](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-StreamingDigest)
+#Since("0.3.0")
+export let StreamingDigest = module (
+    /// @brief A running digest whose type argument `D` is the implementing class itself, as in
+    /// `Sha256 implements StreamingDigest<Sha256>`. Neura has no value type parameters, so the specification's
+    /// `OutLen` is the static `output_length`. Generic code such as `Hmac<H: StreamingDigest<H>>` makes a fresh
+    /// digest with `H.create()`.
+    #Since("0.3.0")
+    export let StreamingDigest = interface<D>:CryptographicPrimitive<D> (
+        /// @brief A new digest with no bytes added.
+        static let create = func() -> D;
+        /// @brief The length in bytes of `finish`'s result.
+        static let output_length = func() -> int;
+        /// @brief The block length in bytes, as HMAC uses it.
+        static let block_length = func() -> int;
+        /// @brief Adds the bytes to the message. Traps with "invalid state: digest finished" after `finish`.
+        let update = func(bytes: uint8[list]);
+        /// @brief Ends the digest and returns `output_length` bytes. A second call traps.
+        let finish = func -> uint8[list];
+    );
+);

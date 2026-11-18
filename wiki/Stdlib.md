@@ -97,6 +97,25 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 | [`Std.Core.Variadic`](Stdlib-Core-Variadic) | [Contracts](Stdlib-Core-Variadic#detailed-contracts) | [Declarations](Stdlib-Core-Variadic#exported-declarations) |
 | [`Std.Core.Version`](Stdlib-Core-Version) | [Contracts](Stdlib-Core-Version#detailed-contracts) | [Declarations](Stdlib-Core-Version#exported-declarations) |
 
+### `Std.Crypto`
+
+Hashes, MACs, key derivation, authenticated encryption, and secure random generation; see [section 20](Stdlib-Design#20-stdcrypto).
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Crypto.AeadCipher`](Stdlib-Crypto-AeadCipher) | [Contracts](Stdlib-Crypto-AeadCipher#detailed-contracts) | [Declarations](Stdlib-Crypto-AeadCipher#exported-declarations) |
+| [`Std.Crypto.Algorithm`](Stdlib-Crypto-Algorithm) | [Contracts](Stdlib-Crypto-Algorithm#detailed-contracts) | [Declarations](Stdlib-Crypto-Algorithm#exported-declarations) |
+| [`Std.Crypto.CryptographicPrimitive`](Stdlib-Crypto-CryptographicPrimitive) | [Contracts](Stdlib-Crypto-CryptographicPrimitive#detailed-contracts) | [Declarations](Stdlib-Crypto-CryptographicPrimitive#exported-declarations) |
+| [`Std.Crypto.ExtendableOutput`](Stdlib-Crypto-ExtendableOutput) | [Contracts](Stdlib-Crypto-ExtendableOutput#detailed-contracts) | [Declarations](Stdlib-Crypto-ExtendableOutput#exported-declarations) |
+| [`Std.Crypto.KeyEncapsulation`](Stdlib-Crypto-KeyEncapsulation) | [Contracts](Stdlib-Crypto-KeyEncapsulation#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyEncapsulation#exported-declarations) |
+| [`Std.Crypto.KeyStoreProvider`](Stdlib-Crypto-KeyStoreProvider) | [Contracts](Stdlib-Crypto-KeyStoreProvider#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyStoreProvider#exported-declarations) |
+| [`Std.Crypto.PrivateKey`](Stdlib-Crypto-PrivateKey) | [Contracts](Stdlib-Crypto-PrivateKey#detailed-contracts) | [Declarations](Stdlib-Crypto-PrivateKey#exported-declarations) |
+| [`Std.Crypto.SecretMemory`](Stdlib-Crypto-SecretMemory) | [Contracts](Stdlib-Crypto-SecretMemory#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretMemory#exported-declarations) |
+| [`Std.Crypto.Signer`](Stdlib-Crypto-Signer) | [Contracts](Stdlib-Crypto-Signer#detailed-contracts) | [Declarations](Stdlib-Crypto-Signer#exported-declarations) |
+| [`Std.Crypto.StreamingDigest`](Stdlib-Crypto-StreamingDigest) | [Contracts](Stdlib-Crypto-StreamingDigest#detailed-contracts) | [Declarations](Stdlib-Crypto-StreamingDigest#exported-declarations) |
+| [`Std.Crypto.SymmetricKey`](Stdlib-Crypto-SymmetricKey) | [Contracts](Stdlib-Crypto-SymmetricKey#detailed-contracts) | [Declarations](Stdlib-Crypto-SymmetricKey#exported-declarations) |
+| [`Std.Crypto.Verifier`](Stdlib-Crypto-Verifier) | [Contracts](Stdlib-Crypto-Verifier#detailed-contracts) | [Declarations](Stdlib-Crypto-Verifier#exported-declarations) |
+
 ### `Std.Digest`
 
 | Module | Detailed contracts | Exported declarations |
@@ -317,3 +336,5 @@ The [complete specification](Stdlib-Design) has these sections.
   - [18.11 Test layout](Stdlib-Design#1811-test-layout)
   - [18.12 Concurrency](Stdlib-Design#1812-concurrency)
 - [19. `Std.Concurrent`](Stdlib-Design#19-stdconcurrent)
+- [20. `Std.Crypto`](Stdlib-Design#20-stdcrypto)
+  - [20.1 Contracts](Stdlib-Design#201-contracts)

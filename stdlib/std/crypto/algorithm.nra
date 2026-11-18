@@ -1,0 +1,24 @@
+/// @brief The identifiers of every algorithm that Std.Crypto names (Stdlib.md section 20).
+///
+/// A primitive reports its identifier through CryptographicPrimitive.algorithm, and the process-wide
+/// Std.Crypto.Core.CryptoPolicy decides by identifier whether the primitive may run. The list also names
+/// algorithms that Std.Crypto does not implement (Sha1, Md5, Rsa1024) so that a policy can deny them, and
+/// the public-key and post-quantum algorithms of the later Std.Crypto packages.
+/// @see [Std.Crypto.Algorithm](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Algorithm)
+#Since("0.3.0")
+export let Algorithm = module (
+    /// @brief One algorithm. `to_string` gives the variant name.
+    #Since("0.3.0")
+    export let Algorithm = enum (
+        Md5, Sha1, Sha224, Sha256, Sha384, Sha512, Sha512_256,
+        Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256, CShake128, CShake256,
+        TupleHash128, TupleHash256, TurboShake128, TurboShake256, Blake3, MerkleTree,
+        Hmac, Kmac128, Kmac256, Poly1305, AesCmac,
+        Aes128, Aes192, Aes256, Aes128Gcm, Aes192Gcm, Aes256Gcm, Aes128GcmSiv, Aes256GcmSiv,
+        Aes256Siv, Aes384Siv, Aes512Siv, ChaCha20, ChaCha20Poly1305, XChaCha20Poly1305, Stream, Ff1,
+        Hkdf, Pbkdf2, Scrypt, Argon2id, Balloon,
+        ChaCha20Drbg, OsEntropy,
+        X25519, X448, Ed25519, Ed448, P256, P384, P521, Secp256k1, Rsa1024, RsaPss, RsaOaep, Hpke,
+        MlKem512, MlKem768, MlKem1024, MlDsa44, MlDsa65, MlDsa87, SlhDsa, FnDsa, X25519MlKem768, Ed25519MlDsa65
+    );
+);

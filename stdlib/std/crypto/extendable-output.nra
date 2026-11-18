@@ -1,0 +1,24 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.StreamingDigest;
+
+/// @brief The contract of an extendable-output function (Stdlib.md section 20.1).
+/// @see [Std.Crypto.ExtendableOutput](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-ExtendableOutput)
+#Since("0.3.0")
+export let ExtendableOutput = module (
+    /// @brief A digest whose output is a stream. `finish` returns the first `output_length` bytes; `squeeze`
+    /// continues the stream. `read` has the reader shape of Std.Io (`func(int) -> Result<uint8[list]>`), so
+    /// `reader()` can feed Std.Io.BufferedReader.
+    #Since("0.3.0")
+    export let ExtendableOutput = interface<D>:StreamingDigest<D> (
+        /// @brief The next `count` bytes of output. The first call ends absorption, like `finish`.
+        let squeeze = func(count: int) -> uint8[list];
+
+        /// @brief The next `max` bytes; never fails and never ends.
+        let read = func(max: int) -> Result<uint8[list]> => Result<uint8[list]>.Ok(squeeze(max));
+
+        /// @brief `read` as a function value.
+        let reader = func -> func(int) -> Result<uint8[list]> =>
+            new func(max: int) -> Result<uint8[list]> => read(max);
+    );
+);
