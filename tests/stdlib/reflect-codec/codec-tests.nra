@@ -31,6 +31,26 @@ let Account = class (
     export let init = func { };
 );
 
+let Status = enum (Open, Closed);
+
+let Order = class (
+    export let id: int64 = 0;
+    export let items: string[list] = new;
+    export let discount: Optional<float64> = Optional<float64>.None;
+    #SerialName("ship_to")
+    export let address: Address = nil;
+    export let status: Status = Status.Open;
+    export let small: uint8 = 0;
+    #Skip
+    export let cache: int32 = 0;
+);
+
+let Row = class (
+    export let count: int64 = 0;
+    export let note: Optional<string> = Optional<string>.None;
+    export let tiny: int8 = 0;
+);
+
 let Node = class (
     export let name: string = "";
     export let next: Node = nil;
@@ -146,4 +166,21 @@ let CodecTests = module (
         last node = schemas.json_schema_text(types.of<Node>());
         test.assert(node.contains("\"next\":{\"$ref\":\"#/$defs/Node\"}"));
     };
+
+    export let test_protobuf_schema = func() -> void {
+        last text = schemas.protobuf_schema(types.of<Order>());
+        test.assert_equal_string(
+            "syntax = \"proto3\";\n\nmessage Address {\n    string city = 1;\n    int32 zip = 2;\n}\n\nenum Status {\n    STATUS_OPEN = 0;\n    STATUS_CLOSED = 1;\n}\n\nmessage Order {\n    int64 id = 1;\n    repeated string items = 2;\n    optional double discount = 3;\n    Address ship_to = 4;\n    Status status = 5;\n    uint32 small = 6;\n}\n",
+            text);
+    };
+
+    export let test_sql_table = func() -> void {
+        test.assert_equal_string(
+            "CREATE TABLE addresses (\n    city TEXT NOT NULL,\n    zip INTEGER NOT NULL\n);",
+            schemas.sql_table(types.of<Address>(), "addresses"));
+        test.assert_equal_string(
+            "CREATE TABLE rows (\n    count BIGINT NOT NULL,\n    note TEXT,\n    tiny SMALLINT NOT NULL\n);",
+            schemas.sql_table(types.of<Row>(), "rows"));
+    };
 );
+
