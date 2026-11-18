@@ -428,7 +428,13 @@ export let Reconcile = module (
         };
 
         let expand_view = func(view: ui.View, key: string, pass: uint64, state: Expansion, out: VNode[list]) {
-            if (view.owner != nil && (!(view.owner === instance) || view.pass == pass || view.pass == mounted_pass)) {
+            // Reused: placed earlier in this pass, part of the tree this root has mounted, or part of the tree another
+            // root has mounted. A view that another root only prepared (a refused or unaccepted plan), or that it
+            // mounted before a reset or a later commit, is free.
+            last here = view.owner != nil && view.owner === instance;
+            if (view.owner != nil && ((here && (view.pass == pass || view.pass == mounted_pass)) ||
+                                      (!here && view.owner is Reconciler &&
+                                       (view.owner as Reconciler).holds(view.pass)))) {
                 refuse(state, ui.DiagnosticKind.ViewReused, "a view appears once in one tree, in one root", 0, -1, "");
                 return;
             }
@@ -501,7 +507,9 @@ export let Reconcile = module (
                         element.attributes.append([slot.name, text]);
                     }
                 } else if (value is storage.Payload<ui.Url>) {
-                    element.attributes.append([slot.name, (value as storage.Payload<ui.Url>).value.text]);
+                    last text = (value as storage.Payload<ui.Url>).value.text;
+                    value_bytes(state, text, index);
+                    element.attributes.append([slot.name, text]);
                 } else {
                     trap_with_message("invalid UI attribute value");
                 }
@@ -693,18 +701,28 @@ export let Reconcile = module (
         };
 
         let place_children = func(parent: uint32, nodes: VNode[list], out: Operation[list]) {
+            // The anchor of each child is the next sibling that stays in place, found in one pass from the end so
+            // that placing n children costs O(n).
+            last anchors: uint32[list] = new();
+            let k = 0;
+            while (k < nodes.length) {
+                anchors.append(0);
+                k += 1;
+            }
+            let following: uint32 = 0;
+            k = nodes.length - 1;
+            while (k >= 0) {
+                anchors[k] = following;
+                if (nodes[k].state == 1) {
+                    following = nodes[k].id;
+                }
+                k -= 1;
+            }
             let i = 0;
             while (i < nodes.length) {
                 last node = nodes[i];
                 if (node.state != 1) {
-                    let anchor: uint32 = 0;
-                    let j = i + 1;
-                    while (j < nodes.length && anchor == 0) {
-                        if (nodes[j].state == 1) {
-                            anchor = nodes[j].id;
-                        }
-                        j += 1;
-                    }
+                    last anchor = anchors[i];
                     last operation = new Operation(
                         (node.state == 2) ? OpKind.Move : (node.element ? OpKind.Element : OpKind.Text), node.id);
                     operation.parent = parent;
@@ -896,6 +914,9 @@ export let Reconcile = module (
             }
             return false;
         };
+
+        /// @brief Whether the tree this root has mounted was placed in pass `pass`.
+        export let holds = func(pass: uint64) -> bool => pass != 0 && pass == mounted_pass;
 
         /// @brief The number of handlers of the mounted tree.
         export let handler_count = func -> int => handlers.size();
