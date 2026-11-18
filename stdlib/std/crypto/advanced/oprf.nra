@@ -69,6 +69,12 @@ export let Oprf = module (
         return copies;
     };
 
+    let wipe_scalar = func(value: uint32[list]) {
+        for (let i = 0; i < value.length; i++) {
+            value[i] = 0;
+        }
+    };
+
     let nonzero_scalar = func(group: groups.Group, bytes: uint8[list]) -> uint32[list] {
         match (group.scalar_canonical(bytes)) {
             Optional.Some(scalar) => {
@@ -106,7 +112,9 @@ export let Oprf = module (
             group.mask_candidate(bytes);
             match (group.scalar_canonical(bytes)) {
                 Optional.Some(scalar) => {
-                    if (mp.is_zero(scalar) == 0) {
+                    last nonzero = mp.is_zero(scalar) == 0;
+                    wipe_scalar(scalar);
+                    if (nonzero) {
                         return Result<uint8[list]>.Ok(bytes);
                     }
                 },
@@ -132,7 +140,9 @@ export let Oprf = module (
         if (mode == Mode.Partial) {
             add_frame(framed, info);
         }
-        add_frame(framed, group.encode(element));
+        last encoded = group.encode(element);
+        add_frame(framed, encoded);
+        words.wipe(encoded);
         words.append_all(framed, words.utf8("Finalize"));
         last output = group.hash(framed);
         words.wipe(framed);
@@ -178,7 +188,9 @@ export let Oprf = module (
         }
         last z = group.multiply(k, m);
         last c = challenge(group, mode, public_key, m, z, group.multiply_base(nonce), group.multiply(nonce, m));
-        last s = group.scalar_subtract(nonce, group.scalar_multiply(c, k));
+        last product = group.scalar_multiply(c, k);
+        last s = group.scalar_subtract(nonce, product);
+        wipe_scalar(product);
         let encoded = group.scalar_bytes(c);
         words.append_all(encoded, group.scalar_bytes(s));
         return Result<uint8[list]>.Ok(encoded);
@@ -389,7 +401,10 @@ export let Oprf = module (
             let outputs: uint8[list][list] = new;
             for (let i = 0; i < inputs.length; i++) {
                 last scalar = nonzero_scalar(group, blinds[i].expose());
-                last issued = group.multiply(group.scalar_invert(scalar), evaluated[i]);
+                last inverse = group.scalar_invert(scalar);
+                wipe_scalar(scalar);
+                last issued = group.multiply(inverse, evaluated[i]);
+                wipe_scalar(inverse);
                 outputs.append(finish(group, mode, inputs[i].expose(), info, issued));
             }
             return Result<uint8[list][list]>.Ok(outputs);
@@ -464,6 +479,7 @@ export let Oprf = module (
             last dst = context(group, "HashToGroup-", mode);
             for (let i = 0; i < inputs.length; i++) {
                 last scalar = nonzero_scalar(group, nonces[i]);
+                defer wipe_scalar(scalar);
                 last point = group.hash_to_group(inputs[i], dst);
                 if (group.is_identity(point)) {
                     return fail<BlindState>("an input mapped to the identity");
@@ -548,13 +564,17 @@ export let Oprf = module (
             suite = Suite.Ristretto255Sha512;
             last group = make_group(suite);
             mode = selected;
-            public_point = group.multiply_base(nonzero_scalar(group, scalar));
+            last key = nonzero_scalar(group, scalar);
+            public_point = group.multiply_base(key);
+            wipe_scalar(key);
             material = new secret.SecretBytes(scalar);
         } or func(selected: Mode, scalar: uint8[list], selected_suite: Suite) {
             suite = selected_suite;
             last group = make_group(suite);
             mode = selected;
-            public_point = group.multiply_base(nonzero_scalar(group, scalar));
+            last key = nonzero_scalar(group, scalar);
+            public_point = group.multiply_base(key);
+            wipe_scalar(key);
             material = new secret.SecretBytes(scalar);
         };
 
@@ -587,6 +607,7 @@ export let Oprf = module (
             last scalar = nonzero_scalar(group, material.expose());
             if (mode == Mode.Partial) {
                 last tweaked = group.scalar_add(scalar, info_scalar(group, mode, info));
+                wipe_scalar(scalar);
                 if (mp.is_zero(tweaked) != 0) {
                     return fail<uint32[list]>("the tweaked server key is zero");
                 }
@@ -608,6 +629,7 @@ export let Oprf = module (
 
         let evaluate_points = func(group: groups.Group, blinded: class [list], info, proof_nonce: uint8[list]) -> Result<Evaluation> {
             last scalar = review_info(group, info)?;
+            defer wipe_scalar(scalar);
             last multiplier = mode == Mode.Partial ? group.scalar_invert(scalar) : scalar;
             let evaluated: class [list] = new;
             let encoded: uint8[list][list] = new;
@@ -616,6 +638,9 @@ export let Oprf = module (
                 evaluated.append(element);
                 encoded.append(group.encode(element));
             }
+            if (mode == Mode.Partial) {
+                wipe_scalar(multiplier);
+            }
             if (mode == Mode.Base) {
                 if (proof_nonce.length != 0) {
                     trap_with_message("invalid argument: base OPRF does not use a proof nonce");
@@ -623,6 +648,7 @@ export let Oprf = module (
                 return Result<Evaluation>.Ok(new Evaluation(encoded, new));
             }
             last nonce = nonzero_scalar(group, proof_nonce);
+            defer wipe_scalar(nonce);
             last proof = mode == Mode.Verifiable ? (prove(group, mode, scalar, nonce, public_point, blinded, evaluated)?) : (prove(group, mode, scalar, nonce, group.multiply_base(scalar), evaluated, blinded)?);
             return Result<Evaluation>.Ok(new Evaluation(encoded, proof));
         };
@@ -681,7 +707,12 @@ export let Oprf = module (
             }
             last scalar = review_info(group, info)?;
             last multiplier = mode == Mode.Partial ? group.scalar_invert(scalar) : scalar;
-            return Result<uint8[list]>.Ok(finish(group, mode, input, info, group.multiply(multiplier, point)));
+            last output = finish(group, mode, input, info, group.multiply(multiplier, point));
+            wipe_scalar(scalar);
+            if (mode == Mode.Partial) {
+                wipe_scalar(multiplier);
+            }
+            return Result<uint8[list]>.Ok(output);
         };
 
         /// @brief A fixed placeholder for the private server key.
@@ -707,6 +738,7 @@ export let Oprf = module (
         for (let counter = 0; counter < 256; counter++) {
             input[input.length - 1] = counter as uint8;
             last scalar = group.hash_to_scalar(input, dst);
+            defer wipe_scalar(scalar);
             if (mp.is_zero(scalar) == 0) {
                 let bytes = group.scalar_bytes(scalar);
                 defer words.wipe(bytes);
