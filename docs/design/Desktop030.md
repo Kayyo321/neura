@@ -213,10 +213,19 @@ A 0.2 program has no desktop form to migrate. A prototype that served its UI fro
 
 1. A desktop child cannot use `Std.DynamicForeign` or `import:c(...)`: concurrent calls need tasks, and the first concurrent image profile excludes native bindings. SQL and the other providers are host services and are not affected.
 2. Bridge operations run as tasks, so an implementation must be task-safe with transferable captures, and reaches the host through `call.host()`. A `Call`'s `window` is a method, `call.window()`, because a monitor's other monitors are reached through methods.
-3. When the channel ends with calls still running after cancellation, the child ends at once with the application's status rather than waiting for operations that never ask whether they were cancelled.
+3. When the channel ends with calls that have not reported finishing, a cancelled call included, the child ends at once with the application's status rather than waiting for operations that never ask whether they were cancelled; those calls are abandoned without a chance to finish cooperatively.
 4. A cancelled call writes no `Return`: the host has answered its caller already, and dropping a late reply is its rule anyway.
 5. Request bytes cross into a call's task as text when they are UTF-8 and as hex digits otherwise.
 6. A desktop child is built with an unlimited step limit (`--max-steps 18446744073709551615`).
+7. The `.deb` installs `chrome-sandbox` setuid root, as Electron's own packages do, for systems without unprivileged user namespaces.
+8. There is no application menu until the child sets one: Electron's default menu offers reloads and developer tools.
+9. A granted file is replaced at its first write, not when the save dialog closes, so a grant never written leaves an existing file as it was.
+10. The host keeps at most 64 granted files, a menu has at most four levels and 512 entries, and a window keeps at most 64 unread host events.
+11. `MenuActivated` carries window 0 when no runner window has focus.
+12. When focus moves between windows, the old window's `Blurred` and the new window's `Focused` reach the child in the order X reports them, which may be either.
+13. A `.deb` whose `desktop.json` names no maintainer says `Unknown <unknown@invalid>`.
+14. B-D2 is reported both as Apps030 defines it (resident size summed over the tree, 632.7 MiB, over the budget) and as PSS (276.4 MiB, within it); which measure the budget means is the owner's decision.
+15. The notification service answers `Shown` when Electron accepted the notification; on Linux it does not learn whether one was displayed, and never answers `Denied`.
 
 ## Approved design decisions
 
