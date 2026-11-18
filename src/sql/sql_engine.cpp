@@ -396,7 +396,7 @@ namespace {
 
 std::size_t encoded_bytes(const std::vector<Value>& values) {
     std::size_t total = 0;
-    for (const auto& value : values) total += 16 + value.bytes.size();
+    for (const auto& value : values) total += channel_bytes(value.kind, value.bytes.size());
     return total;
 }
 

@@ -10,6 +10,7 @@
 //   GET  /pool?NAME   200 when the host has the pool NAME, 404 otherwise
 //   GET  /big?N       a statement with a text parameter of N bytes: its length, or the error's code
 //   GET  /two         holds a connection and acquires a second: the second acquire's error code
+//   GET  /many        pages a cursor over 1,000 rows of 50 short text columns: the rows it read
 let app = import:Std.App;
 let errors = import:Std.Core.Error;
 let program = import:Std.Program;
@@ -110,6 +111,16 @@ let SqlProbe = module:program.Entry (
                 },
             }
         }
+        if (request.path == "/many") {
+            let columns = "";
+            for (let i = 0; i < 50; i += 1) {
+                columns = columns + ", 'ab' AS c" + i.to_string();
+            }
+            last statement = database == "postgresql" ? "SELECT x" + columns + " FROM generate_series(1, 1000) AS x"
+                : "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 1000) SELECT x"
+                    + columns + " FROM c";
+            return count_rows(pool, statement);
+        }
         if (request.path == "/big") {
             last size = match (integers.parse(request.query)) {
                 Result.Ok(number) => number,
@@ -127,6 +138,43 @@ let SqlProbe = module:program.Entry (
             };
         }
         return Result<app.Response>.Ok(app.text(404, "not found"));
+    };
+
+    /// @brief Reads every row of `statement` through a cursor in pages of 1,000: the count, or the error.
+    let count_rows = func(pool: sql.Pool, statement: string) -> Result<app.Response> {
+        match (pool.acquire()) {
+            Result.Err(problem) => {
+                return Result<app.Response>.Err(problem);
+            },
+            Result.Ok(connection) => {
+                match (connection.open_cursor(statement)) {
+                    Result.Err(problem) => {
+                        let _ = connection.close();
+                        return Result<app.Response>.Err(problem);
+                    },
+                    Result.Ok(cursor) => {
+                        let total = 0;
+                        let pages = 0;
+                        while (cursor.has_more()) {
+                            match (cursor.fetch(1000)) {
+                                Result.Err(problem) => {
+                                    let _ = cursor.close();
+                                    let _ = connection.close();
+                                    return Result<app.Response>.Err(problem);
+                                },
+                                Result.Ok(rows) => {
+                                    total += rows.size();
+                                    pages += 1;
+                                },
+                            }
+                        }
+                        let _ = cursor.close();
+                        let _ = connection.close();
+                        return Result<app.Response>.Ok(app.text(200, total.to_string() + " in " + pages.to_string()));
+                    },
+                }
+            },
+        }
     };
 
     /// @brief 200 with the affected row count, 409 with the error for a constraint violation, and the error

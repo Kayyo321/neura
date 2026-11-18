@@ -585,7 +585,12 @@ Status PostgresCursor::fetch(std::size_t max, std::size_t budget, const Wait& wa
     while (pending_ && rows < max) {
         const int fields = PQnfields(pending_);
         std::size_t size = 0;
-        for (int i = 0; i < fields; ++i) size += 16 + static_cast<std::size_t>(PQgetlength(pending_, 0, i));
+        // The text form's length bounds every converted payload.
+        for (int i = 0; i < fields; ++i) {
+            size += PQgetisnull(pending_, 0, i)
+                        ? channel_bytes(nvm::sql_kind::null, 0)
+                        : channel_bytes(nvm::sql_kind::bytes, static_cast<std::size_t>(PQgetlength(pending_, 0, i)));
+        }
         if (rows > 0 && bytes + size > budget) break;
         bytes += size;
         for (int i = 0; i < fields; ++i) {

@@ -223,6 +223,10 @@ def probe_journey(args, port, label):
     check(status == 200 and body == b"none", f"{label} sql settings are not configuration: {status} {body!r}")
     status, body = call(args, port, "GET", "/config?sql.main.password")
     check(status == 200 and body == b"none", f"{label} passwords are not configuration: {status} {body!r}")
+    status, body = call(args, port, "GET", "/many")
+    pages = int(body.split(b" in ")[1]) if status == 200 and b" in " in body else 0
+    check(status == 200 and body.startswith(b"1000 in ") and pages >= 2,
+          f"{label} a cursor's pages fit the channel and lose no row: {status} {body!r}")
     status, body = call(args, port, "GET", "/big?1000")
     check(status == 200 and body == b"1000", f"{label} a 1,000-byte parameter: {status} {body!r}")
     status, body = call(args, port, "GET", "/big?1100000")

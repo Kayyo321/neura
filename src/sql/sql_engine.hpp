@@ -68,7 +68,7 @@ public:
     virtual const std::vector<std::string>& columns() const = 0;
     // Appends up to `max` rows, row by row, to `values`; `more` tells
     // whether another row follows. Stops early, before a row that would
-    // take the values past `budget` bytes (16 per value and its payload),
+    // take the values past `budget` bytes (channel_bytes of each value),
     // but always returns at least one row when there is one.
     virtual Status fetch(std::size_t max, std::size_t budget, const Wait& wait, std::vector<Value>& values,
                          bool& more) = 0;
@@ -234,6 +234,13 @@ private:
     std::unique_ptr<Engine> engine_;
     std::unique_ptr<Session> session_;
 };
+
+// The bytes a value takes in a worker channel's Return frame: its kind
+// byte and its bits element (17), and for Text and Bytes the element that
+// holds the payload (16 and its length). Pages are bounded by this measure.
+inline std::size_t channel_bytes(std::uint8_t kind, std::size_t payload) {
+    return 17 + (kind == nvm::sql_kind::text || kind == nvm::sql_kind::bytes ? 16 + payload : 0);
+}
 
 // Encodes values as the four lists of nvm::sql_kind; `columns` > 0 checks
 // that the count is a multiple of it.

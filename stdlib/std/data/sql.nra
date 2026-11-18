@@ -96,6 +96,7 @@ export let Sql = module (
     /// @brief What went wrong. Host codes map as docs/runtime/Sql.md lists. The library adds NotFound (no
     /// row for `query_one`, no such column) and InvalidInput (a closed connection, transaction or cursor, a
     /// NULL or a value that does not convert).
+    #Since("0.3.0")
     export let ErrorKind = enum (
         NotFound, InvalidInput, PermissionDenied, ConnectionFailed, ConnectionLost, TimedOut, Unsupported,
         CapabilityDenied, Cancelled, TooLarge, Busy, OutcomeUnknown, PoolExhausted, ConstraintViolation,
@@ -104,7 +105,7 @@ export let Sql = module (
 
     /// @brief A failed SQL operation: its kind, what was attempted, and the database's detail (a constraint,
     /// column or type name, or its message; never row data).
-    #Final
+    #[Final, Since("0.3.0")]
     export let SqlError = class:errors.ErrorDetail (
         /// @brief The kind of failure.
         export last kind: ErrorKind;
@@ -229,6 +230,7 @@ export let Sql = module (
     // Values
 
     /// @brief The SQL types a value can have.
+    #Since("0.3.0")
     export let ValueKind = enum (Null, Bool, Int, Float, Text, Bytes);
 
     /// @brief One SQL value: NULL, a Boolean, a 64-bit integer, a 64-bit float, UTF-8 text or bytes. Values
@@ -548,7 +550,7 @@ export let Sql = module (
     // Rows
 
     /// @brief The column names of a result, shared by its rows.
-    #Final
+    #[Final, Since("0.3.0")]
     export let Columns = class (
         /// @brief The names in result order.
         export last names: string[list];

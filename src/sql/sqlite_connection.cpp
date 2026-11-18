@@ -330,8 +330,9 @@ Status SqliteCursor::fetch(std::size_t max, std::size_t budget, const Wait& wait
             // Only text and blobs have a payload; asking an INTEGER or REAL
             // column for its bytes would convert it to text.
             const int type = sqlite3_column_type(statement_, i);
-            size += 16;
-            if (type == SQLITE_TEXT || type == SQLITE_BLOB) size += static_cast<std::size_t>(sqlite3_column_bytes(statement_, i));
+            size += type == SQLITE_TEXT || type == SQLITE_BLOB
+                        ? channel_bytes(nvm::sql_kind::bytes, static_cast<std::size_t>(sqlite3_column_bytes(statement_, i)))
+                        : channel_bytes(nvm::sql_kind::integer, 0);
         }
         if (rows > 0 && bytes + size > budget) break;
         bytes += size;
