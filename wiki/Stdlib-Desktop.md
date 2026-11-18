@@ -17,135 +17,210 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Desktop** · [`export const MaxWindows: int = 8`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L44)
+- **Desktop** · [`export const MaxWindows: int = 8`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L45)
   The most windows open at once (D-1). `open_window` answers Busy beyond it. The window host refuses a package that raises D-1 or D-3, because this child keeps the defaults.
-- **Desktop** · [`export let Registry = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L63)
+- **Desktop** · [`export let Registry = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L64)
   The operation identifiers a desktop target's bridge serves, as `registry.json` lists them. An identifier has 1 to 128 bytes of lowercase ASCII letters, digits, `.`, `_` and `-`. The canonical text is `{"operations":[...],"schema":1}` with the identifiers in ascending byte order and no spaces; the host and the child compare the SHA-256 of exactly that text. Tagged `#Final`.
-- **Desktop.Registry** · [`export last operations: string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L65)
+- **Desktop.Registry** · [`export last operations: string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L66)
   The identifiers in ascending byte order.
-- **Desktop.Registry** · [`export let init = func(ids: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L69)
+- **Desktop.Registry** · [`export let init = func(ids: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L70)
   A registry of `ids`, which must be valid, distinct, and in ascending byte order. Traps with "invalid argument: registry operation" otherwise.
-- **Desktop.Registry** · [`export let contains = func(id: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L82)
+- **Desktop.Registry** · [`export let contains = func(id: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L83)
   Whether `id` is listed.
-- **Desktop.Registry** · [`export let json = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L92)
+- **Desktop.Registry** · [`export let json = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L93)
   The canonical text of `registry.json`.
-- **Desktop.Registry** · [`export let digest = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L104)
+- **Desktop.Registry** · [`export let digest = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L105)
   The 32-byte SHA-256 of the canonical text.
-- **Desktop.Registry** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L106)
-- **Desktop.Registry** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L108)
-- **Desktop.Registry** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L115)
-- **Desktop** · [`export let Host = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L160)
+- **Desktop.Registry** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L107)
+- **Desktop.Registry** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L109)
+- **Desktop.Registry** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L116)
+- **Desktop** · [`export let Host = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L161)
   The services of the window host, usable from any task. Each request waits for its answer while the reader task runs; a request of a cancelled task answers Cancelled. Requests made through one `Host` take turns; `Context.host()` and `Call.host()` give every call its own. Tagged `#Final`, `#Synchronized`.
-- **Desktop.Host** · [`export let init = func(frames: Writer, requests: atomics.AtomicInt64, registrations: channels.Sender<Waiter>, status: atomics.AtomicInt64, windows: atomics.AtomicInt64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L173)
+- **Desktop.Host** · [`export let init = func(frames: Writer, requests: atomics.AtomicInt64, registrations: channels.Sender<Waiter>, status: atomics.AtomicInt64, windows: atomics.AtomicInt64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L174)
   Built by `run_application` and `Context`; shares the connection's handles.
-- **Desktop.Host** · [`export let fork = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L183)
+- **Desktop.Host** · [`export let fork = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L184)
   Another Host on the same connection, for another task.
-- **Desktop.Host** · [`export let window = func(handle: uint32) -> Window`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L186)
+- **Desktop.Host** · [`export let window = func(handle: uint32) -> Window`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L187)
   The window with `handle`, open or not; a request for a closed one answers InvalidInput.
-- **Desktop.Host** · [`export let open_window = func(title: string, width: int, height: int) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L190)
+- **Desktop.Host** · [`export let open_window = func(title: string, width: int, height: int) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L191)
   Opens a window of `width` by `height` pixels that shows the bundle's start route. Busy when D-1 windows are open.
-- **Desktop.Host** · [`export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int, route: string) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L195)
+- **Desktop.Host** · [`export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int, route: string) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L196)
   Opens a window with a minimum size and the bundle route it starts on. Sizes are 0 to 65,535; a route starts with `/`. Busy when D-1 windows are open.
-- **Desktop.Host** · [`export let data_directory = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L229)
+- **Desktop.Host** · [`export let data_directory = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L230)
   The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
-- **Desktop.Host** · [`export let notify = func(title: string, body: string) -> Result<NotifyOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L239)
+- **Desktop.Host** · [`export let notify = func(title: string, body: string) -> Result<NotifyOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L240)
   Shows a system notification: Shown, Denied (notifications turned off), or Unsupported (no notification service).
-- **Desktop.Host** · [`export let clipboard_write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L267)
+- **Desktop.Host** · [`export let clipboard_write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L268)
   Replaces the clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_write`.
-- **Desktop.Host** · [`export let clipboard_read = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L277)
+- **Desktop.Host** · [`export let clipboard_read = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L278)
   The clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_read`.
-- **Desktop.Host** · [`export let quit = func(status: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L288)
+- **Desktop.Host** · [`export let set_menu = func(items: MenuItem[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L290)
+  Replaces the application menu with `items`; an empty list removes it. Activating a `Native` item is a `MenuActivated` event for the child; a `Window` item goes to the focused window's page. InvalidInput for a menu the host refuses: an item identifier used twice, more than four levels, or more than 512 entries.
+- **Desktop.Host** · [`export let open_file_dialog = func(window: Window, filters: FileFilter[list]) -> Result<DialogOutcome<GrantedFile>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L301)
+  Asks the user for a file to read, over `window`: Chosen with a read grant, or Cancelled. The child learns the file's name, never its directory.
+- **Desktop.Host** · [`export let save_file_dialog = func(window: Window, suggested_name: string, filters: FileFilter[list]) -> Result<DialogOutcome<GrantedFile>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L306)
+  Asks the user where to save, over `window`, suggesting the file name `suggested_name`: Chosen with a write grant, or Cancelled. Choosing an existing file asks the system's own confirmation first.
+- **Desktop.Host** · [`export let quit = func(status: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L351)
   Ends the application with `status` (0 to 255). The host closes every window and the channel, so the calls in flight are cancelled and the process ends with `status`. Returns once the channel has ended; code after it in a bridge operation may not run.
-- **Desktop.Host** · [`export let exit_status = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L360)
+- **Desktop.Host** · [`export let exit_status = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L423)
   The status given to `quit`, or 0.
-- **Desktop.Host** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L365)
-- **Desktop** · [`export let Window = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L370)
+- **Desktop.Host** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L428)
+- **Desktop** · [`export let Window = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L433)
   A window of this application, identified by the host's handle. Usable from any task. Tagged `#Final`, `#Synchronized`.
-- **Desktop.Window** · [`export last handle: uint32 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L372)
+- **Desktop.Window** · [`export last handle: uint32 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L435)
   The host's handle; never reused while the application runs.
-- **Desktop.Window** · [`export let init = func(window_handle: uint32, through: Host)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L378)
+- **Desktop.Window** · [`export let init = func(window_handle: uint32, through: Host)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L441)
   The window with `window_handle`. Use `Context.open_window` or `Host.window`.
-- **Desktop.Window** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L384)
+- **Desktop.Window** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L447)
   Closes the window. Its renderer and state end; a call in flight from it is cancelled.
-- **Desktop.Window** · [`export let focus = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L387)
+- **Desktop.Window** · [`export let focus = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L450)
   Gives the window the input focus.
-- **Desktop.Window** · [`export let set_title = func(title: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L390)
+- **Desktop.Window** · [`export let set_title = func(title: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L453)
   Replaces the window's title.
-- **Desktop.Window** · [`export let host = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L394)
+- **Desktop.Window** · [`export let host = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L457)
   The services this window uses.
-- **Desktop.Window** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L396)
-- **Desktop.Window** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L398)
-- **Desktop.Window** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L405)
-- **Desktop** · [`export let Event = enum ( Closed(Window), Focused(Window), Blurred(Window), Resized(Window, int, int), MenuActivated(string, Window) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L409)
+- **Desktop.Window** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L459)
+- **Desktop.Window** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L461)
+- **Desktop.Window** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L468)
+- **Desktop** · [`export let Event = enum ( Closed(Window), Focused(Window), Blurred(Window), Resized(Window, int, int), MenuActivated(string, Window) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L472)
   A window event in the order the host observed it.
-- **Desktop** · [`export let NotifyOutcome = enum (Shown, Denied, Unsupported)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L418)
+- **Desktop** · [`export let NotifyOutcome = enum (Shown, Denied, Unsupported)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L481)
   What became of a notification.
-- **Desktop** · [`export let Call = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L423)
+- **Desktop** · [`export let DialogOutcome = enum<T> (Chosen(T), Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L484)
+  What the user did with a dialog: chose something, or cancelled it.
+- **Desktop** · [`export let MenuTarget = enum (Native, Window)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L488)
+  Where activating a menu item goes: a `MenuActivated` event for the child, or the focused window's page through `next_host_event()`.
+- **Desktop** · [`export let FileFilter = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L493)
+  A group of file types a dialog offers, such as "Images" with `png` and `jpg`. An extension is 1 to 16 ASCII letters and digits, or `*` for every file. Tagged `#Final`.
+- **Desktop.FileFilter** · [`export last label: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L495)
+  The text the dialog shows for the group.
+- **Desktop.FileFilter** · [`export last extensions: string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L497)
+  The extensions, without the dot.
+- **Desktop.FileFilter** · [`export let init = func(name: string, types: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L500)
+  The group `name` of the files with `types`.
+- **Desktop.FileFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L505)
+- **Desktop** · [`export let MenuItem = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L512)
+  One entry of an application menu: an item, a separator, or a submenu. Immutable; the `with_` functions answer a changed copy. Roles (`copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit`, `about`) are performed by the system, and their items never reach the child or the page. Tagged `#Final`.
+- **Desktop.MenuItem** · [`export last kind: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L514)
+  "item", "separator" or "submenu".
+- **Desktop.MenuItem** · [`export last id: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L516)
+  The item's identifier, unique in the menu: 1 to 128 of `a`-`z`, `0`-`9`, `.`, `_`, `-`.
+- **Desktop.MenuItem** · [`export last label: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L518)
+  The text shown.
+- **Desktop.MenuItem** · [`export last accelerator: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L520)
+  The keyboard shortcut, such as "CmdOrCtrl+S", or "".
+- **Desktop.MenuItem** · [`export last role: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L522)
+  The system role, or "".
+- **Desktop.MenuItem** · [`export last enabled: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L524)
+  Whether the item can be activated.
+- **Desktop.MenuItem** · [`export last target: MenuTarget`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L526)
+  Where activation goes.
+- **Desktop.MenuItem** · [`export last items: MenuItem[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L528)
+  A submenu's entries.
+- **Desktop.MenuItem** · [`export let init = func(entry_kind: string, entry_id: string, text: string, shortcut: string, system_role: string, active: bool, destination: MenuTarget, entries: MenuItem[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L531)
+  Use `action`, `role_item`, `separator` or `submenu`.
+- **Desktop.MenuItem** · [`export let with_accelerator = func(shortcut: string) -> MenuItem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L544)
+  The same entry with the keyboard shortcut `shortcut`.
+- **Desktop.MenuItem** · [`export let with_enabled = func(active: bool) -> MenuItem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L548)
+  The same entry, enabled or not.
+- **Desktop.MenuItem** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L551)
+- **Desktop** · [`export let action = func(id: string, label: string, target: MenuTarget) -> MenuItem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L555)
+  An item whose activation goes to `target`.
+- **Desktop** · [`export let role_item = func(id: string, label: string, role: string) -> MenuItem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L564)
+  An item the system performs: `copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit` or `about`. Traps with "invalid argument: menu role" for any other.
+- **Desktop** · [`export let separator = func -> MenuItem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L576)
+  A separator line.
+- **Desktop** · [`export let submenu = func(label: string, items: MenuItem[list]) -> MenuItem`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L580)
+  A submenu labelled `label` holding `items`.
+- **Desktop** · [`export let GrantedFile = class implements closeable.Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L589)
+  The capability to read or to write the one file the user chose in a dialog. It names the file and never its directory. The window host performs the reads and writes; the child needs no `fs` capability. A read grant only reads and a write grant only writes (PermissionDenied otherwise); the file is replaced at the first write. `close` revokes the grant, after which every use is InvalidInput and another `close` does nothing. Tagged `#Final`, `#Synchronized`.
+- **Desktop.GrantedFile** · [`export last handle: uint32 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L591)
+  The host's handle of the grant.
+- **Desktop.GrantedFile** · [`export last name: string { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L594)
+  The chosen file's name, without its directory.
+- **Desktop.GrantedFile** · [`export last writable: bool { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L597)
+  Whether this is a write grant.
+- **Desktop.GrantedFile** · [`export let init = func(grant_handle: uint32, file_name: string, write_grant: bool, through: Host)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L605)
+  The grant `grant_handle` of the file `file_name`. Built by the dialogs.
+- **Desktop.GrantedFile** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L613)
+  Up to `max` bytes (1 or more), fewer when they are all there is; empty at the end of the file.
+- **Desktop.GrantedFile** · [`export let write = func(data: uint8[list]) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L627)
+  Writes every byte of `data` after the bytes written before; answers the count.
+- **Desktop.GrantedFile** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L651)
+  Revokes the grant. Closing again does nothing and answers Ok.
+- **Desktop.GrantedFile** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L664)
+- **Desktop** · [`export let Call = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L670)
   One bridge call from a window. It carries nothing of the page: no URL, no script, no path. A call is handed to the task that runs its operation. Tagged `#Final`, `#Synchronized`.
-- **Desktop.Call** · [`export last id: uint32 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L425)
+- **Desktop.Call** · [`export last id: uint32 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L672)
   The host's request identifier.
-- **Desktop.Call** · [`export last operation: string { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L428)
+- **Desktop.Call** · [`export last operation: string { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L675)
   The registry operation identifier.
-- **Desktop.Call** · [`export last deadline_nanos: int64 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L431)
+- **Desktop.Call** · [`export last deadline_nanos: int64 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L678)
   Nanoseconds the caller still waited when the host forwarded the call (at most D-4).
-- **Desktop.Call** · [`export let init = func(call_id: uint32, from: Window, operation_id: string, body: uint8[list], nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L441)
+- **Desktop.Call** · [`export let init = func(call_id: uint32, from: Window, operation_id: string, body: uint8[list], nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L688)
   A call of `operation_id` from `from` carrying `body`. Built by `Context.run` from a Call frame.
-- **Desktop.Call** · [`export let request = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L451)
+- **Desktop.Call** · [`export let request = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L698)
   The request: the JSON bytes of the contract operation.
-- **Desktop.Call** · [`export let text = func -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L454)
+- **Desktop.Call** · [`export let text = func -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L701)
   The request as text, when it is UTF-8.
-- **Desktop.Call** · [`export let window = func -> Window`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L462)
+- **Desktop.Call** · [`export let window = func -> Window`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L709)
   The window whose main frame made the call.
-- **Desktop.Call** · [`export let host = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L466)
+- **Desktop.Call** · [`export let host = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L713)
   The window host's services for this call. Requests through it answer Cancelled once the call is cancelled.
-- **Desktop.Call** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L468)
-- **Desktop** · [`export let Dispatcher = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L493)
+- **Desktop.Call** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L715)
+- **Desktop** · [`export let Dispatcher = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L740)
   Maps each operation of a registry to its implementation. An operation without one answers the caller with error 13 (Unsupported). Each implementation runs as its own task: it must be task-safe and capture only transferable values (docs/lang/Concurrency.md section 5). Tagged `#Final`.
-- **Desktop.Dispatcher** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L495)
+- **Desktop.Dispatcher** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L742)
   The operations this dispatcher serves.
-- **Desktop.Dispatcher** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L502)
+- **Desktop.Dispatcher** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L749)
   A dispatcher for `served`, with no implementation yet.
-- **Desktop.Dispatcher** · [`export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L508)
+- **Desktop.Dispatcher** · [`export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L755)
   Adds the implementation of `operation`, which must be in the registry and not yet added. Traps with "invalid argument: dispatcher operation" otherwise.
-- **Desktop.Dispatcher** · [`export let on_event = func(handler: func(Event) -> void) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L519)
+- **Desktop.Dispatcher** · [`export let on_event = func(handler: func(Event) -> void) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L766)
   Has `Context.run` call `handler` with every window event, in the order the host observed them, after its own handling (a Closed window is no longer open). The handler runs on the task that called `run`, between calls, so it may use the context. Replaces an earlier handler.
-- **Desktop.Dispatcher** · [`export let dispatch = func(call: Call) -> [uint32, uint8[list]]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L542)
+- **Desktop.Dispatcher** · [`export let dispatch = func(call: Call) -> [uint32, uint8[list]]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L789)
   Runs `call` on the calling task: the status and reply bytes, 0 and the reply, or an error code and the UTF-8 message. `Context.run` runs each call as a task instead.
-- **Desktop.Dispatcher** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L560)
-- **Desktop** · [`export let Context = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L583)
+- **Desktop.Dispatcher** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L807)
+- **Desktop** · [`export let Context = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L830)
   The connection of the native child to its window host, used by the task that runs `start`. Tagged `#Final`, `#NotThreadSafe`.
-- **Desktop.Context** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L585)
+- **Desktop.Context** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L832)
   The registry sent in Hello.
-- **Desktop.Context** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L612)
+- **Desktop.Context** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L859)
   Use `run_application`.
-- **Desktop.Context** · [`export let host = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L628)
+- **Desktop.Context** · [`export let host = func -> Host`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L875)
   The services of the window host for this task. Pass `context.host().fork()` to another task.
-- **Desktop.Context** · [`export let window = func(handle: uint32) -> Window`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L631)
+- **Desktop.Context** · [`export let window = func(handle: uint32) -> Window`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L878)
   The window with `handle`, open or not.
-- **Desktop.Context** · [`export let open_window = func(title: string, width: int, height: int) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L635)
+- **Desktop.Context** · [`export let open_window = func(title: string, width: int, height: int) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L882)
   Opens a window of `width` by `height` pixels that shows the bundle's start route. Busy when D-1 windows are open.
-- **Desktop.Context** · [`export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int, route: string) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L640)
+- **Desktop.Context** · [`export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int, route: string) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L887)
   Opens a window with a minimum size and the bundle route it starts on. Sizes are 0 to 65,535; a route starts with `/`. Busy when D-1 windows are open.
-- **Desktop.Context** · [`export let open_windows = func -> Window[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L656)
+- **Desktop.Context** · [`export let open_windows = func -> Window[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L903)
   The windows this context opened that it has not seen close, in the order they opened. Windows a bridge operation opened through its own `Host` are not listed.
-- **Desktop.Context** · [`export let data_directory = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L659)
+- **Desktop.Context** · [`export let data_directory = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L906)
   The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
-- **Desktop.Context** · [`export let notify = func(title: string, body: string) -> Result<NotifyOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L663)
+- **Desktop.Context** · [`export let notify = func(title: string, body: string) -> Result<NotifyOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L910)
   Shows a system notification: Shown, Denied (notifications turned off), or Unsupported (no notification service).
-- **Desktop.Context** · [`export let clipboard_write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L667)
+- **Desktop.Context** · [`export let clipboard_write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L914)
   Replaces the clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_write`.
-- **Desktop.Context** · [`export let clipboard_read = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L670)
+- **Desktop.Context** · [`export let clipboard_read = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L917)
   The clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_read`.
-- **Desktop.Context** · [`export let next_event = func -> Result<Event>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L674)
+- **Desktop.Context** · [`export let set_menu = func(items: MenuItem[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L920)
+  Replaces the application menu (see `Host.set_menu`).
+- **Desktop.Context** · [`export let open_file_dialog = func(window: Window, filters: FileFilter[list]) -> Result<DialogOutcome<GrantedFile>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L923)
+  Asks the user for a file to read (see `Host.open_file_dialog`).
+- **Desktop.Context** · [`export let save_file_dialog = func(window: Window, suggested_name: string, filters: FileFilter[list]) -> Result<DialogOutcome<GrantedFile>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L927)
+  Asks the user where to save (see `Host.save_file_dialog`).
+- **Desktop.Context** · [`export let next_event = func -> Result<Event>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L932)
   The next window event, waiting for one. Bridge calls that arrive first wait for `run`. UnexpectedEnd once the host has closed the channel.
-- **Desktop.Context** · [`export let run = func(dispatcher: Dispatcher) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L697)
+- **Desktop.Context** · [`export let run = func(dispatcher: Dispatcher) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L955)
   Answers bridge calls with `dispatcher` and consumes events until the host ends the channel: after the last window closes, after `quit`, or when the host itself ends. Each call runs as its own task. A Closed event forgets its window; then every event goes to the dispatcher's `on_event` handler on this task. When the channel ends, calls still running are cancelled; if any is still running then, the process ends at once with the application's status. A dispatcher for another registry is InvalidInput.
-- **Desktop.Context** · [`export let quit = func(status: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L759)
+- **Desktop.Context** · [`export let quit = func(status: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L1017)
   Ends the application with `status` (0 to 255). The host closes every window and the channel; `quit` returns when the channel has ended, `run` then returns, and the process ends with `status`. Calls and events still in flight are dropped.
-- **Desktop.Context** · [`export let exit_status = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L762)
+- **Desktop.Context** · [`export let exit_status = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L1020)
   The process status the application ends with: the status given to `quit`, or 0.
-- **Desktop.Context** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L876)
-- **Desktop** · [`export let run_application = func(registry: Registry, start: func(Context) -> Result<Unit>) -> program.ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L883)
+- **Desktop.Context** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L1134)
+- **Desktop** · [`export let run_application = func(registry: Registry, start: func(Context) -> Result<Unit>) -> program.ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L1141)
   Connects to the window host, runs `start`, and ends the process with the application's status: the status given to `quit`, 0 when `start` returns Ok, and 1 when it returns an error or the handshake fails. The error goes to standard error. It returns only if ending the process fails.
 <!-- END SOURCE API -->
 
@@ -162,8 +237,10 @@ The following section is the module's part of the standard-library design. The s
 - **Calls run as tasks.** `run` spawns each call as its own task ([Concurrency](Concurrency)), so a slow operation holds up no other and replies come back in the order operations finish. An implementation is therefore a spawned call: task-safe, with only transferable captures. It reaches the window host through `call.host()` and `call.window()`; capturing the `Context` is `E0602` at the program's call of `run`. A call whose caller stopped waiting (past D-4, its window closed, or its page ended) is cancelled: a parked timer, channel or host request answers `Cancelled`, and a computing operation sees `Std.Concurrent.Cancellation.requested()`. Nothing interrupts an operation that never parks and never asks. A desktop child cannot use `Std.DynamicForeign` or `import:c(...)`, which tasks exclude.
 - **`Call`** (a monitor): `id`, `operation`, `deadline_nanos`, `request()` (the JSON bytes of the contract operation), `text()` (`Some` when they are UTF-8), `window()` and `host()`, and nothing of the page.
 - **`Host`** (a monitor, usable from any task): `open_window(title, width, height)` and `open_window_at(title, width, height, min_width, min_height, route)` answer `Result<Window>` (Busy past the 8 windows of D-1; the child keeps the default D-1 and D-3, and the window host refuses a package that raises them); `window(handle)`; `quit(status)`; `data_directory()`; `notify(title, body) -> Result<NotifyOutcome>` (`Shown`, `Denied`, `Unsupported`); `clipboard_write(text)` and `clipboard_read()`, which answer `CapabilityDenied` unless the package grants `desktop.clipboard_write` or `desktop.clipboard_read`; `fork()` gives another task its own `Host`. A request whose channel has ended answers `UnexpectedEnd`.
+- **Menus**: `Host.set_menu(items: MenuItem[list])` replaces the application menu (an empty list removes it). `action(id, label, target)` with `MenuTarget.Native` (a `MenuActivated` event) or `MenuTarget.Window` (the focused page's `next_host_event()`), `role_item(id, label, role)` for `copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit` and `about`, which the system performs, `separator()` and `submenu(label, items)`; `with_accelerator(shortcut)` and `with_enabled(flag)` answer changed copies. A menu the host refuses (an identifier twice, more than four levels or 512 entries) is `InvalidInput`.
+- **Dialogs and granted files**: `Host.open_file_dialog(window, filters)` and `save_file_dialog(window, suggested_name, filters)` answer `Result<DialogOutcome<GrantedFile>>`, `Chosen(file)` or `Cancelled`, with `FileFilter(label, extensions)`. A `GrantedFile` (a monitor implementing `Closeable`) has `name` (never the directory), `writable`, `read(max)` (empty at the end), `write(data) -> Result<int64>` and `close()`. A read grant only reads and a write grant only writes (`PermissionDenied`); the file is replaced at the first write; after `close` every use is `InvalidInput` and another `close` does nothing.
 - **`run_application(registry, start: func(Context) -> Result<Unit>) -> ExitCode`** connects, calls `start`, and ends the process with 0, the status given to `quit`, or 1 when the handshake or `start` fails.
-- **`Context`** (the task that runs `start`): the `Host` services above, delegated to its own `host()`; `open_windows()` (the windows it opened and has not seen close); `next_event() -> Result<Event>` with `Event` = `Closed(Window)`, `Focused(Window)`, `Blurred(Window)`, `Resized(Window, int, int)`, `MenuActivated(string, Window)`; `run(dispatcher)` serves calls and passes events to the dispatcher's `on_event` handler until the host ends the channel, then cancels the calls still running and, if one still runs, ends the process at once.
+- **`Context`** (the task that runs `start`): the `Host` services above, menus and dialogs included, delegated to its own `host()`; `open_windows()` (the windows it opened and has not seen close); `next_event() -> Result<Event>` with `Event` = `Closed(Window)`, `Focused(Window)`, `Blurred(Window)`, `Resized(Window, int, int)`, `MenuActivated(string, Window)`; `run(dispatcher)` serves calls and passes events to the dispatcher's `on_event` handler until the host ends the channel, then cancels the calls still running and, if one still runs, ends the process at once.
 - **`Window`** (a monitor, usable from any task): `handle`, `close()`, `focus()`, `set_title(title)`, `host()`; windows are equal by handle.
 - A handler's `Err` reaches the page as status 100 with the error's message; an operation without an implementation as status 13; a reply larger than D-3 as status 16 with no body. A trap in the child ends the application.
 

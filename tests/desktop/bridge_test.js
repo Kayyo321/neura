@@ -13,9 +13,12 @@ const {
     BridgeRouter, DesktopStatus, FrameQueue, NativeChildChannel, NativeFrameKind: Kind, desktopLimits, parseRegistry,
 } = require('../../hosts/desktop/main');
 
-const fixtureOperations = ['fixture.clipboard_read', 'fixture.clipboard_write', 'fixture.close', 'fixture.data_dir',
-    'fixture.echo', 'fixture.fail', 'fixture.focus', 'fixture.notify', 'fixture.open', 'fixture.open_many', 'fixture.quit',
-    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved', 'fixture.wait', 'fixture.work'];
+const fixtureOperations = [
+    'fixture.clipboard_read', 'fixture.clipboard_write', 'fixture.close', 'fixture.data_dir', 'fixture.echo',
+    'fixture.fail', 'fixture.focus', 'fixture.menu', 'fixture.menu_bad', 'fixture.notify', 'fixture.open',
+    'fixture.open_many', 'fixture.open_read', 'fixture.quit', 'fixture.save', 'fixture.spin', 'fixture.title',
+    'fixture.trap', 'fixture.unserved', 'fixture.wait', 'fixture.work'
+];
 const fixtureRegistry = Buffer.from(JSON.stringify({ operations: fixtureOperations, schema: 1 }));
 
 function u32(value) {
@@ -81,7 +84,7 @@ test('the registry is canonical and hashed as written', () => {
     const registry = parseRegistry(fixtureRegistry);
     assert.equal(registry.digest, createHash('sha256').update(fixtureRegistry).digest('hex'));
     // The digest Std.Desktop.Registry computes for the same identifiers (tests/stdlib/desktop).
-    assert.equal(registry.digest, '8b2f1075c0bfda522889711fbc75537e5731cbcbc59e2eafafd1bfe6499bdaa9');
+    assert.equal(registry.digest, 'e917d79fbe142599476e9a5da796ee9ebcd9404133d6c92310f9183a4004cc8e');
     assert.equal(parseRegistry(Buffer.from('{"operations":[],"schema":1}')).operations.size, 0);
     for (const bad of [
         '{"schema":1,"operations":[]}', '{"operations":["b","a"],"schema":1}', '{"operations":["a","a"],"schema":1}',

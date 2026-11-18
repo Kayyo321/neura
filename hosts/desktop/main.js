@@ -1052,6 +1052,86 @@ function dataDirectory(applicationId) {
     return path.join(base, applicationId);
 }
 
+// A menu is canonical JSON from the child: {"items":[...],"schema":1}. An entry is
+// {"kind":"separator"}, {"items":[...],"kind":"submenu","label":...}, or an item
+// {"accelerator","enabled","id","kind":"item","label","role","target"} whose
+// target is "native" (a MenuActivated event for the child) or "window" (a host
+// event for the focused window's page). Roles are performed by the system.
+const menuRoles = new Map([
+    ['copy', 'copy'], ['paste', 'paste'], ['cut', 'cut'], ['undo', 'undo'], ['redo', 'redo'],
+    ['select_all', 'selectAll'], ['quit', 'quit'], ['about', 'about'],
+]);
+const menuBounds = Object.freeze({ depth: 4, entries: 512, label: 256 });
+const acceleratorPattern = /^(?:[A-Za-z]+\+){0,4}(?:[A-Za-z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|Plus|Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|Escape|Esc)$/;
+
+function parseMenu(text) {
+    let document;
+    try {
+        document = JSON.parse(text);
+    } catch {
+        throw new DesktopServiceError(DesktopStatus.InvalidInput, 'the menu is not JSON');
+    }
+    if (!record(document) || document.schema !== 1 || !Array.isArray(document.items)) {
+        throw new DesktopServiceError(DesktopStatus.InvalidInput, 'the menu is not a schema 1 menu');
+    }
+    const ids = new Set();
+    let count = 0;
+    const invalid = reason => new DesktopServiceError(DesktopStatus.InvalidInput, `invalid menu: ${reason}`);
+    const label = value => {
+        if (typeof value !== 'string' || value.length === 0 || value.length > menuBounds.label || /[\x00-\x1f\x7f]/.test(value)) {
+            throw invalid('label');
+        }
+        return value;
+    };
+    const entries = (items, depth) => {
+        if (!Array.isArray(items) || depth > menuBounds.depth) throw invalid('nesting');
+        return items.map(entry => {
+            count += 1;
+            if (!record(entry) || count > menuBounds.entries) throw invalid('entry');
+            if (entry.kind === 'separator') return Object.freeze({ kind: 'separator' });
+            if (entry.kind === 'submenu') {
+                return Object.freeze({ kind: 'submenu', label: label(entry.label), items: entries(entry.items, depth + 1) });
+            }
+            if (entry.kind !== 'item' || typeof entry.id !== 'string' || !operationPattern.test(entry.id) || ids.has(entry.id)) {
+                throw invalid('item id');
+            }
+            ids.add(entry.id);
+            if (typeof entry.enabled !== 'boolean' || !['native', 'window'].includes(entry.target)) throw invalid('item');
+            if (typeof entry.role !== 'string' || (entry.role !== '' && !menuRoles.has(entry.role))) throw invalid('role');
+            if (typeof entry.accelerator !== 'string' || (entry.accelerator !== '' && !acceleratorPattern.test(entry.accelerator))) {
+                throw invalid('accelerator');
+            }
+            return Object.freeze({
+                kind: 'item', id: entry.id, label: label(entry.label), enabled: entry.enabled, target: entry.target,
+                role: entry.role, accelerator: entry.accelerator,
+            });
+        });
+    };
+    return Object.freeze(entries(document.items, 1));
+}
+
+// A dialog's file filters: a count, then a label and a count of extensions, each a text.
+function readFilters(cursor) {
+    const count = cursor.u32();
+    if (count > 32) throw new DesktopServiceError(DesktopStatus.InvalidInput, 'too many filters');
+    const filters = [];
+    for (let i = 0; i < count; i += 1) {
+        const name = cursor.text();
+        const extensions = [];
+        const total = cursor.u32();
+        if (total > 32 || !name || name.length > 256) throw new DesktopServiceError(DesktopStatus.InvalidInput, 'invalid filter');
+        for (let j = 0; j < total; j += 1) {
+            const extension = cursor.text();
+            if (!/^(?:[A-Za-z0-9]{1,16}|\*)$/.test(extension)) throw new DesktopServiceError(DesktopStatus.InvalidInput, 'invalid extension');
+            extensions.push(extension);
+        }
+        filters.push({ name, extensions });
+    }
+    return filters;
+}
+
+const maxGrantedFiles = 64;
+
 let bridgeOwners;
 
 // One handler serves every window. A sender that is not the main frame of a
@@ -1063,7 +1143,12 @@ function registerBridgeIpc(ipcMain) {
     ipcMain.handle('neura:bridge-call', (event, operationId, request) => {
         const owner = bridgeOwners.get(event.sender.id);
         if (!owner) throw new Error('The Neura desktop bridge is unavailable');
-        return owner(event, operationId, request);
+        return owner.call(event, operationId, request);
+    });
+    ipcMain.handle('neura:next-host-event', event => {
+        const owner = bridgeOwners.get(event.sender.id);
+        if (!owner) throw new Error('The Neura desktop bridge is unavailable');
+        return owner.nextHostEvent(event);
     });
     return bridgeOwners;
 }
@@ -1074,10 +1159,10 @@ function registerBridgeIpc(ipcMain) {
 // comes from the trusted package bootstrap, never from a renderer.
 async function runDesktopApplication(configuration, {
     openExternal, log = console.warn, nativeIO = {}, onNativeFailure, clipboard: clipboardOverride,
-    notify: notifyOverride,
+    notify: notifyOverride, dialogs: dialogDriver, timing = false,
 } = {}) {
     registerDesktopScheme();
-    const { app, dialog, ipcMain } = require('electron');
+    const { app, dialog, ipcMain, Menu } = require('electron');
     const applicationId = configuration.applicationId;
     const allowed = externalAllowlist(configuration.externalOrigins ?? []);
     const limits = desktopLimits(configuration.limits);
@@ -1089,6 +1174,8 @@ async function runDesktopApplication(configuration, {
     const reportFailure = onNativeFailure ?? (error => dialog.showErrorBox('Neura desktop application ended', error.message));
     const windows = new Map();
     let nextWindow = 1;
+    const grants = new Map();
+    let nextFile = 1;
     let quitStatus;
     let ending = false;
     let queue;
@@ -1120,6 +1207,86 @@ async function runDesktopApplication(configuration, {
         return entry.window;
     };
     const clipboard = () => clipboardOverride ?? require('electron').clipboard;
+    const handleOf = window => {
+        for (const [handle, entry] of windows) if (entry.window === window) return handle;
+        return 0;
+    };
+    // Window-target menu items and other host events for a page, read by its next_host_event().
+    const deliverHostEvent = (handle, value) => {
+        const entry = windows.get(handle);
+        if (!entry) return false;
+        const waiter = entry.waiting.shift();
+        if (waiter) {
+            waiter(value);
+        } else {
+            if (entry.hostEvents.length >= 64) {
+                entry.hostEvents.shift();
+                log('Dropped the oldest host event of a window that did not read them');
+            }
+            entry.hostEvents.push(value);
+        }
+        return true;
+    };
+    const activateMenu = (item, focused) => {
+        const handle = focused && !focused.isDestroyed() ? handleOf(focused) : 0;
+        if (item.target === 'native') {
+            sendEvent(EventKind.MenuActivated, handle, 0, 0, item.id);
+        } else if (!handle || !deliverHostEvent(handle, Object.freeze({ kind: 'menu', id: item.id }))) {
+            log('Dropped a window menu item with no focused window');
+        }
+    };
+    const menuTemplate = entries => entries.map(entry => {
+        if (entry.kind === 'separator') return { type: 'separator' };
+        if (entry.kind === 'submenu') return { label: entry.label, submenu: menuTemplate(entry.items) };
+        const template = { id: entry.id, label: entry.label, enabled: entry.enabled };
+        if (entry.accelerator) template.accelerator = entry.accelerator;
+        if (entry.role) template.role = menuRoles.get(entry.role);
+        else template.click = (_item, focused) => activateMenu(entry, focused);
+        return template;
+    });
+    const grantOf = (cursor, mode) => {
+        const handle = cursor.u32();
+        const grant = grants.get(handle);
+        if (!grant) throw new DesktopServiceError(DesktopStatus.InvalidInput, 'unknown or closed file');
+        if (mode && grant.mode !== mode) throw new DesktopServiceError(DesktopStatus.PermissionDenied, `the file was granted for ${grant.mode}`);
+        return [handle, grant];
+    };
+    const closeGrant = async handle => {
+        const grant = grants.get(handle);
+        grants.delete(handle);
+        if (grant?.file) await grant.file.close().catch(() => {});
+    };
+    // A file dialog: the system's own, or the scripted driver of a test. The child receives the chosen file's
+    // name and a handle, never its directory.
+    const fileDialog = async (kind, cursor) => {
+        const window = windowOf(cursor);
+        const suggested = cursor.text();
+        const filters = readFilters(cursor);
+        cursor.end();
+        if (suggested !== '' && (!safePath(suggested) || suggested.includes('/'))) {
+            throw new DesktopServiceError(DesktopStatus.InvalidInput, 'the suggested name must be a file name');
+        }
+        if (grants.size >= maxGrantedFiles) throw new DesktopServiceError(DesktopStatus.Busy, 'too many granted files');
+        let outcome;
+        if (dialogDriver) {
+            outcome = await dialogDriver(kind, { handle: handleOf(window), suggestedName: suggested, filters });
+        } else {
+            const defaultPath = suggested ? path.join(app.getPath('documents'), suggested) : undefined;
+            outcome = kind === 'open'
+                ? await dialog.showOpenDialog(window, { properties: ['openFile'], defaultPath, filters })
+                : await dialog.showSaveDialog(window, { defaultPath, filters, properties: ['showOverwriteConfirmation', 'createDirectory'] });
+            outcome = { canceled: outcome.canceled, filePath: outcome.filePath ?? outcome.filePaths?.[0] };
+        }
+        if (ending || outcome.canceled || !outcome.filePath) return Buffer.concat([u32(0), u32(0), wireText('')]);
+        let chosen = path.resolve(outcome.filePath);
+        if (kind === 'open') {
+            chosen = await fs.realpath(chosen);
+            if (!(await fs.stat(chosen)).isFile()) throw new DesktopServiceError(DesktopStatus.InvalidInput, 'not a regular file');
+        }
+        const handle = nextFile++;
+        grants.set(handle, { path: chosen, mode: kind === 'open' ? 'read' : 'write', file: null });
+        return Buffer.concat([u32(1), u32(handle), wireText(path.basename(chosen))]);
+    };
 
     services = {
         async 'neura.desktop.window.open'(cursor) {
@@ -1140,15 +1307,33 @@ async function runDesktopApplication(configuration, {
                 onRendererGone: () => router.closeWindow(handle),
                 onWindow(value) {
                     created = value;
+                    // B-D1: the time from process start to the first window's first paint, for the benchmark.
+                    if (timing && handle === 1) {
+                        value.once('ready-to-show', () => {
+                            console.log(`neura-timing first-paint ms=${Math.round(process.uptime() * 1000)} pid=${process.pid} child=${child.pid}`);
+                        });
+                    }
                     const contentsId = value.webContents.id;
-                    windows.set(handle, { window: value });
-                    owners.set(contentsId, (event, operationId, request) => {
-                        if (value.isDestroyed() || event.senderFrame !== value.webContents.mainFrame ||
-                            !ownOrigin(parseUrl(event.senderFrame.url), applicationId)) {
-                            log('Refused a bridge call from a frame outside the application');
-                            return { status: DesktopStatus.PermissionDenied };
-                        }
-                        return router.call(handle, operationId, request);
+                    const entry = { window: value, hostEvents: [], waiting: [] };
+                    windows.set(handle, entry);
+                    const trusted = event => !value.isDestroyed() && event.senderFrame === value.webContents.mainFrame &&
+                        ownOrigin(parseUrl(event.senderFrame.url), applicationId);
+                    owners.set(contentsId, {
+                        call(event, operationId, request) {
+                            if (!trusted(event)) {
+                                log('Refused a bridge call from a frame outside the application');
+                                return { status: DesktopStatus.PermissionDenied };
+                            }
+                            return router.call(handle, operationId, request);
+                        },
+                        nextHostEvent(event) {
+                            if (!trusted(event)) {
+                                log('Refused a host event request from a frame outside the application');
+                                return null;
+                            }
+                            if (entry.hostEvents.length) return entry.hostEvents.shift();
+                            return new Promise(resolve => entry.waiting.push(resolve));
+                        },
                     });
                     value.on('focus', () => sendEvent(EventKind.Focused, handle));
                     value.on('blur', () => sendEvent(EventKind.Blurred, handle));
@@ -1158,6 +1343,7 @@ async function runDesktopApplication(configuration, {
                     value.once('closed', () => {
                         owners.delete(contentsId);
                         windows.delete(handle);
+                        for (const waiter of entry.waiting.splice(0)) waiter(null);
                         router.closeWindow(handle);
                         sendEvent(EventKind.Closed, handle);
                         if (windows.size === 0 && !ending) endChannel();
@@ -1214,6 +1400,49 @@ async function runDesktopApplication(configuration, {
             if (!capabilities.has('desktop.clipboard_read')) throw new DesktopServiceError(DesktopStatus.CapabilityDenied, 'denied');
             return wireText(await clipboard().readText());
         },
+        async 'neura.desktop.menu.set'(cursor) {
+            const text = cursor.text();
+            cursor.end();
+            const entries = parseMenu(text);
+            Menu.setApplicationMenu(entries.length ? Menu.buildFromTemplate(menuTemplate(entries)) : null);
+        },
+        async 'neura.desktop.dialog.open_file'(cursor) {
+            return fileDialog('open', cursor);
+        },
+        async 'neura.desktop.dialog.save_file'(cursor) {
+            return fileDialog('save', cursor);
+        },
+        async 'neura.desktop.file.read'(cursor) {
+            const [, grant] = grantOf(cursor, 'read');
+            const maximum = cursor.u32();
+            cursor.end();
+            // The answer must fit one frame: the HostReturn header is 8 bytes after the 5-byte envelope.
+            if (maximum < 1 || maximum > 0x7fffffff) throw new DesktopServiceError(DesktopStatus.InvalidInput, 'invalid count');
+            const count = Math.min(maximum, limits.frameBytes - 13);
+            grant.file ??= await fs.open(grant.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+            const buffer = Buffer.alloc(count);
+            const { bytesRead } = await grant.file.read(buffer, 0, count, null);
+            return buffer.subarray(0, bytesRead);
+        },
+        async 'neura.desktop.file.write'(cursor) {
+            const [, grant] = grantOf(cursor, 'write');
+            const data = cursor.rest();
+            // The file is replaced at its first write, so a grant never written leaves the file as it was.
+            grant.file ??= await fs.open(grant.path, 'w', 0o600);
+            let written = 0;
+            while (written < data.length) {
+                const { bytesWritten } = await grant.file.write(data, written, data.length - written, null);
+                written += bytesWritten;
+            }
+            const count = Buffer.alloc(8);
+            count.writeBigInt64LE(BigInt(written));
+            return count;
+        },
+        async 'neura.desktop.file.close'(cursor) {
+            const [handle] = grantOf(cursor);
+            cursor.end();
+            await closeGrant(handle);
+        },
         async 'neura.desktop.quit'(cursor) {
             const status = cursor.u32();
             cursor.end();
@@ -1236,15 +1465,18 @@ async function runDesktopApplication(configuration, {
         endChannel();
     };
     const allWindowsClosed = () => {};
+    // No menu until the child sets one: Electron's default menu offers reloads and developer tools.
+    Menu.setApplicationMenu(null);
     app.on('before-quit', beforeQuit);
     app.on('window-all-closed', allWindowsClosed);
     const detach = () => {
         app.off('before-quit', beforeQuit);
         app.off('window-all-closed', allWindowsClosed);
     };
-    const finished = child.closed.then(result => {
+    const finished = child.closed.then(async result => {
         ending = true;
         router.close();
+        await Promise.all([...grants.keys()].map(closeGrant));
         let error = result.error;
         const expected = quitStatus ?? 0;
         if (!error && result.code !== expected) {
@@ -1304,7 +1536,22 @@ async function loadDesktopPackage(directory) {
     if (createHash('sha256').update(registryBytes).digest('hex') !== registry.sha256) throw new Error('SHA-256 mismatch for registry.json');
     const executable = await inside(child.executable, false);
     await fs.access(executable, constants.X_OK);
+    // A package built with --test-hooks names a scripted dialog driver: a JSON list of answers, consumed in order,
+    // each {"canceled": true} or {"canceled": false, "filePath": <absolute path>}. Release packages have no
+    // testHooks, and the packager refuses one that names it without --test-hooks.
+    let dialogDriver;
+    if (manifest.testHooks !== undefined) {
+        if (!record(manifest.testHooks) || typeof manifest.testHooks.dialogs !== 'string') throw new Error('desktop.json has invalid testHooks');
+        const script = JSON.parse(await fs.readFile(await inside(manifest.testHooks.dialogs, false), 'utf8'));
+        if (!Array.isArray(script)) throw new Error('the dialog script is not a list');
+        dialogDriver = async kind => {
+            const answer = script.shift() ?? { canceled: true };
+            console.log(`neura-test-hook dialog ${kind}: ${answer.canceled ? 'cancelled' : 'chosen'}`);
+            return answer;
+        };
+    }
     return {
+        dialogDriver,
         applicationId: manifest.id,
         directory: await inside(web.directory, true),
         manifestDigest: web.manifestDigest,
@@ -1331,7 +1578,9 @@ function bootstrapDesktopPackage() {
         return;
     }
     loadDesktopPackage(directory)
-        .then(configuration => runDesktopApplication(configuration))
+        .then(configuration => runDesktopApplication(configuration, {
+            timing: process.argv.includes('--timing'), dialogs: configuration.dialogDriver,
+        }))
         .catch(error => {
             console.error(`Neura desktop application failed to start: ${error.message}`);
             app.exit(1);

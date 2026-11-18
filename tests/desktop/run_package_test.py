@@ -23,15 +23,12 @@ import tempfile
 import time
 
 from run_app_test import build_child
-from run_shell_test import stop_children
+from run_shell_test import ELECTRON_X11, isolated_environment, stop_children
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 APPLICATION_ID = "example.neura.fixture"
-OPERATIONS = ["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir", "fixture.echo",
-              "fixture.fail", "fixture.focus", "fixture.notify", "fixture.open", "fixture.open_many", "fixture.quit",
-              "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved", "fixture.wait",
-              "fixture.work"]
+OPERATIONS = ["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir", "fixture.echo", "fixture.fail", "fixture.focus", "fixture.menu", "fixture.menu_bad", "fixture.notify", "fixture.open", "fixture.open_many", "fixture.open_read", "fixture.quit", "fixture.save", "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved", "fixture.wait", "fixture.work"]
 TITLE = "Packaged ✓"
 CSP = "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
 
@@ -127,7 +124,8 @@ def inner(executable):
     for tool in ("neura", "node"):
         if shutil.which(tool, path=environment["PATH"]):
             print(f"note: {tool} is on the system path; the package does not use it")
-    process = subprocess.Popen([executable, "--disable-background-networking"], env=environment,
+    environment["DBUS_SESSION_BUS_ADDRESS"] = "disabled:"
+    process = subprocess.Popen([executable, ELECTRON_X11, "--disable-background-networking"], env=environment,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         deadline = time.monotonic() + 30
@@ -193,7 +191,7 @@ def main():
         executable = install / "fixture" / "fixture"
         home = scratch / "home é"
         home.mkdir()
-        environment = {**os.environ, "HOME": str(home), "XDG_DATA_HOME": str(home / "data")}
+        environment = isolated_environment(HOME=str(home), XDG_DATA_HOME=str(home / "data"))
         result = subprocess.run(["xvfb-run", "-a", sys.executable, str(Path(__file__).resolve()), "--inner", str(executable)],
                                 env=environment, timeout=90)
         return result.returncode

@@ -210,6 +210,9 @@ async function verifyShell({ directory, settings }) {
 
 async function run() {
     assert.equal(process.versions.electron, '45.3.3');
+    // Never the user's own desktop: no Wayland display, and Electron on the virtual X display.
+    assert.equal(process.env.WAYLAND_DISPLAY, undefined);
+    assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
     const fixture = await makeBundle();
     await verifyStartup(fixture);
     await verifyShell(fixture);
@@ -218,6 +221,9 @@ async function run() {
 
 async function runNative(mode) {
     assert.equal(process.versions.electron, '45.3.3');
+    // Never the user's own desktop: no Wayland display, and Electron on the virtual X display.
+    assert.equal(process.env.WAYLAND_DISPLAY, undefined);
+    assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
     const { settings } = await makeBundle();
     const latch = path.join(scratch, 'permit-hello');
     const registryDigest = digest('{"operations":[]}\n');

@@ -16,9 +16,9 @@ import sys
 import tempfile
 import time
 
-from run_shell_test import stop_children
+from run_shell_test import ELECTRON_X11, isolated_environment, stop_children
 
-CASES = {"app-close": 0, "app-quit": 7, "app-trap": 1, "app-services": 0, "app-denied": 0, "app-windows": 0,
+CASES = {"app-close": 0, "app-quit": 7, "app-trap": 1, "app-services": 0, "app-denied": 0, "app-windows": 0, "app-dialogs": 0, "app-trap-dialog": 1,
          "app-killed": None}
 HERE = Path(__file__).resolve().parent
 # A desktop child runs as long as the application, so its policy records no practical step limit: the default
@@ -115,17 +115,63 @@ def run_killed(command, env, scratch):
     return 1 if left else 0
 
 
+def run_trap_dialog(command, env, scratch):
+    """Case 32 with the default failure report: find the native error dialog, dismiss it, and expect status 1."""
+    log = Path(scratch) / "dialog.out"
+    with open(log, "w") as output, subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, text=True,
+                                                    start_new_session=True, env=env) as process:
+        found = None
+        try:
+            deadline = time.monotonic() + 60
+            display = None
+            while time.monotonic() < deadline and process.poll() is None and not found:
+                text = log.read_text()
+                display = display or next((line[8:] for line in text.splitlines() if line.startswith("DISPLAY=")), None)
+                authority = next((line[11:] for line in text.splitlines() if line.startswith("XAUTHORITY=")), None)
+                if display and authority is not None:
+                    x = {**isolated_environment(), "DISPLAY": display, "XAUTHORITY": authority}
+                    # GTK titles the error dialog's window "Error"; its text is the host's title and message.
+                    search = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", "^Error$"],
+                                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=x)
+                    found = search.stdout.split()[0] if search.stdout.strip() else None
+                time.sleep(0.1)
+            if found:
+                name = subprocess.run(["xdotool", "getwindowname", found], stdout=subprocess.PIPE, text=True, env=x)
+                print(f"app-trap-dialog: the window {found} named {name.stdout.strip()!r} is mapped")
+                if os.environ.get("NEURA_DESKTOP_EVIDENCE"):
+                    subprocess.run(["import", "-window", found, os.environ["NEURA_DESKTOP_EVIDENCE"]], env=x, timeout=20)
+                subprocess.run(["xdotool", "windowfocus", "--sync", found], env=x, timeout=10)
+                subprocess.run(["xdotool", "key", "--window", found, "Return"], env=x, timeout=10)
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+            stop_children()
+    text = log.read_text()
+    verified = found is not None and "Verified desktop app-trap-dialog\n" in text and process.returncode == 1
+    if not verified:
+        print(text, end="", file=sys.stderr)
+    print(f"app-trap-dialog: dialog {'found' if found else 'NOT found'}, exit {process.returncode}, "
+          f"{'verified' if verified else 'NOT verified'}")
+    return 0 if verified else 1
+
+
 def run_case(engine, child, case):
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
         raise OSError(ctypes.get_errno(), "could not adopt fixture subprocesses")
     with tempfile.TemporaryDirectory(prefix="neura-desktop-app-") as scratch:
         (Path(scratch) / "profile").mkdir()
-        command = ["xvfb-run", "-a", engine, "--disable-background-networking", str(HERE / "app_test.js")]
-        env = {**os.environ, "NEURA_DESKTOP_TEST_SCRATCH": scratch, "NEURA_DESKTOP_TEST_CASE": case,
-               "NEURA_DESKTOP_TEST_CHILD": str(child), "XDG_DATA_HOME": str(Path(scratch) / "data")}
+        command = ["xvfb-run", "-a", engine, ELECTRON_X11, "--disable-background-networking", str(HERE / "app_test.js")]
+        env = isolated_environment(NEURA_DESKTOP_TEST_SCRATCH=scratch, NEURA_DESKTOP_TEST_CASE=case,
+                                   NEURA_DESKTOP_TEST_CHILD=str(child), XDG_DATA_HOME=str(Path(scratch) / "data"))
         if case == "app-killed":
             return run_killed(command, env, scratch)
+        if case == "app-trap-dialog":
+            return run_trap_dialog(command, env, scratch)
         with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                               start_new_session=True, env=env) as process:
             try:

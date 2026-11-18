@@ -11,7 +11,7 @@ const { createHash } = require('node:crypto');
 const { promises: fs } = require('node:fs');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
-const { app, BrowserWindow, clipboard, ipcMain } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, Menu } = require('electron');
 const { DesktopStatus, loadDesktopPackage, registerDesktopScheme, runDesktopApplication } = require('../../hosts/desktop/main');
 
 const scratch = process.env.NEURA_DESKTOP_TEST_SCRATCH;
@@ -23,8 +23,9 @@ const home = `app://${applicationId}/`;
 const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; " +
     "frame-src 'self' https:; base-uri 'none'; form-action 'none'";
 const operations = ['fixture.clipboard_read', 'fixture.clipboard_write', 'fixture.close', 'fixture.data_dir',
-    'fixture.echo', 'fixture.fail', 'fixture.focus', 'fixture.notify', 'fixture.open', 'fixture.open_many', 'fixture.quit',
-    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved', 'fixture.wait', 'fixture.work'];
+    'fixture.echo', 'fixture.fail', 'fixture.focus', 'fixture.menu', 'fixture.menu_bad', 'fixture.notify', 'fixture.open',
+    'fixture.open_many', 'fixture.open_read', 'fixture.quit', 'fixture.save', 'fixture.spin', 'fixture.title',
+    'fixture.trap', 'fixture.unserved', 'fixture.wait', 'fixture.work'];
 
 function digest(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
 
@@ -56,7 +57,8 @@ async function makePackage({ capabilities = [], limits = {} } = {}) {
             });
         });`, 'text/javascript');
     await file('index.html', '<!doctype html><title>Page title</title><script src="page.fixture.js"></script>' +
-        '<button>Echo</button><output></output>', 'text/html');
+        '<button>Echo</button><output></output><input id="source" value="copied by a role"><input id="target">',
+    'text/html');
     await file('second.html', '<!doctype html><title>Second page</title><script src="page.fixture.js"></script>' +
         '<button>Echo</button><output></output>', 'text/html', false);
     await file('frame.html', '<!doctype html><title>Embedded</title><p>embedded</p>', 'text/html', false);
@@ -113,7 +115,7 @@ async function start(packageOptions = {}, runOptions = {}) {
     const childLog = [];
     const running = await runDesktopApplication(configuration, {
         log: message => logged.push(message),
-        onNativeFailure: (error, result) => reported.push({ error, result }),
+        onNativeFailure: runOptions.defaultFailure ? undefined : (error, result) => reported.push({ error, result }),
         nativeIO: { onStderr: chunk => childLog.push(...chunk.toString().split('\n').filter(Boolean)) },
         ...runOptions,
     });
@@ -313,7 +315,9 @@ async function windows() {
     assert.deepEqual(await bridge(evaluate, 'fixture.focus', '9'), { status: 0, text: 'focused' });
     await waitFor(() => seen('event Focused 9') && seen('event Blurred 1'), 'the child did not see Focused 9 and Blurred 1');
     const order = ['event Focused 1', 'event Blurred 1', 'event Focused 9'].map(position);
-    assert.ok(order[0] < order[1] && order[1] < order[2], `events out of order: ${order}`);
+    // X delivers the old window's focus-out and the new window's focus-in in either order, so only Focused 1
+    // before both is fixed.
+    assert.ok(order[0] < order[1] && order[0] < order[2], `events out of order: ${order}`);
 
     step('close with a call in flight');
     // Case 26: a window closed with a call in flight; the call is cancelled in the child.
@@ -384,6 +388,94 @@ async function windows() {
     for (const { window } of running.windows()) window.close();
 }
 
+// Menus, dialogs and granted files (cases 6 to 10 and 29) with the scripted dialog driver; the page never
+// receives a path.
+async function dialogs() {
+    const script = [];
+    const asked = [];
+    const session = await start({}, {
+        dialogs: async (kind, options) => {
+            asked.push([kind, options.handle, options.suggestedName, JSON.stringify(options.filters)]);
+            return script.shift() ?? { canceled: true };
+        },
+    });
+    const { evaluate, childLog, logged, first } = session;
+    const files = path.join(scratch, 'files');
+    await fs.mkdir(files);
+
+    step('save cancelled');
+    script.push({ canceled: true });
+    assert.deepEqual(await bridge(evaluate, 'fixture.save', 'report.txt'), { status: 0, text: 'cancelled' });
+    assert.deepEqual(asked.shift(), ['save', 1, 'report.txt', '[{"name":"Text","extensions":["txt"]}]']);
+    assert.deepEqual(await fs.readdir(files), []);
+
+    step('save chosen');
+    const target = path.join(files, 'chosen report.txt');
+    script.push({ canceled: false, filePath: target });
+    assert.deepEqual(await bridge(evaluate, 'fixture.save', 'report.txt'),
+        { status: 0, text: 'saved chosen report.txt 11+12 closed; InvalidInput: the granted file is closed' });
+    assert.equal(await fs.readFile(target, 'utf8'), 'first line\nsecond line\n');
+
+    step('save over an existing file');
+    await fs.writeFile(target, 'old content that is longer than the new content\n');
+    script.push({ canceled: false, filePath: target });
+    assert.equal((await bridge(evaluate, 'fixture.save', 'report.txt')).text,
+        'saved chosen report.txt 11+12 closed; InvalidInput: the granted file is closed');
+    assert.equal(await fs.readFile(target, 'utf8'), 'first line\nsecond line\n');
+
+    step('open and read');
+    const source = path.join(files, 'notes é.txt');
+    await fs.writeFile(source, 'read in chunks of five ✓');
+    script.push({ canceled: false, filePath: source });
+    assert.deepEqual(await bridge(evaluate, 'fixture.open_read'),
+        { status: 0, text: 'notes é.txt: read in chunks of five ✓; PermissionDenied: neura.desktop.file.write failed' });
+    assert.equal(await fs.readFile(source, 'utf8'), 'read in chunks of five ✓');
+    script.push({ canceled: true });
+    assert.deepEqual(await bridge(evaluate, 'fixture.open_read'), { status: 0, text: 'cancelled' });
+
+    step('menu');
+    assert.deepEqual(await bridge(evaluate, 'fixture.menu_bad'),
+        { status: DesktopStatus.Other, text: 'InvalidInput: neura.desktop.menu.set failed' });
+    assert.equal(Menu.getApplicationMenu(), null, 'a refused menu replaced the menu');
+    assert.deepEqual(await bridge(evaluate, 'fixture.menu'), { status: 0, text: 'menu set' });
+    const menu = Menu.getApplicationMenu();
+    assert.equal(menu.getMenuItemById('file.export').accelerator, 'CmdOrCtrl+E');
+    assert.equal(menu.getMenuItemById('file.never').enabled, false);
+    assert.equal(menu.getMenuItemById('file.never').label, 'Unavailable "quoted"');
+    // A native item: MenuActivated for the child, with the focused window.
+    first.window.focus();
+    await waitFor(() => first.window.isFocused(), 'the window did not take focus');
+    menu.getMenuItemById('file.export').click(undefined, first.window, first.window.webContents);
+    await waitFor(() => childLog.includes('child: event MenuActivated file.export 1'), 'no MenuActivated');
+    // A window item reaches the focused window's page through next_host_event().
+    const next = evaluate('neuraDesktop.next_host_event()');
+    menu.getMenuItemById('view.refresh').click(undefined, first.window, first.window.webContents);
+    assert.deepEqual(await next, { kind: 'menu', id: 'view.refresh' });
+    // Case 10: a window item with no focused window is dropped.
+    menu.getMenuItemById('view.refresh').click(undefined, undefined, undefined);
+    assert.ok(logged.some(line => /no focused window/.test(line)));
+    // Case 9: the copy and paste roles work in a text input with no Neura code involved.
+    await evaluate("document.getElementById('source').select()");
+    menu.getMenuItemById('edit.copy').click(undefined, first.window, first.window.webContents);
+    await waitFor(async () => (await clipboard.readText()) === 'copied by a role', 'the copy role did not copy');
+    await evaluate("document.getElementById('target').focus()");
+    menu.getMenuItemById('edit.paste').click(undefined, first.window, first.window.webContents);
+    await waitFor(() => evaluate("document.getElementById('target').value === 'copied by a role'"), 'the paste role did not paste');
+
+    expectEnd(session, 0, reported => assert.equal(reported.length, 0));
+    first.window.close();
+}
+
+// Case 32 with the default failure report: the host's native error dialog. The test runner finds the dialog on
+// the X display, checks its title and dismisses it; the application then exits 1.
+async function trapDialog() {
+    const session = await start({}, { defaultFailure: true });
+    console.log(`DISPLAY=${process.env.DISPLAY}`);
+    console.log(`XAUTHORITY=${process.env.XAUTHORITY ?? ''}`);
+    expectEnd(session, 1, reported => assert.equal(reported.length, 0));
+    bridge(session.evaluate, 'fixture.trap').catch(() => {});
+}
+
 // Case 34: the test runner kills this process; it prints what the runner checks.
 async function killed() {
     const { running, first } = await start();
@@ -393,11 +485,15 @@ async function killed() {
 
 const cases = {
     'app-close': lifecycle, 'app-quit': lifecycle, 'app-trap': lifecycle, 'app-services': services, 'app-denied': denied,
-    'app-windows': windows, 'app-killed': killed,
+    'app-windows': windows, 'app-dialogs': dialogs, 'app-trap-dialog': trapDialog,
+    'app-killed': killed,
 };
 
 (async () => {
     assert.equal(process.versions.electron, '45.3.3');
+    // Never the user's own desktop: no Wayland display, and Electron on the virtual X display.
+    assert.equal(process.env.WAYLAND_DISPLAY, undefined);
+    assert.equal(app.commandLine.getSwitchValue('ozone-platform'), 'x11');
     await cases[caseName]();
 })().catch(error => {
     console.error(error);

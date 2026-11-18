@@ -1,6 +1,7 @@
 let console = import:Std.Io.Console;
 let desktop = import:Std.Desktop;
 let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
 let errors = import:Std.Core.Error;
 let cancellation = import:Std.Concurrent.Cancellation;
 let durations = import:Std.Time.Duration;
@@ -15,9 +16,9 @@ let.promote _ = import:Std.Core.Unit;
 // operation runs as its own task, so it reaches the host through `call.host()` and captures nothing else.
 let AppChild = module:program.Entry (
     last registry = new desktop.Registry(new(["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close",
-        "fixture.data_dir", "fixture.echo", "fixture.fail", "fixture.focus", "fixture.notify", "fixture.open",
-        "fixture.open_many", "fixture.quit", "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved",
-        "fixture.wait", "fixture.work"]));
+        "fixture.data_dir", "fixture.echo", "fixture.fail", "fixture.focus", "fixture.menu", "fixture.menu_bad",
+        "fixture.notify", "fixture.open", "fixture.open_many", "fixture.open_read", "fixture.quit", "fixture.save",
+        "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved", "fixture.wait", "fixture.work"]));
 
     /// @brief The request as text; the fixture's pages send UTF-8.
     let text_of = func(call: desktop.Call) -> string {
@@ -165,6 +166,107 @@ let AppChild = module:program.Entry (
                 count = count + 1;
             }
             return reply(count.to_string());
+        });
+        // The application menu: a native item, a window item, a disabled item, and the copy and paste roles.
+        dispatcher.add("fixture.menu", func(call: desktop.Call) -> Result<uint8[list]> {
+            last file: desktop.MenuItem[list] = new([
+                desktop.action("file.export", "Export…", desktop.MenuTarget.Native).with_accelerator("CmdOrCtrl+E"),
+                desktop.action("view.refresh", "Refresh", desktop.MenuTarget.Window),
+                desktop.separator(),
+                desktop.action("file.never", "Unavailable \"quoted\"", desktop.MenuTarget.Native).with_enabled(false)
+            ]);
+            last edit: desktop.MenuItem[list] = new([
+                desktop.role_item("edit.copy", "Copy", "copy"),
+                desktop.role_item("edit.paste", "Paste", "paste")
+            ]);
+            last menu: desktop.MenuItem[list] = new([desktop.submenu("File", file), desktop.submenu("Edit", edit)]);
+            match (call.host().set_menu(menu)) {
+                Result.Ok(_) => { return reply("menu set"); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        // A menu the host refuses: one identifier used twice.
+        dispatcher.add("fixture.menu_bad", func(call: desktop.Call) -> Result<uint8[list]> {
+            last twice: desktop.MenuItem[list] = new([
+                desktop.action("same.id", "One", desktop.MenuTarget.Native),
+                desktop.action("same.id", "Two", desktop.MenuTarget.Native)
+            ]);
+            match (call.host().set_menu(twice)) {
+                Result.Ok(_) => { return reply("accepted"); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        // Asks where to save, suggesting the request's name, and writes two lines (cases 6 to 8).
+        dispatcher.add("fixture.save", func(call: desktop.Call) -> Result<uint8[list]> {
+            last filters: desktop.FileFilter[list] = new([new desktop.FileFilter("Text", new(["txt"]))]);
+            match (call.host().save_file_dialog(call.window(), text_of(call), filters)) {
+                Result.Ok(outcome) => {
+                    match (outcome) {
+                        desktop.DialogOutcome.Cancelled => { return reply("cancelled"); },
+                        desktop.DialogOutcome.Chosen(file) => {
+                            last first = file.write(strings.to_bytes("first line\n"));
+                            last second = file.write(strings.to_bytes("second line\n"));
+                            last outcome_text = match (closeable.release<Unit>(file, Result<Unit>.Ok(Unit.Value))) {
+                                Result.Ok(_) => "closed",
+                                Result.Err(problem) => errors.message(problem),
+                            };
+                            last reading = match (file.read(10)) {
+                                Result.Ok(_) => "read after close",
+                                Result.Err(problem) => errors.message(problem),
+                            };
+                            last counts = match (first) {
+                                Result.Ok(a) => match (second) {
+                                    Result.Ok(b) => a.to_string() + "+" + b.to_string(),
+                                    Result.Err(problem) => errors.message(problem),
+                                },
+                                Result.Err(problem) => errors.message(problem),
+                            };
+                            return reply("saved " + file.name + " " + counts + " " + outcome_text + "; " + reading);
+                        },
+                    }
+                },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        // Asks for a file to read and reads it in chunks of five bytes; a write is refused.
+        dispatcher.add("fixture.open_read", func(call: desktop.Call) -> Result<uint8[list]> {
+            last none: desktop.FileFilter[list] = new;
+            match (call.host().open_file_dialog(call.window(), none)) {
+                Result.Ok(outcome) => {
+                    match (outcome) {
+                        desktop.DialogOutcome.Cancelled => { return reply("cancelled"); },
+                        desktop.DialogOutcome.Chosen(file) => {
+                            // Five-byte chunks split UTF-8 sequences, so the bytes are decoded once at the end.
+                            last content_bytes: uint8[list] = new;
+                            while (true) {
+                                match (file.read(5)) {
+                                    Result.Ok(chunk) => {
+                                        if (chunk.length == 0) {
+                                            break;
+                                        }
+                                        for (let b in chunk) {
+                                            content_bytes.append(b);
+                                        }
+                                    },
+                                    Result.Err(problem) => { return failed(problem); },
+                                }
+                            }
+                            last refused = match (file.write(strings.to_bytes("x"))) {
+                                Result.Ok(_) => "written",
+                                Result.Err(problem) => errors.message(problem),
+                            };
+                            file.close();
+                            let [valid, content] = string.from_utf8(content_bytes);
+                            return reply(file.name + ": " + content + "; " + refused);
+                        },
+                    }
+                },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
         });
         dispatcher.add("fixture.trap", func(call: desktop.Call) -> Result<uint8[list]> {
             trap_with_message("fixture trap in a bridge operation");

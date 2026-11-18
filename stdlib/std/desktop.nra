@@ -2,6 +2,7 @@ let atomics = import:Std.Concurrent.AtomicInt64;
 let bytes = import:Std.Io.Internal.Bytes;
 let channels = import:Std.Concurrent.Channel;
 let console = import:Std.Io.Console;
+let closeable = import:Std.Io.Closeable;
 let errors = import:Std.Core.Error;
 let hex = import:Std.Encoding.Hex;
 let host_error = import:Std.Core.Internal.HostError;
@@ -282,6 +283,68 @@ export let Desktop = module (
             };
         };
 
+        /// @brief Replaces the application menu with `items`; an empty list removes it. Activating a `Native`
+        /// item is a `MenuActivated` event for the child; a `Window` item goes to the focused window's page.
+        /// InvalidInput for a menu the host refuses: an item identifier used twice, more than four levels, or
+        /// more than 512 entries.
+        export let set_menu = func(items: MenuItem[list]) -> Result<Unit> {
+            last args: uint8[list] = new;
+            wire.put_text(args, menu_json(items));
+            return match (request("neura.desktop.menu.set", args)) {
+                Result.Ok(_) => bytes.ok(),
+                Result.Err(problem) => Result<Unit>.Err(problem),
+            };
+        };
+
+        /// @brief Asks the user for a file to read, over `window`: Chosen with a read grant, or Cancelled. The
+        /// child learns the file's name, never its directory.
+        export let open_file_dialog = func(window: Window, filters: FileFilter[list]) -> Result<DialogOutcome<GrantedFile>> =>
+            file_dialog("neura.desktop.dialog.open_file", window, "", filters);
+
+        /// @brief Asks the user where to save, over `window`, suggesting the file name `suggested_name`: Chosen
+        /// with a write grant, or Cancelled. Choosing an existing file asks the system's own confirmation first.
+        export let save_file_dialog = func(window: Window, suggested_name: string, filters: FileFilter[list])
+                -> Result<DialogOutcome<GrantedFile>> =>
+            file_dialog("neura.desktop.dialog.save_file", window, suggested_name, filters);
+
+        /// @brief Runs a file dialog service. Used by the two dialogs.
+        #Hidden
+        export let file_dialog = func(service: string, window: Window, suggested_name: string, filters: FileFilter[list])
+                -> Result<DialogOutcome<GrantedFile>> {
+            last args: uint8[list] = new;
+            wire.put_u32(args, window.handle);
+            wire.put_text(args, suggested_name);
+            wire.put_u32(args, filters.length as uint32);
+            for (let filter in filters) {
+                wire.put_text(args, filter.label);
+                wire.put_u32(args, filter.extensions.length as uint32);
+                for (let extension in filter.extensions) {
+                    wire.put_text(args, extension);
+                }
+            }
+            match (request(service, args)) {
+                Result.Ok(answer) => {
+                    last cursor = new wire.Cursor(answer);
+                    last chosen = cursor.u32();
+                    last handle = cursor.u32();
+                    last name = cursor.text();
+                    if (!cursor.finished() || chosen > 1) {
+                        return Result<DialogOutcome<GrantedFile>>.Err(failure(100, "malformed dialog answer"));
+                    }
+                    if (chosen == 0) {
+                        return Result<DialogOutcome<GrantedFile>>.Ok(DialogOutcome<GrantedFile>.Cancelled);
+                    }
+                    last writable = service == "neura.desktop.dialog.save_file";
+                    return Result<DialogOutcome<GrantedFile>>.Ok(
+                        DialogOutcome<GrantedFile>.Chosen(new GrantedFile(handle, name, writable, fork())));
+                },
+                Result.Err(problem) => {
+                    return Result<DialogOutcome<GrantedFile>>.Err(problem);
+                },
+            }
+            return Result<DialogOutcome<GrantedFile>>.Err(failure(100, "unreachable"));
+        };
+
         /// @brief Ends the application with `status` (0 to 255). The host closes every window and the channel,
         /// so the calls in flight are cancelled and the process ends with `status`. Returns once the channel has
         /// ended; code after it in a bridge operation may not run.
@@ -416,6 +479,190 @@ export let Desktop = module (
 
     /// @brief What became of a notification.
     export let NotifyOutcome = enum (Shown, Denied, Unsupported);
+
+    /// @brief What the user did with a dialog: chose something, or cancelled it.
+    export let DialogOutcome = enum<T> (Chosen(T), Cancelled);
+
+    /// @brief Where activating a menu item goes: a `MenuActivated` event for the child, or the focused window's
+    /// page through `next_host_event()`.
+    export let MenuTarget = enum (Native, Window);
+
+    /// @brief A group of file types a dialog offers, such as "Images" with `png` and `jpg`. An extension is 1 to
+    /// 16 ASCII letters and digits, or `*` for every file.
+    #Final
+    export let FileFilter = class (
+        /// @brief The text the dialog shows for the group.
+        export last label: string;
+        /// @brief The extensions, without the dot.
+        export last extensions: string[list];
+
+        /// @brief The group `name` of the files with `types`.
+        export let init = func(name: string, types: string[list]) {
+            label = name;
+            extensions = types;
+        };
+
+        export let.override to_string = func -> string => "FileFilter(" + label + ")";
+    );
+
+    /// @brief One entry of an application menu: an item, a separator, or a submenu. Immutable; the `with_`
+    /// functions answer a changed copy. Roles (`copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit`,
+    /// `about`) are performed by the system, and their items never reach the child or the page.
+    #Final
+    export let MenuItem = class (
+        /// @brief "item", "separator" or "submenu".
+        export last kind: string;
+        /// @brief The item's identifier, unique in the menu: 1 to 128 of `a`-`z`, `0`-`9`, `.`, `_`, `-`.
+        export last id: string;
+        /// @brief The text shown.
+        export last label: string;
+        /// @brief The keyboard shortcut, such as "CmdOrCtrl+S", or "".
+        export last accelerator: string;
+        /// @brief The system role, or "".
+        export last role: string;
+        /// @brief Whether the item can be activated.
+        export last enabled: bool;
+        /// @brief Where activation goes.
+        export last target: MenuTarget;
+        /// @brief A submenu's entries.
+        export last items: MenuItem[list];
+
+        /// @brief Use `action`, `role_item`, `separator` or `submenu`.
+        export let init = func(entry_kind: string, entry_id: string, text: string, shortcut: string, system_role: string,
+                active: bool, destination: MenuTarget, entries: MenuItem[list]) {
+            kind = entry_kind;
+            id = entry_id;
+            label = text;
+            accelerator = shortcut;
+            role = system_role;
+            enabled = active;
+            target = destination;
+            items = entries;
+        };
+
+        /// @brief The same entry with the keyboard shortcut `shortcut`.
+        export let with_accelerator = func(shortcut: string) -> MenuItem =>
+            new MenuItem(kind, id, label, shortcut, role, enabled, target, items);
+
+        /// @brief The same entry, enabled or not.
+        export let with_enabled = func(active: bool) -> MenuItem =>
+            new MenuItem(kind, id, label, accelerator, role, active, target, items);
+
+        export let.override to_string = func -> string => "MenuItem(" + kind + ", " + id + ", " + label + ")";
+    );
+
+    /// @brief An item whose activation goes to `target`.
+    export let action = func(id: string, label: string, target: MenuTarget) -> MenuItem {
+        if (!valid_operation(id)) {
+            trap_with_message("invalid argument: menu item id " + id);
+        }
+        return new MenuItem("item", id, label, "", "", true, target, new MenuItem[list]());
+    };
+
+    /// @brief An item the system performs: `copy`, `paste`, `cut`, `undo`, `redo`, `select_all`, `quit` or
+    /// `about`. Traps with "invalid argument: menu role" for any other.
+    export let role_item = func(id: string, label: string, role: string) -> MenuItem {
+        if (!valid_operation(id)) {
+            trap_with_message("invalid argument: menu item id " + id);
+        }
+        if (role != "copy" && role != "paste" && role != "cut" && role != "undo" && role != "redo" &&
+                role != "select_all" && role != "quit" && role != "about") {
+            trap_with_message("invalid argument: menu role " + role);
+        }
+        return new MenuItem("item", id, label, "", role, true, MenuTarget.Native, new MenuItem[list]());
+    };
+
+    /// @brief A separator line.
+    export let separator = func -> MenuItem =>
+        new MenuItem("separator", "", "", "", "", true, MenuTarget.Native, new MenuItem[list]());
+
+    /// @brief A submenu labelled `label` holding `items`.
+    export let submenu = func(label: string, items: MenuItem[list]) -> MenuItem =>
+        new MenuItem("submenu", "", label, "", "", true, MenuTarget.Native, items);
+
+    /// @brief The capability to read or to write the one file the user chose in a dialog. It names the file and
+    /// never its directory. The window host performs the reads and writes; the child needs no `fs` capability.
+    /// A read grant only reads and a write grant only writes (PermissionDenied otherwise); the file is replaced
+    /// at the first write. `close` revokes the grant, after which every use is InvalidInput and another `close`
+    /// does nothing.
+    #[Final, Synchronized]
+    export let GrantedFile = class implements closeable.Closeable (
+        /// @brief The host's handle of the grant.
+        export last handle: uint32;
+            | get: handle;
+        /// @brief The chosen file's name, without its directory.
+        export last name: string;
+            | get: name;
+        /// @brief Whether this is a write grant.
+        export last writable: bool;
+            | get: writable;
+        /// @brief The services the grant's requests go through.
+        last services: Host;
+        /// @brief Whether `close` was called.
+        let closed: bool = false;
+
+        /// @brief The grant `grant_handle` of the file `file_name`. Built by the dialogs.
+        export let init = func(grant_handle: uint32, file_name: string, write_grant: bool, through: Host) {
+            handle = grant_handle;
+            name = file_name;
+            writable = write_grant;
+            services = through;
+        };
+
+        /// @brief Up to `max` bytes (1 or more), fewer when they are all there is; empty at the end of the file.
+        export let read = func(max: int) -> Result<uint8[list]> {
+            if (closed) {
+                return Result<uint8[list]>.Err(failure(4, "the granted file is closed"));
+            }
+            if (max < 1) {
+                return Result<uint8[list]>.Err(failure(4, "invalid count"));
+            }
+            last args: uint8[list] = new;
+            wire.put_u32(args, handle);
+            wire.put_u32(args, max as uint32);
+            return services.request("neura.desktop.file.read", args);
+        };
+
+        /// @brief Writes every byte of `data` after the bytes written before; answers the count.
+        export let write = func(data: uint8[list]) -> Result<int64> {
+            if (closed) {
+                return Result<int64>.Err(failure(4, "the granted file is closed"));
+            }
+            last args: uint8[list] = new;
+            wire.put_u32(args, handle);
+            bytes.append_range(args, data, 0, data.length);
+            match (services.request("neura.desktop.file.write", args)) {
+                Result.Ok(answer) => {
+                    last cursor = new wire.Cursor(answer);
+                    last count = cursor.i64();
+                    if (!cursor.finished()) {
+                        return Result<int64>.Err(failure(100, "malformed file.write answer"));
+                    }
+                    return Result<int64>.Ok(count);
+                },
+                Result.Err(problem) => {
+                    return Result<int64>.Err(problem);
+                },
+            }
+            return Result<int64>.Err(failure(100, "unreachable"));
+        };
+
+        /// @brief Revokes the grant. Closing again does nothing and answers Ok.
+        export let close = func -> Result<Unit> {
+            if (closed) {
+                return bytes.ok();
+            }
+            closed = true;
+            last args: uint8[list] = new;
+            wire.put_u32(args, handle);
+            return match (services.request("neura.desktop.file.close", args)) {
+                Result.Ok(_) => bytes.ok(),
+                Result.Err(problem) => Result<Unit>.Err(problem),
+            };
+        };
+
+        export let.override to_string = func -> string => "GrantedFile(" + name + ")";
+    );
 
     /// @brief One bridge call from a window. It carries nothing of the page: no URL, no script, no path. A call
     /// is handed to the task that runs its operation.
@@ -668,6 +915,17 @@ export let Desktop = module (
 
         /// @brief The clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_read`.
         export let clipboard_read = func -> Result<string> => services.clipboard_read();
+
+        /// @brief Replaces the application menu (see `Host.set_menu`).
+        export let set_menu = func(items: MenuItem[list]) -> Result<Unit> => services.set_menu(items);
+
+        /// @brief Asks the user for a file to read (see `Host.open_file_dialog`).
+        export let open_file_dialog = func(window: Window, filters: FileFilter[list]) -> Result<DialogOutcome<GrantedFile>> =>
+            services.open_file_dialog(window, filters);
+
+        /// @brief Asks the user where to save (see `Host.save_file_dialog`).
+        export let save_file_dialog = func(window: Window, suggested_name: string, filters: FileFilter[list])
+                -> Result<DialogOutcome<GrantedFile>> => services.save_file_dialog(window, suggested_name, filters);
 
         /// @brief The next window event, waiting for one. Bridge calls that arrive first wait for `run`.
         /// UnexpectedEnd once the host has closed the channel.
@@ -1148,6 +1406,56 @@ export let Desktop = module (
             return Result<string>.Err(failure(100, "malformed host answer"));
         }
         return Result<string>.Ok(text);
+    };
+
+    /// @brief The canonical JSON text of a menu: `{"items":[...],"schema":1}` with sorted keys.
+    let menu_json = func(items: MenuItem[list]) -> string => "{\"items\":" + menu_entries(items) + ",\"schema\":1}";
+
+    /// @brief The JSON array of menu entries.
+    let menu_entries = func(items: MenuItem[list]) -> string {
+        let text = "[";
+        for (let i = 0; i < items.length; i = i + 1) {
+            if (i > 0) {
+                text += ",";
+            }
+            last item = items[i];
+            if (item.kind == "separator") {
+                text += "{\"kind\":\"separator\"}";
+            } else if (item.kind == "submenu") {
+                text += "{\"items\":" + menu_entries(item.items) + ",\"kind\":\"submenu\",\"label\":" + json_text(item.label) + "}";
+            } else {
+                last target = match (item.target) {
+                    MenuTarget.Native => "native",
+                    MenuTarget.Window => "window",
+                };
+                text += "{\"accelerator\":" + json_text(item.accelerator) + ",\"enabled\":" + item.enabled.to_string() +
+                    ",\"id\":" + json_text(item.id) + ",\"kind\":\"item\",\"label\":" + json_text(item.label) +
+                    ",\"role\":" + json_text(item.role) + ",\"target\":\"" + target + "\"}";
+            }
+        }
+        return text + "]";
+    };
+
+    /// @brief `value` as a JSON string: quotes, backslashes and control characters escaped.
+    let json_text = func(value: string) -> string {
+        let text = "\"";
+        let start = 0;
+        for (let i = 0; i < value.byte_length; i = i + 1) {
+            last c = value.byte_at(i);
+            if (c == 34 || c == 92 || c < 32) {
+                text += value.slice(start, i);
+                if (c == 34) {
+                    text += "\\\"";
+                } else if (c == 92) {
+                    text += "\\\\";
+                } else {
+                    last digits = "0123456789abcdef";
+                    text += "\\u00" + digits.slice((c / 16) as int, (c / 16) as int + 1) + digits.slice((c % 16) as int, (c % 16) as int + 1);
+                }
+                start = i + 1;
+            }
+        }
+        return text + value.slice(start, value.byte_length) + "\"";
     };
 
     /// @brief The error for host code `code`.

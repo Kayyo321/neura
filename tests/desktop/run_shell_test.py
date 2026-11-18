@@ -12,6 +12,25 @@ import tempfile
 import time
 
 
+# The user's own display and session bus. xvfb-run replaces only DISPLAY, and Electron prefers Wayland when
+# WAYLAND_DISPLAY is set, so a test that kept these would open its windows, dialogs and notifications on the
+# user's desktop instead of the virtual X display.
+SESSION_VARIABLES = ("WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS")
+# Electron on X11 only: the virtual display that xvfb-run starts.
+ELECTRON_X11 = "--ozone-platform=x11"
+
+
+def isolated_environment(**extra):
+    """The environment of an Electron run under xvfb-run: nothing of the user's display or session bus."""
+    environment = {key: value for key, value in os.environ.items() if key not in SESSION_VARIABLES}
+    environment["ELECTRON_OZONE_PLATFORM_HINT"] = "x11"
+    environment["DBUS_SESSION_BUS_ADDRESS"] = "disabled:"
+    environment.update(extra)
+    if "WAYLAND_DISPLAY" in environment or "DISPLAY" in environment:
+        raise RuntimeError("an Electron test would reach the user's display")
+    return environment
+
+
 def collect_children():
     while True:
         try:
@@ -48,8 +67,8 @@ def run(engine, case):
     fixture = Path(__file__).with_name("shell_test.js").resolve()
     with tempfile.TemporaryDirectory(prefix="neura-desktop-") as scratch:
         (Path(scratch) / "profile").mkdir()
-        command = ["xvfb-run", "-a", engine, "--disable-background-networking", str(fixture)]
-        env = {**os.environ, "NEURA_DESKTOP_TEST_SCRATCH": scratch, "NEURA_DESKTOP_TEST_CASE": case}
+        command = ["xvfb-run", "-a", engine, ELECTRON_X11, "--disable-background-networking", str(fixture)]
+        env = isolated_environment(NEURA_DESKTOP_TEST_SCRATCH=scratch, NEURA_DESKTOP_TEST_CASE=case)
         if case != "shell":
             node = shutil.which("node")
             if node is None:
