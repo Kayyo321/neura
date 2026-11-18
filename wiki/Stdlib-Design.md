@@ -1498,3 +1498,13 @@ The modules of `Std.Concurrent` are implemented. [Concurrency](Concurrency) spec
 | `MerkleTree` | `MerkleTree<H: StreamingDigest<H>>` is append-only and hashes as RFC 6962 and RFC 9162, section 2.1 do: a leaf is H(0x00 ‖ data), a node is H(0x01 ‖ left ‖ right), and the empty tree is H(""). It has `append(data) -> index`, `size`, `leaf`, `root`, `root_at(size)`, `inclusion_proof(index, size)` and `consistency_proof(old_size, new_size)`. The module functions `leaf_hash<H>`, `node_hash<H>`, `verify_inclusion<H>` and `verify_consistency<H>` follow the algorithms of RFC 9162, sections 2.1.3.2 and 2.1.4.2. A root or proof costs time in proportion to the tree size. |
 
 Every digest checks the policy when it is created. An `update` after the output was read, or a second `finish` of a fixed-length digest, traps with `invalid state: digest finished`. No hardware acceleration (SHA-NI, AVX-512) is used.
+
+### 20.5 `Std.Crypto.Mac`
+
+| Module | Contract |
+| --- | --- |
+| `Authenticator` | The interface of every MAC here: `algorithm`, `tag_length`, `update(bytes)`, `finish() -> tag` and `verify(tag) -> bool`. `verify` compares in constant time and accepts only a tag of the full length, never a truncated one. An `update` after `finish` or `verify`, or a second `finish`, traps with `invalid state: mac finished`. |
+| `Hmac` | `Hmac<H: StreamingDigest<H>>(key)` (FIPS 198-1) over any digest, with `mac<H>(key, message)` and `verify<H>(key, message, tag)`. A key longer than the block is hashed first. The policy is checked for `Hmac` and for `H`. |
+| `Kmac` | `Kmac128` and `Kmac256` (SP 800-185, section 4). `new Kmac128(key)` gives a 32-byte tag (64 for `Kmac256`); `new Kmac128(key, customization, length)` takes any length of at least 4 bytes. `finish_xof(count)` and `squeeze` give KMACXOF. The functions are `kmac128(key, data, length, customization)`, `kmac128_xof` and the same for 256. |
+| `Poly1305` | The one-time authenticator of RFC 8439 under a 32-byte key, with `mac(key, message)`. The key must not be reused. The final reduction selects with a mask. |
+| `AesCmac` | AES-CMAC (SP 800-38B, RFC 4493) with 16-, 24- or 32-byte keys, and `mac(key, message)`. |

@@ -119,6 +119,11 @@ Hashes, MACs, key derivation, authenticated encryption, and secure random genera
 | [`Std.Crypto.Hash.TupleHash`](Stdlib-Crypto-TupleHash) | [Contracts](Stdlib-Crypto-TupleHash#detailed-contracts) | [Declarations](Stdlib-Crypto-TupleHash#exported-declarations) |
 | [`Std.Crypto.KeyEncapsulation`](Stdlib-Crypto-KeyEncapsulation) | [Contracts](Stdlib-Crypto-KeyEncapsulation#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyEncapsulation#exported-declarations) |
 | [`Std.Crypto.KeyStoreProvider`](Stdlib-Crypto-KeyStoreProvider) | [Contracts](Stdlib-Crypto-KeyStoreProvider#detailed-contracts) | [Declarations](Stdlib-Crypto-KeyStoreProvider#exported-declarations) |
+| [`Std.Crypto.Mac.AesCmac`](Stdlib-Crypto-AesCmac) | [Contracts](Stdlib-Crypto-AesCmac#detailed-contracts) | [Declarations](Stdlib-Crypto-AesCmac#exported-declarations) |
+| [`Std.Crypto.Mac.Authenticator`](Stdlib-Crypto-Authenticator) | [Contracts](Stdlib-Crypto-Authenticator#detailed-contracts) | [Declarations](Stdlib-Crypto-Authenticator#exported-declarations) |
+| [`Std.Crypto.Mac.Hmac`](Stdlib-Crypto-Hmac) | [Contracts](Stdlib-Crypto-Hmac#detailed-contracts) | [Declarations](Stdlib-Crypto-Hmac#exported-declarations) |
+| [`Std.Crypto.Mac.Kmac`](Stdlib-Crypto-Kmac) | [Contracts](Stdlib-Crypto-Kmac#detailed-contracts) | [Declarations](Stdlib-Crypto-Kmac#exported-declarations) |
+| [`Std.Crypto.Mac.Poly1305`](Stdlib-Crypto-Poly1305) | [Contracts](Stdlib-Crypto-Poly1305#detailed-contracts) | [Declarations](Stdlib-Crypto-Poly1305#exported-declarations) |
 | [`Std.Crypto.PrivateKey`](Stdlib-Crypto-PrivateKey) | [Contracts](Stdlib-Crypto-PrivateKey#detailed-contracts) | [Declarations](Stdlib-Crypto-PrivateKey#exported-declarations) |
 | [`Std.Crypto.SecretMemory`](Stdlib-Crypto-SecretMemory) | [Contracts](Stdlib-Crypto-SecretMemory#detailed-contracts) | [Declarations](Stdlib-Crypto-SecretMemory#exported-declarations) |
 | [`Std.Crypto.Signer`](Stdlib-Crypto-Signer) | [Contracts](Stdlib-Crypto-Signer#detailed-contracts) | [Declarations](Stdlib-Crypto-Signer#exported-declarations) |
@@ -350,3 +355,4 @@ The [complete specification](Stdlib-Design) has these sections.
   - [20.1 Contracts](Stdlib-Design#201-contracts)
   - [20.2 `Std.Crypto.Core`](Stdlib-Design#202-stdcryptocore)
   - [20.4 `Std.Crypto.Hash`](Stdlib-Design#204-stdcryptohash)
+  - [20.5 `Std.Crypto.Mac`](Stdlib-Design#205-stdcryptomac)

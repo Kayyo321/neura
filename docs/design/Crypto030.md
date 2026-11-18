@@ -46,6 +46,11 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | BLAKE3 hash, keyed hash, derive_key, XOF (2.3) | KAT | official `test_vectors.json` at commit 657284b1, all 24 inputs up to 4097 bytes, 131 output bytes per mode | implemented; serial |
 | Multi-threaded SIMD BLAKE3, SHA-NI/AVX-512 acceleration (2.3) | not provided | the serial code gives the same results | not provided by this runtime |
 | `MerkleTree<H>` with inclusion and consistency proofs (2.3) | logic | independent Python reference of RFC 6962 section 2.1 (`gen-merkle.py`), sizes 0 to 13, SHA-256 and SHA3-256; verification against tampered proofs | implemented |
+| HMAC over every hash: SHA-2 and SHA-3 (2.4) | KAT | Python `hmac`: 5 key and message shapes per digest (keys shorter than, equal to and longer than the block) | implemented |
+| KMAC128/256 and KMACXOF (2.4) | KAT | every NIST SP 800-185 KMAC and KMACXOF sample, and 8 `openssl mac` cases | implemented |
+| Poly1305 (2.4) | KAT | `cryptography` 43, including all-ones keys and messages for the final carry | implemented |
+| AES-CMAC (2.4) | KAT | `cryptography` 43, 128/192/256-bit keys, 0 to 100 bytes | implemented |
+| Constant-time verification that refuses truncated tags (2.4) | logic | `verify` tests with truncated and altered tags | implemented |
 
 ## Runtime needs
 

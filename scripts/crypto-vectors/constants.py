@@ -139,7 +139,12 @@ def main():
     show("SHA-512/256 H0", sha512_t_iv(256), 4)
     show("Keccak RC", keccak_rc(), 4)
     show("Keccak rho", keccak_rho(), 25)
-    show("AES S-box", aes_sbox(), 16)
+    box = aes_sbox()
+    show("AES S-box", box, 16)
+    inverse = [0] * 256
+    for x, y in enumerate(box):
+        inverse[y] = x
+    show("AES inverse S-box", inverse, 16)
 
 
 if __name__ == "__main__":

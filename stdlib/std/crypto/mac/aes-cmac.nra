@@ -1,0 +1,93 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Mac.Authenticator;
+let aes = import:Std.Crypto.Internal.Aes;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief AES-CMAC (NIST SP 800-38B, RFC 4493) with 128-, 192- and 256-bit keys (Stdlib.md section 20.5).
+/// @see [Std.Crypto.Mac.AesCmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesCmac)
+#Since("0.3.0")
+export let AesCmac = module (
+    /// @brief The block doubled in GF(2^128): shifted left one bit, with 0x87 folded in when the top bit was set
+    /// (by mask, not by branch). Also used by AES-SIV's S2V.
+    #[Internal, Since("0.3.0")]
+    export let double = func(block: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < 15; i++) {
+            out.append((((block[i] as uint32) << 1) & 255) as uint8 | (block[i + 1] >> 7));
+        }
+        out.append((((block[15] as uint32) << 1) & 255) as uint8 ^ ((block[0] >> 7) * 135));
+        return out;
+    };
+
+    /// @brief AES-CMAC under a 16-, 24- or 32-byte key, with a 16-byte tag.
+    #[Final, Since("0.3.0")]
+    export let AesCmac = class implements Authenticator (
+        let cipher: aes.Cipher;
+        let k1: uint8[list];
+        let k2: uint8[list];
+        let chain: uint8[list] = new;
+        let pending: uint8[list] = new;
+        let done: bool = false;
+
+        /// @brief Keys the MAC; a key of another length traps.
+        export let init = func(key: uint8[list]) {
+            crypto_policy.require(Algorithm.AesCmac);
+            cipher = new(key);
+            k1 = double(cipher.encrypt(words.zeros(16), 0));
+            k2 = double(k1);
+            chain = words.zeros(16);
+        };
+
+        /// @brief `Algorithm.AesCmac`.
+        export let algorithm = func -> Algorithm => Algorithm.AesCmac;
+        /// @brief 16.
+        export let tag_length = func -> int => 16;
+
+        export let update = func(bytes: uint8[list]) {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            // The last block is kept back until finish, which must know whether it is complete.
+            for (let b in bytes) {
+                if (pending.length == 16) {
+                    chain = cipher.encrypt(words.xor(chain, pending), 0);
+                    pending = new;
+                }
+                pending.append(b);
+            }
+        };
+
+        export let finish = func -> uint8[list] {
+            if (done) {
+                trap_with_message("invalid state: mac finished");
+            }
+            done = true;
+            let final_block: uint8[list] = new;
+            if (pending.length == 16) {
+                final_block = words.xor(pending, k1);
+            } else {
+                let padded = pending;
+                padded.append(128);
+                while (padded.length < 16) {
+                    padded.append(0);
+                }
+                final_block = words.xor(padded, k2);
+            }
+            return cipher.encrypt(words.xor(chain, final_block), 0);
+        };
+
+        export let verify = func(tag: uint8[list]) -> bool => constant_time.ct_eq(finish(), tag);
+
+        export let.override to_string = func -> string => "AesCmac(<redacted>)";
+    );
+
+    /// @brief The 16-byte AES-CMAC tag of the message under the key.
+    #[NoDiscard, Since("0.3.0")]
+    export let mac = func(key: uint8[list], message: uint8[list]) -> uint8[list] {
+        let cmac = new AesCmac(key);
+        cmac.update(message);
+        return cmac.finish();
+    };
+);
