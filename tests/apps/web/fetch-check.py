@@ -126,8 +126,10 @@ class Api(Quiet):
         if urlsplit(self.path).path != '/cors/greet':
             self.reply(404, b'', self.cors())
             return
+        # The echoed request header is sent back without line breaks, so it cannot split the response.
+        seen = self.headers.get('X-Neura', 'none').replace('\r', '').replace('\n', '')
         self.reply(200, b'greet ' + body, [*self.cors(), ('Content-Type', 'text/plain; charset=utf-8'),
-                                           ('X-Neura-Seen', self.headers.get('X-Neura', 'none')),
+                                           ('X-Neura-Seen', seen),
                                            ('X-Secret', 'not exposed'),
                                            ('Access-Control-Expose-Headers', 'X-Neura-Seen')])
 

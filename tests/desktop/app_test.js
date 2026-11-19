@@ -354,7 +354,8 @@ async function windows() {
         setTimeout(done, 2000);
         document.body.append(frame);
     })`);
-    assert.ok(!first.window.webContents.mainFrame.frames.some(frame => frame.url.startsWith('https://elsewhere.example')));
+    const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+    assert.ok(!first.window.webContents.mainFrame.frames.some(frame => hostOf(frame.url) === 'elsewhere.example'));
     // The host's own sender check, exercised directly: a synthetic IPC event whose sender frame is the embedded
     // frame of a runner window (the preload never exposes the bridge there, so no page can send one).
     const handler = ipcMain._invokeHandlers?.get('neura:bridge-call');
