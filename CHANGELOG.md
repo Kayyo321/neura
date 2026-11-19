@@ -247,6 +247,39 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - With `NEURA_TIER_PROGRAMS=1` (or `NEURA_TIER3=interp`), a block whose call, list or array literal, or other operation took more than 255 arguments read only the low 8 bits of the count, so it ran with too few arguments: a 300-element list literal built a list of 44 elements. Such a block now runs on the reference evaluator. The default configuration was not affected.
 - A local copied from another local or a parameter (`let value = current;`) could read the source's later value when the source was assigned later in the same block and the copy was then used across an operation that ends the block: captured by a `new func` (a copied tuple too), passed to a constructor or a virtual method, or passed to a call before an argument that is itself a call. A `while` loop that ran `let value = current; current = current + 1; actions.append(new func() -> int => value);` made closures that returned 1 and 2 instead of 0 and 1, with and without `--no-optimize`. Earlier releases have the same defect. IRtoNeuronConversion now copies such a value to a slot of its own before the block ends; programs without this pattern keep their images.
 
+### Known issues
+
+Performance against 0.2.1-rc.3 (x86-64 Linux, `scripts/bench-wall.py --long`, median of 5 runs on the same machine; the 0.3.0 gates of [the baseline](docs/design/Release030.md#performance-gate) for these items are waived for this release):
+
+- Two benchmark programs are slower than 0.2.1-rc.3: `mandelbrot` 2.33–2.43 s against 2.05–2.12 s (+10 to +14%) and `parse-results` 8.6–8.9 s against 7.8–8.1 s (+6 to +15%). The geometric mean of all 17 programs is 3.6% slower, and every output is identical. In `mandelbrot` the native code of the inner loop keeps loop values in memory that 0.2.1 kept in registers. In `parse-results` tier 3 does not inline a function that uses storage regions, so calls that 0.2.1 inlined are now made (82.7 million against 6,291), and 0.2.1 images also run slower on the 0.3.0 runtime, for a reason not yet diagnosed.
+- A hello-world image starts in 0.77–0.87 ms against 0.45 ms with 0.2.1-rc.3 (about 0.35 ms more per process); `neura --version` is faster (0.07 ms against 0.28 ms). The cost is fixed per process: the runtime loads a 19.9 MB shared core that contains the TLS, HTTP/2 and PostgreSQL components.
+- With `NEURA_TIER3=off` the geometric mean is unchanged (0.996). Four programs measured 2 to 4% slower in a 3-run comparison; the 5-run measurement of the gate was not made for every program.
+- Peak resident memory of `closures` at the long size is 62 MiB against 24 MiB; most other programs use 4 to 12 MiB more.
+- Release archives are larger: the x86-64 Linux SDK archive is 25.8 MB against 10.0 MB, mostly statically linked OpenSSL (linked three times: into the core library, the server host and the native launcher), nghttp2 and libpq. A native hello-world executable is 12.0 MB against 5.1 MB.
+
+Language and tools:
+
+- `neura check` and the language server accept a value type that contains itself; only `neura build` reports `E0448` (and `E0449`), because both are found on the specialized program.
+- The language server does not report `E1030` (an import across packages) and is not project-aware; `neura check` and `neura build --target` report it. Project builds reject `--error-format=short`.
+- 54 `#ThreadSafe` standard library classes with `equals(other: class)`, such as `Duration`, are rejected with `E0608` in a program that declares a class getter that is not task-safe. This follows the hook rules as written; the language rule that would allow it is an open decision ([Status](docs/lang/Status.md)).
+- Seven 0.3.0 design areas are recorded as proposed and await confirmation: records and contracts, calls, matching, lifetime, networking, expressions and reflection ([Status](docs/lang/Status.md)).
+- Block arms of `return if` and arm-local `yield`, module contracts (associated types, tables, static module parameters, laws), and generic overloaded `init` (`E0899`) are not implemented. The debugger does not step over generated functions; the language server does not know `unless` and does not show `typeof` on hover.
+- Narrowing applies only in an `if` condition, not inside a conditional expression.
+
+Standard library:
+
+- `Std.Net` has 90 declarations that report Unsupported: QUIC transport, HTTP/3, MASQUE, WebTransport, ACME, DNS over QUIC and mDNS, eBPF, and parts of gRPC, TLS and sockets (`git grep '@stub' -- stdlib/std/net`).
+- `Std.Crypto` has 11: the device calls (PKCS#11, TPM, cloud KMS, Nitro, SEV-SNP, SGX/TDX quotes), FN-DSA (FIPS 206 is not published), `Secret<T>.lock` for values other than byte buffers, and `Entropy.fork_generation`. JWS signing in JSON or detached form and JWE JSON sealing are not provided; verification and opening are. FROST has no distributed key generation and Bulletproofs no distributed proving. Interpreted cryptography makes no constant-time or zeroization guarantee.
+- `Std.Reflect` cannot be used from spawned tasks (`E0601`), does not treat arrays as dynamic values, and does not invoke generic or variadic methods.
+- SQL calls are synchronous and hold every task of the request, with no cancellation from a scope or a client disconnect. The PostgreSQL provider is built on macOS but tested only on Linux.
+
+Applications and platforms:
+
+- Browser budgets B-W5 (about 130 ms against 8 ms) and B-W6 (about 290 ms against 50 ms) are missed; WebAssembly is several times slower than native code; continuous integration does not run browser or desktop tests.
+- `neura.http.fetch` is served only in a browser. Desktop packages are built for Linux only (`.dmg`, `.msix` and Windows targets are refused with `E1033`); `neura package --sign`, `--source-map` and `--report` are not implemented.
+- Native tier 3 runs only on x86-64 Linux. On macOS and AArch64 Linux, programs run on tier 2, and the asymmetric and post-quantum cryptography suites are not run on x86-64 macOS in continuous integration because they exceed its time limit there.
+- The VS Code extension for 0.3.0 is in its own repository; it is not part of these archives and is not yet published to an extension marketplace.
+
 ## [0.2.0] - 2026-11-11
 
 This version adds assign-once `last` bindings, target-typed `new`, anonymous classes in type positions, accessors on exported fields, and `#` tags to the language; requires a `;` after every declaration; gives every diagnostic a code, a rendered source snippet, and a page that `neura explain` prints; runs parts of the standard library on built-in C kernels; and adds two execution tiers above the reference evaluator: blocks proven to compute typed operations run as native operations, and regions of them run together, as machine code the runner generates on x86-64 Linux. The standard library is rewritten in the new style, and some of its zero-argument methods are now fields. The [release checklist](docs/Release.md) maps each feature to its tests.
