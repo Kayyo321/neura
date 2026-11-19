@@ -326,7 +326,11 @@ def build_images(neura, images, programs):
         target = images / f"{name}.nvr"
         if target.exists():
             continue
-        status, _, stderr = run([neura, "build", str(ROOT / source), "-o", str(target)], ROOT)
+        # A standard library area's programs and traps import the modules in
+        # its support/ directory, passed with -I as tests/stdlib/area.cmake does.
+        support = (ROOT / source).parent.parent / "support"
+        include = ["-I", str(support)] if source.startswith("tests/stdlib/") and support.is_dir() else []
+        status, _, stderr = run([neura, "build", *include, str(ROOT / source), "-o", str(target)], ROOT)
         if status != 0:
             sys.exit(f"{name}: build failed\n{stderr.decode(errors='replace')}")
 
