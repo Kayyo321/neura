@@ -191,7 +191,7 @@ EXTENDED_TEST_FILES = [
 NONDETERMINISTIC_STDLIB = {
     "clock", "system-clock", "instant", "local-date", "local-date-time", "local-time", "zone-offset", "random",
     "net", "process", "environment", "file", "fs", "io", "host", "dynamic-foreign", "language-bindings",
-    "logger", "console", "concurrent", "uuid",
+    "logger", "console", "concurrent", "uuid", "crypto-random", "reflect-ffi",
 }
 
 
