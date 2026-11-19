@@ -61,9 +61,10 @@ jobs:
   build-and-test:
     name: Build and test (Linux x86-64)
     runs-on: ubuntu-24.04
-    # The build and the full suite take 20 minutes on an idle runner and up to
-    # 30 when several pull requests build at once; 45 leaves room for that.
-    timeout-minutes: 45
+    # The 0.3.0 suite takes about 55 minutes on this runner (release trial 21's
+    # x86-64 Linux leg: 3,152 s of tests) after a 6-minute build; 120 leaves
+    # room for a busy runner.
+    timeout-minutes: 120
     env:
       CC: gcc-14
       CXX: g++-14
@@ -109,6 +110,7 @@ jobs:
           "-DNEURA_LIBPQ_BUILD=$HOME/server-components/postgresql"
           "-DNEURA_COMPONENT_LICENSES=$HOME/server-components/licenses"
           "-DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl"
+          -DNEURA_TEST_TIMEOUT_SCALE=3
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log
